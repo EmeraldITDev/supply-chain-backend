@@ -1,0 +1,83 @@
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+
+class RFQ extends Model
+{
+    protected $table = 'r_f_q_s';
+
+    protected $fillable = [
+        'rfq_id',
+        'mrf_id',
+        'mrf_title',
+        'description',
+        'quantity',
+        'estimated_cost',
+        'deadline',
+        'status',
+        'created_by',
+    ];
+
+    protected $casts = [
+        'estimated_cost' => 'decimal:2',
+        'deadline' => 'date',
+    ];
+
+    /**
+     * Get the MRF this RFQ is based on
+     */
+    public function mrf(): BelongsTo
+    {
+        return $this->belongsTo(MRF::class, 'mrf_id');
+    }
+
+    /**
+     * Get the user who created this RFQ
+     */
+    public function creator(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'created_by');
+    }
+
+    /**
+     * Get vendors associated with this RFQ
+     */
+    public function vendors(): BelongsToMany
+    {
+        return $this->belongsToMany(Vendor::class, 'rfq_vendors', 'rfq_id', 'vendor_id')
+            ->withTimestamps();
+    }
+
+    /**
+     * Get quotations for this RFQ
+     */
+    public function quotations(): HasMany
+    {
+        return $this->hasMany(Quotation::class, 'rfq_id');
+    }
+
+    /**
+     * Generate RFQ ID
+     */
+    public static function generateRFQId(): string
+    {
+        $year = date('Y');
+        $lastRFQ = self::where('rfq_id', 'like', "RFQ-{$year}-%")
+            ->orderBy('rfq_id', 'desc')
+            ->first();
+
+        if ($lastRFQ) {
+            $lastNumber = (int) substr($lastRFQ->rfq_id, -3);
+            $newNumber = str_pad($lastNumber + 1, 3, '0', STR_PAD_LEFT);
+        } else {
+            $newNumber = '001';
+        }
+
+        return "RFQ-{$year}-{$newNumber}";
+    }
+}
