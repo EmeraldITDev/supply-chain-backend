@@ -1,7 +1,7 @@
 services:
   - type: web
     name: supply-chain-backend
-    env: php
+    env: php-8.2
     buildCommand: composer install --no-dev --optimize-autoloader && php artisan migrate --force
     startCommand: php artisan serve --host=0.0.0.0 --port=$PORT
     envVars:
