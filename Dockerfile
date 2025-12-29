@@ -38,7 +38,8 @@ RUN sed -ri -e 's!/var/www/html!${APACHE_DOCUMENT_ROOT}!g' /etc/apache2/sites-av
     && sed -ri -e 's!/var/www/!${APACHE_DOCUMENT_ROOT}!g' /etc/apache2/apache2.conf /etc/apache2/conf-available/*.conf
 
 # Install PHP dependencies (DO NOT run Laravel scripts during build)
-RUN composer install --no-dev --optimize-autoloader --no-scripts -vvv
+# Capture full error output for debugging
+RUN composer install --no-dev --optimize-autoloader --no-scripts -vvv 2>&1 | tee /tmp/composer.log || (cat /tmp/composer.log && exit 1)
 
 # Fix permissions
 RUN chown -R www-data:www-data /var/www/html \
