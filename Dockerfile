@@ -15,6 +15,12 @@ COPY --from=composer:2.6 /usr/bin/composer /usr/bin/composer
 # Set working directory
 WORKDIR /var/www/html
 
+# Copy composer files first (for better caching)
+COPY composer.json composer.lock ./
+
+# Install PHP dependencies (skip scripts to avoid Laravel bootstrap issues)
+RUN composer install --no-dev --optimize-autoloader --no-scripts
+
 # Copy project files into container
 COPY . .
 
@@ -23,8 +29,8 @@ ENV APACHE_DOCUMENT_ROOT=/var/www/html/public
 RUN sed -ri -e 's!/var/www/html!${APACHE_DOCUMENT_ROOT}!g' /etc/apache2/sites-available/000-default.conf \
     && sed -ri -e 's!/var/www/!${APACHE_DOCUMENT_ROOT}!g' /etc/apache2/apache2.conf /etc/apache2/conf-available/*.conf
 
-# Install PHP dependencies
-RUN composer install --no-dev --optimize-autoloader
+# Run composer scripts now that files are copied
+RUN composer dump-autoload --optimize
 
 # Fix permissions for Laravel storage & bootstrap/cache
 RUN chown -R www-data:www-data /var/www/html \
