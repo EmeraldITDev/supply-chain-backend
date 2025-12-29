@@ -15,25 +15,19 @@ COPY --from=composer:2.6 /usr/bin/composer /usr/bin/composer
 # Set working directory
 WORKDIR /var/www/html
 
-# Copy composer files first (for better caching)
-COPY composer.json composer.lock ./
-
-# Create a minimal .env file for composer scripts
-RUN echo "APP_KEY=" > .env
-
-# Install PHP dependencies
-RUN composer install --no-dev --optimize-autoloader --no-scripts --no-interaction
-
 # Copy project files into container
 COPY . .
+
+# Create a minimal .env file if it doesn't exist (for composer scripts)
+RUN if [ ! -f .env ]; then echo "APP_KEY=" > .env; fi
 
 # Set Apache DocumentRoot to Laravel's public directory
 ENV APACHE_DOCUMENT_ROOT=/var/www/html/public
 RUN sed -ri -e 's!/var/www/html!${APACHE_DOCUMENT_ROOT}!g' /etc/apache2/sites-available/000-default.conf \
     && sed -ri -e 's!/var/www/!${APACHE_DOCUMENT_ROOT}!g' /etc/apache2/apache2.conf /etc/apache2/conf-available/*.conf
 
-# Run composer scripts now that files are copied
-RUN composer dump-autoload --optimize
+# Install PHP dependencies
+RUN composer install --no-dev --optimize-autoloader
 
 # Fix permissions for Laravel storage & bootstrap/cache
 RUN chown -R www-data:www-data /var/www/html \
