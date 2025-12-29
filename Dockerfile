@@ -16,10 +16,11 @@ COPY --from=composer:2.6 /usr/bin/composer /usr/bin/composer
 WORKDIR /var/www/html
 
 # Copy composer files first (for better caching)
-COPY composer.json composer.lock ./
+COPY composer.json composer.lock* ./
 
-# Install PHP dependencies (skip scripts to avoid Laravel bootstrap issues)
-RUN composer install --no-dev --optimize-autoloader --no-scripts
+# Install PHP dependencies (skip scripts and platform checks)
+RUN composer install --no-dev --optimize-autoloader --no-scripts --no-interaction --ignore-platform-reqs || \
+    (composer install --no-dev --optimize-autoloader --no-scripts --no-interaction && true)
 
 # Copy project files into container
 COPY . .
