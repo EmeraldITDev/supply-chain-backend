@@ -16,11 +16,13 @@ COPY --from=composer:2.6 /usr/bin/composer /usr/bin/composer
 WORKDIR /var/www/html
 
 # Copy composer files first (for better caching)
-COPY composer.json composer.lock* ./
+COPY composer.json composer.lock ./
 
-# Install PHP dependencies (skip scripts and platform checks)
-RUN composer install --no-dev --optimize-autoloader --no-scripts --no-interaction --ignore-platform-reqs || \
-    (composer install --no-dev --optimize-autoloader --no-scripts --no-interaction && true)
+# Create a minimal .env file for composer scripts
+RUN echo "APP_KEY=" > .env
+
+# Install PHP dependencies
+RUN composer install --no-dev --optimize-autoloader --no-scripts --no-interaction
 
 # Copy project files into container
 COPY . .
