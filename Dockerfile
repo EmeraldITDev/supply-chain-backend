@@ -10,33 +10,20 @@ RUN apt-get update && apt-get install -y \
 RUN a2enmod rewrite
 
 # Install Composer
-COPY --from=composer:2.6 /usr/bin/composer /usr/bin/composer
+COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
 
 # Set working directory
 WORKDIR /var/www/html
-
-# Copy project files into container
 COPY . .
 
-# Create a minimal .env file if it doesn't exist (for composer scripts)
-RUN if [ ! -f .env ]; then echo "APP_KEY=" > .env; fi
-
-# Set Apache DocumentRoot to Laravel's public directory
 ENV APACHE_DOCUMENT_ROOT=/var/www/html/public
 RUN sed -ri -e 's!/var/www/html!${APACHE_DOCUMENT_ROOT}!g' /etc/apache2/sites-available/000-default.conf \
     && sed -ri -e 's!/var/www/!${APACHE_DOCUMENT_ROOT}!g' /etc/apache2/apache2.conf /etc/apache2/conf-available/*.conf
 
-# Install PHP dependencies
-RUN composer install --no-dev --optimize-autoloader
+RUN composer install --no-dev --optimize-autoloader --no-scripts
 
-# Fix permissions for Laravel storage & bootstrap/cache
 RUN chown -R www-data:www-data /var/www/html \
-    && chmod -R 755 /var/www/html/storage \
-    && chmod -R 755 /var/www/html/bootstrap/cache
+    && chmod -R 775 storage bootstrap/cache
 
-# Expose port 80 for Apache
 EXPOSE 80
-
-# Start Apache
 CMD ["apache2-foreground"]
-
