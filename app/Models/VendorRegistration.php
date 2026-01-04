@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class VendorRegistration extends Model
 {
@@ -21,10 +22,15 @@ class VendorRegistration extends Model
         'approved_by',
         'approved_at',
         'vendor_id',
+        'documents',
+        'temp_password',
+        'password_changed_at',
     ];
 
     protected $casts = [
         'approved_at' => 'datetime',
+        'password_changed_at' => 'datetime',
+        'documents' => 'array',
     ];
 
     /**
@@ -41,5 +47,13 @@ class VendorRegistration extends Model
     public function approver(): BelongsTo
     {
         return $this->belongsTo(User::class, 'approved_by');
+    }
+
+    /**
+     * Get documents for this registration
+     */
+    public function documents(): HasMany
+    {
+        return $this->hasMany(VendorRegistrationDocument::class, 'vendor_registration_id');
     }
 }

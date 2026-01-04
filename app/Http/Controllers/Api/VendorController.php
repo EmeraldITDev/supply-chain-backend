@@ -3,9 +3,13 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\User;
 use App\Models\Vendor;
 use App\Models\VendorRegistration;
+use App\Services\VendorApprovalService;
+use App\Services\VendorDocumentService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Validator;
 
 class VendorController extends Controller
@@ -80,7 +84,7 @@ class VendorController extends Controller
     /**
      * Register new vendor (public endpoint)
      */
-    public function register(Request $request)
+    public function register(Request $request, VendorDocumentService $documentService)
     {
         $validator = Validator::make($request->all(), [
             'companyName' => 'required|string|max:255',
@@ -90,6 +94,8 @@ class VendorController extends Controller
             'address' => 'nullable|string',
             'taxId' => 'nullable|string|max:255',
             'contactPerson' => 'nullable|string|max:255',
+            'documents' => 'nullable|array',
+            'documents.*' => 'file|max:10240', // Max 10MB per file
         ]);
 
         if ($validator->fails()) {
@@ -112,6 +118,12 @@ class VendorController extends Controller
             'status' => 'Pending',
         ]);
 
+        // Handle document uploads if provided
+        if ($request->hasFile('documents')) {
+            $documents = $request->file('documents');
+            $documentService->storeDocuments($registration, $documents);
+        }
+
         return response()->json([
             'success' => true,
             'message' => 'Vendor registration submitted successfully',
@@ -124,14 +136,14 @@ class VendorController extends Controller
     }
 
     /**
-     * Get all vendor registrations (procurement only)
+     * Get all vendor registrations (procurement_manager and supply_chain_director only)
      */
     public function registrations(Request $request)
     {
         $user = $request->user();
 
         // Check permission
-        if (!in_array($user->role, ['procurement', 'admin'])) {
+        if (!in_array($user->role, ['procurement_manager', 'supply_chain_director', 'admin'])) {
             return response()->json([
                 'success' => false,
                 'error' => 'Insufficient permissions',
@@ -139,7 +151,7 @@ class VendorController extends Controller
             ], 403);
         }
 
-        $query = VendorRegistration::with(['vendor', 'approver']);
+        $query = VendorRegistration::with(['vendor', 'approver', 'documents']);
 
         // Filter by status
         if ($request->has('status')) {
@@ -162,20 +174,21 @@ class VendorController extends Controller
                 'rejectionReason' => $reg->rejection_reason,
                 'approvalRemarks' => $reg->approval_remarks,
                 'vendorId' => $reg->vendor ? $reg->vendor->vendor_id : null,
+                'documents' => $reg->documents,
                 'createdAt' => $reg->created_at->toIso8601String(),
             ];
         }));
     }
 
     /**
-     * Approve vendor registration (procurement only)
+     * Approve vendor registration (procurement_manager and supply_chain_director only)
      */
-    public function approveRegistration(Request $request, $id)
+    public function approveRegistration(Request $request, $id, VendorApprovalService $approvalService)
     {
         $user = $request->user();
 
         // Check permission
-        if (!in_array($user->role, ['procurement', 'admin'])) {
+        if (!in_array($user->role, ['procurement_manager', 'supply_chain_director', 'admin'])) {
             return response()->json([
                 'success' => false,
                 'error' => 'Insufficient permissions',
@@ -214,41 +227,164 @@ class VendorController extends Controller
             ], 422);
         }
 
-        // Create vendor from registration
-        $vendor = Vendor::create([
-            'vendor_id' => Vendor::generateVendorId(),
-            'name' => $registration->company_name,
-            'category' => $registration->category,
-            'email' => $registration->email,
-            'phone' => $registration->phone,
-            'address' => $registration->address,
-            'tax_id' => $registration->tax_id,
-            'contact_person' => $registration->contact_person,
-            'status' => 'Active',
-            'rating' => 0,
-            'total_orders' => 0,
-        ]);
+        // Use approval service to handle the complete approval process
+        $result = $approvalService->approveVendor($registration, $user->id);
 
-        // Update registration
-        $registration->update([
-            'status' => 'Approved',
-            'approved_by' => $user->id,
-            'approved_at' => now(),
-            'approval_remarks' => $request->remarks,
-            'vendor_id' => $vendor->id,
-        ]);
+        // Update approval remarks if provided
+        if ($request->has('remarks')) {
+            $registration->update([
+                'approval_remarks' => $request->remarks,
+            ]);
+        }
 
         return response()->json([
             'success' => true,
-            'message' => 'Vendor registration approved and vendor created',
+            'message' => 'Vendor registration approved. User account created and email sent.',
             'vendor' => [
-                'id' => $vendor->vendor_id,
-                'name' => $vendor->name,
-                'status' => $vendor->status,
+                'id' => $result['vendor']->vendor_id,
+                'name' => $result['vendor']->name,
+                'status' => $result['vendor']->status,
+            ],
+            'user' => [
+                'id' => $result['user']->id,
+                'email' => $result['user']->email,
             ],
             'registration' => [
                 'id' => $registration->id,
                 'status' => $registration->status,
+            ]
+        ]);
+    }
+
+    /**
+     * Reject vendor registration (procurement_manager and supply_chain_director only)
+     */
+    public function rejectRegistration(Request $request, $id)
+    {
+        $user = $request->user();
+
+        // Check permission
+        if (!in_array($user->role, ['procurement_manager', 'supply_chain_director', 'admin'])) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Insufficient permissions',
+                'code' => 'FORBIDDEN'
+            ], 403);
+        }
+
+        $registration = VendorRegistration::find($id);
+
+        if (!$registration) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Registration not found',
+                'code' => 'NOT_FOUND'
+            ], 404);
+        }
+
+        if ($registration->status !== 'Pending') {
+            return response()->json([
+                'success' => false,
+                'error' => 'Registration is not in Pending status',
+                'code' => 'VALIDATION_ERROR'
+            ], 422);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'rejectionReason' => 'required|string|max:1000',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Validation failed',
+                'errors' => $validator->errors(),
+                'code' => 'VALIDATION_ERROR'
+            ], 422);
+        }
+
+        // Update registration status
+        $registration->update([
+            'status' => 'Rejected',
+            'rejection_reason' => $request->rejectionReason,
+            'approved_by' => $user->id,
+            'approved_at' => now(),
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Vendor registration rejected',
+            'registration' => [
+                'id' => $registration->id,
+                'status' => $registration->status,
+                'rejectionReason' => $registration->rejection_reason,
+            ]
+        ]);
+    }
+
+    /**
+     * Update vendor credentials (procurement_manager and supply_chain_director only)
+     */
+    public function updateVendorCredentials(Request $request, $id)
+    {
+        $user = $request->user();
+
+        // Check permission
+        if (!in_array($user->role, ['procurement_manager', 'supply_chain_director', 'admin'])) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Insufficient permissions',
+                'code' => 'FORBIDDEN'
+            ], 403);
+        }
+
+        $vendor = Vendor::where('vendor_id', $id)->first();
+
+        if (!$vendor) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Vendor not found',
+                'code' => 'NOT_FOUND'
+            ], 404);
+        }
+
+        // Find the user account associated with this vendor
+        $vendorUser = User::where('vendor_id', $vendor->id)->first();
+
+        if (!$vendorUser) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Vendor user account not found',
+                'code' => 'NOT_FOUND'
+            ], 404);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'newPassword' => 'required|string|min:8|confirmed',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Validation failed',
+                'errors' => $validator->errors(),
+                'code' => 'VALIDATION_ERROR'
+            ], 422);
+        }
+
+        // Update password and force change on next login
+        $vendorUser->update([
+            'password' => Hash::make($request->newPassword),
+            'must_change_password' => true,
+            'password_changed_at' => null,
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Vendor credentials updated. Vendor will be required to change password on next login.',
+            'user' => [
+                'id' => $vendorUser->id,
+                'email' => $vendorUser->email,
             ]
         ]);
     }
