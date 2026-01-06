@@ -96,12 +96,49 @@ class DashboardController extends Controller
             });
 
         // Statistics
+        $pendingRegistrationsCount = VendorRegistration::where('status', 'Pending')->count();
+        $activeVendors = Vendor::where('status', 'Active')->get();
+        
+        // Calculate average rating from active vendors (only those with ratings)
+        $vendorsWithRatings = $activeVendors->filter(function($vendor) {
+            return $vendor->rating !== null && $vendor->rating > 0;
+        });
+        $avgRating = $vendorsWithRatings->count() > 0 
+            ? $vendorsWithRatings->avg('rating') 
+            : 0;
+        
+        // Calculate on-time delivery percentage
+        // Compare delivery_date with RFQ deadline for approved quotations
+        $approvedQuotations = Quotation::where('status', 'Approved')
+            ->with('rfq')
+            ->get();
+        
+        $onTimeCount = 0;
+        $totalDeliveries = $approvedQuotations->count();
+        
+        foreach ($approvedQuotations as $quote) {
+            if ($quote->rfq && $quote->delivery_date && $quote->rfq->deadline) {
+                // If delivery_date is on or before deadline, it's on-time
+                if ($quote->delivery_date <= $quote->rfq->deadline) {
+                    $onTimeCount++;
+                }
+            }
+        }
+        
+        $onTimeDeliveryPercentage = $totalDeliveries > 0 
+            ? round(($onTimeCount / $totalDeliveries) * 100, 1) 
+            : 0;
+
         $stats = [
-            'pendingRegistrations' => VendorRegistration::where('status', 'Pending')->count(),
+            'pendingRegistrations' => $pendingRegistrationsCount,
             'pendingMRFs' => MRF::where('status', 'Pending')->count(),
             'pendingSRFs' => SRF::where('status', 'Pending')->count(),
             'pendingQuotations' => Quotation::where('status', 'Pending')->count(),
-            'totalVendors' => Vendor::where('status', 'Active')->count(),
+            'totalVendors' => $activeVendors->count(),
+            'pendingKYC' => $pendingRegistrationsCount, // Same as pending registrations
+            'awaitingReview' => $pendingRegistrationsCount, // Same as pending registrations
+            'avgRating' => round((float) $avgRating, 2),
+            'onTimeDelivery' => $onTimeDeliveryPercentage,
         ];
 
         return response()->json([
