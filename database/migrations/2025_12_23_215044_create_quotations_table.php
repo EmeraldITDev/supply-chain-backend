@@ -14,8 +14,8 @@ return new class extends Migration
         Schema::create('quotations', function (Blueprint $table) {
             $table->id();
             $table->string('quotation_id')->unique(); // QUO-2025-001 format
-            $table->foreignId('rfq_id')->constrained('r_f_q_s')->onDelete('cascade');
-            $table->foreignId('vendor_id')->constrained('vendors')->onDelete('cascade');
+            $table->unsignedBigInteger('rfq_id')->nullable(); // Will add foreign key constraint later
+            $table->unsignedBigInteger('vendor_id')->nullable(); // Will add foreign key constraint later
             $table->string('vendor_name');
             $table->decimal('price', 15, 2);
             $table->date('delivery_date');
