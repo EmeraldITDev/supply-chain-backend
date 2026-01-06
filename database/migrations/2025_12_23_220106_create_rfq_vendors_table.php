@@ -13,8 +13,8 @@ return new class extends Migration
     {
         Schema::create('rfq_vendors', function (Blueprint $table) {
             $table->id();
-            $table->foreignId('rfq_id')->constrained('r_f_q_s')->onDelete('cascade');
-            $table->foreignId('vendor_id')->constrained('vendors')->onDelete('cascade');
+            $table->unsignedBigInteger('rfq_id'); // Will add foreign key constraint later
+            $table->unsignedBigInteger('vendor_id'); // Will add foreign key constraint later
             $table->timestamps();
             
             $table->unique(['rfq_id', 'vendor_id']);

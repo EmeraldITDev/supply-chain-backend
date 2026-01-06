@@ -25,7 +25,7 @@ return new class extends Migration
             $table->text('approval_remarks')->nullable();
             $table->foreignId('approved_by')->nullable()->constrained('users')->onDelete('set null');
             $table->timestamp('approved_at')->nullable();
-            $table->foreignId('vendor_id')->nullable()->constrained('vendors')->onDelete('set null'); // Link to vendor if approved
+            $table->unsignedBigInteger('vendor_id')->nullable(); // Will add foreign key constraint later
             $table->timestamps();
             
             $table->index('status');
