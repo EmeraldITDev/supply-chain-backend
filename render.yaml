@@ -15,4 +15,8 @@ services:
         value: database
       - key: CACHE_DRIVER
         value: database
+      - key: MAIL_MAILER
+        value: log
+      - key: FRONTEND_URL
+        value: https://emerald-supply-chain.vercel.app
 
