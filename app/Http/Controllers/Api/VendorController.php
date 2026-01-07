@@ -10,6 +10,7 @@ use App\Services\VendorApprovalService;
 use App\Services\VendorDocumentService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Validator;
 
 class VendorController extends Controller
@@ -161,6 +162,41 @@ class VendorController extends Controller
         $registrations = $query->orderBy('created_at', 'desc')->get();
 
         $mappedRegistrations = $registrations->map(function($reg) {
+            // Format documents with download URLs
+            $formattedDocuments = [];
+            if ($reg->documents && $reg->documents->count() > 0) {
+                foreach ($reg->documents as $doc) {
+                    $fileUrl = Storage::disk('public')->url($doc->file_path);
+                    $formattedDocuments[] = [
+                        'id' => (string) $doc->id,
+                        'type' => $doc->file_type,
+                        'fileName' => $doc->file_name,
+                        'name' => $doc->file_name,
+                        'filePath' => $doc->file_path,
+                        'fileUrl' => $fileUrl,
+                        'fileSize' => $doc->file_size,
+                        'fileData' => $fileUrl,
+                        'uploadedAt' => $doc->uploaded_at->toIso8601String(),
+                    ];
+                }
+            } elseif ($reg->documents && is_array($reg->documents)) {
+                // Fallback: if documents are stored in JSON column
+                foreach ($reg->documents as $doc) {
+                    $fileUrl = isset($doc['file_path']) ? Storage::disk('public')->url($doc['file_path']) : null;
+                    $formattedDocuments[] = [
+                        'id' => (string) ($doc['id'] ?? ''),
+                        'type' => $doc['file_type'] ?? null,
+                        'fileName' => $doc['file_name'] ?? 'Unknown',
+                        'name' => $doc['file_name'] ?? 'Unknown',
+                        'filePath' => $doc['file_path'] ?? null,
+                        'fileUrl' => $fileUrl,
+                        'fileSize' => $doc['file_size'] ?? null,
+                        'fileData' => $fileUrl,
+                        'uploadedAt' => $doc['uploaded_at'] ?? now()->toIso8601String(),
+                    ];
+                }
+            }
+
             return [
                 'id' => (string) $reg->id, // Ensure ID is a string for frontend
                 'companyName' => $reg->company_name,
@@ -174,7 +210,7 @@ class VendorController extends Controller
                 'rejectionReason' => $reg->rejection_reason,
                 'approvalRemarks' => $reg->approval_remarks,
                 'vendorId' => $reg->vendor ? $reg->vendor->vendor_id : null,
-                'documents' => $reg->documents,
+                'documents' => $formattedDocuments,
                 'createdAt' => $reg->created_at->toIso8601String(),
             ];
         });
@@ -211,6 +247,41 @@ class VendorController extends Controller
             ], 404);
         }
 
+        // Format documents with download URLs
+        $formattedDocuments = [];
+        if ($registration->documents && $registration->documents->count() > 0) {
+            foreach ($registration->documents as $doc) {
+                $fileUrl = Storage::disk('public')->url($doc->file_path);
+                $formattedDocuments[] = [
+                    'id' => (string) $doc->id,
+                    'type' => $doc->file_type,
+                    'fileName' => $doc->file_name,
+                    'name' => $doc->file_name,
+                    'filePath' => $doc->file_path,
+                    'fileUrl' => $fileUrl,
+                    'fileSize' => $doc->file_size,
+                    'fileData' => $fileUrl, // For frontend compatibility
+                    'uploadedAt' => $doc->uploaded_at->toIso8601String(),
+                ];
+            }
+        } elseif ($registration->documents && is_array($registration->documents)) {
+            // Fallback: if documents are stored in JSON column
+            foreach ($registration->documents as $doc) {
+                $fileUrl = isset($doc['file_path']) ? Storage::disk('public')->url($doc['file_path']) : null;
+                $formattedDocuments[] = [
+                    'id' => (string) ($doc['id'] ?? ''),
+                    'type' => $doc['file_type'] ?? null,
+                    'fileName' => $doc['file_name'] ?? 'Unknown',
+                    'name' => $doc['file_name'] ?? 'Unknown',
+                    'filePath' => $doc['file_path'] ?? null,
+                    'fileUrl' => $fileUrl,
+                    'fileSize' => $doc['file_size'] ?? null,
+                    'fileData' => $fileUrl,
+                    'uploadedAt' => $doc['uploaded_at'] ?? now()->toIso8601String(),
+                ];
+            }
+        }
+
         $mappedRegistration = [
             'id' => (string) $registration->id,
             'companyName' => $registration->company_name,
@@ -224,7 +295,13 @@ class VendorController extends Controller
             'rejectionReason' => $registration->rejection_reason,
             'approvalRemarks' => $registration->approval_remarks,
             'vendorId' => $registration->vendor ? $registration->vendor->vendor_id : null,
-            'documents' => $registration->documents,
+            'documents' => $formattedDocuments,
+            'approvedBy' => $registration->approver ? [
+                'id' => $registration->approver->id,
+                'name' => $registration->approver->name,
+                'email' => $registration->approver->email,
+            ] : null,
+            'approvedAt' => $registration->approved_at ? $registration->approved_at->toIso8601String() : null,
             'createdAt' => $registration->created_at->toIso8601String(),
             'updatedAt' => $registration->updated_at->toIso8601String(),
         ];
