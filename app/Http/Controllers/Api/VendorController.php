@@ -333,33 +333,52 @@ class VendorController extends Controller
             ], 422);
         }
 
-        // Use approval service to handle the complete approval process
-        $result = $approvalService->approveVendor($registration, $user->id);
+        try {
+            // Use approval service to handle the complete approval process
+            $result = $approvalService->approveVendor($registration, $user->id);
 
-        // Update approval remarks if provided
-        if ($request->has('remarks')) {
-            $registration->update([
-                'approval_remarks' => $request->remarks,
+            // Update approval remarks if provided
+            if ($request->has('remarks')) {
+                $registration->update([
+                    'approval_remarks' => $request->remarks,
+                ]);
+            }
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Vendor registration approved. User account created and email sent.',
+                'vendor' => [
+                    'id' => $result['vendor']->vendor_id,
+                    'name' => $result['vendor']->name,
+                    'status' => $result['vendor']->status,
+                ],
+                'user' => [
+                    'id' => $result['user']->id,
+                    'email' => $result['user']->email,
+                ],
+                'registration' => [
+                    'id' => $registration->id,
+                    'status' => $registration->status,
+                ]
             ]);
+        } catch (\Illuminate\Database\QueryException $e) {
+            // Handle duplicate email error
+            if ($e->getCode() === '23000' && strpos($e->getMessage(), 'Duplicate entry') !== false) {
+                return response()->json([
+                    'success' => false,
+                    'error' => 'A user with this email already exists. The vendor may have already been approved.',
+                    'code' => 'DUPLICATE_EMAIL'
+                ], 422);
+            }
+            // Re-throw if it's a different database error
+            throw $e;
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'error' => $e->getMessage(),
+                'code' => 'APPROVAL_ERROR'
+            ], 500);
         }
-
-        return response()->json([
-            'success' => true,
-            'message' => 'Vendor registration approved. User account created and email sent.',
-            'vendor' => [
-                'id' => $result['vendor']->vendor_id,
-                'name' => $result['vendor']->name,
-                'status' => $result['vendor']->status,
-            ],
-            'user' => [
-                'id' => $result['user']->id,
-                'email' => $result['user']->email,
-            ],
-            'registration' => [
-                'id' => $registration->id,
-                'status' => $registration->status,
-            ]
-        ]);
     }
 
     /**

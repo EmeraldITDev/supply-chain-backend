@@ -43,9 +43,41 @@ class VendorApprovalService
      * @param Vendor $vendor
      * @param string $temporaryPassword
      * @return User
+     * @throws \Exception If user already exists and is not a vendor
      */
     public function createVendorUser(VendorRegistration $registration, Vendor $vendor, string $temporaryPassword): User
     {
+        // Check if user already exists
+        $existingUser = User::where('email', $registration->email)->first();
+
+        if ($existingUser) {
+            // If user exists and is already a vendor, update the vendor_id and password
+            if ($existingUser->role === 'vendor' || $existingUser->hasRole('vendor')) {
+                $existingUser->update([
+                    'vendor_id' => $vendor->id,
+                    'password' => Hash::make($temporaryPassword),
+                    'must_change_password' => true,
+                    'password_changed_at' => null,
+                ]);
+
+                // Ensure Spatie role is assigned
+                try {
+                    $vendorRole = \Spatie\Permission\Models\Role::firstOrCreate(['name' => 'vendor', 'guard_name' => 'web']);
+                    if (!$existingUser->hasRole('vendor')) {
+                        $existingUser->assignRole($vendorRole);
+                    }
+                } catch (\Exception $e) {
+                    \Log::warning('Failed to assign vendor role to existing user: ' . $e->getMessage());
+                }
+
+                return $existingUser;
+            } else {
+                // User exists but is not a vendor - this is an error
+                throw new \Exception("A user with email {$registration->email} already exists and is not a vendor. Please contact support.");
+            }
+        }
+
+        // Create new user
         $user = User::create([
             'name' => $registration->contact_person,
             'email' => $registration->email,
@@ -93,28 +125,56 @@ class VendorApprovalService
      * @param VendorRegistration $registration
      * @param int $approvedBy User ID of the approver
      * @return array Array containing vendor, user, and temporary password
+     * @throws \Exception If vendor already exists or registration already approved
      */
     public function approveVendor(VendorRegistration $registration, int $approvedBy): array
     {
+        // Check if vendor already exists for this registration
+        if ($registration->vendor_id) {
+            $existingVendor = Vendor::find($registration->vendor_id);
+            if ($existingVendor) {
+                throw new \Exception("This vendor registration has already been approved. Vendor ID: {$existingVendor->vendor_id}");
+            }
+        }
+
         // Generate temporary password
         $temporaryPassword = $this->generateTemporaryPassword();
 
-        // Create vendor record from registration
-        $vendor = Vendor::create([
-            'vendor_id' => Vendor::generateVendorId(),
-            'name' => $registration->company_name,
-            'category' => $registration->category,
-            'email' => $registration->email,
-            'phone' => $registration->phone,
-            'address' => $registration->address,
-            'tax_id' => $registration->tax_id,
-            'contact_person' => $registration->contact_person,
-            'status' => 'Active',
-            'rating' => 0,
-            'total_orders' => 0,
-        ]);
+        // Check if vendor with same email already exists
+        $existingVendorByEmail = Vendor::where('email', $registration->email)->first();
+        $vendor = null;
 
-        // Create user account
+        if ($existingVendorByEmail) {
+            // Use existing vendor
+            $vendor = $existingVendorByEmail;
+            // Update vendor details from registration if needed
+            $vendor->update([
+                'name' => $registration->company_name,
+                'category' => $registration->category,
+                'phone' => $registration->phone,
+                'address' => $registration->address,
+                'tax_id' => $registration->tax_id,
+                'contact_person' => $registration->contact_person,
+                'status' => 'Active',
+            ]);
+        } else {
+            // Create new vendor record from registration
+            $vendor = Vendor::create([
+                'vendor_id' => Vendor::generateVendorId(),
+                'name' => $registration->company_name,
+                'category' => $registration->category,
+                'email' => $registration->email,
+                'phone' => $registration->phone,
+                'address' => $registration->address,
+                'tax_id' => $registration->tax_id,
+                'contact_person' => $registration->contact_person,
+                'status' => 'Active',
+                'rating' => 0,
+                'total_orders' => 0,
+            ]);
+        }
+
+        // Create or update user account
         $user = $this->createVendorUser($registration, $vendor, $temporaryPassword);
 
         // Update registration
