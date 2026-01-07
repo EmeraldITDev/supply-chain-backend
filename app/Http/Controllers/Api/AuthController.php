@@ -16,6 +16,11 @@ class AuthController extends Controller
      */
     private function hasSupplyChainAccess(User $user): bool
     {
+        // Check if user is a vendor (vendors have access to vendor portal)
+        if ($user->role === 'vendor' || $user->hasRole('vendor')) {
+            return true;
+        }
+
         // Allowed Spatie roles
         $allowedRoles = [
             'procurement_manager',

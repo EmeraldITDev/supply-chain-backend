@@ -20,7 +20,20 @@ class VendorApprovalService
     public function generateTemporaryPassword(): string
     {
         // Generate a random 12-character password with mixed case, numbers, and special chars
-        return Str::random(12);
+        // Format: 3 uppercase + 3 lowercase + 3 numbers + 3 special chars
+        $uppercase = 'ABCDEFGHJKLMNPQRSTUVWXYZ'; // Exclude confusing characters
+        $lowercase = 'abcdefghijkmnpqrstuvwxyz';
+        $numbers = '23456789'; // Exclude 0 and 1
+        $special = '!@#$%&*';
+        
+        $password = '';
+        $password .= substr(str_shuffle($uppercase), 0, 3);
+        $password .= substr(str_shuffle($lowercase), 0, 3);
+        $password .= substr(str_shuffle($numbers), 0, 3);
+        $password .= substr(str_shuffle($special), 0, 3);
+        
+        // Shuffle the final password
+        return str_shuffle($password);
     }
 
     /**
@@ -42,6 +55,15 @@ class VendorApprovalService
             'must_change_password' => true,
             'password_changed_at' => null,
         ]);
+
+        // Assign Spatie 'vendor' role if it exists
+        try {
+            $vendorRole = \Spatie\Permission\Models\Role::firstOrCreate(['name' => 'vendor', 'guard_name' => 'web']);
+            $user->assignRole($vendorRole);
+        } catch (\Exception $e) {
+            // Log but don't fail if role assignment fails
+            \Log::warning('Failed to assign vendor role to user: ' . $e->getMessage());
+        }
 
         return $user;
     }

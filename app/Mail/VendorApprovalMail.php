@@ -32,7 +32,7 @@ class VendorApprovalMail extends Mailable
     public function envelope(): Envelope
     {
         return new Envelope(
-            subject: 'Vendor Registration Approved - Login Credentials',
+            subject: 'Welcome to Emerald Partnership - Your Vendor Portal Access',
         );
     }
 
@@ -41,8 +41,14 @@ class VendorApprovalMail extends Mailable
      */
     public function content(): Content
     {
+        $frontendUrl = env('FRONTEND_URL', 'https://emerald-supply-chain.vercel.app');
+        $vendorPortalUrl = rtrim($frontendUrl, '/') . '/vendor-portal';
+        
         return new Content(
             view: 'emails.vendor-approval',
+            with: [
+                'vendorPortalUrl' => $vendorPortalUrl,
+            ],
         );
     }
 
