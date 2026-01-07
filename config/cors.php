@@ -28,6 +28,7 @@ return [
 
     'allowed_origins_patterns' => [
         '#^https://.*\.lovable\.app$#', // Allow all Lovable preview domains
+        '#^https://.*\.vercel\.app$#', // Allow all Vercel preview deployments
     ],
 
     'allowed_headers' => ['*'],
