@@ -71,6 +71,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/vendors', [VendorController::class, 'index']);
     Route::get('/vendors/{id}', [VendorController::class, 'show']);
     Route::get('/vendors/registrations', [VendorController::class, 'registrations']);
+    Route::get('/vendors/registrations/{id}', [VendorController::class, 'getRegistration']);
     Route::post('/vendors/registrations/{id}/approve', [VendorController::class, 'approveRegistration']);
     Route::post('/vendors/registrations/{id}/reject', [VendorController::class, 'rejectRegistration']);
     Route::put('/vendors/{id}/credentials', [VendorController::class, 'updateVendorCredentials']);

@@ -160,9 +160,9 @@ class VendorController extends Controller
 
         $registrations = $query->orderBy('created_at', 'desc')->get();
 
-        return response()->json($registrations->map(function($reg) {
+        $mappedRegistrations = $registrations->map(function($reg) {
             return [
-                'id' => $reg->id,
+                'id' => (string) $reg->id, // Ensure ID is a string for frontend
                 'companyName' => $reg->company_name,
                 'category' => $reg->category,
                 'email' => $reg->email,
@@ -177,7 +177,62 @@ class VendorController extends Controller
                 'documents' => $reg->documents,
                 'createdAt' => $reg->created_at->toIso8601String(),
             ];
-        }));
+        });
+
+        return response()->json([
+            'success' => true,
+            'data' => $mappedRegistrations,
+        ]);
+    }
+
+    /**
+     * Get a single vendor registration by ID
+     */
+    public function getRegistration(Request $request, $id)
+    {
+        $user = $request->user();
+
+        // Check permission
+        if (!in_array($user->role, ['procurement_manager', 'supply_chain_director', 'admin'])) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Insufficient permissions',
+                'code' => 'FORBIDDEN'
+            ], 403);
+        }
+
+        $registration = VendorRegistration::with(['vendor', 'approver', 'documents'])->find($id);
+
+        if (!$registration) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Vendor registration not found',
+                'code' => 'NOT_FOUND'
+            ], 404);
+        }
+
+        $mappedRegistration = [
+            'id' => (string) $registration->id,
+            'companyName' => $registration->company_name,
+            'category' => $registration->category,
+            'email' => $registration->email,
+            'phone' => $registration->phone,
+            'address' => $registration->address,
+            'taxId' => $registration->tax_id,
+            'contactPerson' => $registration->contact_person,
+            'status' => $registration->status,
+            'rejectionReason' => $registration->rejection_reason,
+            'approvalRemarks' => $registration->approval_remarks,
+            'vendorId' => $registration->vendor ? $registration->vendor->vendor_id : null,
+            'documents' => $registration->documents,
+            'createdAt' => $registration->created_at->toIso8601String(),
+            'updatedAt' => $registration->updated_at->toIso8601String(),
+        ];
+
+        return response()->json([
+            'success' => true,
+            'data' => $mappedRegistration,
+        ]);
     }
 
     /**
