@@ -152,7 +152,7 @@ class VendorController extends Controller
             ], 403);
         }
 
-        $query = VendorRegistration::with(['vendor', 'approver', 'documents']);
+        $query = VendorRegistration::with(['vendor', 'approver']);
 
         // Filter by status
         if ($request->has('status')) {
@@ -163,38 +163,25 @@ class VendorController extends Controller
 
         $mappedRegistrations = $registrations->map(function($reg) {
             // Format documents with download URLs
+            // documents is cast to array in the model, so check if it's an array
             $formattedDocuments = [];
-            if ($reg->documents && $reg->documents->count() > 0) {
-                foreach ($reg->documents as $doc) {
-                    $fileUrl = Storage::disk('public')->url($doc->file_path);
-                    $formattedDocuments[] = [
-                        'id' => (string) $doc->id,
-                        'type' => $doc->file_type,
-                        'fileName' => $doc->file_name,
-                        'name' => $doc->file_name,
-                        'filePath' => $doc->file_path,
-                        'fileUrl' => $fileUrl,
-                        'fileSize' => $doc->file_size,
-                        'fileData' => $fileUrl,
-                        'uploadedAt' => $doc->uploaded_at->toIso8601String(),
-                    ];
-                }
-            } elseif ($reg->documents && is_array($reg->documents)) {
-                // Fallback: if documents are stored in JSON column
-                foreach ($reg->documents as $doc) {
-                    $fileUrl = isset($doc['file_path']) ? Storage::disk('public')->url($doc['file_path']) : null;
-                    $formattedDocuments[] = [
-                        'id' => (string) ($doc['id'] ?? ''),
-                        'type' => $doc['file_type'] ?? null,
-                        'fileName' => $doc['file_name'] ?? 'Unknown',
-                        'name' => $doc['file_name'] ?? 'Unknown',
-                        'filePath' => $doc['file_path'] ?? null,
-                        'fileUrl' => $fileUrl,
-                        'fileSize' => $doc['file_size'] ?? null,
-                        'fileData' => $fileUrl,
-                        'uploadedAt' => $doc['uploaded_at'] ?? now()->toIso8601String(),
-                    ];
-                }
+            $documentMetadata = is_array($reg->documents) ? $reg->documents : [];
+            
+            foreach ($documentMetadata as $doc) {
+                $filePath = $doc['file_path'] ?? null;
+                $fileUrl = $filePath ? Storage::disk('public')->url($filePath) : null;
+                
+                $formattedDocuments[] = [
+                    'id' => (string) ($doc['id'] ?? ''),
+                    'type' => $doc['file_type'] ?? null,
+                    'fileName' => $doc['file_name'] ?? 'Unknown',
+                    'name' => $doc['file_name'] ?? 'Unknown',
+                    'filePath' => $filePath,
+                    'fileUrl' => $fileUrl,
+                    'fileSize' => $doc['file_size'] ?? null,
+                    'fileData' => $fileUrl,
+                    'uploadedAt' => $doc['uploaded_at'] ?? now()->toIso8601String(),
+                ];
             }
 
             return [
@@ -237,7 +224,7 @@ class VendorController extends Controller
             ], 403);
         }
 
-        $registration = VendorRegistration::with(['vendor', 'approver', 'documents'])->find($id);
+        $registration = VendorRegistration::with(['vendor', 'approver'])->find($id);
 
         if (!$registration) {
             return response()->json([
@@ -248,38 +235,25 @@ class VendorController extends Controller
         }
 
         // Format documents with download URLs
+        // documents is cast to array in the model, so check if it's an array
         $formattedDocuments = [];
-        if ($registration->documents && $registration->documents->count() > 0) {
-            foreach ($registration->documents as $doc) {
-                $fileUrl = Storage::disk('public')->url($doc->file_path);
-                $formattedDocuments[] = [
-                    'id' => (string) $doc->id,
-                    'type' => $doc->file_type,
-                    'fileName' => $doc->file_name,
-                    'name' => $doc->file_name,
-                    'filePath' => $doc->file_path,
-                    'fileUrl' => $fileUrl,
-                    'fileSize' => $doc->file_size,
-                    'fileData' => $fileUrl, // For frontend compatibility
-                    'uploadedAt' => $doc->uploaded_at->toIso8601String(),
-                ];
-            }
-        } elseif ($registration->documents && is_array($registration->documents)) {
-            // Fallback: if documents are stored in JSON column
-            foreach ($registration->documents as $doc) {
-                $fileUrl = isset($doc['file_path']) ? Storage::disk('public')->url($doc['file_path']) : null;
-                $formattedDocuments[] = [
-                    'id' => (string) ($doc['id'] ?? ''),
-                    'type' => $doc['file_type'] ?? null,
-                    'fileName' => $doc['file_name'] ?? 'Unknown',
-                    'name' => $doc['file_name'] ?? 'Unknown',
-                    'filePath' => $doc['file_path'] ?? null,
-                    'fileUrl' => $fileUrl,
-                    'fileSize' => $doc['file_size'] ?? null,
-                    'fileData' => $fileUrl,
-                    'uploadedAt' => $doc['uploaded_at'] ?? now()->toIso8601String(),
-                ];
-            }
+        $documentMetadata = is_array($registration->documents) ? $registration->documents : [];
+        
+        foreach ($documentMetadata as $doc) {
+            $filePath = $doc['file_path'] ?? null;
+            $fileUrl = $filePath ? Storage::disk('public')->url($filePath) : null;
+            
+            $formattedDocuments[] = [
+                'id' => (string) ($doc['id'] ?? ''),
+                'type' => $doc['file_type'] ?? null,
+                'fileName' => $doc['file_name'] ?? 'Unknown',
+                'name' => $doc['file_name'] ?? 'Unknown',
+                'filePath' => $filePath,
+                'fileUrl' => $fileUrl,
+                'fileSize' => $doc['file_size'] ?? null,
+                'fileData' => $fileUrl,
+                'uploadedAt' => $doc['uploaded_at'] ?? now()->toIso8601String(),
+            ];
         }
 
         $mappedRegistration = [
