@@ -26,7 +26,9 @@ return [
         'https://emerald-supply-chain.vercel.app',
     ],
 
-    'allowed_origins_patterns' => [],
+    'allowed_origins_patterns' => [
+        '#^https://.*\.lovable\.app$#', // Allow all Lovable preview domains
+    ],
 
     'allowed_headers' => ['*'],
 
