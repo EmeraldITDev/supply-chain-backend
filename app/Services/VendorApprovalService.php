@@ -6,6 +6,7 @@ use App\Mail\VendorApprovalMail;
 use App\Models\User;
 use App\Models\Vendor;
 use App\Models\VendorRegistration;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Schema;
