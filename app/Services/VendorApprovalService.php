@@ -79,15 +79,21 @@ class VendorApprovalService
 
         // Create new user
         try {
-            $user = User::create([
+            $userData = [
                 'name' => $registration->contact_person,
                 'email' => $registration->email,
                 'password' => Hash::make($temporaryPassword),
                 'role' => 'vendor',
-                'vendor_id' => $vendor->id,
                 'must_change_password' => true,
                 'password_changed_at' => null,
-            ]);
+            ];
+            
+            // Only add vendor_id if the column exists
+            if (Schema::hasColumn('users', 'vendor_id')) {
+                $userData['vendor_id'] = $vendor->id;
+            }
+            
+            $user = User::create($userData);
         } catch (\Illuminate\Database\QueryException $e) {
             // Handle specific database errors
             if ($e->getCode() === '23000' && strpos($e->getMessage(), 'Duplicate entry') !== false) {
