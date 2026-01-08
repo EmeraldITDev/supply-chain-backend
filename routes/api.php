@@ -72,6 +72,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/vendors/{id}', [VendorController::class, 'show']);
     Route::get('/vendors/registrations', [VendorController::class, 'registrations']);
     Route::get('/vendors/registrations/{id}', [VendorController::class, 'getRegistration']);
+    Route::get('/vendors/registrations/{registrationId}/documents/{documentId}', [VendorController::class, 'downloadDocument']);
     Route::post('/vendors/registrations/{id}/approve', [VendorController::class, 'approveRegistration']);
     Route::post('/vendors/registrations/{id}/reject', [VendorController::class, 'rejectRegistration']);
     Route::put('/vendors/{id}/credentials', [VendorController::class, 'updateVendorCredentials']);

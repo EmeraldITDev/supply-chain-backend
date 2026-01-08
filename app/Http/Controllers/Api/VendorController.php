@@ -558,4 +558,70 @@ class VendorController extends Controller
             ]
         ]);
     }
+
+    /**
+     * Download a vendor registration document
+     */
+    public function downloadDocument(Request $request, $registrationId, $documentId, VendorDocumentService $documentService)
+    {
+        $user = $request->user();
+
+        // Check permission - allow procurement manager, supply chain director, and executive-level roles
+        $allowedRoles = [
+            'procurement_manager',
+            'supply_chain_director',
+            'supply_chain', // alias for supply_chain_director
+            'executive',
+            'chairman',
+            'admin'
+        ];
+        
+        if (!in_array($user->role, $allowedRoles)) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Insufficient permissions',
+                'code' => 'FORBIDDEN'
+            ], 403);
+        }
+
+        // Verify registration exists
+        $registration = VendorRegistration::find($registrationId);
+        if (!$registration) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Vendor registration not found',
+                'code' => 'NOT_FOUND'
+            ], 404);
+        }
+
+        // Find the document
+        $document = VendorRegistrationDocument::where('id', $documentId)
+            ->where('vendor_registration_id', $registrationId)
+            ->first();
+
+        if (!$document) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Document not found',
+                'code' => 'NOT_FOUND'
+            ], 404);
+        }
+
+        // Get document content
+        $content = $documentService->getDocumentContent($document);
+
+        if ($content === false) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Document file not found in storage',
+                'code' => 'FILE_NOT_FOUND'
+            ], 404);
+        }
+
+        // Return file as download
+        return response($content)
+            ->header('Content-Type', $document->file_type)
+            ->header('Content-Disposition', 'attachment; filename="' . $document->file_name . '"')
+            ->header('Content-Length', strlen($content));
+    }
 }
