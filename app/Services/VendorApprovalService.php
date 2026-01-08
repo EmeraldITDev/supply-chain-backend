@@ -156,79 +156,97 @@ class VendorApprovalService
      */
     public function approveVendor(VendorRegistration $registration, int $approvedBy): array
     {
-        // Check if vendor already exists for this registration
-        if ($registration->vendor_id) {
-            $existingVendor = Vendor::find($registration->vendor_id);
-            if ($existingVendor) {
-                throw new \Exception("This vendor registration has already been approved. Vendor ID: {$existingVendor->vendor_id}");
+        // Use database transaction to ensure atomicity
+        return \DB::transaction(function () use ($registration, $approvedBy) {
+            // Check if vendor already exists for this registration
+            if ($registration->vendor_id) {
+                $existingVendor = Vendor::find($registration->vendor_id);
+                if ($existingVendor) {
+                    throw new \Exception("This vendor registration has already been approved. Vendor ID: {$existingVendor->vendor_id}");
+                }
             }
-        }
 
-        // Generate temporary password
-        $temporaryPassword = $this->generateTemporaryPassword();
+            // Generate temporary password
+            $temporaryPassword = $this->generateTemporaryPassword();
 
-        // Check if vendor with same email already exists
-        $existingVendorByEmail = Vendor::where('email', $registration->email)->first();
-        $vendor = null;
+            // Check if vendor with same email already exists
+            $existingVendorByEmail = Vendor::where('email', $registration->email)->first();
+            $vendor = null;
 
-        if ($existingVendorByEmail) {
-            // Use existing vendor
-            $vendor = $existingVendorByEmail;
-            // Update vendor details from registration if needed
-            $vendor->update([
-                'name' => $registration->company_name,
-                'category' => $registration->category,
-                'phone' => $registration->phone,
-                'address' => $registration->address,
-                'tax_id' => $registration->tax_id,
-                'contact_person' => $registration->contact_person,
-                'status' => 'Active',
-            ]);
-        } else {
-            // Create new vendor record from registration
-            try {
-                $vendor = Vendor::create([
-                    'vendor_id' => Vendor::generateVendorId(),
+            if ($existingVendorByEmail) {
+                // Use existing vendor
+                $vendor = $existingVendorByEmail;
+                // Update vendor details from registration if needed
+                $vendor->update([
                     'name' => $registration->company_name,
                     'category' => $registration->category,
-                    'email' => $registration->email,
                     'phone' => $registration->phone,
                     'address' => $registration->address,
                     'tax_id' => $registration->tax_id,
                     'contact_person' => $registration->contact_person,
                     'status' => 'Active',
-                    'rating' => 0,
-                    'total_orders' => 0,
+                ]);
+            } else {
+                // Create new vendor record from registration
+                try {
+                    $vendor = Vendor::create([
+                        'vendor_id' => Vendor::generateVendorId(),
+                        'name' => $registration->company_name,
+                        'category' => $registration->category,
+                        'email' => $registration->email,
+                        'phone' => $registration->phone,
+                        'address' => $registration->address,
+                        'tax_id' => $registration->tax_id,
+                        'contact_person' => $registration->contact_person,
+                        'status' => 'Active',
+                        'rating' => 0,
+                        'total_orders' => 0,
+                    ]);
+                } catch (\Exception $e) {
+                    \Log::error('Failed to create vendor: ' . $e->getMessage(), [
+                        'registration_id' => $registration->id,
+                        'email' => $registration->email,
+                        'trace' => $e->getTraceAsString(),
+                    ]);
+                    throw new \Exception('Failed to create vendor record: ' . $e->getMessage());
+                }
+            }
+
+            // Create or update user account
+            $user = $this->createVendorUser($registration, $vendor, $temporaryPassword);
+
+            // Update registration
+            try {
+                $registration->update([
+                    'status' => 'approved',
+                    'vendor_id' => $vendor->id,
+                    'approved_by' => $approvedBy,
+                    'approved_at' => now(),
+                    'temp_password' => $temporaryPassword, // Store temporarily (not hashed) for reference
                 ]);
             } catch (\Exception $e) {
-                \Log::error('Failed to create vendor: ' . $e->getMessage(), [
+                \Log::error('Failed to update registration: ' . $e->getMessage(), [
                     'registration_id' => $registration->id,
-                    'email' => $registration->email,
+                    'vendor_id' => $vendor->id,
+                    'trace' => $e->getTraceAsString(),
                 ]);
-                throw new \Exception('Failed to create vendor record: ' . $e->getMessage());
+                throw new \Exception('Failed to update registration: ' . $e->getMessage());
             }
-        }
 
-        // Create or update user account
-        $user = $this->createVendorUser($registration, $vendor, $temporaryPassword);
+            // Send approval email (outside transaction to avoid rollback on email failure)
+            try {
+                $this->sendApprovalEmail($registration, $temporaryPassword);
+            } catch (\Exception $e) {
+                // Log but don't fail - email is not critical
+                \Log::warning('Failed to send approval email, but vendor was approved: ' . $e->getMessage());
+            }
 
-        // Update registration
-        $registration->update([
-            'status' => 'approved',
-            'vendor_id' => $vendor->id,
-            'approved_by' => $approvedBy,
-            'approved_at' => now(),
-            'temp_password' => $temporaryPassword, // Store temporarily (not hashed) for reference
-        ]);
-
-        // Send approval email
-        $this->sendApprovalEmail($registration, $temporaryPassword);
-
-        return [
-            'vendor' => $vendor,
-            'user' => $user,
-            'temporary_password' => $temporaryPassword,
-        ];
+            return [
+                'vendor' => $vendor,
+                'user' => $user,
+                'temporary_password' => $temporaryPassword,
+            ];
+        });
     }
 }
 
