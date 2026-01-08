@@ -87,6 +87,33 @@ class VendorController extends Controller
      */
     public function register(Request $request, VendorDocumentService $documentService)
     {
+        // Check if registration with this email already exists
+        $existingRegistration = VendorRegistration::where('email', $request->email)->first();
+        
+        if ($existingRegistration) {
+            // If it's pending, return success (idempotent - same as if they just submitted)
+            if ($existingRegistration->status === 'Pending') {
+                return response()->json([
+                    'success' => true,
+                    'message' => 'Vendor registration already submitted and pending approval',
+                    'registration' => [
+                        'id' => $existingRegistration->id,
+                        'companyName' => $existingRegistration->company_name,
+                        'status' => $existingRegistration->status,
+                    ]
+                ], 200);
+            }
+            
+            // If it's approved or rejected, return appropriate message
+            return response()->json([
+                'success' => false,
+                'error' => $existingRegistration->status === 'Approved' 
+                    ? 'A vendor registration with this email has already been approved.'
+                    : 'A vendor registration with this email already exists.',
+                'code' => 'DUPLICATE_EMAIL'
+            ], 422);
+        }
+
         $validator = Validator::make($request->all(), [
             'companyName' => 'required|string|max:255',
             'category' => 'required|string|max:255',
