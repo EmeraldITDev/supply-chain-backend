@@ -87,12 +87,15 @@ class VendorController extends Controller
      */
     public function register(Request $request, VendorDocumentService $documentService)
     {
-        // Check if registration with this email already exists
-        $existingRegistration = VendorRegistration::where('email', $request->email)->first();
+        // Normalize email (trim and lowercase) for consistent checking
+        $email = strtolower(trim($request->email));
+        
+        // Check if registration with this email already exists (case-insensitive)
+        $existingRegistration = VendorRegistration::whereRaw('LOWER(email) = ?', [strtolower($email)])->first();
         
         if ($existingRegistration) {
             // If it's pending, return success (idempotent - same as if they just submitted)
-            if ($existingRegistration->status === 'Pending') {
+            if (strtolower($existingRegistration->status) === 'pending') {
                 return response()->json([
                     'success' => true,
                     'message' => 'Vendor registration already submitted and pending approval',
@@ -107,17 +110,23 @@ class VendorController extends Controller
             // If it's approved or rejected, return appropriate message
             return response()->json([
                 'success' => false,
-                'error' => $existingRegistration->status === 'Approved' 
+                'error' => strtolower($existingRegistration->status) === 'approved'
                     ? 'A vendor registration with this email has already been approved.'
                     : 'A vendor registration with this email already exists.',
                 'code' => 'DUPLICATE_EMAIL'
             ], 422);
         }
 
-        $validator = Validator::make($request->all(), [
+        // Prepare validation data with normalized email
+        $validationData = $request->all();
+        $validationData['email'] = $email;
+
+        // Note: We don't use 'unique' rule here because we check manually above
+        // This prevents false positives from case sensitivity or timing issues
+        $validator = Validator::make($validationData, [
             'companyName' => 'required|string|max:255',
             'category' => 'required|string|max:255',
-            'email' => 'required|email|unique:vendor_registrations,email',
+            'email' => 'required|email', // Removed unique rule - we check manually above
             'phone' => 'nullable|string|max:20',
             'address' => 'nullable|string',
             'taxId' => 'nullable|string|max:255',
@@ -138,7 +147,7 @@ class VendorController extends Controller
         $registration = VendorRegistration::create([
             'company_name' => $request->companyName,
             'category' => $request->category,
-            'email' => $request->email,
+            'email' => $email, // Use normalized email
             'phone' => $request->phone,
             'address' => $request->address,
             'tax_id' => $request->taxId,
