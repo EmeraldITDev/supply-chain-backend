@@ -143,8 +143,17 @@ class VendorController extends Controller
     {
         $user = $request->user();
 
-        // Check permission
-        if (!in_array($user->role, ['procurement_manager', 'supply_chain_director', 'admin'])) {
+        // Check permission - allow procurement manager, supply chain director, and executive-level roles
+        $allowedRoles = [
+            'procurement_manager',
+            'supply_chain_director',
+            'supply_chain', // alias for supply_chain_director
+            'executive',
+            'chairman',
+            'admin'
+        ];
+        
+        if (!in_array($user->role, $allowedRoles)) {
             return response()->json([
                 'success' => false,
                 'error' => 'Insufficient permissions',
@@ -215,8 +224,17 @@ class VendorController extends Controller
     {
         $user = $request->user();
 
-        // Check permission
-        if (!in_array($user->role, ['procurement_manager', 'supply_chain_director', 'admin'])) {
+        // Check permission - allow procurement manager, supply chain director, and executive-level roles
+        $allowedRoles = [
+            'procurement_manager',
+            'supply_chain_director',
+            'supply_chain', // alias for supply_chain_director
+            'executive',
+            'chairman',
+            'admin'
+        ];
+        
+        if (!in_array($user->role, $allowedRoles)) {
             return response()->json([
                 'success' => false,
                 'error' => 'Insufficient permissions',
@@ -293,8 +311,17 @@ class VendorController extends Controller
     {
         $user = $request->user();
 
-        // Check permission
-        if (!in_array($user->role, ['procurement_manager', 'supply_chain_director', 'admin'])) {
+        // Check permission - allow procurement manager, supply chain director, and executive-level roles
+        $allowedRoles = [
+            'procurement_manager',
+            'supply_chain_director',
+            'supply_chain', // alias for supply_chain_director
+            'executive',
+            'chairman',
+            'admin'
+        ];
+        
+        if (!in_array($user->role, $allowedRoles)) {
             return response()->json([
                 'success' => false,
                 'error' => 'Insufficient permissions',
@@ -388,8 +415,17 @@ class VendorController extends Controller
     {
         $user = $request->user();
 
-        // Check permission
-        if (!in_array($user->role, ['procurement_manager', 'supply_chain_director', 'admin'])) {
+        // Check permission - allow procurement manager, supply chain director, and executive-level roles
+        $allowedRoles = [
+            'procurement_manager',
+            'supply_chain_director',
+            'supply_chain', // alias for supply_chain_director
+            'executive',
+            'chairman',
+            'admin'
+        ];
+        
+        if (!in_array($user->role, $allowedRoles)) {
             return response()->json([
                 'success' => false,
                 'error' => 'Insufficient permissions',
@@ -454,8 +490,17 @@ class VendorController extends Controller
     {
         $user = $request->user();
 
-        // Check permission
-        if (!in_array($user->role, ['procurement_manager', 'supply_chain_director', 'admin'])) {
+        // Check permission - allow procurement manager, supply chain director, and executive-level roles
+        $allowedRoles = [
+            'procurement_manager',
+            'supply_chain_director',
+            'supply_chain', // alias for supply_chain_director
+            'executive',
+            'chairman',
+            'admin'
+        ];
+        
+        if (!in_array($user->role, $allowedRoles)) {
             return response()->json([
                 'success' => false,
                 'error' => 'Insufficient permissions',
