@@ -462,13 +462,20 @@ class VendorController extends Controller
             \Log::error('Vendor approval database error: ' . $e->getMessage(), [
                 'registration_id' => $id,
                 'user_id' => $user->id,
+                'sql_state' => $e->getCode(),
                 'trace' => $e->getTraceAsString()
             ]);
             
+            // Return detailed error in non-production or if debug is enabled
+            $errorMessage = config('app.debug') || config('app.env') !== 'production'
+                ? $e->getMessage()
+                : 'Database error during vendor approval. Please check the logs.';
+            
             return response()->json([
                 'success' => false,
-                'error' => 'Database error during vendor approval. Please check the logs.',
-                'code' => 'DATABASE_ERROR'
+                'error' => $errorMessage,
+                'code' => 'DATABASE_ERROR',
+                'sql_state' => $e->getCode(),
             ], 500);
         } catch (\Exception $e) {
             // Log the full error for debugging
@@ -478,9 +485,14 @@ class VendorController extends Controller
                 'trace' => $e->getTraceAsString()
             ]);
             
+            // Return detailed error in non-production or if debug is enabled
+            $errorMessage = config('app.debug') || config('app.env') !== 'production'
+                ? $e->getMessage() . ' (File: ' . basename($e->getFile()) . ', Line: ' . $e->getLine() . ')'
+                : ($e->getMessage() ?: 'An unexpected error occurred during vendor approval.');
+            
             return response()->json([
                 'success' => false,
-                'error' => $e->getMessage() ?: 'An unexpected error occurred during vendor approval.',
+                'error' => $errorMessage,
                 'code' => 'APPROVAL_ERROR'
             ], 500);
         }
