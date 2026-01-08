@@ -153,7 +153,7 @@ class VendorController extends Controller
             'address' => $request->address,
             'tax_id' => $request->taxId,
             'contact_person' => $request->contactPerson,
-            'status' => 'Pending',
+            'status' => VendorRegistration::STATUS_PENDING,
         ]);
 
         // Handle document uploads if provided
@@ -398,7 +398,7 @@ class VendorController extends Controller
             ], 404);
         }
 
-        if ($registration->status !== 'Pending') {
+        if ($registration->status !== VendorRegistration::STATUS_PENDING) {
             return response()->json([
                 'success' => false,
                 'error' => 'Registration is not in Pending status',
@@ -533,7 +533,7 @@ class VendorController extends Controller
             ], 404);
         }
 
-        if ($registration->status !== 'Pending') {
+        if ($registration->status !== VendorRegistration::STATUS_PENDING) {
             return response()->json([
                 'success' => false,
                 'error' => 'Registration is not in Pending status',
@@ -556,7 +556,7 @@ class VendorController extends Controller
 
         // Update registration status
         $registration->update([
-            'status' => 'Rejected',
+            'status' => VendorRegistration::STATUS_REJECTED,
             'rejection_reason' => $request->rejectionReason,
             'approved_by' => $user->id,
             'approved_at' => now(),

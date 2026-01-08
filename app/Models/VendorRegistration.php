@@ -2,12 +2,19 @@
 
 namespace App\Models;
 
+use App\Enums\VendorRegistrationStatus;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class VendorRegistration extends Model
 {
+    /**
+     * Valid status values (must match database ENUM exactly)
+     */
+    public const STATUS_PENDING = 'Pending';
+    public const STATUS_APPROVED = 'Approved';
+    public const STATUS_REJECTED = 'Rejected';
     protected $fillable = [
         'company_name',
         'category',

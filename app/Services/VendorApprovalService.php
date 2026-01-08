@@ -219,7 +219,7 @@ class VendorApprovalService
             // Update registration
             try {
                 $registration->update([
-                    'status' => 'approved',
+                    'status' => VendorRegistration::STATUS_APPROVED, // Use constant to ensure correct casing
                     'vendor_id' => $vendor->id,
                     'approved_by' => $approvedBy,
                     'approved_at' => now(),
