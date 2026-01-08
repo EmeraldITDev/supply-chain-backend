@@ -445,7 +445,8 @@ class VendorController extends Controller
                 'registration' => [
                     'id' => $registration->id,
                     'status' => $registration->status,
-                ]
+                ],
+                'temporaryPassword' => $result['temporary_password'] ?? null,
             ]);
         } catch (\Illuminate\Database\QueryException $e) {
             // Handle duplicate email error
@@ -456,12 +457,30 @@ class VendorController extends Controller
                     'code' => 'DUPLICATE_EMAIL'
                 ], 422);
             }
-            // Re-throw if it's a different database error
-            throw $e;
-        } catch (\Exception $e) {
+            
+            // Log the full error for debugging
+            \Log::error('Vendor approval database error: ' . $e->getMessage(), [
+                'registration_id' => $id,
+                'user_id' => $user->id,
+                'trace' => $e->getTraceAsString()
+            ]);
+            
             return response()->json([
                 'success' => false,
-                'error' => $e->getMessage(),
+                'error' => 'Database error during vendor approval. Please check the logs.',
+                'code' => 'DATABASE_ERROR'
+            ], 500);
+        } catch (\Exception $e) {
+            // Log the full error for debugging
+            \Log::error('Vendor approval error: ' . $e->getMessage(), [
+                'registration_id' => $id,
+                'user_id' => $user->id,
+                'trace' => $e->getTraceAsString()
+            ]);
+            
+            return response()->json([
+                'success' => false,
+                'error' => $e->getMessage() ?: 'An unexpected error occurred during vendor approval.',
                 'code' => 'APPROVAL_ERROR'
             ], 500);
         }

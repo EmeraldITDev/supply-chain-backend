@@ -78,15 +78,35 @@ class VendorApprovalService
         }
 
         // Create new user
-        $user = User::create([
-            'name' => $registration->contact_person,
-            'email' => $registration->email,
-            'password' => Hash::make($temporaryPassword),
-            'role' => 'vendor',
-            'vendor_id' => $vendor->id,
-            'must_change_password' => true,
-            'password_changed_at' => null,
-        ]);
+        try {
+            $user = User::create([
+                'name' => $registration->contact_person,
+                'email' => $registration->email,
+                'password' => Hash::make($temporaryPassword),
+                'role' => 'vendor',
+                'vendor_id' => $vendor->id,
+                'must_change_password' => true,
+                'password_changed_at' => null,
+            ]);
+        } catch (\Illuminate\Database\QueryException $e) {
+            // Handle specific database errors
+            if ($e->getCode() === '23000' && strpos($e->getMessage(), 'Duplicate entry') !== false) {
+                throw new \Exception("A user with email {$registration->email} already exists. Please contact support.");
+            }
+            \Log::error('Failed to create vendor user: ' . $e->getMessage(), [
+                'registration_id' => $registration->id,
+                'vendor_id' => $vendor->id,
+                'email' => $registration->email,
+            ]);
+            throw new \Exception('Failed to create user account: ' . $e->getMessage());
+        } catch (\Exception $e) {
+            \Log::error('Failed to create vendor user: ' . $e->getMessage(), [
+                'registration_id' => $registration->id,
+                'vendor_id' => $vendor->id,
+                'email' => $registration->email,
+            ]);
+            throw $e;
+        }
 
         // Assign Spatie 'vendor' role if it exists
         try {
@@ -159,19 +179,27 @@ class VendorApprovalService
             ]);
         } else {
             // Create new vendor record from registration
-            $vendor = Vendor::create([
-                'vendor_id' => Vendor::generateVendorId(),
-                'name' => $registration->company_name,
-                'category' => $registration->category,
-                'email' => $registration->email,
-                'phone' => $registration->phone,
-                'address' => $registration->address,
-                'tax_id' => $registration->tax_id,
-                'contact_person' => $registration->contact_person,
-                'status' => 'Active',
-                'rating' => 0,
-                'total_orders' => 0,
-            ]);
+            try {
+                $vendor = Vendor::create([
+                    'vendor_id' => Vendor::generateVendorId(),
+                    'name' => $registration->company_name,
+                    'category' => $registration->category,
+                    'email' => $registration->email,
+                    'phone' => $registration->phone,
+                    'address' => $registration->address,
+                    'tax_id' => $registration->tax_id,
+                    'contact_person' => $registration->contact_person,
+                    'status' => 'Active',
+                    'rating' => 0,
+                    'total_orders' => 0,
+                ]);
+            } catch (\Exception $e) {
+                \Log::error('Failed to create vendor: ' . $e->getMessage(), [
+                    'registration_id' => $registration->id,
+                    'email' => $registration->email,
+                ]);
+                throw new \Exception('Failed to create vendor record: ' . $e->getMessage());
+            }
         }
 
         // Create or update user account
