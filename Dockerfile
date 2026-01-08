@@ -40,9 +40,10 @@ RUN sed -ri -e 's!/var/www/html!${APACHE_DOCUMENT_ROOT}!g' /etc/apache2/sites-av
 # Create minimal .env file if .env.example exists (needed for some composer scripts)
 RUN if [ -f .env.example ]; then cp .env.example .env; fi
 
-# Install PHP dependencies (DO NOT run Laravel scripts during build)
-RUN composer install --no-dev --optimize-autoloader --no-scripts --no-interaction --ignore-platform-reqs || \
-    composer install --no-dev --optimize-autoloader --no-scripts --no-interaction
+    # Install PHP dependencies (DO NOT run Laravel scripts during build)
+    # Update composer.lock if needed, then install
+    RUN composer update --lock --no-scripts --no-interaction --ignore-platform-reqs || true && \
+        composer install --no-dev --optimize-autoloader --no-scripts --no-interaction --ignore-platform-reqs
 
 # Fix permissions
 RUN chown -R www-data:www-data /var/www/html \
