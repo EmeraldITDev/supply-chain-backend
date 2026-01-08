@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\User;
 use App\Models\Vendor;
 use App\Models\VendorRegistration;
+use App\Models\VendorRegistrationDocument;
 use App\Services\VendorApprovalService;
 use App\Services\VendorDocumentService;
 use Illuminate\Http\Request;
@@ -207,14 +208,25 @@ class VendorController extends Controller
         $registrations = $query->orderBy('created_at', 'desc')->get();
 
         $mappedRegistrations = $registrations->map(function($reg) {
-            // Format documents with download URLs
+            // Format documents with download URLs using VendorDocumentService
             // documents is cast to array in the model, so check if it's an array
             $formattedDocuments = [];
             $documentMetadata = is_array($reg->documents) ? $reg->documents : [];
+            $documentService = app(VendorDocumentService::class);
             
             foreach ($documentMetadata as $doc) {
                 $filePath = $doc['file_path'] ?? null;
-                $fileUrl = $filePath ? Storage::disk('public')->url($filePath) : null;
+                $fileUrl = null;
+                
+            if ($filePath) {
+                try {
+                    $fileUrl = $documentService->getDocumentUrl($filePath, $doc['id'] ?? null, $reg->id);
+                } catch (\Exception $e) {
+                    \Log::warning("Failed to generate document URL for {$filePath}: " . $e->getMessage());
+                    // Fallback to API download endpoint
+                    $fileUrl = url("/api/vendors/registrations/{$reg->id}/documents/{$doc['id']}/download");
+                }
+            }
                 
                 $formattedDocuments[] = [
                     'id' => (string) ($doc['id'] ?? ''),
@@ -288,14 +300,25 @@ class VendorController extends Controller
             ], 404);
         }
 
-        // Format documents with download URLs
+        // Format documents with download URLs using VendorDocumentService
         // documents is cast to array in the model, so check if it's an array
         $formattedDocuments = [];
         $documentMetadata = is_array($registration->documents) ? $registration->documents : [];
+        $documentService = app(VendorDocumentService::class);
         
         foreach ($documentMetadata as $doc) {
             $filePath = $doc['file_path'] ?? null;
-            $fileUrl = $filePath ? Storage::disk('public')->url($filePath) : null;
+            $fileUrl = null;
+            
+            if ($filePath) {
+                try {
+                    $fileUrl = $documentService->getDocumentUrl($filePath, $doc['id'] ?? null, $registration->id);
+                } catch (\Exception $e) {
+                    \Log::warning("Failed to generate document URL for {$filePath}: " . $e->getMessage());
+                    // Fallback to API download endpoint
+                    $fileUrl = url("/api/vendors/registrations/{$registration->id}/documents/{$doc['id']}/download");
+                }
+            }
             
             $formattedDocuments[] = [
                 'id' => (string) ($doc['id'] ?? ''),

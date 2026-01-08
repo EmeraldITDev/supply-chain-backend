@@ -18,7 +18,9 @@ class VendorDocumentService
      */
     protected function getStorageDisk(): string
     {
-        return config('filesystems.documents_disk', 's3');
+        // Use 'public' for local development, 's3' for production
+        // Can be overridden via DOCUMENTS_DISK env variable
+        return config('filesystems.documents_disk', env('DOCUMENTS_DISK', 'public'));
     }
 
     /**
@@ -94,19 +96,49 @@ class VendorDocumentService
      * @param string $filePath
      * @return string
      */
-    public function getDocumentUrl(string $filePath): string
+    public function getDocumentUrl(string $filePath, $documentId = null, $registrationId = null): string
     {
         $disk = $this->getStorageDisk();
         
         // For S3, generate temporary signed URL (valid for 1 hour)
         if ($disk === 's3') {
-            return Storage::disk($disk)->temporaryUrl(
-                $filePath,
-                now()->addHour()
-            );
+            try {
+                return Storage::disk($disk)->temporaryUrl(
+                    $filePath,
+                    now()->addHour()
+                );
+            } catch (\Exception $e) {
+                // If S3 fails, fallback to API download endpoint
+                \Log::warning("S3 URL generation failed for {$filePath}: " . $e->getMessage());
+                if ($registrationId && $documentId) {
+                    return url("/api/vendors/registrations/{$registrationId}/documents/{$documentId}/download");
+                }
+                throw $e;
+            }
         }
         
-        // For local/public disk, return regular URL
+        // For local/public disk, check if file exists
+        if (!Storage::disk($disk)->exists($filePath)) {
+            // If file doesn't exist, use API download endpoint as fallback
+            if ($registrationId && $documentId) {
+                return url("/api/vendors/registrations/{$registrationId}/documents/{$documentId}/download");
+            }
+            // Try to extract from path or find in database
+            if (preg_match('/vendor_documents\/(\d+)\//', $filePath, $matches)) {
+                $regId = $matches[1];
+                if (!$documentId) {
+                    $document = VendorRegistrationDocument::where('file_path', $filePath)->first();
+                    if ($document) {
+                        return url("/api/vendors/registrations/{$regId}/documents/{$document->id}/download");
+                    }
+                } else {
+                    return url("/api/vendors/registrations/{$regId}/documents/{$documentId}/download");
+                }
+            }
+            throw new \Exception("File not found: {$filePath}");
+        }
+        
+        // Return public URL for local storage
         return Storage::disk($disk)->url($filePath);
     }
 
