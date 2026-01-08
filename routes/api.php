@@ -3,6 +3,7 @@
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Api\AuthController;
+use App\Http\Controllers\Api\VendorAuthController;
 use App\Http\Controllers\Api\DashboardController;
 use App\Http\Controllers\Api\MRFController;
 use App\Http\Controllers\Api\SRFController;
@@ -35,6 +36,9 @@ Route::get('/', function () {
 Route::post('/auth/login', [AuthController::class, 'login']);
 Route::post('/auth/vendor/change-password', [AuthController::class, 'forcePasswordChange']);
 
+// Vendor authentication (public)
+Route::post('/vendors/auth/login', [VendorAuthController::class, 'login']);
+
 // Protected routes
 Route::middleware('auth:sanctum')->group(function () {
     // Authentication
@@ -42,6 +46,10 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/auth/me', [AuthController::class, 'me']);
     Route::post('/auth/refresh-token', [AuthController::class, 'refreshToken']);
     Route::post('/auth/change-password', [AuthController::class, 'changePassword']);
+
+    // Vendor authentication (protected)
+    Route::post('/vendors/auth/logout', [VendorAuthController::class, 'logout']);
+    Route::get('/vendors/auth/me', [VendorAuthController::class, 'me']);
 
     // MRF routes
     Route::get('/mrfs', [MRFController::class, 'index']);
