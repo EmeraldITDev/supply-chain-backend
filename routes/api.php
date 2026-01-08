@@ -40,6 +40,7 @@ Route::middleware('auth:sanctum')->group(function () {
     // Authentication
     Route::post('/auth/logout', [AuthController::class, 'logout']);
     Route::get('/auth/me', [AuthController::class, 'me']);
+    Route::post('/auth/refresh-token', [AuthController::class, 'refreshToken']);
     Route::post('/auth/change-password', [AuthController::class, 'changePassword']);
 
     // MRF routes

@@ -76,6 +76,7 @@ class AuthController extends Controller
         $request->validate([
             'email' => 'required|email',
             'password' => 'required',
+            'remember_me' => 'nullable|boolean',
         ]);
 
         $user = User::with('employee')->where('email', $request->email)->first();
@@ -93,7 +94,16 @@ class AuthController extends Controller
             ]);
         }
 
-        $token = $user->createToken('auth-token')->plainTextToken;
+        // Determine token expiration based on remember_me
+        // Remember me: 30 days, Regular session: 1 day
+        $rememberMe = $request->boolean('remember_me', true); // Default to true for persistent login
+        $expiresAt = $rememberMe 
+            ? now()->addDays(30)  // 30 days for "remember me"
+            : now()->addDay();    // 1 day for regular session
+
+        // Create token with expiration
+        $tokenName = $rememberMe ? 'remember-token' : 'session-token';
+        $token = $user->createToken($tokenName, ['*'], $expiresAt)->plainTextToken;
 
         // Get user role (from Spatie or fallback to role field)
         $role = $user->getRoleNames()->first() ?? $user->role ?? 'employee';
@@ -115,6 +125,7 @@ class AuthController extends Controller
                 'createdAt' => $user->created_at->toIso8601String(),
             ],
             'token' => $token,
+            'expiresAt' => $expiresAt->toIso8601String(),
             'requiresPasswordChange' => $requiresPasswordChange,
         ]);
     }
@@ -137,6 +148,7 @@ class AuthController extends Controller
     public function me(Request $request)
     {
         $user = $request->user()->load('employee');
+        $token = $request->user()->currentAccessToken();
 
         // Get user role (from Spatie or fallback to role field)
         $role = $user->getRoleNames()->first() ?? $user->role ?? 'employee';
@@ -153,6 +165,37 @@ class AuthController extends Controller
             'employeeId' => $user->employee_id,
             'createdAt' => $user->created_at->toIso8601String(),
             'requiresPasswordChange' => $user->must_change_password ?? false,
+            'tokenExpiresAt' => $token->expires_at ? $token->expires_at->toIso8601String() : null,
+        ]);
+    }
+
+    /**
+     * Refresh authentication token (extends session)
+     */
+    public function refreshToken(Request $request)
+    {
+        $user = $request->user();
+        $currentToken = $request->user()->currentAccessToken();
+        
+        // Determine if this was a remember token or session token
+        $isRememberToken = str_contains($currentToken->name, 'remember');
+        
+        // Create new token with same expiration logic
+        $expiresAt = $isRememberToken 
+            ? now()->addDays(30)  // 30 days for "remember me"
+            : now()->addDay();    // 1 day for regular session
+        
+        $tokenName = $isRememberToken ? 'remember-token' : 'session-token';
+        
+        // Delete old token
+        $currentToken->delete();
+        
+        // Create new token
+        $newToken = $user->createToken($tokenName, ['*'], $expiresAt)->plainTextToken;
+
+        return response()->json([
+            'token' => $newToken,
+            'expiresAt' => $expiresAt->toIso8601String(),
         ]);
     }
 
