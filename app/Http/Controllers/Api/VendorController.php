@@ -13,6 +13,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Str;
 
 class VendorController extends Controller
 {
@@ -575,6 +576,7 @@ class VendorController extends Controller
 
     /**
      * Update vendor credentials (procurement_manager and supply_chain_director only)
+     * Supports both manual password setting and automatic password reset
      */
     public function updateVendorCredentials(Request $request, $id)
     {
@@ -619,6 +621,32 @@ class VendorController extends Controller
             ], 404);
         }
 
+        // Check if this is an automatic password reset request
+        if ($request->boolean('resetPassword', false)) {
+            // Generate random secure password (12 characters)
+            $newPassword = Str::random(12);
+            
+            // Update password and force change on next login
+            $vendorUser->update([
+                'password' => Hash::make($newPassword),
+                'must_change_password' => true,
+                'password_changed_at' => null,
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Vendor password has been reset. The vendor will be required to change this temporary password on next login.',
+                'data' => [
+                    'temporaryPassword' => $newPassword,
+                ],
+                'user' => [
+                    'id' => $vendorUser->id,
+                    'email' => $vendorUser->email,
+                ]
+            ]);
+        }
+
+        // Manual password setting (existing behavior)
         $validator = Validator::make($request->all(), [
             'newPassword' => 'required|string|min:8|confirmed',
         ]);
@@ -645,6 +673,81 @@ class VendorController extends Controller
             'user' => [
                 'id' => $vendorUser->id,
                 'email' => $vendorUser->email,
+            ]
+        ]);
+    }
+
+    /**
+     * Delete a vendor
+     * Soft deletes the vendor and deactivates their user account
+     */
+    public function destroy(Request $request, $id)
+    {
+        $user = $request->user();
+
+        // Check permission - allow procurement manager, supply chain director, and executive-level roles
+        $allowedRoles = [
+            'procurement_manager',
+            'supply_chain_director',
+            'supply_chain', // alias for supply_chain_director
+            'executive',
+            'chairman',
+            'admin'
+        ];
+        
+        if (!in_array($user->role, $allowedRoles)) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Insufficient permissions',
+                'code' => 'FORBIDDEN'
+            ], 403);
+        }
+
+        $vendor = Vendor::where('vendor_id', $id)->first();
+
+        if (!$vendor) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Vendor not found',
+                'code' => 'NOT_FOUND'
+            ], 404);
+        }
+
+        // Check if vendor has active orders or quotations
+        $activeQuotations = $vendor->quotations()
+            ->whereIn('status', ['Pending', 'Approved'])
+            ->count();
+
+        if ($activeQuotations > 0) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Cannot delete vendor with active quotations. Please complete or reject all pending quotations first.',
+                'code' => 'VENDOR_HAS_ACTIVE_QUOTATIONS',
+                'activeQuotations' => $activeQuotations
+            ], 422);
+        }
+
+        // Deactivate associated user account if exists
+        $vendorUser = User::where('vendor_id', $vendor->id)->first();
+        if ($vendorUser) {
+            // Revoke all tokens
+            $vendorUser->tokens()->delete();
+            
+            // Delete user account
+            $vendorUser->delete();
+        }
+
+        // Delete the vendor
+        $vendorName = $vendor->name;
+        $vendorId = $vendor->vendor_id;
+        $vendor->delete();
+
+        return response()->json([
+            'success' => true,
+            'message' => "Vendor '{$vendorName}' has been successfully deleted.",
+            'data' => [
+                'vendorId' => $vendorId,
+                'vendorName' => $vendorName,
             ]
         ]);
     }

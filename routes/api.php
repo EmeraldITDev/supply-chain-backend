@@ -79,6 +79,7 @@ Route::middleware('auth:sanctum')->group(function () {
     // Vendor routes
     Route::get('/vendors', [VendorController::class, 'index']);
     Route::get('/vendors/{id}', [VendorController::class, 'show']);
+    Route::delete('/vendors/{id}', [VendorController::class, 'destroy']);
     Route::get('/vendors/registrations', [VendorController::class, 'registrations']);
     Route::get('/vendors/registrations/{id}', [VendorController::class, 'getRegistration']);
     Route::get('/vendors/registrations/{registrationId}/documents/{documentId}/download', [VendorController::class, 'downloadDocument']);
