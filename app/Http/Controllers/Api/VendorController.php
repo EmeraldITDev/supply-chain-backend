@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\User;
 use App\Models\Vendor;
+use App\Models\VendorRating;
 use App\Models\VendorRegistration;
 use App\Models\VendorRegistrationDocument;
 use App\Services\VendorApprovalService;
@@ -845,5 +846,132 @@ class VendorController extends Controller
             ->header('Content-Type', $document->file_type)
             ->header('Content-Disposition', 'attachment; filename="' . $document->file_name . '"')
             ->header('Content-Length', strlen($content));
+    }
+
+    /**
+     * Add rating/comment to vendor
+     */
+    public function addRating(Request $request, $id)
+    {
+        $user = $request->user();
+
+        // Validate input
+        $validator = Validator::make($request->all(), [
+            'rating' => 'required|numeric|min:1|max:5',
+            'comment' => 'nullable|string|max:1000',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Validation failed',
+                'errors' => $validator->errors(),
+                'code' => 'VALIDATION_ERROR'
+            ], 422);
+        }
+
+        // Find vendor
+        $vendor = $this->findVendor($id);
+
+        if (!$vendor) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Vendor not found',
+                'code' => 'NOT_FOUND'
+            ], 404);
+        }
+
+        // Create rating
+        $rating = VendorRating::create([
+            'vendor_id' => $vendor->id,
+            'user_id' => $user->id,
+            'rating' => $request->rating,
+            'comment' => $request->comment,
+        ]);
+
+        // Recalculate vendor average rating
+        $this->updateVendorAverageRating($vendor);
+
+        // Get all ratings with user info
+        $ratings = VendorRating::where('vendor_id', $vendor->id)
+            ->with('user')
+            ->orderBy('created_at', 'desc')
+            ->get()
+            ->map(function($r) {
+                return [
+                    'id' => $r->id,
+                    'comment' => $r->comment,
+                    'rating' => (float) $r->rating,
+                    'createdAt' => $r->created_at->toIso8601String(),
+                    'createdBy' => [
+                        'id' => $r->user->id,
+                        'name' => $r->user->name,
+                        'email' => $r->user->email,
+                    ],
+                ];
+            });
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Rating added successfully',
+            'rating' => (float) $vendor->fresh()->rating,
+            'comments' => $ratings,
+        ]);
+    }
+
+    /**
+     * Get vendor comments/ratings
+     */
+    public function getComments($id)
+    {
+        // Find vendor
+        $vendor = $this->findVendor($id);
+
+        if (!$vendor) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Vendor not found',
+                'code' => 'NOT_FOUND'
+            ], 404);
+        }
+
+        // Get all ratings with user info
+        $comments = VendorRating::where('vendor_id', $vendor->id)
+            ->with('user')
+            ->orderBy('created_at', 'desc')
+            ->get()
+            ->map(function($r) {
+                return [
+                    'id' => $r->id,
+                    'comment' => $r->comment,
+                    'rating' => (float) $r->rating,
+                    'createdAt' => $r->created_at->toIso8601String(),
+                    'createdBy' => [
+                        'id' => $r->user->id,
+                        'name' => $r->user->name,
+                        'email' => $r->user->email,
+                    ],
+                ];
+            });
+
+        return response()->json([
+            'success' => true,
+            'data' => $comments,
+            'vendorRating' => (float) ($vendor->rating ?? 0),
+            'totalComments' => $comments->count(),
+        ]);
+    }
+
+    /**
+     * Update vendor average rating
+     */
+    private function updateVendorAverageRating(Vendor $vendor): void
+    {
+        $avgRating = VendorRating::where('vendor_id', $vendor->id)
+            ->avg('rating');
+
+        $vendor->update([
+            'rating' => $avgRating ? round($avgRating, 2) : 0,
+        ]);
     }
 }

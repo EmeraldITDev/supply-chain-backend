@@ -54,6 +54,14 @@ class Vendor extends Model
     }
 
     /**
+     * Get vendor ratings
+     */
+    public function ratings(): HasMany
+    {
+        return $this->hasMany(VendorRating::class, 'vendor_id');
+    }
+
+    /**
      * Generate Vendor ID
      */
     public static function generateVendorId(): string

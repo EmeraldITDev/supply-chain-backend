@@ -80,6 +80,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/vendors', [VendorController::class, 'index']);
     Route::get('/vendors/{id}', [VendorController::class, 'show']);
     Route::delete('/vendors/{id}', [VendorController::class, 'destroy']);
+    Route::post('/vendors/{id}/rating', [VendorController::class, 'addRating']);
+    Route::get('/vendors/{id}/comments', [VendorController::class, 'getComments']);
     Route::get('/vendors/registrations', [VendorController::class, 'registrations']);
     Route::get('/vendors/registrations/{id}', [VendorController::class, 'getRegistration']);
     Route::get('/vendors/registrations/{registrationId}/documents/{documentId}/download', [VendorController::class, 'downloadDocument']);
