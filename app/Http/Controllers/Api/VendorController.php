@@ -18,6 +18,25 @@ use Illuminate\Support\Str;
 class VendorController extends Controller
 {
     /**
+     * Find vendor by ID (supports both primary key and vendor_id)
+     * 
+     * @param mixed $id - Can be primary key (integer) or vendor_id (string like "V001")
+     * @return Vendor|null
+     */
+    private function findVendor($id): ?Vendor
+    {
+        // Try to find by vendor_id first (business identifier like "V001")
+        $vendor = Vendor::where('vendor_id', $id)->first();
+        
+        // If not found and $id is numeric, try by primary key
+        if (!$vendor && is_numeric($id)) {
+            $vendor = Vendor::find($id);
+        }
+        
+        return $vendor;
+    }
+
+    /**
      * Get all vendors
      */
     public function index(Request $request)
@@ -600,13 +619,18 @@ class VendorController extends Controller
             ], 403);
         }
 
-        $vendor = Vendor::where('vendor_id', $id)->first();
+        // Find vendor by either primary key or vendor_id
+        $vendor = $this->findVendor($id);
 
         if (!$vendor) {
             return response()->json([
                 'success' => false,
                 'error' => 'Vendor not found',
-                'code' => 'NOT_FOUND'
+                'code' => 'NOT_FOUND',
+                'debug' => [
+                    'searchedId' => $id,
+                    'searchedType' => is_numeric($id) ? 'numeric (tried both primary key and vendor_id)' : 'string (tried vendor_id only)'
+                ]
             ], 404);
         }
 
@@ -703,13 +727,18 @@ class VendorController extends Controller
             ], 403);
         }
 
-        $vendor = Vendor::where('vendor_id', $id)->first();
+        // Find vendor by either primary key or vendor_id
+        $vendor = $this->findVendor($id);
 
         if (!$vendor) {
             return response()->json([
                 'success' => false,
                 'error' => 'Vendor not found',
-                'code' => 'NOT_FOUND'
+                'code' => 'NOT_FOUND',
+                'debug' => [
+                    'searchedId' => $id,
+                    'searchedType' => is_numeric($id) ? 'numeric (tried both primary key and vendor_id)' : 'string (tried vendor_id only)'
+                ]
             ], 404);
         }
 
