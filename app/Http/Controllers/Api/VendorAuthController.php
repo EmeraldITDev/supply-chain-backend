@@ -68,17 +68,6 @@ class VendorAuthController extends Controller
             ], 401);
         }
 
-        // Check if user must change password (first login with temporary password)
-        if ($user->must_change_password) {
-            return response()->json([
-                'success' => false,
-                'error' => 'You must change your temporary password before logging in.',
-                'code' => 'PASSWORD_CHANGE_REQUIRED',
-                'requiresPasswordChange' => true,
-                'email' => $user->email,
-            ], 403);
-        }
-
         // Determine token expiration based on remember_me
         $rememberMe = $request->boolean('remember_me', true);
         $expiresAt = $rememberMe 
@@ -89,28 +78,31 @@ class VendorAuthController extends Controller
         $tokenName = $rememberMe ? 'vendor-remember-token' : 'vendor-session-token';
         $token = $user->createToken($tokenName, ['*'], $expiresAt)->plainTextToken;
 
+        // Return success with requiresPasswordChange flag
         return response()->json([
             'success' => true,
+            'data' => [
+                'vendor' => [
+                    'id' => $user->vendor->vendor_id,
+                    'name' => $user->vendor->name,
+                    'email' => $user->vendor->email,
+                    'status' => $user->vendor->status,
+                    'category' => $user->vendor->category,
+                    'phone' => $user->vendor->phone,
+                    'address' => $user->vendor->address,
+                    'contactPerson' => $user->vendor->contact_person,
+                    'rating' => $user->vendor->rating ? (float) $user->vendor->rating : 0,
+                    'totalOrders' => $user->vendor->total_orders,
+                ],
+                'token' => $token,
+                'requiresPasswordChange' => $user->must_change_password ?? false,
+            ],
             'user' => [
                 'id' => $user->id,
                 'email' => $user->email,
                 'name' => $user->name,
                 'role' => 'vendor',
-                'createdAt' => $user->created_at->toIso8601String(),
             ],
-            'vendor' => [
-                'id' => $user->vendor->vendor_id,
-                'name' => $user->vendor->name,
-                'category' => $user->vendor->category,
-                'email' => $user->vendor->email,
-                'phone' => $user->vendor->phone,
-                'address' => $user->vendor->address,
-                'contactPerson' => $user->vendor->contact_person,
-                'status' => $user->vendor->status,
-                'rating' => $user->vendor->rating ? (float) $user->vendor->rating : 0,
-                'totalOrders' => $user->vendor->total_orders,
-            ],
-            'token' => $token,
             'expiresAt' => $expiresAt->toIso8601String(),
         ]);
     }
