@@ -138,8 +138,12 @@ class VendorApprovalService
     public function sendApprovalEmail(VendorRegistration $registration, string $temporaryPassword): void
     {
         try {
-            Mail::to($registration->email)
-                ->send(new VendorApprovalMail($registration, $temporaryPassword));
+            $emailService = app(EmailService::class);
+            $emailService->sendVendorApprovalEmail(
+                $registration->email,
+                $registration->company_name,
+                $temporaryPassword
+            );
         } catch (\Exception $e) {
             // Log error but don't fail the approval process
             \Log::error('Failed to send vendor approval email: ' . $e->getMessage());

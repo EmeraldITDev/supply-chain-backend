@@ -38,6 +38,7 @@ Route::post('/auth/vendor/change-password', [AuthController::class, 'forcePasswo
 
 // Vendor authentication (public)
 Route::post('/vendors/auth/login', [VendorAuthController::class, 'login']);
+Route::post('/vendors/auth/password-reset', [VendorAuthController::class, 'requestPasswordReset']);
 
 // Protected routes
 Route::middleware('auth:sanctum')->group(function () {
@@ -50,6 +51,9 @@ Route::middleware('auth:sanctum')->group(function () {
     // Vendor authentication (protected)
     Route::post('/vendors/auth/logout', [VendorAuthController::class, 'logout']);
     Route::get('/vendors/auth/me', [VendorAuthController::class, 'me']);
+    Route::get('/vendors/auth/profile', [VendorAuthController::class, 'getProfile']);
+    Route::put('/vendors/auth/profile', [VendorAuthController::class, 'updateProfile']);
+    Route::post('/vendors/auth/change-password', [VendorAuthController::class, 'changePassword']);
 
     // MRF routes
     Route::get('/mrfs', [MRFController::class, 'index']);
@@ -80,6 +84,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/vendors', [VendorController::class, 'index']);
     Route::get('/vendors/{id}', [VendorController::class, 'show']);
     Route::delete('/vendors/{id}', [VendorController::class, 'destroy']);
+    Route::post('/vendors/invite', [VendorController::class, 'inviteVendor']);
     Route::post('/vendors/{id}/rating', [VendorController::class, 'addRating']);
     Route::get('/vendors/{id}/comments', [VendorController::class, 'getComments']);
     Route::get('/vendors/registrations', [VendorController::class, 'registrations']);

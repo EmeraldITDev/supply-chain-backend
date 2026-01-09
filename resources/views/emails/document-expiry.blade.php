@@ -13,7 +13,7 @@
             padding: 20px;
         }
         .header {
-            background-color: #10B981;
+            background-color: #EF4444;
             color: white;
             padding: 20px;
             text-align: center;
@@ -24,29 +24,27 @@
             padding: 30px;
             border: 1px solid #e5e7eb;
         }
-        .credentials {
+        .document-list {
             background-color: #fff;
-            border: 2px solid #10B981;
+            border: 2px solid #EF4444;
             padding: 20px;
             border-radius: 5px;
             margin: 20px 0;
         }
-        .credentials strong {
-            color: #10B981;
+        .document-item {
+            padding: 10px;
+            border-bottom: 1px solid #e5e7eb;
+        }
+        .document-item:last-child {
+            border-bottom: none;
         }
         .button {
             display: inline-block;
-            background-color: #10B981;
+            background-color: #EF4444;
             color: white;
             padding: 12px 30px;
             text-decoration: none;
             border-radius: 5px;
-            margin: 20px 0;
-        }
-        .warning {
-            background-color: #FEF3C7;
-            border-left: 4px solid #F59E0B;
-            padding: 15px;
             margin: 20px 0;
         }
         .footer {
@@ -61,40 +59,32 @@
 </head>
 <body>
     <div class="header">
-        <h1>✓ Vendor Registration Approved</h1>
+        <h1>⚠️ Document Expiry Reminder</h1>
     </div>
     
     <div class="content">
         <p>Dear {{ $companyName }},</p>
         
-        <p>Congratulations! Your vendor registration has been approved. Welcome to our Supply Chain Management vendor network!</p>
+        <p>This is a reminder that the following documents in your vendor profile are expiring soon or have already expired:</p>
         
-        <h3>Your Login Credentials:</h3>
-        <div class="credentials">
-            <p><strong>Email:</strong> {{ $email }}</p>
-            <p><strong>Temporary Password:</strong> <code>{{ $temporaryPassword }}</code></p>
+        <div class="document-list">
+            @foreach($documents as $document)
+            <div class="document-item">
+                <strong>{{ $document['name'] }}</strong><br>
+                <span style="color: #EF4444;">Expires: {{ $document['expiryDate'] }}</span>
+            </div>
+            @endforeach
         </div>
         
-        <div class="warning">
-            <strong>⚠️ Important:</strong> For security reasons, you will be required to change your password upon first login.
-        </div>
+        <p><strong>Action Required:</strong> Please update these documents as soon as possible to maintain your vendor status and continue receiving business opportunities.</p>
         
         <div style="text-align: center;">
-            <a href="{{ $loginUrl }}" class="button">Login to Vendor Portal</a>
+            <a href="{{ $portalUrl }}" class="button">Update Documents</a>
         </div>
         
-        <h3>What's Next?</h3>
-        <ol>
-            <li>Click the login button above</li>
-            <li>Enter your email and temporary password</li>
-            <li>Set your new secure password</li>
-            <li>Complete your vendor profile</li>
-            <li>Start receiving RFQs and submitting quotations</li>
-        </ol>
+        <p>Failure to update expired documents may result in suspension of your vendor account.</p>
         
-        <p>If you encounter any issues logging in, please contact our support team.</p>
-        
-        <p>We look forward to a successful partnership!</p>
+        <p>If you have any questions, please contact our vendor support team.</p>
         
         <p>Best regards,<br>
         Supply Chain Management Team</p>
@@ -102,7 +92,6 @@
     
     <div class="footer">
         <p>This is an automated email. Please do not reply.</p>
-        <p>Keep your credentials secure and do not share them with anyone.</p>
         <p>&copy; {{ date('Y') }} Supply Chain Management System. All rights reserved.</p>
     </div>
 </body>

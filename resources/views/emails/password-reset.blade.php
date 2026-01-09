@@ -13,7 +13,7 @@
             padding: 20px;
         }
         .header {
-            background-color: #10B981;
+            background-color: #F59E0B;
             color: white;
             padding: 20px;
             text-align: center;
@@ -26,27 +26,18 @@
         }
         .credentials {
             background-color: #fff;
-            border: 2px solid #10B981;
+            border: 2px solid #F59E0B;
             padding: 20px;
             border-radius: 5px;
             margin: 20px 0;
         }
-        .credentials strong {
-            color: #10B981;
-        }
         .button {
             display: inline-block;
-            background-color: #10B981;
+            background-color: #F59E0B;
             color: white;
             padding: 12px 30px;
             text-decoration: none;
             border-radius: 5px;
-            margin: 20px 0;
-        }
-        .warning {
-            background-color: #FEF3C7;
-            border-left: 4px solid #F59E0B;
-            padding: 15px;
             margin: 20px 0;
         }
         .footer {
@@ -61,40 +52,26 @@
 </head>
 <body>
     <div class="header">
-        <h1>✓ Vendor Registration Approved</h1>
+        <h1>Password Reset</h1>
     </div>
     
     <div class="content">
-        <p>Dear {{ $companyName }},</p>
+        <p>Dear {{ $name }},</p>
         
-        <p>Congratulations! Your vendor registration has been approved. Welcome to our Supply Chain Management vendor network!</p>
+        <p>Your password has been reset as requested.</p>
         
-        <h3>Your Login Credentials:</h3>
+        <h3>Your New Temporary Password:</h3>
         <div class="credentials">
-            <p><strong>Email:</strong> {{ $email }}</p>
             <p><strong>Temporary Password:</strong> <code>{{ $temporaryPassword }}</code></p>
         </div>
         
-        <div class="warning">
-            <strong>⚠️ Important:</strong> For security reasons, you will be required to change your password upon first login.
-        </div>
+        <p>For security reasons, you will be required to change this password upon your next login.</p>
         
         <div style="text-align: center;">
-            <a href="{{ $loginUrl }}" class="button">Login to Vendor Portal</a>
+            <a href="{{ $loginUrl }}" class="button">Login Now</a>
         </div>
         
-        <h3>What's Next?</h3>
-        <ol>
-            <li>Click the login button above</li>
-            <li>Enter your email and temporary password</li>
-            <li>Set your new secure password</li>
-            <li>Complete your vendor profile</li>
-            <li>Start receiving RFQs and submitting quotations</li>
-        </ol>
-        
-        <p>If you encounter any issues logging in, please contact our support team.</p>
-        
-        <p>We look forward to a successful partnership!</p>
+        <p><strong>Security Notice:</strong> If you did not request this password reset, please contact our support team immediately.</p>
         
         <p>Best regards,<br>
         Supply Chain Management Team</p>
@@ -102,7 +79,6 @@
     
     <div class="footer">
         <p>This is an automated email. Please do not reply.</p>
-        <p>Keep your credentials secure and do not share them with anyone.</p>
         <p>&copy; {{ date('Y') }} Supply Chain Management System. All rights reserved.</p>
     </div>
 </body>

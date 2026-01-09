@@ -7,157 +7,285 @@ use App\Models\User;
 use App\Models\Vendor;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
-use Illuminate\Validation\ValidationException;
+use Illuminate\Support\Facades\Validator;
 
 class VendorAuthController extends Controller
 {
     /**
-     * Vendor login
-     * 
-     * Authenticates vendor users and returns JWT token
+     * Update authenticated vendor's profile
      */
-    public function login(Request $request)
+    public function updateProfile(Request $request)
     {
-        $request->validate([
-            'email' => 'required|email',
-            'password' => 'required',
-            'remember_me' => 'nullable|boolean',
-        ]);
+        $user = $request->user();
 
-        // Find user by email where vendor_id is set
-        $user = User::with('vendor')
-            ->where('email', $request->email)
-            ->whereNotNull('vendor_id')
-            ->first();
-
-        // Check if user exists and is a vendor
-        if (!$user) {
-            throw ValidationException::withMessages([
-                'email' => ['No vendor account found with this email address.'],
-            ]);
-        }
-
-        // Verify password
-        if (!Hash::check($request->password, $user->password)) {
-            throw ValidationException::withMessages([
-                'email' => ['The provided credentials are incorrect.'],
-            ]);
-        }
-
-        // Check if vendor exists
-        if (!$user->vendor) {
-            throw ValidationException::withMessages([
-                'email' => ['Vendor information not found. Please contact support.'],
-            ]);
-        }
-
-        // Check vendor status - only 'Active' vendors can login
-        if ($user->vendor->status !== 'Active') {
-            $statusMessage = match($user->vendor->status) {
-                'Pending' => 'Your vendor account is pending approval. Please wait for approval from the procurement team.',
-                'Inactive' => 'Your vendor account has been deactivated. Please contact support for assistance.',
-                'Suspended' => 'Your vendor account has been suspended. Please contact support for assistance.',
-                default => 'Your vendor account is not active. Please contact support.',
-            };
-
+        // Ensure user is a vendor
+        if ($user->role !== 'vendor' && !$user->hasRole('vendor')) {
             return response()->json([
                 'success' => false,
-                'error' => $statusMessage,
-                'code' => 'VENDOR_NOT_ACTIVE',
-                'vendorStatus' => $user->vendor->status,
-            ], 401);
+                'error' => 'Only vendors can access this endpoint',
+                'code' => 'FORBIDDEN'
+            ], 403);
         }
 
-        // Determine token expiration based on remember_me
-        $rememberMe = $request->boolean('remember_me', true);
-        $expiresAt = $rememberMe 
-            ? now()->addDays(30)  // 30 days for "remember me"
-            : now()->addDay();    // 1 day for regular session
+        // Get the vendor record
+        $vendor = Vendor::find($user->vendor_id);
 
-        // Create token
-        $tokenName = $rememberMe ? 'vendor-remember-token' : 'vendor-session-token';
-        $token = $user->createToken($tokenName, ['*'], $expiresAt)->plainTextToken;
+        if (!$vendor) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Vendor profile not found',
+                'code' => 'NOT_FOUND'
+            ], 404);
+        }
 
-        // Return success with requiresPasswordChange flag
+        // Validate input
+        $validator = Validator::make($request->all(), [
+            'contact_person' => 'sometimes|string|max:255',
+            'phone' => 'sometimes|string|max:20',
+            'address' => 'sometimes|string|max:500',
+            'email' => 'sometimes|email|max:255|unique:vendors,email,' . $vendor->id,
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Validation failed',
+                'errors' => $validator->errors(),
+                'code' => 'VALIDATION_ERROR'
+            ], 422);
+        }
+
+        // Build update data
+        $updateData = [];
+        
+        if ($request->has('contact_person')) {
+            $updateData['contact_person'] = $request->contact_person;
+            // Also update user name if contact person changes
+            $user->update(['name' => $request->contact_person]);
+        }
+
+        if ($request->has('phone')) {
+            $updateData['phone'] = $request->phone;
+        }
+
+        if ($request->has('address')) {
+            $updateData['address'] = $request->address;
+        }
+
+        if ($request->has('email')) {
+            // Update both vendor and user email
+            $updateData['email'] = $request->email;
+            $user->update(['email' => $request->email]);
+        }
+
+        // Update vendor profile
+        $vendor->update($updateData);
+
         return response()->json([
             'success' => true,
+            'message' => 'Profile updated successfully',
             'data' => [
                 'vendor' => [
-                    'id' => $user->vendor->vendor_id,
-                    'name' => $user->vendor->name,
-                    'email' => $user->vendor->email,
-                    'status' => $user->vendor->status,
-                    'category' => $user->vendor->category,
-                    'phone' => $user->vendor->phone,
-                    'address' => $user->vendor->address,
-                    'contactPerson' => $user->vendor->contact_person,
-                    'rating' => $user->vendor->rating ? (float) $user->vendor->rating : 0,
-                    'totalOrders' => $user->vendor->total_orders,
-                ],
-                'token' => $token,
-                'requiresPasswordChange' => $user->must_change_password ?? false,
-            ],
-            'user' => [
-                'id' => $user->id,
-                'email' => $user->email,
-                'name' => $user->name,
-                'role' => 'vendor',
-            ],
-            'expiresAt' => $expiresAt->toIso8601String(),
-        ]);
+                    'id' => $vendor->vendor_id,
+                    'name' => $vendor->name,
+                    'email' => $vendor->email,
+                    'phone' => $vendor->phone,
+                    'address' => $vendor->address,
+                    'contactPerson' => $vendor->contact_person,
+                    'category' => $vendor->category,
+                    'status' => $vendor->status,
+                    'rating' => (float) ($vendor->rating ?? 0),
+                    'updatedAt' => $vendor->updated_at->toIso8601String(),
+                ]
+            ]
+        ], 200);
     }
 
     /**
-     * Vendor logout
+     * Get authenticated vendor's profile
      */
-    public function logout(Request $request)
+    public function getProfile(Request $request)
     {
-        $request->user()->currentAccessToken()->delete();
+        $user = $request->user();
 
-        return response()->json([
-            'success' => true,
-            'message' => 'Logged out successfully',
-        ]);
-    }
-
-    /**
-     * Get authenticated vendor info
-     */
-    public function me(Request $request)
-    {
-        $user = $request->user()->load('vendor');
-        $token = $request->user()->currentAccessToken();
-
-        if (!$user->vendor) {
+        // Ensure user is a vendor
+        if ($user->role !== 'vendor' && !$user->hasRole('vendor')) {
             return response()->json([
                 'success' => false,
-                'error' => 'Vendor information not found',
-                'code' => 'VENDOR_NOT_FOUND'
+                'error' => 'Only vendors can access this endpoint',
+                'code' => 'FORBIDDEN'
+            ], 403);
+        }
+
+        // Get the vendor record
+        $vendor = Vendor::find($user->vendor_id);
+
+        if (!$vendor) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Vendor profile not found',
+                'code' => 'NOT_FOUND'
             ], 404);
         }
 
         return response()->json([
             'success' => true,
-            'user' => [
-                'id' => $user->id,
-                'email' => $user->email,
-                'name' => $user->name,
-                'role' => 'vendor',
-                'createdAt' => $user->created_at->toIso8601String(),
-            ],
-            'vendor' => [
-                'id' => $user->vendor->vendor_id,
-                'name' => $user->vendor->name,
-                'category' => $user->vendor->category,
-                'email' => $user->vendor->email,
-                'phone' => $user->vendor->phone,
-                'address' => $user->vendor->address,
-                'contactPerson' => $user->vendor->contact_person,
-                'status' => $user->vendor->status,
-                'rating' => $user->vendor->rating ? (float) $user->vendor->rating : 0,
-                'totalOrders' => $user->vendor->total_orders,
-            ],
-            'tokenExpiresAt' => $token->expires_at ? $token->expires_at->toIso8601String() : null,
+            'data' => [
+                'vendor' => [
+                    'id' => $vendor->vendor_id,
+                    'name' => $vendor->name,
+                    'email' => $vendor->email,
+                    'phone' => $vendor->phone,
+                    'address' => $vendor->address,
+                    'contactPerson' => $vendor->contact_person,
+                    'category' => $vendor->category,
+                    'status' => $vendor->status,
+                    'rating' => (float) ($vendor->rating ?? 0),
+                    'totalOrders' => $vendor->total_orders ?? 0,
+                    'taxId' => $vendor->tax_id,
+                    'createdAt' => $vendor->created_at->toIso8601String(),
+                    'updatedAt' => $vendor->updated_at->toIso8601String(),
+                ],
+                'user' => [
+                    'id' => $user->id,
+                    'name' => $user->name,
+                    'email' => $user->email,
+                    'mustChangePassword' => $user->must_change_password ?? false,
+                ]
+            ]
+        ], 200);
+    }
+
+    /**
+     * Change vendor password
+     */
+    public function changePassword(Request $request)
+    {
+        $user = $request->user();
+
+        // Ensure user is a vendor
+        if ($user->role !== 'vendor' && !$user->hasRole('vendor')) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Only vendors can access this endpoint',
+                'code' => 'FORBIDDEN'
+            ], 403);
+        }
+
+        // Validate input
+        $validator = Validator::make($request->all(), [
+            'current_password' => 'required|string',
+            'new_password' => 'required|string|min:8|confirmed',
         ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Validation failed',
+                'errors' => $validator->errors(),
+                'code' => 'VALIDATION_ERROR'
+            ], 422);
+        }
+
+        // Verify current password
+        if (!Hash::check($request->current_password, $user->password)) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Current password is incorrect',
+                'code' => 'INVALID_PASSWORD'
+            ], 401);
+        }
+
+        // Update password
+        $user->update([
+            'password' => Hash::make($request->new_password),
+            'must_change_password' => false,
+            'password_changed_at' => now(),
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Password changed successfully',
+        ], 200);
+    }
+
+    /**
+     * Request password reset (for vendors)
+     */
+    public function requestPasswordReset(Request $request)
+    {
+        // Validate input
+        $validator = Validator::make($request->all(), [
+            'email' => 'required|email',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Validation failed',
+                'errors' => $validator->errors(),
+                'code' => 'VALIDATION_ERROR'
+            ], 422);
+        }
+
+        // Find user by email
+        $user = User::where('email', $request->email)
+            ->where(function($query) {
+                $query->where('role', 'vendor')
+                      ->orWhereHas('roles', function($q) {
+                          $q->where('name', 'vendor');
+                      });
+            })
+            ->first();
+
+        // Always return success for security (don't reveal if email exists)
+        if (!$user) {
+            return response()->json([
+                'success' => true,
+                'message' => 'If the email exists, a password reset link has been sent',
+            ], 200);
+        }
+
+        // Generate temporary password
+        $temporaryPassword = $this->generateTemporaryPassword();
+
+        // Update user password
+        $user->update([
+            'password' => Hash::make($temporaryPassword),
+            'must_change_password' => true,
+            'password_changed_at' => null,
+        ]);
+
+        // Send password reset email
+        $emailService = app(\App\Services\EmailService::class);
+        $emailService->sendPasswordResetEmail(
+            $user->email,
+            $user->name,
+            $temporaryPassword
+        );
+
+        return response()->json([
+            'success' => true,
+            'message' => 'If the email exists, a password reset link has been sent',
+        ], 200);
+    }
+
+    /**
+     * Generate a secure temporary password
+     */
+    private function generateTemporaryPassword(): string
+    {
+        $uppercase = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
+        $lowercase = 'abcdefghijkmnpqrstuvwxyz';
+        $numbers = '23456789';
+        $special = '!@#$%&*';
+        
+        $password = '';
+        $password .= substr(str_shuffle($uppercase), 0, 3);
+        $password .= substr(str_shuffle($lowercase), 0, 3);
+        $password .= substr(str_shuffle($numbers), 0, 3);
+        $password .= substr(str_shuffle($special), 0, 3);
+        
+        return str_shuffle($password);
     }
 }

@@ -1,0 +1,114 @@
+===========================================
+EMAIL CONFIGURATION EXAMPLES
+===========================================
+Copy the appropriate section to your .env file
+
+For detailed setup instructions, see EMAIL_SETUP_GUIDE.md
+===========================================
+
+---------------------------------------------
+OPTION 1: MAILTRAP (DEVELOPMENT/TESTING)
+---------------------------------------------
+Best for: Testing without sending real emails
+Sign up: https://mailtrap.io
+Free tier: Unlimited test emails
+
+MAIL_MAILER=smtp
+MAIL_HOST=sandbox.smtp.mailtrap.io
+MAIL_PORT=2525
+MAIL_USERNAME=your_mailtrap_username_here
+MAIL_PASSWORD=your_mailtrap_password_here
+MAIL_ENCRYPTION=tls
+MAIL_FROM_ADDRESS=noreply@scm.local
+MAIL_FROM_NAME="${APP_NAME}"
+FRONTEND_URL=http://localhost:3000
+
+---------------------------------------------
+OPTION 2: SENDGRID (PRODUCTION)
+---------------------------------------------
+Best for: Production environments
+Sign up: https://sendgrid.com
+Free tier: 100 emails/day
+
+MAIL_MAILER=smtp
+MAIL_HOST=smtp.sendgrid.net
+MAIL_PORT=587
+MAIL_USERNAME=apikey
+MAIL_PASSWORD=your_sendgrid_api_key_here
+MAIL_ENCRYPTION=tls
+MAIL_FROM_ADDRESS=noreply@yourdomain.com
+MAIL_FROM_NAME="${APP_NAME}"
+FRONTEND_URL=https://your-frontend-domain.com
+
+---------------------------------------------
+OPTION 3: RESEND (MODERN ALTERNATIVE)
+---------------------------------------------
+Best for: Modern API, developer-friendly
+Sign up: https://resend.com
+Free tier: 3,000 emails/month
+
+MAIL_MAILER=smtp
+MAIL_HOST=smtp.resend.com
+MAIL_PORT=587
+MAIL_USERNAME=resend
+MAIL_PASSWORD=your_resend_api_key_here
+MAIL_ENCRYPTION=tls
+MAIL_FROM_ADDRESS=noreply@yourdomain.com
+MAIL_FROM_NAME="${APP_NAME}"
+FRONTEND_URL=https://your-frontend-domain.com
+
+---------------------------------------------
+OPTION 4: AMAZON SES (HIGH VOLUME)
+---------------------------------------------
+Best for: Cost-effective at scale
+Sign up: AWS Console -> SES
+Free tier: 62,000 emails/month (from EC2)
+
+MAIL_MAILER=ses
+AWS_ACCESS_KEY_ID=your_aws_access_key
+AWS_SECRET_ACCESS_KEY=your_aws_secret_key
+AWS_DEFAULT_REGION=us-east-1
+MAIL_FROM_ADDRESS=noreply@yourdomain.com
+MAIL_FROM_NAME="${APP_NAME}"
+FRONTEND_URL=https://your-frontend-domain.com
+
+---------------------------------------------
+OPTION 5: LOG DRIVER (TESTING ONLY)
+---------------------------------------------
+Best for: Testing without external services
+Emails will be written to storage/logs/laravel.log
+
+MAIL_MAILER=log
+MAIL_FROM_ADDRESS=noreply@scm.local
+MAIL_FROM_NAME="${APP_NAME}"
+FRONTEND_URL=http://localhost:3000
+
+===========================================
+QUICK START FOR DEVELOPMENT
+===========================================
+
+1. Sign up for Mailtrap (free): https://mailtrap.io
+2. Create an inbox
+3. Copy the SMTP credentials
+4. Add OPTION 1 configuration to your .env
+5. Replace username and password with your Mailtrap credentials
+6. Run: php artisan config:clear
+7. Test by inviting a vendor through the API
+
+===========================================
+AFTER CONFIGURATION
+===========================================
+
+Always run after changing .env:
+  php artisan config:clear
+  php artisan cache:clear
+
+Test with:
+  php artisan tinker
+
+Then in tinker:
+  use App\Services\EmailService;
+  $emailService = app(EmailService::class);
+  $emailService->sendVendorInvitation('test@example.com', 'Test Company');
+
+===========================================

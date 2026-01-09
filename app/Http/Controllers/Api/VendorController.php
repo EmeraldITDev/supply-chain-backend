@@ -974,4 +974,98 @@ class VendorController extends Controller
             'rating' => $avgRating ? round($avgRating, 2) : 0,
         ]);
     }
+
+    /**
+     * Send vendor invitation email
+     */
+    public function inviteVendor(Request $request)
+    {
+        $user = $request->user();
+
+        // Check permissions - only procurement managers and higher
+        $allowedRoles = [
+            'procurement_manager',
+            'supply_chain_director',
+            'supply_chain',
+            'executive',
+            'chairman',
+            'admin',
+        ];
+
+        if (!in_array($user->role, $allowedRoles)) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Insufficient permissions to invite vendors',
+                'code' => 'FORBIDDEN'
+            ], 403);
+        }
+
+        // Validate input
+        $validator = Validator::make($request->all(), [
+            'email' => 'required|email|max:255',
+            'company_name' => 'required|string|max:255',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Validation failed',
+                'errors' => $validator->errors(),
+                'code' => 'VALIDATION_ERROR'
+            ], 422);
+        }
+
+        // Check if vendor already exists with this email
+        $existingVendor = Vendor::where('email', $request->email)->first();
+        if ($existingVendor) {
+            return response()->json([
+                'success' => false,
+                'error' => 'A vendor with this email already exists',
+                'code' => 'VENDOR_EXISTS'
+            ], 409);
+        }
+
+        // Check if there's already a pending registration with this email
+        $pendingRegistration = VendorRegistration::where('email', $request->email)
+            ->whereIn('status', ['pending', 'Pending'])
+            ->first();
+
+        if ($pendingRegistration) {
+            return response()->json([
+                'success' => false,
+                'error' => 'A registration with this email is already pending',
+                'code' => 'REGISTRATION_PENDING'
+            ], 409);
+        }
+
+        // Send invitation email
+        $emailService = app(\App\Services\EmailService::class);
+        $emailSent = $emailService->sendVendorInvitation(
+            $request->email,
+            $request->company_name
+        );
+
+        if (!$emailSent) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Failed to send invitation email',
+                'code' => 'EMAIL_FAILED'
+            ], 500);
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Vendor invitation sent successfully',
+            'data' => [
+                'email' => $request->email,
+                'companyName' => $request->company_name,
+                'sentAt' => now()->toIso8601String(),
+                'sentBy' => [
+                    'id' => $user->id,
+                    'name' => $user->name,
+                    'email' => $user->email,
+                ],
+            ]
+        ], 200);
+    }
 }

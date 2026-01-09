@@ -13,7 +13,7 @@
             padding: 20px;
         }
         .header {
-            background-color: #10B981;
+            background-color: #8B5CF6;
             color: white;
             padding: 20px;
             text-align: center;
@@ -24,26 +24,23 @@
             padding: 30px;
             border: 1px solid #e5e7eb;
         }
-        .credentials {
+        .rfq-details {
             background-color: #fff;
-            border: 2px solid #10B981;
+            border: 2px solid #8B5CF6;
             padding: 20px;
             border-radius: 5px;
             margin: 20px 0;
         }
-        .credentials strong {
-            color: #10B981;
-        }
         .button {
             display: inline-block;
-            background-color: #10B981;
+            background-color: #8B5CF6;
             color: white;
             padding: 12px 30px;
             text-decoration: none;
             border-radius: 5px;
             margin: 20px 0;
         }
-        .warning {
+        .deadline {
             background-color: #FEF3C7;
             border-left: 4px solid #F59E0B;
             padding: 15px;
@@ -61,48 +58,47 @@
 </head>
 <body>
     <div class="header">
-        <h1>✓ Vendor Registration Approved</h1>
+        <h1>New RFQ Assigned</h1>
     </div>
     
     <div class="content">
         <p>Dear {{ $companyName }},</p>
         
-        <p>Congratulations! Your vendor registration has been approved. Welcome to our Supply Chain Management vendor network!</p>
+        <p>A new Request for Quotation (RFQ) has been assigned to your company.</p>
         
-        <h3>Your Login Credentials:</h3>
-        <div class="credentials">
-            <p><strong>Email:</strong> {{ $email }}</p>
-            <p><strong>Temporary Password:</strong> <code>{{ $temporaryPassword }}</code></p>
+        <div class="rfq-details">
+            <h3>RFQ Details:</h3>
+            <p><strong>RFQ ID:</strong> {{ $rfqId }}</p>
+            <p><strong>Title:</strong> {{ $rfqTitle }}</p>
         </div>
         
-        <div class="warning">
-            <strong>⚠️ Important:</strong> For security reasons, you will be required to change your password upon first login.
+        <div class="deadline">
+            <strong>⏰ Submission Deadline:</strong> {{ $deadline }}
         </div>
+        
+        <p>Please review the RFQ details and submit your quotation before the deadline.</p>
         
         <div style="text-align: center;">
-            <a href="{{ $loginUrl }}" class="button">Login to Vendor Portal</a>
+            <a href="{{ $rfqUrl }}" class="button">View RFQ & Submit Quotation</a>
         </div>
         
-        <h3>What's Next?</h3>
-        <ol>
-            <li>Click the login button above</li>
-            <li>Enter your email and temporary password</li>
-            <li>Set your new secure password</li>
-            <li>Complete your vendor profile</li>
-            <li>Start receiving RFQs and submitting quotations</li>
-        </ol>
+        <h3>Important Notes:</h3>
+        <ul>
+            <li>Carefully review all requirements and specifications</li>
+            <li>Ensure your quotation includes all requested items</li>
+            <li>Submit before the deadline to be considered</li>
+            <li>Contact us if you have any questions or clarifications</li>
+        </ul>
         
-        <p>If you encounter any issues logging in, please contact our support team.</p>
-        
-        <p>We look forward to a successful partnership!</p>
+        <p>We look forward to receiving your competitive quotation.</p>
         
         <p>Best regards,<br>
-        Supply Chain Management Team</p>
+        Procurement Team<br>
+        Supply Chain Management</p>
     </div>
     
     <div class="footer">
         <p>This is an automated email. Please do not reply.</p>
-        <p>Keep your credentials secure and do not share them with anyone.</p>
         <p>&copy; {{ date('Y') }} Supply Chain Management System. All rights reserved.</p>
     </div>
 </body>
