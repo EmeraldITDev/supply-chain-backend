@@ -8,6 +8,7 @@ use App\Models\Vendor;
 use App\Models\VendorRating;
 use App\Models\VendorRegistration;
 use App\Models\VendorRegistrationDocument;
+use App\Services\NotificationService;
 use App\Services\VendorApprovalService;
 use App\Services\VendorDocumentService;
 use Illuminate\Http\Request;
@@ -18,6 +19,12 @@ use Illuminate\Support\Str;
 
 class VendorController extends Controller
 {
+    protected NotificationService $notificationService;
+
+    public function __construct(NotificationService $notificationService)
+    {
+        $this->notificationService = $notificationService;
+    }
     /**
      * Find vendor by ID (supports both primary key and vendor_id)
      * 
@@ -182,6 +189,9 @@ class VendorController extends Controller
             $documents = $request->file('documents');
             $documentService->storeDocuments($registration, $documents);
         }
+
+        // Send notification to procurement managers
+        $this->notificationService->notifyVendorRegistration($registration);
 
         return response()->json([
             'success' => true,

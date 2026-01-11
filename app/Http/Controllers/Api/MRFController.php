@@ -4,12 +4,19 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\MRF;
+use App\Services\NotificationService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\Rule;
 
 class MRFController extends Controller
 {
+    protected NotificationService $notificationService;
+
+    public function __construct(NotificationService $notificationService)
+    {
+        $this->notificationService = $notificationService;
+    }
     /**
      * Get all MRFs with optional filters
      */
@@ -151,6 +158,9 @@ class MRFController extends Controller
             'approval_history' => [],
             'is_resubmission' => false,
         ]);
+
+        // Send notification to procurement managers
+        $this->notificationService->notifyMRFSubmitted($mrf);
 
         return response()->json([
             'id' => $mrf->mrf_id,
@@ -317,6 +327,9 @@ class MRFController extends Controller
             'remarks' => $request->remarks,
         ]);
 
+        // Send notification to requester
+        $this->notificationService->notifyMRFApproved($mrf, $user, $request->remarks);
+
         return response()->json([
             'success' => true,
             'message' => 'MRF approved successfully',
@@ -371,6 +384,9 @@ class MRFController extends Controller
             'status' => 'Rejected',
             'rejection_reason' => $request->reason,
         ]);
+
+        // Send notification to requester
+        $this->notificationService->notifyMRFRejected($mrf, $user, $request->reason);
 
         return response()->json([
             'success' => true,

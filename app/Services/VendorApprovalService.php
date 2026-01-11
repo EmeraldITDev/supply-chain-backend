@@ -14,6 +14,12 @@ use Illuminate\Support\Str;
 
 class VendorApprovalService
 {
+    protected NotificationService $notificationService;
+
+    public function __construct(NotificationService $notificationService)
+    {
+        $this->notificationService = $notificationService;
+    }
     /**
      * Generate a secure temporary password
      *
@@ -244,6 +250,13 @@ class VendorApprovalService
             } catch (\Exception $e) {
                 // Log but don't fail - email is not critical
                 \Log::warning('Failed to send approval email, but vendor was approved: ' . $e->getMessage());
+            }
+
+            // Send notification to procurement team
+            try {
+                $this->notificationService->notifyVendorApproved($vendor, $temporaryPassword);
+            } catch (\Exception $e) {
+                \Log::warning('Failed to send vendor approval notification: ' . $e->getMessage());
             }
 
             return [

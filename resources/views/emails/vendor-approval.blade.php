@@ -63,10 +63,10 @@
     <div class="header">
         <h1>✓ Vendor Registration Approved</h1>
     </div>
-    
+
     <div class="content">
         <p>Dear {{ $companyName }},</p>
-        
+
         <p>Congratulations! Your vendor registration has been approved. Welcome to our Supply Chain Management vendor network!</p>
         
         <h3>Your Login Credentials:</h3>
@@ -74,15 +74,15 @@
             <p><strong>Email:</strong> {{ $email }}</p>
             <p><strong>Temporary Password:</strong> <code>{{ $temporaryPassword }}</code></p>
         </div>
-        
+
         <div class="warning">
             <strong>⚠️ Important:</strong> For security reasons, you will be required to change your password upon first login.
         </div>
-        
+
         <div style="text-align: center;">
             <a href="{{ $loginUrl }}" class="button">Login to Vendor Portal</a>
         </div>
-        
+
         <h3>What's Next?</h3>
         <ol>
             <li>Click the login button above</li>
@@ -91,15 +91,15 @@
             <li>Complete your vendor profile</li>
             <li>Start receiving RFQs and submitting quotations</li>
         </ol>
-        
+
         <p>If you encounter any issues logging in, please contact our support team.</p>
-        
+
         <p>We look forward to a successful partnership!</p>
         
         <p>Best regards,<br>
         Supply Chain Management Team</p>
     </div>
-    
+
     <div class="footer">
         <p>This is an automated email. Please do not reply.</p>
         <p>Keep your credentials secure and do not share them with anyone.</p>

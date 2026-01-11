@@ -10,6 +10,7 @@ use App\Http\Controllers\Api\SRFController;
 use App\Http\Controllers\Api\RFQController;
 use App\Http\Controllers\Api\QuotationController;
 use App\Http\Controllers\Api\VendorController;
+use App\Http\Controllers\Api\NotificationController;
 
 // API health check/test route
 Route::get('/', function () {
@@ -98,6 +99,17 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/dashboard/procurement-manager', [DashboardController::class, 'procurementManagerDashboard']);
     Route::get('/dashboard/supply-chain-director', [DashboardController::class, 'supplyChainDirectorDashboard']);
     Route::get('/dashboard/vendor', [DashboardController::class, 'vendorDashboard']);
+
+    // Notification routes
+    Route::get('/notifications', [NotificationController::class, 'index']);
+    Route::get('/notifications/unread-count', [NotificationController::class, 'unreadCount']);
+    Route::get('/notifications/statistics', [NotificationController::class, 'statistics']);
+    Route::get('/notifications/{id}', [NotificationController::class, 'show']);
+    Route::post('/notifications/{id}/read', [NotificationController::class, 'markAsRead']);
+    Route::post('/notifications/read-all', [NotificationController::class, 'markAllAsRead']);
+    Route::delete('/notifications/{id}', [NotificationController::class, 'destroy']);
+    Route::delete('/notifications', [NotificationController::class, 'destroyAll']);
+    Route::post('/notifications/announcement', [NotificationController::class, 'sendAnnouncement']);
 });
 
 // Public vendor registration
