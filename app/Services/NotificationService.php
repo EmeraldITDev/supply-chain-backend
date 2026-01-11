@@ -360,4 +360,205 @@ class NotificationService
             ]);
         }
     }
+
+    /**
+     * Notify chairman about pending MRF approval
+     */
+    public function notifyMRFPendingChairmanApproval(MRF $mrf): void
+    {
+        try {
+            $chairmen = User::whereIn('role', ['chairman', 'admin'])->get();
+
+            foreach ($chairmen as $chairman) {
+                $chairman->notify(new SystemAnnouncementNotification(
+                    'High-Value MRF Pending Approval',
+                    "MRF {$mrf->mrf_id} requires your approval. Amount: {$mrf->currency} " . number_format($mrf->estimated_cost, 2),
+                    "/mrfs/{$mrf->mrf_id}",
+                    'high'
+                ));
+            }
+
+            Log::info('MRF pending chairman approval notification sent', ['mrf_id' => $mrf->mrf_id]);
+        } catch (\Exception $e) {
+            Log::error('Failed to send MRF chairman notification', [
+                'mrf_id' => $mrf->mrf_id,
+                'error' => $e->getMessage()
+            ]);
+        }
+    }
+
+    /**
+     * Notify procurement managers about approved MRF
+     */
+    public function notifyMRFPendingProcurement(MRF $mrf): void
+    {
+        try {
+            $procurementManagers = User::whereIn('role', ['procurement_manager', 'procurement', 'admin'])->get();
+
+            foreach ($procurementManagers as $manager) {
+                $manager->notify(new SystemAnnouncementNotification(
+                    'MRF Ready for PO Generation',
+                    "MRF {$mrf->mrf_id} has been approved and is ready for PO generation.",
+                    "/mrfs/{$mrf->mrf_id}",
+                    'normal'
+                ));
+            }
+
+            Log::info('MRF pending procurement notification sent', ['mrf_id' => $mrf->mrf_id]);
+        } catch (\Exception $e) {
+            Log::error('Failed to send MRF procurement notification', [
+                'mrf_id' => $mrf->mrf_id,
+                'error' => $e->getMessage()
+            ]);
+        }
+    }
+
+    /**
+     * Notify Supply Chain Director about PO ready for signature
+     */
+    public function notifyPOReadyForSignature(MRF $mrf): void
+    {
+        try {
+            $supplyChainDirectors = User::whereIn('role', ['supply_chain_director', 'supply_chain', 'admin'])->get();
+
+            foreach ($supplyChainDirectors as $director) {
+                $director->notify(new SystemAnnouncementNotification(
+                    'PO Ready for Signature',
+                    "PO {$mrf->po_number} for MRF {$mrf->mrf_id} is ready for your signature.",
+                    "/mrfs/{$mrf->mrf_id}",
+                    'high'
+                ));
+            }
+
+            Log::info('PO ready for signature notification sent', ['mrf_id' => $mrf->mrf_id, 'po_number' => $mrf->po_number]);
+        } catch (\Exception $e) {
+            Log::error('Failed to send PO signature notification', [
+                'mrf_id' => $mrf->mrf_id,
+                'error' => $e->getMessage()
+            ]);
+        }
+    }
+
+    /**
+     * Notify Finance team about signed PO
+     */
+    public function notifyPOSignedToFinance(MRF $mrf): void
+    {
+        try {
+            $financeTeam = User::whereIn('role', ['finance', 'admin'])->get();
+
+            foreach ($financeTeam as $finance) {
+                $finance->notify(new SystemAnnouncementNotification(
+                    'Signed PO Received',
+                    "PO {$mrf->po_number} for MRF {$mrf->mrf_id} has been signed and is ready for payment processing.",
+                    "/mrfs/{$mrf->mrf_id}",
+                    'normal'
+                ));
+            }
+
+            Log::info('PO signed to finance notification sent', ['mrf_id' => $mrf->mrf_id, 'po_number' => $mrf->po_number]);
+        } catch (\Exception $e) {
+            Log::error('Failed to send PO signed notification', [
+                'mrf_id' => $mrf->mrf_id,
+                'error' => $e->getMessage()
+            ]);
+        }
+    }
+
+    /**
+     * Notify procurement about PO rejection
+     */
+    public function notifyPORejectedToProcurement(MRF $mrf, string $reason): void
+    {
+        try {
+            $procurementManagers = User::whereIn('role', ['procurement_manager', 'procurement', 'admin'])->get();
+
+            foreach ($procurementManagers as $manager) {
+                $manager->notify(new SystemAnnouncementNotification(
+                    'PO Rejected - Revision Required',
+                    "PO {$mrf->po_number} for MRF {$mrf->mrf_id} has been rejected. Reason: {$reason}",
+                    "/mrfs/{$mrf->mrf_id}",
+                    'high'
+                ));
+            }
+
+            Log::info('PO rejected notification sent', ['mrf_id' => $mrf->mrf_id, 'po_number' => $mrf->po_number]);
+        } catch (\Exception $e) {
+            Log::error('Failed to send PO rejection notification', [
+                'mrf_id' => $mrf->mrf_id,
+                'error' => $e->getMessage()
+            ]);
+        }
+    }
+
+    /**
+     * Notify chairman about pending payment approval
+     */
+    public function notifyPaymentPendingChairman(MRF $mrf): void
+    {
+        try {
+            $chairmen = User::whereIn('role', ['chairman', 'admin'])->get();
+
+            foreach ($chairmen as $chairman) {
+                $chairman->notify(new SystemAnnouncementNotification(
+                    'Payment Pending Approval',
+                    "Payment for PO {$mrf->po_number} (MRF {$mrf->mrf_id}) requires your approval. Amount: {$mrf->currency} " . number_format($mrf->estimated_cost, 2),
+                    "/mrfs/{$mrf->mrf_id}",
+                    'high'
+                ));
+            }
+
+            Log::info('Payment pending chairman notification sent', ['mrf_id' => $mrf->mrf_id]);
+        } catch (\Exception $e) {
+            Log::error('Failed to send payment pending notification', [
+                'mrf_id' => $mrf->mrf_id,
+                'error' => $e->getMessage()
+            ]);
+        }
+    }
+
+    /**
+     * Notify all stakeholders about completed MRF
+     */
+    public function notifyMRFCompleted(MRF $mrf): void
+    {
+        try {
+            // Notify requester
+            $requester = $mrf->requester;
+            if ($requester) {
+                $requester->notify(new SystemAnnouncementNotification(
+                    'MRF Completed',
+                    "Your MRF {$mrf->mrf_id} has been completed. Payment has been approved.",
+                    "/mrfs/{$mrf->mrf_id}",
+                    'normal'
+                ));
+            }
+
+            // Notify procurement, finance, and admins
+            $stakeholders = User::whereIn('role', [
+                'procurement_manager',
+                'procurement',
+                'finance',
+                'supply_chain_director',
+                'supply_chain',
+                'admin'
+            ])->get();
+
+            foreach ($stakeholders as $stakeholder) {
+                $stakeholder->notify(new SystemAnnouncementNotification(
+                    'MRF Workflow Completed',
+                    "MRF {$mrf->mrf_id} workflow has been completed. PO {$mrf->po_number}.",
+                    "/mrfs/{$mrf->mrf_id}",
+                    'normal'
+                ));
+            }
+
+            Log::info('MRF completed notification sent', ['mrf_id' => $mrf->mrf_id]);
+        } catch (\Exception $e) {
+            Log::error('Failed to send MRF completed notification', [
+                'mrf_id' => $mrf->mrf_id,
+                'error' => $e->getMessage()
+            ]);
+        }
+    }
 }

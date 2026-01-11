@@ -61,9 +61,19 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/mrfs/{id}', [MRFController::class, 'show']);
     Route::post('/mrfs', [MRFController::class, 'store']);
     Route::put('/mrfs/{id}', [MRFController::class, 'update']);
-    Route::post('/mrfs/{id}/approve', [MRFController::class, 'approve']);
-    Route::post('/mrfs/{id}/reject', [MRFController::class, 'reject']);
+    Route::post('/mrfs/{id}/approve', [MRFController::class, 'approve']); // Legacy
+    Route::post('/mrfs/{id}/reject', [MRFController::class, 'reject']); // Legacy
     Route::delete('/mrfs/{id}', [MRFController::class, 'destroy']);
+    
+    // MRF Workflow routes (new multi-stage approval)
+    Route::post('/mrfs/{id}/executive-approve', [\App\Http\Controllers\Api\MRFWorkflowController::class, 'executiveApprove']);
+    Route::post('/mrfs/{id}/chairman-approve', [\App\Http\Controllers\Api\MRFWorkflowController::class, 'chairmanApprove']);
+    Route::post('/mrfs/{id}/generate-po', [\App\Http\Controllers\Api\MRFWorkflowController::class, 'generatePO']);
+    Route::post('/mrfs/{id}/upload-signed-po', [\App\Http\Controllers\Api\MRFWorkflowController::class, 'uploadSignedPO']);
+    Route::post('/mrfs/{id}/reject-po', [\App\Http\Controllers\Api\MRFWorkflowController::class, 'rejectPO']);
+    Route::post('/mrfs/{id}/process-payment', [\App\Http\Controllers\Api\MRFWorkflowController::class, 'processPayment']);
+    Route::post('/mrfs/{id}/approve-payment', [\App\Http\Controllers\Api\MRFWorkflowController::class, 'approvePayment']);
+    Route::post('/mrfs/{id}/workflow-reject', [\App\Http\Controllers\Api\MRFWorkflowController::class, 'rejectMRF']);
 
     // SRF routes
     Route::get('/srfs', [SRFController::class, 'index']);

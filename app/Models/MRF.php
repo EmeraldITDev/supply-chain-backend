@@ -18,6 +18,7 @@ class MRF extends Model
         'description',
         'quantity',
         'estimated_cost',
+        'currency',
         'justification',
         'requester_id',
         'requester_name',
@@ -26,8 +27,33 @@ class MRF extends Model
         'current_stage',
         'approval_history',
         'rejection_reason',
+        'rejection_comments',
+        'rejected_by',
+        'rejected_at',
         'is_resubmission',
+        'previous_submission_id',
         'remarks',
+        // Executive approval
+        'executive_approved',
+        'executive_approved_by',
+        'executive_approved_at',
+        'executive_remarks',
+        // Chairman approval
+        'chairman_approved',
+        'chairman_approved_by',
+        'chairman_approved_at',
+        'chairman_remarks',
+        // PO information
+        'po_number',
+        'unsigned_po_url',
+        'signed_po_url',
+        'po_version',
+        'po_generated_at',
+        'po_signed_at',
+        // Payment
+        'payment_status',
+        'payment_approved_at',
+        'payment_approved_by',
     ];
 
     protected $casts = [
@@ -35,6 +61,14 @@ class MRF extends Model
         'date' => 'date',
         'is_resubmission' => 'boolean',
         'approval_history' => 'array',
+        'executive_approved' => 'boolean',
+        'executive_approved_at' => 'datetime',
+        'chairman_approved' => 'boolean',
+        'chairman_approved_at' => 'datetime',
+        'rejected_at' => 'datetime',
+        'po_generated_at' => 'datetime',
+        'po_signed_at' => 'datetime',
+        'payment_approved_at' => 'datetime',
     ];
 
     /**
@@ -51,6 +85,62 @@ class MRF extends Model
     public function rfqs(): HasMany
     {
         return $this->hasMany(RFQ::class, 'mrf_id');
+    }
+
+    /**
+     * Get MRF items
+     */
+    public function items(): HasMany
+    {
+        return $this->hasMany(MRFItem::class, 'mrf_id');
+    }
+
+    /**
+     * Get approval history
+     */
+    public function approvalHistory(): HasMany
+    {
+        return $this->hasMany(MRFApprovalHistory::class, 'mrf_id')->orderBy('created_at', 'asc');
+    }
+
+    /**
+     * Get executive who approved this MRF
+     */
+    public function executiveApprover(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'executive_approved_by');
+    }
+
+    /**
+     * Get chairman who approved this MRF
+     */
+    public function chairmanApprover(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'chairman_approved_by');
+    }
+
+    /**
+     * Get user who rejected this MRF
+     */
+    public function rejector(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'rejected_by');
+    }
+
+    /**
+     * Get previous submission if this is a resubmission
+     */
+    public function previousSubmission(): BelongsTo
+    {
+        return $this->belongsTo(MRF::class, 'previous_submission_id');
+    }
+
+    /**
+     * Get payment approver
+     */
+    public function paymentApprover(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'payment_approved_by');
     }
 
     /**
