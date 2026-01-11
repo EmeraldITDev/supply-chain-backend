@@ -21,6 +21,8 @@ class RFQ extends Model
         'deadline',
         'status',
         'created_by',
+        'selected_vendor_id',
+        'selected_quotation_id',
     ];
 
     protected $casts = [
@@ -45,12 +47,21 @@ class RFQ extends Model
     }
 
     /**
-     * Get vendors associated with this RFQ
+     * Get vendors associated with this RFQ (with engagement tracking)
      */
     public function vendors(): BelongsToMany
     {
         return $this->belongsToMany(Vendor::class, 'rfq_vendors', 'rfq_id', 'vendor_id')
+            ->withPivot(['sent_at', 'viewed_at', 'responded', 'responded_at'])
             ->withTimestamps();
+    }
+
+    /**
+     * Get RFQ items
+     */
+    public function items(): HasMany
+    {
+        return $this->hasMany(RFQItem::class, 'rfq_id');
     }
 
     /**
@@ -59,6 +70,22 @@ class RFQ extends Model
     public function quotations(): HasMany
     {
         return $this->hasMany(Quotation::class, 'rfq_id');
+    }
+    
+    /**
+     * Get selected vendor for this RFQ
+     */
+    public function selectedVendor(): BelongsTo
+    {
+        return $this->belongsTo(Vendor::class, 'selected_vendor_id');
+    }
+    
+    /**
+     * Get selected quotation for this RFQ
+     */
+    public function selectedQuotation(): BelongsTo
+    {
+        return $this->belongsTo(Quotation::class, 'selected_quotation_id');
     }
 
     /**

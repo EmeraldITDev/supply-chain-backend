@@ -84,6 +84,13 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/rfqs', [RFQController::class, 'index']);
     Route::post('/rfqs', [RFQController::class, 'store']);
     Route::put('/rfqs/{id}', [RFQController::class, 'update']);
+    
+    // RFQ Workflow routes (enhanced)
+    Route::get('/vendors/rfqs', [\App\Http\Controllers\Api\RFQWorkflowController::class, 'getVendorRFQs']); // Vendor portal
+    Route::post('/rfqs/{id}/mark-viewed', [\App\Http\Controllers\Api\RFQWorkflowController::class, 'markAsViewed']); // Vendor marks as viewed
+    Route::get('/rfqs/{id}/quotations', [\App\Http\Controllers\Api\RFQWorkflowController::class, 'getQuotationsForRFQ']); // Comparison view
+    Route::post('/rfqs/{id}/select-vendor', [\App\Http\Controllers\Api\RFQWorkflowController::class, 'selectVendor']); // Award RFQ
+    Route::post('/rfqs/{id}/close', [\App\Http\Controllers\Api\RFQWorkflowController::class, 'closeRFQ']); // Close without award
 
     // Quotation routes
     Route::get('/quotations', [QuotationController::class, 'index']);

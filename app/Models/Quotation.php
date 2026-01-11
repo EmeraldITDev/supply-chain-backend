@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Quotation extends Model
 {
@@ -12,20 +13,37 @@ class Quotation extends Model
         'rfq_id',
         'vendor_id',
         'vendor_name',
-        'price',
+        'quote_number',
+        'total_amount',
+        'currency',
+        'price', // Legacy field
+        'delivery_days',
         'delivery_date',
+        'payment_terms',
+        'validity_days',
+        'warranty_period',
+        'attachments',
         'notes',
         'status',
         'rejection_reason',
         'approval_remarks',
         'approved_by',
         'approved_at',
+        'submitted_at',
+        'reviewed_at',
+        'reviewed_by',
     ];
 
     protected $casts = [
         'price' => 'decimal:2',
+        'total_amount' => 'decimal:2',
         'delivery_date' => 'date',
         'approved_at' => 'datetime',
+        'submitted_at' => 'datetime',
+        'reviewed_at' => 'datetime',
+        'attachments' => 'array',
+        'delivery_days' => 'integer',
+        'validity_days' => 'integer',
     ];
 
     /**
@@ -50,6 +68,30 @@ class Quotation extends Model
     public function approver(): BelongsTo
     {
         return $this->belongsTo(User::class, 'approved_by');
+    }
+
+    /**
+     * Get the user who reviewed this quotation
+     */
+    public function reviewer(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'reviewed_by');
+    }
+
+    /**
+     * Get quotation items
+     */
+    public function items(): HasMany
+    {
+        return $this->hasMany(QuotationItem::class, 'quotation_id');
+    }
+
+    /**
+     * Calculate total amount from items
+     */
+    public function calculateTotalFromItems(): void
+    {
+        $this->total_amount = $this->items()->sum('total_price');
     }
 
     /**

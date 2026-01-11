@@ -561,4 +561,105 @@ class NotificationService
             ]);
         }
     }
+
+    /**
+     * Notify vendor about quotation being awarded
+     */
+    public function notifyQuotationAwarded(Quotation $quotation): void
+    {
+        try {
+            $vendor = $quotation->vendor;
+            $vendorUser = User::where('vendor_id', $vendor->id)->first();
+
+            if ($vendorUser) {
+                $vendorUser->notify(new SystemAnnouncementNotification(
+                    'Quotation Awarded! 🎉',
+                    "Congratulations! Your quotation {$quotation->quotation_id} has been selected for RFQ {$quotation->rfq->rfq_id}. Total amount: {$quotation->currency} " . number_format($quotation->total_amount, 2),
+                    "/quotations/{$quotation->quotation_id}",
+                    'high'
+                ));
+            }
+
+            // Notify procurement team
+            $procurementTeam = User::whereIn('role', ['procurement_manager', 'procurement', 'admin'])->get();
+            foreach ($procurementTeam as $manager) {
+                $manager->notify(new SystemAnnouncementNotification(
+                    'Vendor Selected',
+                    "Vendor {$vendor->name} has been selected for RFQ {$quotation->rfq->rfq_id}. Quotation: {$quotation->quotation_id}.",
+                    "/rfqs/{$quotation->rfq->rfq_id}",
+                    'normal'
+                ));
+            }
+
+            Log::info('Quotation awarded notification sent', [
+                'quotation_id' => $quotation->quotation_id,
+                'vendor_id' => $vendor->vendor_id
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Failed to send quotation awarded notification', [
+                'quotation_id' => $quotation->quotation_id,
+                'error' => $e->getMessage()
+            ]);
+        }
+    }
+
+    /**
+     * Notify vendor about quotation being rejected
+     */
+    public function notifyQuotationRejected(Quotation $quotation): void
+    {
+        try {
+            $vendor = $quotation->vendor;
+            $vendorUser = User::where('vendor_id', $vendor->id)->first();
+
+            if ($vendorUser) {
+                $vendorUser->notify(new SystemAnnouncementNotification(
+                    'Quotation Not Selected',
+                    "Thank you for your submission for RFQ {$quotation->rfq->rfq_id}. Another vendor was selected for this opportunity.",
+                    "/quotations/{$quotation->quotation_id}",
+                    'normal'
+                ));
+            }
+
+            Log::info('Quotation rejected notification sent', [
+                'quotation_id' => $quotation->quotation_id,
+                'vendor_id' => $vendor->vendor_id
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Failed to send quotation rejected notification', [
+                'quotation_id' => $quotation->quotation_id,
+                'error' => $e->getMessage()
+            ]);
+        }
+    }
+
+    /**
+     * Notify vendor about RFQ being closed
+     */
+    public function notifyRFQClosed(RFQ $rfq, Vendor $vendor): void
+    {
+        try {
+            $vendorUser = User::where('vendor_id', $vendor->id)->first();
+
+            if ($vendorUser) {
+                $vendorUser->notify(new SystemAnnouncementNotification(
+                    'RFQ Closed',
+                    "RFQ {$rfq->rfq_id} has been closed without vendor selection.",
+                    "/rfqs/{$rfq->rfq_id}",
+                    'normal'
+                ));
+            }
+
+            Log::info('RFQ closed notification sent', [
+                'rfq_id' => $rfq->rfq_id,
+                'vendor_id' => $vendor->vendor_id
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Failed to send RFQ closed notification', [
+                'rfq_id' => $rfq->rfq_id,
+                'vendor_id' => $vendor->vendor_id,
+                'error' => $e->getMessage()
+            ]);
+        }
+    }
 }
