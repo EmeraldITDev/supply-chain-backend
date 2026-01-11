@@ -11,6 +11,14 @@ return new class extends Migration
      */
     public function up(): void
     {
+        // Drop orphaned indexes if they exist (from failed previous migration)
+        try {
+            \DB::statement('DROP INDEX IF EXISTS notifications_notifiable_type_notifiable_id_index');
+            \DB::statement('DROP INDEX IF EXISTS notifications_read_at_index');
+        } catch (\Exception $e) {
+            // Ignore if indexes don't exist
+        }
+
         // Only create table if it doesn't exist
         if (!Schema::hasTable('notifications')) {
             Schema::create('notifications', function (Blueprint $table) {
