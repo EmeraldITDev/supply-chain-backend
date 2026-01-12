@@ -19,12 +19,14 @@ return [
 
     'allowed_methods' => ['*'],
 
-    'allowed_origins' => [
-        env('FRONTEND_URL', 'http://localhost:8081'),
-        'http://localhost:8081',
-        'http://localhost:8080',
-        'https://emerald-supply-chain.vercel.app',
-    ],
+    'allowed_origins' => env('CORS_ALLOWED_ORIGINS') 
+        ? explode(',', env('CORS_ALLOWED_ORIGINS'))
+        : [
+            'http://localhost:8081',
+            'http://localhost:8080',
+            'http://localhost:3000',
+            'https://emerald-supply-chain.vercel.app',
+        ],
 
     'allowed_origins_patterns' => [
         '#^https://.*\.lovable\.app$#', // Allow all Lovable preview domains
