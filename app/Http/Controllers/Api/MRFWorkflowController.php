@@ -299,8 +299,22 @@ class MRFWorkflowController extends Controller
             ], 422);
         }
 
+        // Check if PO already generated for this MRF
+        if ($mrf->po_number) {
+            return response()->json([
+                'success' => false,
+                'error' => 'PO already generated for this MRF',
+                'code' => 'DUPLICATE_PO',
+                'data' => [
+                    'existing_po_number' => $mrf->po_number,
+                    'po_url' => $mrf->unsigned_po_url
+                ]
+            ], 422);
+        }
+
         $validator = Validator::make($request->all(), [
-            'po_number' => 'required|string|max:50|unique:m_r_f_s,po_number',
+            'po_number' => 'nullable|string|max:50|unique:m_r_f_s,po_number',
+            'remarks' => 'nullable|string',
         ]);
 
         if ($validator->fails()) {
@@ -312,20 +326,23 @@ class MRFWorkflowController extends Controller
             ], 422);
         }
 
+        // Auto-generate PO number if not provided
+        $poNumber = $request->po_number ?? $this->generatePONumber();
+
         // Generate PO document (PDF)
         // TODO: Implement PDF generation logic here
-        $poContent = $this->generatePODocument($mrf, $request->po_number);
+        $poContent = $this->generatePODocument($mrf, $poNumber);
         
         // Upload to configured storage disk
         $disk = config('filesystems.documents_disk', 'public');
-        $poFileName = "po_{$request->po_number}_" . time() . ".pdf";
+        $poFileName = "po_{$poNumber}_" . time() . ".pdf";
         $poPath = "purchase-orders/{$poFileName}";
         Storage::disk($disk)->put($poPath, $poContent);
         $poUrl = Storage::disk($disk)->url($poPath);
 
         // Update MRF
         $mrf->update([
-            'po_number' => $request->po_number,
+            'po_number' => $poNumber,
             'unsigned_po_url' => $poUrl,
             'po_generated_at' => now(),
             'status' => 'supply_chain',
@@ -691,6 +708,31 @@ class MRFWorkflowController extends Controller
                 'rejection_reason' => $mrf->rejection_reason,
             ]
         ]);
+    }
+
+    /**
+     * Helper: Generate unique PO number
+     */
+    private function generatePONumber(): string
+    {
+        $year = date('Y');
+        $month = date('m');
+        
+        // Format: PO-YYYY-MM-XXX (e.g., PO-2026-01-001)
+        $prefix = "PO-{$year}-{$month}";
+        
+        $lastPO = MRF::where('po_number', 'like', "{$prefix}-%")
+            ->orderBy('po_number', 'desc')
+            ->first();
+
+        if ($lastPO && preg_match('/-(\d+)$/', $lastPO->po_number, $matches)) {
+            $lastNumber = (int) $matches[1];
+            $newNumber = str_pad($lastNumber + 1, 3, '0', STR_PAD_LEFT);
+        } else {
+            $newNumber = '001';
+        }
+
+        return "{$prefix}-{$newNumber}";
     }
 
     /**
