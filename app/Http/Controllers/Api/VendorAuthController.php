@@ -45,13 +45,16 @@ class VendorAuthController extends Controller
                 ], 401);
             }
 
-            // Check if vendor is approved (case-insensitive and trim whitespace)
+            // Check if vendor is approved/active (case-insensitive and trim whitespace)
             $vendorStatus = strtolower(trim($vendor->status));
-            if ($vendorStatus !== 'approved') {
-                Log::warning('Vendor login failed: not approved', [
+            $allowedStatuses = ['approved', 'active']; // Allow both approved and active status
+            
+            if (!in_array($vendorStatus, $allowedStatuses)) {
+                Log::warning('Vendor login failed: not approved/active', [
                     'email' => $request->email,
                     'status' => $vendor->status,
-                    'status_trimmed' => $vendorStatus
+                    'status_normalized' => $vendorStatus,
+                    'allowed_statuses' => $allowedStatuses
                 ]);
                 return response()->json([
                     'success' => false,
