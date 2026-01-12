@@ -23,6 +23,85 @@ class MRFWorkflowController extends Controller
     }
 
     /**
+     * Procurement Manager approves MRF and forwards to Executive
+     */
+    public function procurementApprove(Request $request, $id)
+    {
+        $user = $request->user();
+
+        // Check role
+        if (!in_array($user->role, ['procurement_manager', 'procurement', 'admin'])) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Only procurement managers can approve at this stage',
+                'code' => 'FORBIDDEN'
+            ], 403);
+        }
+
+        $mrf = MRF::where('mrf_id', $id)->first();
+
+        if (!$mrf) {
+            return response()->json([
+                'success' => false,
+                'error' => 'MRF not found',
+                'code' => 'NOT_FOUND'
+            ], 404);
+        }
+
+        // Check if MRF is in Pending status
+        if (strtolower($mrf->status) !== 'pending') {
+            return response()->json([
+                'success' => false,
+                'error' => 'MRF is not in Pending status',
+                'code' => 'INVALID_STATUS',
+                'current_status' => $mrf->status
+            ], 422);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'remarks' => 'nullable|string',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Validation failed',
+                'errors' => $validator->errors(),
+                'code' => 'VALIDATION_ERROR'
+            ], 422);
+        }
+
+        // Update MRF - forward to Executive
+        $mrf->update([
+            'status' => 'Executive Approval',
+            'current_stage' => 'executive',
+        ]);
+
+        // Record approval history
+        MRFApprovalHistory::create([
+            'mrf_id' => $mrf->id,
+            'stage' => 'procurement',
+            'action' => 'approved',
+            'approver_id' => $user->id,
+            'approver_name' => $user->name,
+            'remarks' => $request->remarks,
+        ]);
+
+        // Notify executives
+        $this->notificationService->notifyMRFForwardedToExecutive($mrf, $user);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'MRF approved and forwarded to Executive for approval',
+            'data' => [
+                'mrf_id' => $mrf->mrf_id,
+                'status' => $mrf->status,
+                'current_stage' => $mrf->current_stage,
+            ]
+        ]);
+    }
+
+    /**
      * Executive approves MRF
      * Logic: If cost > 1M → chairman_review, else → procurement
      */
@@ -49,12 +128,14 @@ class MRFWorkflowController extends Controller
             ], 404);
         }
 
-        // Check if MRF is in correct status
-        if ($mrf->status !== 'pending' && $mrf->status !== 'executive_review') {
+        // Check if MRF is in correct status (case-insensitive)
+        $statusLower = strtolower($mrf->status);
+        if ($statusLower !== 'pending' && $statusLower !== 'executive approval' && $statusLower !== 'executive_review') {
             return response()->json([
                 'success' => false,
                 'error' => 'MRF is not pending executive approval',
-                'code' => 'INVALID_STATUS'
+                'code' => 'INVALID_STATUS',
+                'current_status' => $mrf->status
             ], 422);
         }
 

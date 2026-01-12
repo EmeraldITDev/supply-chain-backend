@@ -518,6 +518,36 @@ class NotificationService
     }
 
     /**
+     * Notify executives when MRF is forwarded from procurement
+     */
+    public function notifyMRFForwardedToExecutive(MRF $mrf, User $approver): void
+    {
+        try {
+            // Notify executives
+            $executives = User::whereIn('role', ['executive', 'admin'])->get();
+
+            foreach ($executives as $executive) {
+                $executive->notify(new SystemAnnouncementNotification(
+                    'MRF Pending Your Approval',
+                    "MRF {$mrf->mrf_id} - {$mrf->title} has been approved by {$approver->name} and requires your approval. Estimated cost: ₦" . number_format($mrf->estimated_cost, 2),
+                    "/mrfs/{$mrf->mrf_id}",
+                    'high'
+                ));
+            }
+
+            Log::info('MRF forwarded to executive notification sent', [
+                'mrf_id' => $mrf->mrf_id,
+                'approved_by' => $approver->name
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Failed to send MRF forwarded to executive notification', [
+                'mrf_id' => $mrf->mrf_id,
+                'error' => $e->getMessage()
+            ]);
+        }
+    }
+
+    /**
      * Notify all stakeholders about completed MRF
      */
     public function notifyMRFCompleted(MRF $mrf): void
