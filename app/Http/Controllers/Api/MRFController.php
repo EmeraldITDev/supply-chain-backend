@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\MRF;
 use App\Services\NotificationService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\Rule;
 
@@ -120,73 +121,104 @@ class MRFController extends Controller
      */
     public function store(Request $request)
     {
-        // Normalize urgency to proper case
-        if ($request->has('urgency')) {
-            $request->merge([
-                'urgency' => ucfirst(strtolower($request->urgency))
+        try {
+            // Normalize urgency to proper case
+            if ($request->has('urgency') && $request->urgency) {
+                $request->merge([
+                    'urgency' => ucfirst(strtolower($request->urgency))
+                ]);
+            }
+
+            $validator = Validator::make($request->all(), [
+                'title' => 'required|string|max:255',
+                'category' => 'required|string|max:255',
+                'urgency' => 'required|in:Low,Medium,High,Critical',
+                'description' => 'required|string',
+                'quantity' => 'required|string',
+                'estimatedCost' => 'required|numeric|min:0',
+                'justification' => 'required|string',
             ]);
-        }
 
-        $validator = Validator::make($request->all(), [
-            'title' => 'required|string|max:255',
-            'category' => 'required|string|max:255',
-            'urgency' => 'required|in:Low,Medium,High,Critical',
-            'description' => 'required|string',
-            'quantity' => 'required|string',
-            'estimatedCost' => 'required|numeric|min:0',
-            'justification' => 'required|string',
-        ]);
+            if ($validator->fails()) {
+                return response()->json([
+                    'success' => false,
+                    'error' => 'Validation failed',
+                    'errors' => $validator->errors(),
+                    'code' => 'VALIDATION_ERROR'
+                ], 422);
+            }
 
-        if ($validator->fails()) {
+            $user = $request->user();
+
+            if (!$user) {
+                return response()->json([
+                    'success' => false,
+                    'error' => 'User not authenticated',
+                    'code' => 'UNAUTHENTICATED'
+                ], 401);
+            }
+
+            $mrf = MRF::create([
+                'mrf_id' => MRF::generateMRFId(),
+                'title' => $request->title,
+                'category' => $request->category,
+                'urgency' => $request->urgency,
+                'description' => $request->description,
+                'quantity' => $request->quantity,
+                'estimated_cost' => $request->estimatedCost,
+                'justification' => $request->justification,
+                'requester_id' => $user->id,
+                'requester_name' => $user->name,
+                'date' => now(),
+                'status' => 'Pending',
+                'current_stage' => 'procurement',
+                'approval_history' => [],
+                'is_resubmission' => false,
+            ]);
+
+            // Send notification to procurement managers
+            try {
+                $this->notificationService->notifyMRFSubmitted($mrf);
+            } catch (\Exception $e) {
+                // Log notification error but don't fail the request
+                \Log::error('Failed to send MRF notification', [
+                    'mrf_id' => $mrf->mrf_id,
+                    'error' => $e->getMessage()
+                ]);
+            }
+
+            return response()->json([
+                'id' => $mrf->mrf_id,
+                'title' => $mrf->title,
+                'category' => $mrf->category,
+                'urgency' => $mrf->urgency,
+                'description' => $mrf->description,
+                'quantity' => $mrf->quantity,
+                'estimatedCost' => (float) $mrf->estimated_cost,
+                'justification' => $mrf->justification,
+                'requester' => $mrf->requester_name,
+                'requesterId' => (string) $mrf->requester_id,
+                'date' => $mrf->date->format('Y-m-d'),
+                'status' => $mrf->status,
+                'currentStage' => $mrf->current_stage,
+                'approvalHistory' => $mrf->approval_history ?? [],
+                'rejectionReason' => $mrf->rejection_reason,
+                'isResubmission' => $mrf->is_resubmission,
+            ], 201);
+        } catch (\Exception $e) {
+            \Log::error('MRF creation failed', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+                'request_data' => $request->all()
+            ]);
+
             return response()->json([
                 'success' => false,
-                'error' => 'Validation failed',
-                'errors' => $validator->errors(),
-                'code' => 'VALIDATION_ERROR'
-            ], 422);
+                'error' => 'Failed to create MRF',
+                'message' => config('app.debug') ? $e->getMessage() : 'An error occurred while creating the MRF',
+                'code' => 'SERVER_ERROR'
+            ], 500);
         }
-
-        $user = $request->user();
-
-        $mrf = MRF::create([
-            'mrf_id' => MRF::generateMRFId(),
-            'title' => $request->title,
-            'category' => $request->category,
-            'urgency' => $request->urgency,
-            'description' => $request->description,
-            'quantity' => $request->quantity,
-            'estimated_cost' => $request->estimatedCost,
-            'justification' => $request->justification,
-            'requester_id' => $user->id,
-            'requester_name' => $user->name,
-            'date' => now(),
-            'status' => 'Pending',
-            'current_stage' => 'procurement',
-            'approval_history' => [],
-            'is_resubmission' => false,
-        ]);
-
-        // Send notification to procurement managers
-        $this->notificationService->notifyMRFSubmitted($mrf);
-
-        return response()->json([
-            'id' => $mrf->mrf_id,
-            'title' => $mrf->title,
-            'category' => $mrf->category,
-            'urgency' => $mrf->urgency,
-            'description' => $mrf->description,
-            'quantity' => $mrf->quantity,
-            'estimatedCost' => (float) $mrf->estimated_cost,
-            'justification' => $mrf->justification,
-            'requester' => $mrf->requester_name,
-            'requesterId' => (string) $mrf->requester_id,
-            'date' => $mrf->date->format('Y-m-d'),
-            'status' => $mrf->status,
-            'currentStage' => $mrf->current_stage,
-            'approvalHistory' => $mrf->approval_history ?? [],
-            'rejectionReason' => $mrf->rejection_reason,
-            'isResubmission' => $mrf->is_resubmission,
-        ], 201);
     }
 
     /**
