@@ -316,11 +316,12 @@ class MRFWorkflowController extends Controller
         // TODO: Implement PDF generation logic here
         $poContent = $this->generatePODocument($mrf, $request->po_number);
         
-        // Upload to S3
+        // Upload to configured storage disk
+        $disk = config('filesystems.documents_disk', 'public');
         $poFileName = "po_{$request->po_number}_" . time() . ".pdf";
         $poPath = "purchase-orders/{$poFileName}";
-        Storage::disk('s3')->put($poPath, $poContent);
-        $poUrl = Storage::disk('s3')->url($poPath);
+        Storage::disk($disk)->put($poPath, $poContent);
+        $poUrl = Storage::disk($disk)->url($poPath);
 
         // Update MRF
         $mrf->update([
@@ -397,12 +398,13 @@ class MRFWorkflowController extends Controller
             ], 422);
         }
 
-        // Upload signed PO to S3
+        // Upload signed PO to configured storage disk
+        $disk = config('filesystems.documents_disk', 'public');
         $signedPOFile = $request->file('signed_po');
         $signedPOFileName = "po_signed_{$mrf->po_number}_" . time() . ".pdf";
         $signedPOPath = "purchase-orders/signed/{$signedPOFileName}";
-        Storage::disk('s3')->putFileAs('purchase-orders/signed', $signedPOFile, $signedPOFileName);
-        $signedPOUrl = Storage::disk('s3')->url($signedPOPath);
+        Storage::disk($disk)->putFileAs('purchase-orders/signed', $signedPOFile, $signedPOFileName);
+        $signedPOUrl = Storage::disk($disk)->url($signedPOPath);
 
         // Update MRF
         $mrf->update([
