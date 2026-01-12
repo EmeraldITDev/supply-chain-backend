@@ -37,53 +37,102 @@ class VendorDocumentService
         $documentMetadata = [];
         $disk = $this->getStorageDisk();
 
+        \Log::info("Storing documents for vendor registration", [
+            'registration_id' => $registration->id,
+            'disk' => $disk,
+            'document_count' => count($documents)
+        ]);
+
         // Create directory for this registration
         $basePath = "vendor_documents/{$registration->id}";
 
         foreach ($documents as $document) {
             if (!$document instanceof UploadedFile) {
+                \Log::warning("Skipping non-file upload", ['type' => gettype($document)]);
                 continue;
             }
 
-            // Generate unique filename
-            $originalName = $document->getClientOriginalName();
-            $extension = $document->getClientOriginalExtension();
-            $fileName = Str::slug(pathinfo($originalName, PATHINFO_FILENAME)) . '_' . time() . '.' . $extension;
-            
-            // Store file in configured disk (S3 in production, local in development)
-            $filePath = $document->storeAs($basePath, $fileName, $disk);
+            try {
+                // Generate unique filename
+                $originalName = $document->getClientOriginalName();
+                $extension = $document->getClientOriginalExtension();
+                $fileName = Str::slug(pathinfo($originalName, PATHINFO_FILENAME)) . '_' . time() . '.' . $extension;
+                
+                // Store file in configured disk (S3 in production, local in development)
+                $filePath = $document->storeAs($basePath, $fileName, $disk);
 
-            // Get file metadata
-            $fileSize = $document->getSize();
-            $fileType = $document->getMimeType();
+                if (!$filePath) {
+                    \Log::error("Failed to store document", [
+                        'file_name' => $originalName,
+                        'disk' => $disk
+                    ]);
+                    continue;
+                }
 
-            // Store in separate table
-            $documentRecord = VendorRegistrationDocument::create([
-                'vendor_registration_id' => $registration->id,
-                'file_path' => $filePath,
-                'file_name' => $originalName,
-                'file_type' => $fileType,
-                'file_size' => $fileSize,
-                'uploaded_at' => now(),
-            ]);
+                // Verify file was actually stored
+                if (!Storage::disk($disk)->exists($filePath)) {
+                    \Log::error("File stored but doesn't exist in storage", [
+                        'file_path' => $filePath,
+                        'disk' => $disk
+                    ]);
+                    continue;
+                }
 
-            // Prepare metadata for JSON column
-            $documentMetadata[] = [
-                'id' => $documentRecord->id,
-                'file_path' => $filePath,
-                'file_name' => $originalName,
-                'file_type' => $fileType,
-                'file_size' => $fileSize,
-                'uploaded_at' => $documentRecord->uploaded_at->toIso8601String(),
-            ];
+                // Get file metadata
+                $fileSize = $document->getSize();
+                $fileType = $document->getMimeType();
 
-            $storedDocuments[] = $documentRecord;
+                \Log::info("Document stored successfully", [
+                    'file_path' => $filePath,
+                    'file_size' => $fileSize,
+                    'disk' => $disk
+                ]);
+
+                // Store in separate table
+                $documentRecord = VendorRegistrationDocument::create([
+                    'vendor_registration_id' => $registration->id,
+                    'file_path' => $filePath,
+                    'file_name' => $originalName,
+                    'file_type' => $fileType,
+                    'file_size' => $fileSize,
+                    'uploaded_at' => now(),
+                ]);
+
+                // Prepare metadata for JSON column
+                $documentMetadata[] = [
+                    'id' => $documentRecord->id,
+                    'file_path' => $filePath,
+                    'file_name' => $originalName,
+                    'file_type' => $fileType,
+                    'file_size' => $fileSize,
+                    'uploaded_at' => $documentRecord->uploaded_at->toIso8601String(),
+                ];
+
+                $storedDocuments[] = $documentRecord;
+            } catch (\Exception $e) {
+                \Log::error("Error storing document", [
+                    'file_name' => $originalName ?? 'unknown',
+                    'error' => $e->getMessage(),
+                    'trace' => $e->getTraceAsString()
+                ]);
+            }
         }
 
         // Update registration with document metadata in JSON column
-        $registration->update([
-            'documents' => $documentMetadata,
-        ]);
+        if (count($documentMetadata) > 0) {
+            $registration->update([
+                'documents' => $documentMetadata,
+            ]);
+            
+            \Log::info("Updated registration with document metadata", [
+                'registration_id' => $registration->id,
+                'documents_stored' => count($documentMetadata)
+            ]);
+        } else {
+            \Log::warning("No documents were stored successfully", [
+                'registration_id' => $registration->id
+            ]);
+        }
 
         return $documentMetadata;
     }
