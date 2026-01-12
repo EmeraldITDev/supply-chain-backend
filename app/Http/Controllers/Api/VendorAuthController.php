@@ -7,10 +7,209 @@ use App\Models\User;
 use App\Models\Vendor;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
 
 class VendorAuthController extends Controller
 {
+    /**
+     * Vendor login
+     */
+    public function login(Request $request)
+    {
+        try {
+            // Validate input
+            $validator = Validator::make($request->all(), [
+                'email' => 'required|email',
+                'password' => 'required|string',
+            ]);
+
+            if ($validator->fails()) {
+                return response()->json([
+                    'success' => false,
+                    'error' => 'Validation failed',
+                    'errors' => $validator->errors(),
+                    'code' => 'VALIDATION_ERROR'
+                ], 422);
+            }
+
+            // Find vendor by email
+            $vendor = Vendor::where('email', $request->email)->first();
+
+            if (!$vendor) {
+                Log::warning('Vendor login failed: vendor not found', ['email' => $request->email]);
+                return response()->json([
+                    'success' => false,
+                    'error' => 'The provided credentials are incorrect',
+                    'code' => 'INVALID_CREDENTIALS'
+                ], 401);
+            }
+
+            // Check if vendor is approved
+            if (strtolower($vendor->status) !== 'approved') {
+                Log::warning('Vendor login failed: not approved', [
+                    'email' => $request->email,
+                    'status' => $vendor->status
+                ]);
+                return response()->json([
+                    'success' => false,
+                    'error' => 'Your vendor account is not yet approved. Please wait for approval.',
+                    'code' => 'NOT_APPROVED',
+                    'status' => $vendor->status
+                ], 403);
+            }
+
+            // Find associated user account
+            $user = User::where('vendor_id', $vendor->id)->first();
+
+            if (!$user) {
+                Log::error('Vendor login failed: user account not found', [
+                    'vendor_id' => $vendor->vendor_id,
+                    'vendor_email' => $vendor->email
+                ]);
+                return response()->json([
+                    'success' => false,
+                    'error' => 'User account not found. Please contact support.',
+                    'code' => 'USER_NOT_FOUND'
+                ], 404);
+            }
+
+            // Verify password
+            if (!Hash::check($request->password, $user->password)) {
+                Log::warning('Vendor login failed: incorrect password', ['email' => $request->email]);
+                return response()->json([
+                    'success' => false,
+                    'error' => 'The provided credentials are incorrect',
+                    'code' => 'INVALID_CREDENTIALS'
+                ], 401);
+            }
+
+            // Create authentication token
+            $token = $user->createToken('vendor-auth-token')->plainTextToken;
+
+            Log::info('Vendor logged in successfully', [
+                'vendor_id' => $vendor->vendor_id,
+                'email' => $vendor->email
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'data' => [
+                    'vendor' => [
+                        'id' => $vendor->vendor_id,
+                        'name' => $vendor->name,
+                        'email' => $vendor->email,
+                        'phone' => $vendor->phone,
+                        'address' => $vendor->address,
+                        'contactPerson' => $vendor->contact_person,
+                        'category' => $vendor->category,
+                        'status' => $vendor->status,
+                        'rating' => (float) ($vendor->rating ?? 0),
+                    ],
+                    'token' => $token,
+                    'requiresPasswordChange' => $user->must_change_password ?? false,
+                ]
+            ], 200);
+        } catch (\Exception $e) {
+            Log::error('Vendor login error', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'error' => 'An error occurred during login',
+                'message' => config('app.debug') ? $e->getMessage() : 'Please try again or contact support',
+                'code' => 'SERVER_ERROR'
+            ], 500);
+        }
+    }
+
+    /**
+     * Vendor logout
+     */
+    public function logout(Request $request)
+    {
+        try {
+            // Revoke current token
+            $request->user()->currentAccessToken()->delete();
+
+            Log::info('Vendor logged out', ['user_id' => $request->user()->id]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Logged out successfully'
+            ], 200);
+        } catch (\Exception $e) {
+            Log::error('Vendor logout error', [
+                'error' => $e->getMessage()
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'error' => 'Logout failed',
+                'code' => 'SERVER_ERROR'
+            ], 500);
+        }
+    }
+
+    /**
+     * Get authenticated vendor info
+     */
+    public function me(Request $request)
+    {
+        try {
+            $user = $request->user();
+
+            // Get vendor record
+            $vendor = Vendor::where('user_id', $user->id)
+                ->orWhere('id', $user->vendor_id)
+                ->first();
+
+            if (!$vendor) {
+                return response()->json([
+                    'success' => false,
+                    'error' => 'Vendor profile not found',
+                    'code' => 'NOT_FOUND'
+                ], 404);
+            }
+
+            return response()->json([
+                'success' => true,
+                'data' => [
+                    'vendor' => [
+                        'id' => $vendor->vendor_id,
+                        'name' => $vendor->name,
+                        'email' => $vendor->email,
+                        'phone' => $vendor->phone,
+                        'address' => $vendor->address,
+                        'contactPerson' => $vendor->contact_person,
+                        'category' => $vendor->category,
+                        'status' => $vendor->status,
+                        'rating' => (float) ($vendor->rating ?? 0),
+                    ],
+                    'user' => [
+                        'id' => $user->id,
+                        'name' => $user->name,
+                        'email' => $user->email,
+                        'role' => $user->role,
+                        'mustChangePassword' => $user->must_change_password ?? false,
+                    ]
+                ]
+            ], 200);
+        } catch (\Exception $e) {
+            Log::error('Get vendor info error', [
+                'error' => $e->getMessage()
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'error' => 'Failed to get vendor information',
+                'code' => 'SERVER_ERROR'
+            ], 500);
+        }
+    }
+
     /**
      * Update authenticated vendor's profile
      */
