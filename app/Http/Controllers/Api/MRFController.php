@@ -120,6 +120,13 @@ class MRFController extends Controller
      */
     public function store(Request $request)
     {
+        // Normalize urgency to proper case
+        if ($request->has('urgency')) {
+            $request->merge([
+                'urgency' => ucfirst(strtolower($request->urgency))
+            ]);
+        }
+
         $validator = Validator::make($request->all(), [
             'title' => 'required|string|max:255',
             'category' => 'required|string|max:255',
@@ -204,6 +211,13 @@ class MRFController extends Controller
                 'error' => 'Cannot update MRF in current status',
                 'code' => 'FORBIDDEN'
             ], 403);
+        }
+
+        // Normalize urgency to proper case
+        if ($request->has('urgency')) {
+            $request->merge([
+                'urgency' => ucfirst(strtolower($request->urgency))
+            ]);
         }
 
         $validator = Validator::make($request->all(), [

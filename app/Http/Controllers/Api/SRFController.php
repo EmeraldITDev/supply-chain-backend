@@ -64,6 +64,13 @@ class SRFController extends Controller
      */
     public function store(Request $request)
     {
+        // Normalize urgency to proper case
+        if ($request->has('urgency')) {
+            $request->merge([
+                'urgency' => ucfirst(strtolower($request->urgency))
+            ]);
+        }
+
         $validator = Validator::make($request->all(), [
             'title' => 'required|string|max:255',
             'serviceType' => 'required|string|max:255',
@@ -140,6 +147,13 @@ class SRFController extends Controller
                 'error' => 'Cannot update SRF in current status',
                 'code' => 'FORBIDDEN'
             ], 403);
+        }
+
+        // Normalize urgency to proper case
+        if ($request->has('urgency')) {
+            $request->merge([
+                'urgency' => ucfirst(strtolower($request->urgency))
+            ]);
         }
 
         $validator = Validator::make($request->all(), [
