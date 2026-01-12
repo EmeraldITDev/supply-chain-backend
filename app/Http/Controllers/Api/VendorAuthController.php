@@ -45,17 +45,19 @@ class VendorAuthController extends Controller
                 ], 401);
             }
 
-            // Check if vendor is approved
-            if (strtolower($vendor->status) !== 'approved') {
+            // Check if vendor is approved (case-insensitive and trim whitespace)
+            $vendorStatus = strtolower(trim($vendor->status));
+            if ($vendorStatus !== 'approved') {
                 Log::warning('Vendor login failed: not approved', [
                     'email' => $request->email,
-                    'status' => $vendor->status
+                    'status' => $vendor->status,
+                    'status_trimmed' => $vendorStatus
                 ]);
                 return response()->json([
                     'success' => false,
                     'error' => 'Your vendor account is not yet approved. Please wait for approval.',
                     'code' => 'NOT_APPROVED',
-                    'status' => $vendor->status
+                    'current_status' => $vendor->status
                 ], 403);
             }
 
