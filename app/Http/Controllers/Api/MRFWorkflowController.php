@@ -10,6 +10,7 @@ use App\Services\EmailService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\Log;
 
 class MRFWorkflowController extends Controller
 {
@@ -314,6 +315,7 @@ class MRFWorkflowController extends Controller
 
         $validator = Validator::make($request->all(), [
             'po_number' => 'nullable|string|max:50|unique:m_r_f_s,po_number',
+            'unsigned_po' => 'required|file|mimes:pdf,doc,docx|max:10240', // 10MB max
             'remarks' => 'nullable|string',
         ]);
 
@@ -329,16 +331,26 @@ class MRFWorkflowController extends Controller
         // Auto-generate PO number if not provided
         $poNumber = $request->po_number ?? $this->generatePONumber();
 
-        // Generate PO document (PDF)
-        // TODO: Implement PDF generation logic here
-        $poContent = $this->generatePODocument($mrf, $poNumber);
-        
-        // Upload to configured storage disk
-        $disk = config('filesystems.documents_disk', 'public');
-        $poFileName = "po_{$poNumber}_" . time() . ".pdf";
-        $poPath = "purchase-orders/{$poFileName}";
-        Storage::disk($disk)->put($poPath, $poContent);
-        $poUrl = Storage::disk($disk)->url($poPath);
+        // Handle file upload
+        $poUrl = null;
+        if ($request->hasFile('unsigned_po')) {
+            $file = $request->file('unsigned_po');
+            $disk = config('filesystems.documents_disk', 'public');
+            $poFileName = "po_{$poNumber}_" . time() . "." . $file->getClientOriginalExtension();
+            $poPath = "purchase-orders/{$poFileName}";
+            
+            // Store the file
+            $file->storeAs(dirname($poPath), basename($poPath), $disk);
+            $poUrl = Storage::disk($disk)->url($poPath);
+            
+            Log::info('PO file uploaded', [
+                'mrf_id' => $id,
+                'po_number' => $poNumber,
+                'file_name' => $poFileName,
+                'path' => $poPath,
+                'disk' => $disk
+            ]);
+        }
 
         // Update MRF
         $mrf->update([

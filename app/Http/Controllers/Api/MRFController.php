@@ -446,6 +446,287 @@ class MRFController extends Controller
     }
 
     /**
+     * Generate PO for approved MRF (Procurement Manager)
+     */
+    public function generatePO(Request $request, $id)
+    {
+        $user = $request->user();
+        
+        // Check if user has procurement permission
+        if (!in_array($user->role, ['procurement', 'admin'])) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Only Procurement Managers can generate POs',
+                'code' => 'FORBIDDEN'
+            ], 403);
+        }
+
+        $mrf = MRF::where('mrf_id', $id)->first();
+
+        if (!$mrf) {
+            return response()->json([
+                'success' => false,
+                'error' => 'MRF not found',
+                'code' => 'NOT_FOUND'
+            ], 404);
+        }
+
+        // Validate request
+        $validator = Validator::make($request->all(), [
+            'po_number' => 'required|string|max:255',
+            'unsigned_po' => 'required|file|mimes:pdf,doc,docx|max:10240', // Max 10MB
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Validation failed',
+                'errors' => $validator->errors(),
+                'code' => 'VALIDATION_ERROR'
+            ], 422);
+        }
+
+        // Handle file upload
+        $unsignedPoPath = null;
+        if ($request->hasFile('unsigned_po')) {
+            $file = $request->file('unsigned_po');
+            $fileName = time() . '_' . $file->getClientOriginalName();
+            
+            // Store in public disk (configured to storage/app/public)
+            $disk = config('filesystems.documents_disk', 'public');
+            $path = $file->storeAs('documents/pos', $fileName, $disk);
+            $unsignedPoPath = $path;
+            
+            Log::info('PO file uploaded', [
+                'mrf_id' => $id,
+                'file_name' => $fileName,
+                'path' => $path,
+                'disk' => $disk
+            ]);
+        }
+
+        // Update MRF with PO details
+        $mrf->update([
+            'po_number' => $request->po_number,
+            'unsigned_po_url' => $unsignedPoPath,
+            'status' => 'PO Generated',
+            'current_stage' => 'supply_chain',
+        ]);
+
+        // Add to approval history
+        $approvalHistory = $mrf->approval_history ?? [];
+        $approvalHistory[] = [
+            'action' => 'PO Generated',
+            'by' => $user->name,
+            'by_id' => $user->id,
+            'at' => now()->toIso8601String(),
+            'po_number' => $request->po_number,
+        ];
+        $mrf->approval_history = $approvalHistory;
+        $mrf->save();
+
+        // Notify Supply Chain Director
+        try {
+            $this->notificationService->notifyPOGenerated($mrf, $user);
+        } catch (\Exception $e) {
+            Log::error('Failed to send PO generation notification', [
+                'mrf_id' => $mrf->mrf_id,
+                'error' => $e->getMessage()
+            ]);
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Purchase Order generated successfully',
+            'data' => [
+                'id' => $mrf->mrf_id,
+                'poNumber' => $mrf->po_number,
+                'status' => $mrf->status,
+                'currentStage' => $mrf->current_stage,
+                'unsignedPoUrl' => $unsignedPoPath,
+            ]
+        ], 200);
+    }
+
+    /**
+     * Upload Signed PO (Supply Chain Director)
+     */
+    public function uploadSignedPO(Request $request, $id)
+    {
+        $user = $request->user();
+        
+        // Check if user has supply chain permission
+        if (!in_array($user->role, ['supply_chain', 'admin'])) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Only Supply Chain Directors can upload signed POs',
+                'code' => 'FORBIDDEN'
+            ], 403);
+        }
+
+        $mrf = MRF::where('mrf_id', $id)->first();
+
+        if (!$mrf) {
+            return response()->json([
+                'success' => false,
+                'error' => 'MRF not found',
+                'code' => 'NOT_FOUND'
+            ], 404);
+        }
+
+        // Validate request
+        $validator = Validator::make($request->all(), [
+            'signed_po' => 'required|file|mimes:pdf|max:10240', // Max 10MB
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Validation failed',
+                'errors' => $validator->errors(),
+                'code' => 'VALIDATION_ERROR'
+            ], 422);
+        }
+
+        // Handle file upload
+        $signedPoPath = null;
+        if ($request->hasFile('signed_po')) {
+            $file = $request->file('signed_po');
+            $fileName = time() . '_signed_' . $file->getClientOriginalName();
+            
+            $disk = config('filesystems.documents_disk', 'public');
+            $path = $file->storeAs('documents/pos/signed', $fileName, $disk);
+            $signedPoPath = $path;
+            
+            Log::info('Signed PO uploaded', [
+                'mrf_id' => $id,
+                'file_name' => $fileName,
+                'path' => $path
+            ]);
+        }
+
+        // Update MRF
+        $mrf->update([
+            'signed_po_url' => $signedPoPath,
+            'status' => 'PO Signed',
+            'current_stage' => 'finance',
+        ]);
+
+        // Add to approval history
+        $approvalHistory = $mrf->approval_history ?? [];
+        $approvalHistory[] = [
+            'action' => 'PO Signed',
+            'by' => $user->name,
+            'by_id' => $user->id,
+            'at' => now()->toIso8601String(),
+        ];
+        $mrf->approval_history = $approvalHistory;
+        $mrf->save();
+
+        // Notify Finance team
+        try {
+            $this->notificationService->notifyPOSigned($mrf, $user);
+        } catch (\Exception $e) {
+            Log::error('Failed to send PO signed notification', [
+                'mrf_id' => $mrf->mrf_id,
+                'error' => $e->getMessage()
+            ]);
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Signed PO uploaded successfully',
+            'data' => [
+                'id' => $mrf->mrf_id,
+                'status' => $mrf->status,
+                'currentStage' => $mrf->current_stage,
+                'signedPoUrl' => $signedPoPath,
+            ]
+        ]);
+    }
+
+    /**
+     * Reject PO (Supply Chain Director)
+     */
+    public function rejectPO(Request $request, $id)
+    {
+        $user = $request->user();
+        
+        // Check if user has supply chain permission
+        if (!in_array($user->role, ['supply_chain', 'admin'])) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Only Supply Chain Directors can reject POs',
+                'code' => 'FORBIDDEN'
+            ], 403);
+        }
+
+        $mrf = MRF::where('mrf_id', $id)->first();
+
+        if (!$mrf) {
+            return response()->json([
+                'success' => false,
+                'error' => 'MRF not found',
+                'code' => 'NOT_FOUND'
+            ], 404);
+        }
+
+        // Validate request
+        $validator = Validator::make($request->all(), [
+            'reason' => 'required|string',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Validation failed',
+                'errors' => $validator->errors(),
+                'code' => 'VALIDATION_ERROR'
+            ], 422);
+        }
+
+        // Update MRF - send back to procurement
+        $mrf->update([
+            'status' => 'PO Rejected',
+            'current_stage' => 'procurement',
+            'rejection_reason' => $request->reason,
+        ]);
+
+        // Add to approval history
+        $approvalHistory = $mrf->approval_history ?? [];
+        $approvalHistory[] = [
+            'action' => 'PO Rejected',
+            'by' => $user->name,
+            'by_id' => $user->id,
+            'at' => now()->toIso8601String(),
+            'reason' => $request->reason,
+        ];
+        $mrf->approval_history = $approvalHistory;
+        $mrf->save();
+
+        // Notify Procurement
+        try {
+            $this->notificationService->notifyPORejected($mrf, $user, $request->reason);
+        } catch (\Exception $e) {
+            Log::error('Failed to send PO rejection notification', [
+                'mrf_id' => $mrf->mrf_id,
+                'error' => $e->getMessage()
+            ]);
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => 'PO rejected successfully',
+            'data' => [
+                'id' => $mrf->mrf_id,
+                'status' => $mrf->status,
+                'currentStage' => $mrf->current_stage,
+                'rejectionReason' => $mrf->rejection_reason,
+            ]
+        ]);
+    }
+
+    /**
      * Delete MRF
      */
     public function destroy($id)
