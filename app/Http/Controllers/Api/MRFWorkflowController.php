@@ -920,6 +920,11 @@ class MRFWorkflowController extends Controller
 
     /**
      * Upload signed PO (Supply Chain Director)
+     * 
+     * Workflow:
+     * 1. Procurement generates unsigned PO → MRF status becomes "supply_chain"
+     * 2. Supply Chain reviews/downloads the unsigned PO (via unsignedPoUrl in MRF response)
+     * 3. Supply Chain uploads their signed version using this endpoint
      */
     public function uploadSignedPO(Request $request, $id)
     {
@@ -944,12 +949,28 @@ class MRFWorkflowController extends Controller
             ], 404);
         }
 
-        // Check if MRF is in supply_chain status
-        if ($mrf->status !== 'supply_chain') {
+        // Check if MRF is in supply_chain status (case-insensitive)
+        $statusLower = strtolower(trim($mrf->status ?? ''));
+        if ($statusLower !== 'supply_chain') {
             return response()->json([
                 'success' => false,
-                'error' => 'MRF is not pending PO signature',
-                'code' => 'INVALID_STATUS'
+                'error' => 'MRF is not pending PO signature. Current status: ' . $mrf->status,
+                'code' => 'INVALID_STATUS',
+                'current_status' => $mrf->status
+            ], 422);
+        }
+        
+        // Verify that an unsigned PO exists (procurement must generate PO first)
+        // Supply Chain needs to review/download the unsigned PO before uploading signed version
+        if (empty($mrf->unsigned_po_url) || empty($mrf->po_number)) {
+            return response()->json([
+                'success' => false,
+                'error' => 'No unsigned PO found. Procurement must generate a PO before Supply Chain can upload a signed version.',
+                'code' => 'NO_UNSIGNED_PO',
+                'details' => [
+                    'has_po_number' => !empty($mrf->po_number),
+                    'has_unsigned_po_url' => !empty($mrf->unsigned_po_url)
+                ]
             ], 422);
         }
 

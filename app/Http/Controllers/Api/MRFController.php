@@ -154,6 +154,14 @@ class MRFController extends Controller
             'rejectionReason' => $mrf->rejection_reason,
             'isResubmission' => $mrf->is_resubmission,
             'remarks' => $mrf->remarks,
+            // PO information - allows Supply Chain to review/download unsigned PO
+            'poNumber' => $mrf->po_number,
+            'unsignedPoUrl' => $mrf->unsigned_po_url,
+            'unsignedPoShareUrl' => $mrf->unsigned_po_share_url,
+            'signedPoUrl' => $mrf->signed_po_url,
+            'signedPoShareUrl' => $mrf->signed_po_share_url,
+            'poGeneratedAt' => $mrf->po_generated_at?->toIso8601String(),
+            'poSignedAt' => $mrf->po_signed_at?->toIso8601String(),
         ]);
     }
 
