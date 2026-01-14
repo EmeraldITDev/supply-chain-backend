@@ -852,20 +852,49 @@ class VendorController extends Controller
             ], 404);
         }
 
-        // Get document content
+        // Check if document is in OneDrive (has share URL)
+        if ($document->file_share_url) {
+            // Redirect to OneDrive share URL for download
+            return redirect($document->file_share_url);
+        }
+        
+        // Get document content from local/S3 storage
         $content = $documentService->getDocumentContent($document);
 
         if ($content === false) {
             return response()->json([
                 'success' => false,
-                'error' => 'Document file not found in storage',
-                'code' => 'FILE_NOT_FOUND'
+                'error' => 'Document file not found in storage. If this is a OneDrive file, please use the share URL.',
+                'code' => 'FILE_NOT_FOUND',
+                'has_share_url' => !empty($document->file_share_url),
+                'share_url' => $document->file_share_url
             ], 404);
+        }
+
+        // Determine content type from file extension if not set
+        $contentType = $document->file_type;
+        if (!$contentType) {
+            $extension = strtolower(pathinfo($document->file_name, PATHINFO_EXTENSION));
+            $mimeTypes = [
+                'pdf' => 'application/pdf',
+                'doc' => 'application/msword',
+                'docx' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                'xls' => 'application/vnd.ms-excel',
+                'xlsx' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                'jpg' => 'image/jpeg',
+                'jpeg' => 'image/jpeg',
+                'png' => 'image/png',
+                'gif' => 'image/gif',
+                'txt' => 'text/plain',
+                'zip' => 'application/zip',
+                'rar' => 'application/x-rar-compressed',
+            ];
+            $contentType = $mimeTypes[$extension] ?? 'application/octet-stream';
         }
 
         // Return file as download
         return response($content)
-            ->header('Content-Type', $document->file_type)
+            ->header('Content-Type', $contentType)
             ->header('Content-Disposition', 'attachment; filename="' . $document->file_name . '"')
             ->header('Content-Length', strlen($content));
     }

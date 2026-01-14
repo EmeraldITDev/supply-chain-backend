@@ -295,9 +295,26 @@ class VendorDocumentService
      */
     public function getDocumentContent(VendorRegistrationDocument $document)
     {
+        // Check if document is stored in OneDrive
+        if ($document->file_share_url && $this->oneDriveService) {
+            try {
+                // If we have a OneDrive share URL, redirect to it instead of downloading
+                // For OneDrive files, we return a redirect response
+                // The frontend should use the share URL directly
+                return false; // Signal to use share URL instead
+            } catch (\Exception $e) {
+                Log::warning('Failed to access OneDrive document', [
+                    'document_id' => $document->id,
+                    'error' => $e->getMessage()
+                ]);
+            }
+        }
+        
+        // Fallback to local/S3 storage
         $disk = $this->getStorageDisk();
         
-        if (!Storage::disk($disk)->exists($document->file_path)) {
+        // Check if file exists
+        if (!$document->file_path || !Storage::disk($disk)->exists($document->file_path)) {
             return false;
         }
         
