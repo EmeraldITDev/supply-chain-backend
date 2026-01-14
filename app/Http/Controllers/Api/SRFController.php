@@ -89,6 +89,8 @@ class SRFController extends Controller
             'duration' => 'required|string',
             'estimatedCost' => 'required|numeric|min:0',
             'justification' => 'required|string',
+            'invoice' => 'nullable|file|mimes:pdf,doc,docx,xls,xlsx,png,jpg,jpeg|max:10240', // Optional invoice upload (10MB max)
+            'invoice_onedrive_url' => 'nullable|url|max:500', // Optional OneDrive URL
         ]);
 
         if ($validator->fails()) {
@@ -102,8 +104,63 @@ class SRFController extends Controller
 
         $user = $request->user();
 
+        // Handle invoice upload if provided
+        $invoiceUrl = null;
+        $invoiceShareUrl = null;
+        $srfId = SRF::generateSRFId();
+        
+        if ($request->hasFile('invoice')) {
+            $invoiceFile = $request->file('invoice');
+            $oneDriveService = app(\App\Services\OneDriveService::class);
+            
+            if ($oneDriveService) {
+                try {
+                    $year = date('Y');
+                    $folder = "SRFs/{$year}/{$srfId}";
+                    $invoiceFileName = "Invoice_{$srfId}." . $invoiceFile->getClientOriginalExtension();
+                    
+                    $oneDriveResult = $oneDriveService->uploadFile($invoiceFile, $folder, $invoiceFileName);
+                    $invoiceUrl = $oneDriveResult['webUrl'];
+                    
+                    // Create sharing link
+                    try {
+                        $invoiceShareUrl = $oneDriveService->createSharingLink($oneDriveResult['path'], 'view');
+                    } catch (\Exception $e) {
+                        \Log::warning('Failed to create invoice sharing link', [
+                            'error' => $e->getMessage(),
+                            'srf_id' => $srfId
+                        ]);
+                    }
+                } catch (\Exception $e) {
+                    \Log::error('OneDrive invoice upload failed, falling back to local storage', [
+                        'error' => $e->getMessage(),
+                        'srf_id' => $srfId
+                    ]);
+                    // Fallback to local storage
+                    $disk = config('filesystems.documents_disk', 'public');
+                    $invoiceFileName = "invoice_{$srfId}_" . time() . "." . $invoiceFile->getClientOriginalExtension();
+                    $invoicePath = "srfs/{$srfId}/{$invoiceFileName}";
+                    $invoiceFile->storeAs(dirname($invoicePath), basename($invoicePath), $disk);
+                    $invoiceUrl = \Storage::disk($disk)->url($invoicePath);
+                    $invoiceShareUrl = $invoiceUrl;
+                }
+            } else {
+                // No OneDrive, use local storage
+                $disk = config('filesystems.documents_disk', 'public');
+                $invoiceFileName = "invoice_{$srfId}_" . time() . "." . $invoiceFile->getClientOriginalExtension();
+                $invoicePath = "srfs/{$srfId}/{$invoiceFileName}";
+                $invoiceFile->storeAs(dirname($invoicePath), basename($invoicePath), $disk);
+                $invoiceUrl = \Storage::disk($disk)->url($invoicePath);
+                $invoiceShareUrl = $invoiceUrl;
+            }
+        } else if ($request->has('invoice_onedrive_url')) {
+            // Use provided OneDrive URL
+            $invoiceUrl = $request->invoice_onedrive_url;
+            $invoiceShareUrl = $request->invoice_onedrive_url;
+        }
+
         $srf = SRF::create([
-            'srf_id' => SRF::generateSRFId(),
+            'srf_id' => $srfId,
             'title' => $request->title,
             'service_type' => $request->serviceType,
             'urgency' => $request->urgency,
@@ -117,6 +174,8 @@ class SRFController extends Controller
             'status' => 'Pending',
             'current_stage' => 'procurement',
             'approval_history' => [],
+            'invoice_url' => $invoiceUrl,
+            'invoice_share_url' => $invoiceShareUrl,
         ]);
 
         return response()->json([
