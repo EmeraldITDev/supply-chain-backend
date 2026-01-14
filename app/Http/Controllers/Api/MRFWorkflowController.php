@@ -422,31 +422,87 @@ class MRFWorkflowController extends Controller
             }
         }
 
-        // Validate file upload - be more lenient with file types and increase max size
-        // Use 'sometimes' instead of 'required' to provide better error messages
+        // Validate file upload - check if file exists first
+        // Don't use strict validation rules that might fail before we can inspect the file
+        $fileExists = $request->hasFile('unsigned_po');
+        $file = $fileExists ? $request->file('unsigned_po') : null;
+        
+        // Build validation rules dynamically based on file existence
         $rules = [
-            'unsigned_po' => 'required|file', // First check if file exists
             'remarks' => 'nullable|string',
             // Note: po_number is validated manually above, not in validation rules
         ];
+        
+        // Only add file validation if file exists
+        if ($fileExists && $file) {
+            // Check if file is valid first
+            if ($file->isValid()) {
+                $rules['unsigned_po'] = 'file|mimes:pdf,doc,docx|max:20480'; // 20MB max
+            } else {
+                // File exists but is invalid - we'll handle this separately
+                $rules['unsigned_po'] = 'required'; // This will fail and we can provide better error
+            }
+        } else {
+            // File doesn't exist - make it required
+            $rules['unsigned_po'] = 'required|file';
+        }
 
         $validator = Validator::make($request->all(), $rules);
 
-        // If basic validation passes, check file details
-        if (!$validator->fails() && $request->hasFile('unsigned_po')) {
-            $file = $request->file('unsigned_po');
+        // Handle file validation errors with better messages
+        if ($validator->fails()) {
+            $errors = $validator->errors();
             
-            // Check file size (20MB = 20480 KB, but Laravel uses KB for max rule)
-            $maxSizeKB = 20480; // 20MB in KB
-            if ($file->getSize() > ($maxSizeKB * 1024)) {
-                $validator->errors()->add('unsigned_po', 'File size exceeds maximum allowed size of 20MB.');
-            }
-            
-            // Check file extension (be more lenient - check extension instead of MIME)
-            $allowedExtensions = ['pdf', 'doc', 'docx'];
-            $extension = strtolower($file->getClientOriginalExtension());
-            if (!in_array($extension, $allowedExtensions)) {
-                $validator->errors()->add('unsigned_po', 'Invalid file type. Only PDF, DOC, and DOCX files are allowed.');
+            // If file validation failed, provide detailed diagnostics
+            if ($errors->has('unsigned_po')) {
+                if ($fileExists && $file) {
+                    // File exists but failed validation - check why
+                    if (!$file->isValid()) {
+                        $errorCode = $file->getError();
+                        $errorMessage = $file->getErrorMessage();
+                        
+                        $userMessage = match($errorCode) {
+                            UPLOAD_ERR_INI_SIZE, UPLOAD_ERR_FORM_SIZE => 'File is too large. Maximum size is 20MB. Please compress or reduce the file size.',
+                            UPLOAD_ERR_PARTIAL => 'File upload was incomplete. Please try again.',
+                            UPLOAD_ERR_NO_FILE => 'No file was selected. Please choose a file.',
+                            UPLOAD_ERR_NO_TMP_DIR => 'Server configuration error. Please contact administrator.',
+                            UPLOAD_ERR_CANT_WRITE => 'Server storage error. Please contact administrator.',
+                            UPLOAD_ERR_EXTENSION => 'File upload blocked by server settings. Please contact administrator.',
+                            default => 'File upload failed: ' . $errorMessage
+                        };
+                        
+                        $errors->add('unsigned_po', $userMessage);
+                    } else {
+                        // File is valid but failed other validation rules
+                        $originalErrors = $errors->get('unsigned_po');
+                        $errors->forget('unsigned_po');
+                        
+                        // Check file size manually
+                        $fileSize = $file->getSize();
+                        $maxSize = 20480 * 1024; // 20MB in bytes
+                        if ($fileSize > $maxSize) {
+                            $errors->add('unsigned_po', 'File size (' . round($fileSize / 1024 / 1024, 2) . 'MB) exceeds maximum allowed size of 20MB.');
+                        }
+                        
+                        // Check file extension
+                        $extension = strtolower($file->getClientOriginalExtension());
+                        $allowedExtensions = ['pdf', 'doc', 'docx'];
+                        if (!in_array($extension, $allowedExtensions)) {
+                            $errors->add('unsigned_po', 'Invalid file type. Only PDF, DOC, and DOCX files are allowed. Your file type: ' . $extension);
+                        }
+                        
+                        // If no specific error, use original error message
+                        if ($errors->get('unsigned_po')->isEmpty() && !empty($originalErrors)) {
+                            foreach ($originalErrors as $error) {
+                                $errors->add('unsigned_po', $error);
+                            }
+                        }
+                    }
+                } else {
+                    // File doesn't exist in request
+                    $errors->forget('unsigned_po');
+                    $errors->add('unsigned_po', 'Please select a file to upload. Supported formats: PDF, DOC, DOCX (Max 20MB)');
+                }
             }
         }
 
@@ -689,29 +745,95 @@ class MRFWorkflowController extends Controller
                     }
                 }
 
-                $disk = config('filesystems.documents_disk', 'public');
+                $disk = config('filesystems.documents_disk', env('DOCUMENTS_DISK', 'public'));
+                
+                // Verify disk is available
+                if (!config("filesystems.disks.{$disk}")) {
+                    throw new \Exception("Storage disk '{$disk}' is not configured. Please check your filesystem configuration.");
+                }
+                
                 $poFileName = "po_{$poNumber}_" . time() . "." . $file->getClientOriginalExtension();
                 $poPath = "purchase-orders/{$poFileName}";
                 
                 // Ensure directory exists
-                $directory = dirname($poPath);
-                if (!Storage::disk($disk)->exists($directory)) {
-                    Storage::disk($disk)->makeDirectory($directory, 0755, true);
+                try {
+                    $directory = dirname($poPath);
+                    if (!Storage::disk($disk)->exists($directory)) {
+                        $created = Storage::disk($disk)->makeDirectory($directory, 0755, true);
+                        if (!$created) {
+                            throw new \Exception("Failed to create directory: {$directory}");
+                        }
+                        Log::info('Created directory for PO storage', [
+                            'directory' => $directory,
+                            'disk' => $disk
+                        ]);
+                    }
+                } catch (\Exception $e) {
+                    Log::error('Directory creation failed', [
+                        'directory' => $directory ?? 'unknown',
+                        'disk' => $disk,
+                        'error' => $e->getMessage()
+                    ]);
+                    throw new \Exception('Failed to create storage directory. Please check file permissions.');
                 }
                 
-                // Store the file
-                $storedPath = $file->storeAs(dirname($poPath), basename($poPath), $disk);
-                
-                if (!$storedPath) {
-                    throw new \Exception('Failed to store file on disk: ' . $disk);
+                // Store the file - use putFileAs for better error handling
+                try {
+                    $storedPath = Storage::disk($disk)->putFileAs(
+                        dirname($poPath),
+                        $file,
+                        basename($poPath)
+                    );
+                    
+                    if (!$storedPath) {
+                        throw new \Exception('File storage returned null - storage may be full or permissions issue');
+                    }
+                    
+                    // Verify file was actually stored
+                    if (!Storage::disk($disk)->exists($storedPath)) {
+                        throw new \Exception('File was not found after storage - upload may have failed');
+                    }
+                    
+                    Log::info('PO file stored successfully', [
+                        'stored_path' => $storedPath,
+                        'disk' => $disk,
+                        'file_size' => Storage::disk($disk)->size($storedPath)
+                    ]);
+                } catch (\Exception $e) {
+                    Log::error('File storage failed', [
+                        'disk' => $disk,
+                        'path' => $poPath,
+                        'error' => $e->getMessage(),
+                        'trace' => $e->getTraceAsString()
+                    ]);
+                    throw new \Exception('Failed to store file: ' . $e->getMessage());
                 }
                 
                 // Get URL - handle both local and S3
-                if ($disk === 'public' || $disk === 'local') {
-                    $poUrl = Storage::disk($disk)->url($storedPath);
-                } else {
-                    // For S3 or other cloud storage
-                    $poUrl = Storage::disk($disk)->url($storedPath);
+                try {
+                    if ($disk === 'public' || $disk === 'local') {
+                        $poUrl = Storage::disk($disk)->url($storedPath);
+                        // Ensure URL is absolute
+                        if (!filter_var($poUrl, FILTER_VALIDATE_URL)) {
+                            $baseUrl = config('app.url');
+                            $poUrl = rtrim($baseUrl, '/') . '/' . ltrim($poUrl, '/');
+                        }
+                    } else {
+                        // For S3 or other cloud storage
+                        $poUrl = Storage::disk($disk)->url($storedPath);
+                    }
+                    
+                    if (empty($poUrl)) {
+                        throw new \Exception('Failed to generate file URL');
+                    }
+                } catch (\Exception $e) {
+                    Log::error('URL generation failed', [
+                        'disk' => $disk,
+                        'path' => $storedPath,
+                        'error' => $e->getMessage()
+                    ]);
+                    // Don't fail completely - file is stored, URL can be generated later
+                    $poUrl = $storedPath; // Use path as fallback
                 }
                 
                 Log::info($isRegeneration ? 'PO file regenerated' : 'PO file uploaded', [
