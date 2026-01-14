@@ -7,6 +7,7 @@ use App\Models\MRF;
 use App\Models\MRFApprovalHistory;
 use App\Services\NotificationService;
 use App\Services\EmailService;
+use App\Services\OneDriveService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\Storage;
@@ -16,11 +17,26 @@ class MRFWorkflowController extends Controller
 {
     protected NotificationService $notificationService;
     protected EmailService $emailService;
+    protected ?OneDriveService $oneDriveService;
 
     public function __construct(NotificationService $notificationService, EmailService $emailService)
     {
         $this->notificationService = $notificationService;
         $this->emailService = $emailService;
+        
+        // Initialize OneDriveService if credentials are configured
+        try {
+            if (config('filesystems.disks.onedrive.client_id') && 
+                config('filesystems.disks.onedrive.client_secret') &&
+                config('filesystems.disks.onedrive.tenant_id')) {
+                $this->oneDriveService = app(OneDriveService::class);
+            } else {
+                $this->oneDriveService = null;
+            }
+        } catch (\Exception $e) {
+            Log::warning('OneDriveService initialization failed', ['error' => $e->getMessage()]);
+            $this->oneDriveService = null;
+        }
     }
 
     /**
@@ -291,17 +307,21 @@ class MRFWorkflowController extends Controller
             ], 404);
         }
 
-        // Check if MRF is in procurement status
-        if ($mrf->status !== 'procurement') {
+        // Check if MRF is in procurement status (allow both 'procurement' and rejected PO statuses)
+        $allowedStatuses = ['procurement', 'PO Rejected'];
+        if (!in_array($mrf->status, $allowedStatuses)) {
             return response()->json([
                 'success' => false,
-                'error' => 'MRF is not in procurement stage',
+                'error' => 'MRF is not in procurement stage. Current status: ' . $mrf->status,
                 'code' => 'INVALID_STATUS'
             ], 422);
         }
 
-        // Check if PO already generated for this MRF
-        if ($mrf->po_number) {
+        // Allow PO regeneration if it was rejected
+        $isRegeneration = !empty($mrf->po_number) && $mrf->status === 'PO Rejected';
+
+        // If not a regeneration, check if PO already exists
+        if (!$isRegeneration && $mrf->po_number) {
             return response()->json([
                 'success' => false,
                 'error' => 'PO already generated for this MRF',
@@ -313,11 +333,20 @@ class MRFWorkflowController extends Controller
             ], 422);
         }
 
-        $validator = Validator::make($request->all(), [
-            'po_number' => 'nullable|string|max:50|unique:m_r_f_s,po_number',
+        // Validate - allow same PO number for regeneration (ignore unique check for this MRF)
+        $rules = [
             'unsigned_po' => 'required|file|mimes:pdf,doc,docx|max:10240', // 10MB max
             'remarks' => 'nullable|string',
-        ]);
+        ];
+
+        // Only validate PO number uniqueness if not regenerating
+        if (!$isRegeneration) {
+            $rules['po_number'] = 'nullable|string|max:50|unique:m_r_f_s,po_number';
+        } else {
+            $rules['po_number'] = 'nullable|string|max:50';
+        }
+
+        $validator = Validator::make($request->all(), $rules);
 
         if ($validator->fails()) {
             return response()->json([
@@ -328,28 +357,84 @@ class MRFWorkflowController extends Controller
             ], 422);
         }
 
-        // Auto-generate PO number if not provided
-        $poNumber = $request->po_number ?? $this->generatePONumber();
+        // Auto-generate PO number if not provided, or reuse existing for regeneration
+        $poNumber = $request->po_number ?? $mrf->po_number ?? $this->generatePONumber();
 
         // Handle file upload
         $poUrl = null;
+        $useOneDrive = $this->oneDriveService !== null;
+        
         if ($request->hasFile('unsigned_po')) {
             $file = $request->file('unsigned_po');
-            $disk = config('filesystems.documents_disk', 'public');
-            $poFileName = "po_{$poNumber}_" . time() . "." . $file->getClientOriginalExtension();
-            $poPath = "purchase-orders/{$poFileName}";
             
-            // Store the file
-            $file->storeAs(dirname($poPath), basename($poPath), $disk);
-            $poUrl = Storage::disk($disk)->url($poPath);
+            // Use OneDrive if configured
+            if ($useOneDrive) {
+                try {
+                    // Delete old PO file from OneDrive if regenerating
+                    // Extract path from URL if it exists (for legacy files)
+                    if ($isRegeneration && $mrf->unsigned_po_url) {
+                        // Try to extract path from URL or use a pattern
+                        Log::info('Attempting to delete old PO file from OneDrive', [
+                            'po_url' => $mrf->unsigned_po_url
+                        ]);
+                    }
+
+                    // Upload to OneDrive in PurchaseOrders folder (organized by year/month)
+                    $folder = 'PurchaseOrders/' . date('Y/m');
+                    $poFileName = "PO_{$poNumber}_{$mrf->mrf_id}." . $file->getClientOriginalExtension();
+                    
+                    $oneDriveResult = $this->oneDriveService->uploadFile($file, $folder, $poFileName);
+                    
+                    $poUrl = $oneDriveResult['webUrl'];
+                    
+                    Log::info($isRegeneration ? 'PO file regenerated on OneDrive' : 'PO file uploaded to OneDrive', [
+                        'mrf_id' => $id,
+                        'po_number' => $poNumber,
+                        'onedrive_path' => $oneDriveResult['path'],
+                        'web_url' => $poUrl,
+                        'is_regeneration' => $isRegeneration
+                    ]);
+                } catch (\Exception $e) {
+                    Log::error('OneDrive upload failed, falling back to local storage', [
+                        'error' => $e->getMessage(),
+                        'mrf_id' => $id
+                    ]);
+                    // Fall back to local storage on error
+                    $useOneDrive = false;
+                }
+            }
             
-            Log::info('PO file uploaded', [
-                'mrf_id' => $id,
-                'po_number' => $poNumber,
-                'file_name' => $poFileName,
-                'path' => $poPath,
-                'disk' => $disk
-            ]);
+            // Fallback to local/S3 storage if OneDrive is not configured or failed
+            if (!$useOneDrive) {
+                // Delete old PO file if regenerating
+                if ($isRegeneration && $mrf->unsigned_po_url) {
+                    try {
+                        $disk = config('filesystems.documents_disk', 'public');
+                        $oldPath = str_replace(Storage::disk($disk)->url(''), '', $mrf->unsigned_po_url);
+                        Storage::disk($disk)->delete($oldPath);
+                        Log::info('Deleted old PO file for regeneration', ['old_path' => $oldPath]);
+                    } catch (\Exception $e) {
+                        Log::warning('Failed to delete old PO file', ['error' => $e->getMessage()]);
+                    }
+                }
+
+                $disk = config('filesystems.documents_disk', 'public');
+                $poFileName = "po_{$poNumber}_" . time() . "." . $file->getClientOriginalExtension();
+                $poPath = "purchase-orders/{$poFileName}";
+                
+                // Store the file
+                $file->storeAs(dirname($poPath), basename($poPath), $disk);
+                $poUrl = Storage::disk($disk)->url($poPath);
+                
+                Log::info($isRegeneration ? 'PO file regenerated' : 'PO file uploaded', [
+                    'mrf_id' => $id,
+                    'po_number' => $poNumber,
+                    'file_name' => $poFileName,
+                    'path' => $poPath,
+                    'disk' => $disk,
+                    'is_regeneration' => $isRegeneration
+                ]);
+            }
         }
 
         // Update MRF
@@ -359,10 +444,15 @@ class MRFWorkflowController extends Controller
             'po_generated_at' => now(),
             'status' => 'supply_chain',
             'current_stage' => 'supply_chain',
+            'rejection_reason' => null, // Clear rejection reason if regenerating
         ]);
 
         // Record in approval history
-        MRFApprovalHistory::record($mrf, 'generated_po', 'procurement', $user, "PO generated: {$request->po_number}");
+        $action = $isRegeneration ? 'regenerated_po' : 'generated_po';
+        $remarks = $isRegeneration 
+            ? "PO regenerated after rejection: {$poNumber}" 
+            : "PO generated: {$poNumber}";
+        MRFApprovalHistory::record($mrf, $action, 'procurement', $user, $remarks);
 
         // Notify Supply Chain Director
         $this->notificationService->notifyPOReadyForSignature($mrf);
@@ -427,13 +517,43 @@ class MRFWorkflowController extends Controller
             ], 422);
         }
 
-        // Upload signed PO to configured storage disk
-        $disk = config('filesystems.documents_disk', 'public');
+        // Upload signed PO - use OneDrive if configured, otherwise use local/S3 storage
         $signedPOFile = $request->file('signed_po');
-        $signedPOFileName = "po_signed_{$mrf->po_number}_" . time() . ".pdf";
-        $signedPOPath = "purchase-orders/signed/{$signedPOFileName}";
-        Storage::disk($disk)->putFileAs('purchase-orders/signed', $signedPOFile, $signedPOFileName);
-        $signedPOUrl = Storage::disk($disk)->url($signedPOPath);
+        $signedPOUrl = null;
+        $useOneDrive = $this->oneDriveService !== null;
+        
+        if ($useOneDrive) {
+            try {
+                // Upload to OneDrive in PurchaseOrders_Signed folder (organized by year/month)
+                $folder = 'PurchaseOrders_Signed/' . date('Y/m');
+                $signedPOFileName = "PO_Signed_{$mrf->po_number}_{$mrf->mrf_id}.pdf";
+                
+                $oneDriveResult = $this->oneDriveService->uploadFile($signedPOFile, $folder, $signedPOFileName);
+                $signedPOUrl = $oneDriveResult['webUrl'];
+                
+                Log::info('Signed PO uploaded to OneDrive', [
+                    'mrf_id' => $id,
+                    'po_number' => $mrf->po_number,
+                    'onedrive_path' => $oneDriveResult['path'],
+                    'web_url' => $signedPOUrl,
+                ]);
+            } catch (\Exception $e) {
+                Log::error('OneDrive upload failed for signed PO, falling back to local storage', [
+                    'error' => $e->getMessage(),
+                    'mrf_id' => $id
+                ]);
+                $useOneDrive = false;
+            }
+        }
+        
+        // Fallback to local/S3 storage if OneDrive is not configured or failed
+        if (!$useOneDrive) {
+            $disk = config('filesystems.documents_disk', 'public');
+            $signedPOFileName = "po_signed_{$mrf->po_number}_" . time() . ".pdf";
+            $signedPOPath = "purchase-orders/signed/{$signedPOFileName}";
+            Storage::disk($disk)->putFileAs('purchase-orders/signed', $signedPOFile, $signedPOFileName);
+            $signedPOUrl = Storage::disk($disk)->url($signedPOPath);
+        }
 
         // Update MRF
         $mrf->update([
