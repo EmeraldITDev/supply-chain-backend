@@ -950,6 +950,144 @@ class MRFWorkflowController extends Controller
     /**
      * Helper: Generate unique PO number
      */
+    /**
+     * Delete/Clear PO for an MRF (Procurement Manager only)
+     * This allows procurement managers to clear a PO and regenerate it
+     */
+    public function deletePO(Request $request, $id)
+    {
+        $user = $request->user();
+
+        // Check role - only procurement managers can delete POs
+        if (!in_array($user->role, ['procurement_manager', 'procurement', 'admin'])) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Only procurement managers can delete POs',
+                'code' => 'FORBIDDEN'
+            ], 403);
+        }
+
+        $mrf = MRF::where('mrf_id', $id)->first();
+
+        if (!$mrf) {
+            return response()->json([
+                'success' => false,
+                'error' => 'MRF not found',
+                'code' => 'NOT_FOUND'
+            ], 404);
+        }
+
+        // Check if PO exists
+        if (empty($mrf->po_number) && empty($mrf->unsigned_po_url)) {
+            return response()->json([
+                'success' => false,
+                'error' => 'No PO found for this MRF',
+                'code' => 'NO_PO'
+            ], 422);
+        }
+
+        // Delete PO files from storage if they exist
+        try {
+            // Try to delete from OneDrive if configured
+            if ($this->oneDriveService && $mrf->unsigned_po_url) {
+                try {
+                    // Extract path from URL if possible, or use a pattern
+                    // OneDrive paths are stored in file_path or can be extracted from URL
+                    Log::info('Attempting to delete PO file from OneDrive', [
+                        'mrf_id' => $id,
+                        'po_url' => $mrf->unsigned_po_url
+                    ]);
+                    // Note: OneDrive file deletion would require the file path/ID
+                    // For now, we'll just clear the database references
+                } catch (\Exception $e) {
+                    Log::warning('Failed to delete PO from OneDrive', [
+                        'error' => $e->getMessage(),
+                        'mrf_id' => $id
+                    ]);
+                }
+            }
+
+            // Delete from local/S3 storage if exists
+            if ($mrf->unsigned_po_url && !$this->oneDriveService) {
+                try {
+                    $disk = config('filesystems.documents_disk', 'public');
+                    // Extract path from URL
+                    $urlPath = parse_url($mrf->unsigned_po_url, PHP_URL_PATH);
+                    if ($urlPath) {
+                        $filePath = ltrim($urlPath, '/storage/');
+                        if (Storage::disk($disk)->exists($filePath)) {
+                            Storage::disk($disk)->delete($filePath);
+                            Log::info('Deleted PO file from storage', ['path' => $filePath]);
+                        }
+                    }
+                } catch (\Exception $e) {
+                    Log::warning('Failed to delete PO file from storage', [
+                        'error' => $e->getMessage(),
+                        'mrf_id' => $id
+                    ]);
+                }
+            }
+
+            // Delete signed PO if exists
+            if ($mrf->signed_po_url && !$this->oneDriveService) {
+                try {
+                    $disk = config('filesystems.documents_disk', 'public');
+                    $urlPath = parse_url($mrf->signed_po_url, PHP_URL_PATH);
+                    if ($urlPath) {
+                        $filePath = ltrim($urlPath, '/storage/');
+                        if (Storage::disk($disk)->exists($filePath)) {
+                            Storage::disk($disk)->delete($filePath);
+                        }
+                    }
+                } catch (\Exception $e) {
+                    Log::warning('Failed to delete signed PO file', ['error' => $e->getMessage()]);
+                }
+            }
+        } catch (\Exception $e) {
+            Log::error('Error deleting PO files', [
+                'error' => $e->getMessage(),
+                'mrf_id' => $id
+            ]);
+            // Continue with clearing database fields even if file deletion fails
+        }
+
+        // Clear PO-related fields and reset status
+        $mrf->update([
+            'po_number' => null,
+            'unsigned_po_url' => null,
+            'unsigned_po_share_url' => null,
+            'signed_po_url' => null,
+            'signed_po_share_url' => null,
+            'po_generated_at' => null,
+            'po_signed_at' => null,
+            'po_version' => 1,
+            'po_rejection_reason' => null,
+            // Reset status back to procurement stage if it was in supply_chain
+            'status' => in_array($mrf->status, ['supply_chain', 'PO Rejected']) ? 'procurement' : $mrf->status,
+            'current_stage' => in_array($mrf->current_stage, ['supply_chain']) ? 'procurement' : $mrf->current_stage,
+        ]);
+
+        // Record in approval history
+        MRFApprovalHistory::record($mrf, 'po_deleted', 'procurement', $user, 'PO deleted by procurement manager for regeneration');
+
+        // Notify relevant parties
+        try {
+            $this->notificationService->notifyMRFPendingProcurement($mrf);
+        } catch (\Exception $e) {
+            Log::warning('Failed to send notification after PO deletion', ['error' => $e->getMessage()]);
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => 'PO deleted successfully. MRF is now ready for PO regeneration.',
+            'data' => [
+                'mrf_id' => $mrf->mrf_id,
+                'status' => $mrf->status,
+                'current_stage' => $mrf->current_stage,
+            ]
+        ]);
+    }
+
     private function generatePONumber(): string
     {
         $year = date('Y');
