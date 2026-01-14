@@ -864,58 +864,119 @@ class MRFController extends Controller
             ], 404);
         }
 
+        // Normalize status to lowercase for comparison
+        $statusLower = strtolower(trim($mrf->status ?? ''));
+        $currentStageLower = strtolower(trim($mrf->current_stage ?? ''));
+
         // Check if user is the requester
         $isRequester = $mrf->requester_id == $user->id;
         
-        // Check if user is a procurement manager
+        // Check if user is a procurement manager or admin (admin can always delete)
+        $isAdmin = $user->role === 'admin';
         $isProcurementManager = in_array($user->role, ['procurement_manager', 'procurement', 'admin']);
         
-        // Allow deletion if:
-        // 1. User is the requester AND MRF hasn't progressed beyond procurement stage (no PO generated)
-        // 2. User is a procurement manager AND MRF hasn't progressed beyond procurement stage (no PO generated)
-        // 3. OR status is Pending or Rejected (for any user with appropriate permissions)
+        // Admin can always delete any MRF (force delete capability)
+        if ($isAdmin) {
+            try {
+                // Delete related records first (cascade should handle this, but let's be explicit)
+                $mrf->rfqs()->delete();
+                $mrf->items()->delete();
+                $mrf->approvalHistory()->delete();
+                
+                $mrf->delete();
+                
+                Log::info('MRF force deleted by admin', [
+                    'mrf_id' => $id,
+                    'deleted_by' => $user->id,
+                    'status' => $mrf->status
+                ]);
+
+                return response()->json([
+                    'success' => true,
+                    'message' => 'MRF deleted successfully (admin override)'
+                ]);
+            } catch (\Exception $e) {
+                Log::error('MRF deletion failed', [
+                    'mrf_id' => $id,
+                    'error' => $e->getMessage()
+                ]);
+                
+                return response()->json([
+                    'success' => false,
+                    'error' => 'Failed to delete MRF: ' . $e->getMessage(),
+                    'code' => 'DELETE_FAILED'
+                ], 500);
+            }
+        }
+        
+        // For non-admin users, check deletion permissions
         $canDelete = false;
         
+        // Check if MRF has PO or is too far in workflow
+        $hasPO = !empty($mrf->po_number) || !empty($mrf->unsigned_po_url);
+        $tooFarInWorkflow = in_array($statusLower, ['supply_chain', 'finance', 'paid', 'completed', 'chairman_payment']);
+        
         if ($isRequester) {
-            // Requester can delete if no PO has been generated yet
-            $noPOGenerated = empty($mrf->po_number) && empty($mrf->unsigned_po_url);
-            $notTooFarInWorkflow = !in_array(strtolower($mrf->status), ['supply_chain', 'finance', 'paid', 'completed']);
-            
-            if ($noPOGenerated && $notTooFarInWorkflow) {
+            // Requester can delete if no PO has been generated and not too far in workflow
+            if (!$hasPO && !$tooFarInWorkflow) {
                 $canDelete = true;
             }
         }
         
         // Procurement managers can delete MRFs that haven't progressed beyond procurement stage
         if (!$canDelete && $isProcurementManager) {
-            $noPOGenerated = empty($mrf->po_number) && empty($mrf->unsigned_po_url);
-            $notTooFarInWorkflow = !in_array(strtolower($mrf->status), ['supply_chain', 'finance', 'paid', 'completed', 'grn_completed']);
-            $isProcurementStage = in_array(strtolower($mrf->status), ['pending', 'procurement', 'rejected', 'executive_review', 'chairman_review']) 
-                || in_array(strtolower($mrf->current_stage ?? ''), ['pending', 'procurement']);
+            $isEarlyStage = in_array($statusLower, ['pending', 'procurement', 'rejected', 'executive approval', 'executive_review', 'chairman_review']) 
+                || in_array($currentStageLower, ['pending', 'procurement', 'executive', 'executive_review', 'chairman_review']);
             
-            if ($noPOGenerated && ($notTooFarInWorkflow || $isProcurementStage)) {
+            if (!$hasPO && ($isEarlyStage || !$tooFarInWorkflow)) {
                 $canDelete = true;
             }
         }
         
         // Also allow deletion for pending/rejected statuses (original logic)
-        if (!$canDelete && in_array(strtolower($mrf->status), ['pending', 'rejected'])) {
+        if (!$canDelete && in_array($statusLower, ['pending', 'rejected'])) {
             $canDelete = true;
         }
 
         if (!$canDelete) {
             return response()->json([
                 'success' => false,
-                'error' => 'Cannot delete MRF. Either you are not authorized, or the MRF has progressed too far in the workflow.',
-                'code' => 'FORBIDDEN'
+                'error' => 'Cannot delete MRF. Either you are not authorized, or the MRF has progressed too far in the workflow (PO generated or beyond procurement stage).',
+                'code' => 'FORBIDDEN',
+                'details' => [
+                    'has_po' => $hasPO,
+                    'status' => $mrf->status,
+                    'current_stage' => $mrf->current_stage,
+                    'is_requester' => $isRequester,
+                    'is_procurement_manager' => $isProcurementManager
+                ]
             ], 403);
         }
 
-        $mrf->delete();
+        try {
+            $mrf->delete();
+            
+            Log::info('MRF deleted', [
+                'mrf_id' => $id,
+                'deleted_by' => $user->id,
+                'status' => $mrf->status
+            ]);
 
-        return response()->json([
-            'success' => true,
-            'message' => 'MRF deleted successfully'
-        ]);
+            return response()->json([
+                'success' => true,
+                'message' => 'MRF deleted successfully'
+            ]);
+        } catch (\Exception $e) {
+            Log::error('MRF deletion failed', [
+                'mrf_id' => $id,
+                'error' => $e->getMessage()
+            ]);
+            
+            return response()->json([
+                'success' => false,
+                'error' => 'Failed to delete MRF: ' . $e->getMessage(),
+                'code' => 'DELETE_FAILED'
+            ], 500);
+        }
     }
 }

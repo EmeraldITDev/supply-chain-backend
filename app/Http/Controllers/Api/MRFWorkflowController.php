@@ -344,26 +344,33 @@ class MRFWorkflowController extends Controller
             ], 422);
         }
 
-        // Validate - allow same PO number for regeneration (ignore unique check for this MRF)
+        // Validate file upload - increase max size and improve error messages
         $rules = [
-            'unsigned_po' => 'required|file|mimes:pdf,doc,docx|max:10240', // 10MB max
+            'unsigned_po' => 'required|file|mimes:pdf,doc,docx|max:20480', // 20MB max (increased from 10MB)
             'remarks' => 'nullable|string',
         ];
 
-        // PO number validation: always exclude current MRF from unique check
-        // This allows regeneration with the same PO number for this MRF
-        // Only validate uniqueness if a PO number is provided in the request
-        if ($request->has('po_number') && !empty($request->po_number)) {
+        // PO number validation: 
+        // - If provided, validate format and check uniqueness (excluding current MRF)
+        // - If not provided, will be auto-generated (no validation needed)
+        // - For regeneration, existing PO number will be reused if not provided
+        if ($request->has('po_number') && !empty(trim($request->po_number))) {
+            // Only validate if a new PO number is explicitly provided
+            // For regeneration, if no new PO number is provided, we'll reuse the existing one
             $rules['po_number'] = [
-                'nullable',
                 'string',
                 'max:50',
-                \Illuminate\Validation\Rule::unique('m_r_f_s', 'po_number')
-                    ->ignore($mrf->id, 'id') // Explicitly specify primary key column to ignore this MRF
+                'regex:/^[A-Z0-9\-_]+$/i', // Allow alphanumeric, dashes, underscores
+                function ($attribute, $value, $fail) use ($mrf) {
+                    // Check uniqueness excluding this MRF
+                    $exists = MRF::where('po_number', $value)
+                        ->where('id', '!=', $mrf->id)
+                        ->exists();
+                    if ($exists) {
+                        $fail('The PO number has already been taken.');
+                    }
+                },
             ];
-        } else {
-            // If no PO number provided, it will be auto-generated, so no validation needed
-            $rules['po_number'] = 'nullable|string|max:50';
         }
 
         $validator = Validator::make($request->all(), $rules);
@@ -376,7 +383,9 @@ class MRFWorkflowController extends Controller
                 'request_po_number' => $request->po_number ?? 'not provided',
                 'existing_po_number' => $mrf->po_number,
                 'errors' => $validator->errors()->toArray(),
-                'is_regeneration' => $isRegeneration
+                'is_regeneration' => $isRegeneration,
+                'file_size' => $request->hasFile('unsigned_po') ? $request->file('unsigned_po')->getSize() : null,
+                'file_mime' => $request->hasFile('unsigned_po') ? $request->file('unsigned_po')->getMimeType() : null,
             ]);
             
             return response()->json([
@@ -388,7 +397,12 @@ class MRFWorkflowController extends Controller
                     'mrf_id' => $id,
                     'request_po_number' => $request->po_number ?? null,
                     'existing_po_number' => $mrf->po_number,
-                    'is_regeneration' => $isRegeneration
+                    'is_regeneration' => $isRegeneration,
+                    'file_info' => $request->hasFile('unsigned_po') ? [
+                        'size' => $request->file('unsigned_po')->getSize(),
+                        'mime' => $request->file('unsigned_po')->getMimeType(),
+                        'name' => $request->file('unsigned_po')->getClientOriginalName(),
+                    ] : null,
                 ]
             ], 422);
         }
@@ -411,21 +425,43 @@ class MRFWorkflowController extends Controller
             }
         }
 
-        // Handle file upload
+        // Handle file upload with improved error handling
         $poUrl = null;
         $poShareUrl = null;
         $useOneDrive = $this->oneDriveService !== null;
         
-        if ($request->hasFile('unsigned_po')) {
-            $file = $request->file('unsigned_po');
+        if (!$request->hasFile('unsigned_po')) {
+            return response()->json([
+                'success' => false,
+                'error' => 'PO file is required',
+                'code' => 'FILE_REQUIRED'
+            ], 422);
+        }
+        
+        $file = $request->file('unsigned_po');
+        
+        // Validate file before processing
+        if (!$file->isValid()) {
+            Log::error('Invalid file upload', [
+                'mrf_id' => $id,
+                'error' => $file->getError(),
+                'error_message' => $file->getErrorMessage()
+            ]);
             
+            return response()->json([
+                'success' => false,
+                'error' => 'File upload failed: ' . $file->getErrorMessage(),
+                'code' => 'FILE_UPLOAD_ERROR',
+                'error_code' => $file->getError()
+            ], 422);
+        }
+        
+        try {
             // Use OneDrive if configured
             if ($useOneDrive) {
                 try {
                     // Delete old PO file from OneDrive if regenerating
-                    // Extract path from URL if it exists (for legacy files)
                     if ($isRegeneration && $mrf->unsigned_po_url) {
-                        // Try to extract path from URL or use a pattern
                         Log::info('Attempting to delete old PO file from OneDrive', [
                             'po_url' => $mrf->unsigned_po_url
                         ]);
@@ -436,6 +472,10 @@ class MRFWorkflowController extends Controller
                     $poFileName = "PO_{$poNumber}_{$mrf->mrf_id}." . $file->getClientOriginalExtension();
                     
                     $oneDriveResult = $this->oneDriveService->uploadFile($file, $folder, $poFileName);
+                    
+                    if (!isset($oneDriveResult['webUrl']) || empty($oneDriveResult['webUrl'])) {
+                        throw new \Exception('OneDrive upload returned no URL');
+                    }
                     
                     $poUrl = $oneDriveResult['webUrl'];
                     
@@ -466,6 +506,7 @@ class MRFWorkflowController extends Controller
                 } catch (\Exception $e) {
                     Log::error('OneDrive upload failed, falling back to local storage', [
                         'error' => $e->getMessage(),
+                        'trace' => $e->getTraceAsString(),
                         'mrf_id' => $id
                     ]);
                     // Fall back to local storage on error
@@ -478,10 +519,14 @@ class MRFWorkflowController extends Controller
                 // Delete old PO file if regenerating
                 if ($isRegeneration && $mrf->unsigned_po_url) {
                     try {
-        $disk = config('filesystems.documents_disk', 'public');
+                        $disk = config('filesystems.documents_disk', 'public');
                         $oldPath = str_replace(Storage::disk($disk)->url(''), '', $mrf->unsigned_po_url);
-                        Storage::disk($disk)->delete($oldPath);
-                        Log::info('Deleted old PO file for regeneration', ['old_path' => $oldPath]);
+                        // Clean up path
+                        $oldPath = ltrim(str_replace('/storage/', '', $oldPath), '/');
+                        if (Storage::disk($disk)->exists($oldPath)) {
+                            Storage::disk($disk)->delete($oldPath);
+                            Log::info('Deleted old PO file for regeneration', ['old_path' => $oldPath]);
+                        }
                     } catch (\Exception $e) {
                         Log::warning('Failed to delete old PO file', ['error' => $e->getMessage()]);
                     }
@@ -489,21 +534,67 @@ class MRFWorkflowController extends Controller
 
                 $disk = config('filesystems.documents_disk', 'public');
                 $poFileName = "po_{$poNumber}_" . time() . "." . $file->getClientOriginalExtension();
-        $poPath = "purchase-orders/{$poFileName}";
+                $poPath = "purchase-orders/{$poFileName}";
+                
+                // Ensure directory exists
+                $directory = dirname($poPath);
+                if (!Storage::disk($disk)->exists($directory)) {
+                    Storage::disk($disk)->makeDirectory($directory, 0755, true);
+                }
                 
                 // Store the file
-                $file->storeAs(dirname($poPath), basename($poPath), $disk);
-        $poUrl = Storage::disk($disk)->url($poPath);
+                $storedPath = $file->storeAs(dirname($poPath), basename($poPath), $disk);
+                
+                if (!$storedPath) {
+                    throw new \Exception('Failed to store file on disk: ' . $disk);
+                }
+                
+                // Get URL - handle both local and S3
+                if ($disk === 'public' || $disk === 'local') {
+                    $poUrl = Storage::disk($disk)->url($storedPath);
+                } else {
+                    // For S3 or other cloud storage
+                    $poUrl = Storage::disk($disk)->url($storedPath);
+                }
                 
                 Log::info($isRegeneration ? 'PO file regenerated' : 'PO file uploaded', [
                     'mrf_id' => $id,
                     'po_number' => $poNumber,
                     'file_name' => $poFileName,
-                    'path' => $poPath,
+                    'stored_path' => $storedPath,
+                    'url' => $poUrl,
                     'disk' => $disk,
+                    'file_size' => $file->getSize(),
                     'is_regeneration' => $isRegeneration
                 ]);
             }
+            
+            // Verify upload was successful
+            if (empty($poUrl)) {
+                throw new \Exception('PO file upload failed - no URL was generated');
+            }
+            
+        } catch (\Exception $e) {
+            Log::error('PO file upload failed', [
+                'mrf_id' => $id,
+                'po_number' => $poNumber,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+                'file_name' => $file->getClientOriginalName(),
+                'file_size' => $file->getSize(),
+                'file_mime' => $file->getMimeType(),
+            ]);
+            
+            return response()->json([
+                'success' => false,
+                'error' => 'Failed to upload PO file: ' . $e->getMessage(),
+                'code' => 'UPLOAD_FAILED',
+                'details' => [
+                    'file_name' => $file->getClientOriginalName(),
+                    'file_size' => $file->getSize(),
+                    'max_size' => $file->getMaxFilesize(),
+                ]
+            ], 500);
         }
 
         // Update MRF
