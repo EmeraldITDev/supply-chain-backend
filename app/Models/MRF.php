@@ -84,6 +84,10 @@ class MRF extends Model
         'po_generated_at' => 'datetime',
         'po_signed_at' => 'datetime',
         'payment_approved_at' => 'datetime',
+        'grn_requested' => 'boolean',
+        'grn_requested_at' => 'datetime',
+        'grn_completed' => 'boolean',
+        'grn_completed_at' => 'datetime',
     ];
 
     /**

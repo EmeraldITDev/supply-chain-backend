@@ -99,9 +99,18 @@ class MRFController extends Controller
                 'date' => $mrf->date->format('Y-m-d'),
                 'status' => $mrf->status,
                 'currentStage' => $mrf->current_stage,
+                'workflowState' => $mrf->workflow_state,
                 'approvalHistory' => $mrf->approval_history ?? [],
                 'rejectionReason' => $mrf->rejection_reason,
                 'isResubmission' => $mrf->is_resubmission,
+                'pfiUrl' => $mrf->pfi_url,
+                'pfiShareUrl' => $mrf->pfi_share_url,
+                'grnRequested' => $mrf->grn_requested,
+                'grnRequestedAt' => $mrf->grn_requested_at?->toIso8601String(),
+                'grnCompleted' => $mrf->grn_completed,
+                'grnCompletedAt' => $mrf->grn_completed_at?->toIso8601String(),
+                'grnUrl' => $mrf->grn_url,
+                'grnShareUrl' => $mrf->grn_share_url,
             ];
         }));
     }

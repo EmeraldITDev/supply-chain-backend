@@ -25,10 +25,13 @@ class User extends Authenticatable
         'password',
         'role',
         'department',
+        'phone',
         'employee_id',
         'vendor_id',
         'must_change_password',
         'password_changed_at',
+        'is_admin',
+        'can_manage_users',
     ];
 
     /**
