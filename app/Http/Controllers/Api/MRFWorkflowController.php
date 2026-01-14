@@ -8,6 +8,8 @@ use App\Models\MRFApprovalHistory;
 use App\Services\NotificationService;
 use App\Services\EmailService;
 use App\Services\OneDriveService;
+use App\Services\WorkflowStateService;
+use App\Services\PermissionService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\Storage;
@@ -17,12 +19,20 @@ class MRFWorkflowController extends Controller
 {
     protected NotificationService $notificationService;
     protected EmailService $emailService;
+    protected WorkflowStateService $workflowService;
+    protected PermissionService $permissionService;
     protected ?OneDriveService $oneDriveService;
 
-    public function __construct(NotificationService $notificationService, EmailService $emailService)
-    {
+    public function __construct(
+        NotificationService $notificationService, 
+        EmailService $emailService,
+        WorkflowStateService $workflowService,
+        PermissionService $permissionService
+    ) {
         $this->notificationService = $notificationService;
         $this->emailService = $emailService;
+        $this->workflowService = $workflowService;
+        $this->permissionService = $permissionService;
         
         // Initialize OneDriveService if credentials are configured
         try {
@@ -427,7 +437,7 @@ class MRFWorkflowController extends Controller
                 // Delete old PO file if regenerating
                 if ($isRegeneration && $mrf->unsigned_po_url) {
                     try {
-                        $disk = config('filesystems.documents_disk', 'public');
+        $disk = config('filesystems.documents_disk', 'public');
                         $oldPath = str_replace(Storage::disk($disk)->url(''), '', $mrf->unsigned_po_url);
                         Storage::disk($disk)->delete($oldPath);
                         Log::info('Deleted old PO file for regeneration', ['old_path' => $oldPath]);
@@ -438,11 +448,11 @@ class MRFWorkflowController extends Controller
 
                 $disk = config('filesystems.documents_disk', 'public');
                 $poFileName = "po_{$poNumber}_" . time() . "." . $file->getClientOriginalExtension();
-                $poPath = "purchase-orders/{$poFileName}";
+        $poPath = "purchase-orders/{$poFileName}";
                 
                 // Store the file
                 $file->storeAs(dirname($poPath), basename($poPath), $disk);
-                $poUrl = Storage::disk($disk)->url($poPath);
+        $poUrl = Storage::disk($disk)->url($poPath);
                 
                 Log::info($isRegeneration ? 'PO file regenerated' : 'PO file uploaded', [
                     'mrf_id' => $id,
@@ -594,10 +604,10 @@ class MRFWorkflowController extends Controller
         // Fallback to local/S3 storage if OneDrive is not configured or failed
         if (!$useOneDrive) {
             $disk = config('filesystems.documents_disk', 'public');
-            $signedPOFileName = "po_signed_{$mrf->po_number}_" . time() . ".pdf";
-            $signedPOPath = "purchase-orders/signed/{$signedPOFileName}";
-            Storage::disk($disk)->putFileAs('purchase-orders/signed', $signedPOFile, $signedPOFileName);
-            $signedPOUrl = Storage::disk($disk)->url($signedPOPath);
+        $signedPOFileName = "po_signed_{$mrf->po_number}_" . time() . ".pdf";
+        $signedPOPath = "purchase-orders/signed/{$signedPOFileName}";
+        Storage::disk($disk)->putFileAs('purchase-orders/signed', $signedPOFile, $signedPOFileName);
+        $signedPOUrl = Storage::disk($disk)->url($signedPOPath);
         }
 
         // Update MRF

@@ -75,6 +75,16 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/mrfs/{id}/reject-po', [\App\Http\Controllers\Api\MRFWorkflowController::class, 'rejectPO']);
     Route::post('/mrfs/{id}/process-payment', [\App\Http\Controllers\Api\MRFWorkflowController::class, 'processPayment']);
     Route::post('/mrfs/{id}/approve-payment', [\App\Http\Controllers\Api\MRFWorkflowController::class, 'approvePayment']);
+    
+    // GRN endpoints
+    Route::post('/mrfs/{id}/request-grn', [\App\Http\Controllers\Api\GRNController::class, 'requestGRN']);
+    Route::post('/mrfs/{id}/complete-grn', [\App\Http\Controllers\Api\GRNController::class, 'completeGRN']);
+    
+    // User management (admin only)
+    Route::get('/users', [\App\Http\Controllers\Api\UserManagementController::class, 'index']);
+    Route::post('/users', [\App\Http\Controllers\Api\UserManagementController::class, 'store']);
+    Route::put('/users/{id}', [\App\Http\Controllers\Api\UserManagementController::class, 'update']);
+    Route::delete('/users/{id}', [\App\Http\Controllers\Api\UserManagementController::class, 'destroy']);
     Route::post('/mrfs/{id}/workflow-reject', [\App\Http\Controllers\Api\MRFWorkflowController::class, 'rejectMRF']);
 
     // SRF routes

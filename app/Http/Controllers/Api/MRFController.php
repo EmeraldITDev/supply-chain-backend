@@ -5,18 +5,44 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\MRF;
 use App\Services\NotificationService;
+use App\Services\WorkflowStateService;
+use App\Services\PermissionService;
+use App\Services\OneDriveService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
 
 class MRFController extends Controller
 {
     protected NotificationService $notificationService;
+    protected WorkflowStateService $workflowService;
+    protected PermissionService $permissionService;
+    protected ?OneDriveService $oneDriveService;
 
-    public function __construct(NotificationService $notificationService)
-    {
+    public function __construct(
+        NotificationService $notificationService,
+        WorkflowStateService $workflowService,
+        PermissionService $permissionService
+    ) {
         $this->notificationService = $notificationService;
+        $this->workflowService = $workflowService;
+        $this->permissionService = $permissionService;
+        
+        // Initialize OneDriveService if configured
+        try {
+            if (config('filesystems.disks.onedrive.client_id') && 
+                config('filesystems.disks.onedrive.client_secret') &&
+                config('filesystems.disks.onedrive.tenant_id')) {
+                $this->oneDriveService = app(OneDriveService::class);
+            } else {
+                $this->oneDriveService = null;
+            }
+        } catch (\Exception $e) {
+            Log::warning('OneDriveService initialization failed in MRFController', ['error' => $e->getMessage()]);
+            $this->oneDriveService = null;
+        }
     }
     /**
      * Get all MRFs with optional filters
@@ -129,6 +155,16 @@ class MRFController extends Controller
                 ]);
             }
 
+            // Check permission
+            $user = $request->user();
+            if (!$this->permissionService->canCreateMRF($user)) {
+                return response()->json([
+                    'success' => false,
+                    'error' => 'You do not have permission to create MRF requests',
+                    'code' => 'FORBIDDEN'
+                ], 403);
+            }
+
             $validator = Validator::make($request->all(), [
                 'title' => 'required|string|max:255',
                 'category' => 'required|string|max:255',
@@ -137,6 +173,7 @@ class MRFController extends Controller
                 'quantity' => 'required|string',
                 'estimatedCost' => 'required|numeric|min:0',
                 'justification' => 'required|string',
+                'pfi' => 'nullable|file|mimes:pdf,doc,docx|max:10240', // Optional PFI upload (10MB max)
             ]);
 
             if ($validator->fails()) {
@@ -158,8 +195,69 @@ class MRFController extends Controller
                 ], 401);
             }
 
+            // Generate MRF ID first
+            $mrfId = MRF::generateMRFId();
+            
+            // Handle PFI upload if provided
+            $pfiUrl = null;
+            $pfiShareUrl = null;
+            
+            if ($request->hasFile('pfi')) {
+                $pfiFile = $request->file('pfi');
+                
+                // Upload to OneDrive if configured
+                if ($this->oneDriveService) {
+                    try {
+                        $year = date('Y');
+                        $folder = "MRFs/{$year}/{$mrfId}";
+                        $pfiFileName = "PFI_{$mrfId}." . $pfiFile->getClientOriginalExtension();
+                        
+                        $oneDriveResult = $this->oneDriveService->uploadFile($pfiFile, $folder, $pfiFileName);
+                        $pfiUrl = $oneDriveResult['webUrl'];
+                        
+                        // Create sharing link
+                        try {
+                            $pfiShareUrl = $this->oneDriveService->createSharingLink($oneDriveResult['path'], 'view');
+                        } catch (\Exception $e) {
+                            Log::warning('Failed to create PFI sharing link', [
+                                'error' => $e->getMessage(),
+                                'mrf_id' => $mrfId
+                            ]);
+                        }
+                        
+                        Log::info('PFI uploaded to OneDrive', [
+                            'mrf_id' => $mrfId,
+                            'onedrive_path' => $oneDriveResult['path'],
+                            'web_url' => $pfiUrl,
+                            'share_url' => $pfiShareUrl,
+                        ]);
+                    } catch (\Exception $e) {
+                        Log::error('OneDrive PFI upload failed, falling back to local storage', [
+                            'error' => $e->getMessage(),
+                            'mrf_id' => $mrfId
+                        ]);
+                        // Fallback to local storage
+                        $disk = config('filesystems.documents_disk', 'public');
+                        $pfiFileName = "pfi_{$mrfId}_" . time() . "." . $pfiFile->getClientOriginalExtension();
+                        $pfiPath = "mrfs/{$mrfId}/{$pfiFileName}";
+                        $pfiFile->storeAs(dirname($pfiPath), basename($pfiPath), $disk);
+                        $pfiUrl = Storage::disk($disk)->url($pfiPath);
+                        $pfiShareUrl = $pfiUrl; // Use same URL as share URL for local storage
+                    }
+                } else {
+                    // Local storage fallback
+                    $disk = config('filesystems.documents_disk', 'public');
+                    $mrfId = MRF::generateMRFId();
+                    $pfiFileName = "pfi_{$mrfId}_" . time() . "." . $pfiFile->getClientOriginalExtension();
+                    $pfiPath = "mrfs/{$mrfId}/{$pfiFileName}";
+                    $pfiFile->storeAs(dirname($pfiPath), basename($pfiPath), $disk);
+                    $pfiUrl = Storage::disk($disk)->url($pfiPath);
+                    $pfiShareUrl = $pfiUrl;
+                }
+            }
+
             $mrf = MRF::create([
-                'mrf_id' => MRF::generateMRFId(),
+                'mrf_id' => $mrfId,
                 'title' => $request->title,
                 'category' => $request->category,
                 'urgency' => $request->urgency,
@@ -170,13 +268,16 @@ class MRFController extends Controller
                 'requester_id' => $user->id,
                 'requester_name' => $user->name,
                 'date' => now(),
-                'status' => 'Pending',
-                'current_stage' => 'procurement',
+                'status' => 'pending',
+                'current_stage' => 'executive_review',
+                'workflow_state' => WorkflowStateService::STATE_MRF_CREATED,
                 'approval_history' => [],
                 'is_resubmission' => false,
+                'pfi_url' => $pfiUrl,
+                'pfi_share_url' => $pfiShareUrl,
             ]);
 
-            // Send notification to procurement managers
+            // Send notification to Executive
             try {
                 $this->notificationService->notifyMRFSubmitted($mrf);
             } catch (\Exception $e) {
@@ -188,22 +289,28 @@ class MRFController extends Controller
             }
 
             return response()->json([
-                'id' => $mrf->mrf_id,
-                'title' => $mrf->title,
-                'category' => $mrf->category,
-                'urgency' => $mrf->urgency,
-                'description' => $mrf->description,
-                'quantity' => $mrf->quantity,
-                'estimatedCost' => (float) $mrf->estimated_cost,
-                'justification' => $mrf->justification,
-                'requester' => $mrf->requester_name,
-                'requesterId' => (string) $mrf->requester_id,
-                'date' => $mrf->date->format('Y-m-d'),
-                'status' => $mrf->status,
-                'currentStage' => $mrf->current_stage,
-                'approvalHistory' => $mrf->approval_history ?? [],
-                'rejectionReason' => $mrf->rejection_reason,
-                'isResubmission' => $mrf->is_resubmission,
+                'success' => true,
+                'data' => [
+                    'id' => $mrf->mrf_id,
+                    'title' => $mrf->title,
+                    'category' => $mrf->category,
+                    'urgency' => $mrf->urgency,
+                    'description' => $mrf->description,
+                    'quantity' => $mrf->quantity,
+                    'estimatedCost' => (float) $mrf->estimated_cost,
+                    'justification' => $mrf->justification,
+                    'requester' => $mrf->requester_name,
+                    'requesterId' => (string) $mrf->requester_id,
+                    'date' => $mrf->date->format('Y-m-d'),
+                    'status' => $mrf->status,
+                    'currentStage' => $mrf->current_stage,
+                    'workflowState' => $mrf->workflow_state,
+                    'approvalHistory' => $mrf->approval_history ?? [],
+                    'rejectionReason' => $mrf->rejection_reason,
+                    'isResubmission' => $mrf->is_resubmission,
+                    'pfiUrl' => $mrf->pfi_url,
+                    'pfiShareUrl' => $mrf->pfi_share_url,
+                ]
             ], 201);
         } catch (\Exception $e) {
             \Log::error('MRF creation failed', [

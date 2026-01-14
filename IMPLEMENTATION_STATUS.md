@@ -1,153 +1,172 @@
-# Implementation Status - User Profile & Centralized OneDrive
+# Comprehensive Workflow Implementation - Status
 
-## Summary
+## ✅ Completed Components
 
-This is a comprehensive implementation request that includes:
+### **Backend**
 
-1. **User Profile Feature** - Account settings management
-2. **Centralized OneDrive Integration** - Use procurement@emeraldcfze.com account
-3. **Vendor Document Handling** - Save vendor docs to procurement OneDrive
-4. **Secure Sharing Links** - View-only links for PO documents
+1. **Database Migrations** ✅
+   - `2026_01_16_000001_add_workflow_state_and_pfi_to_mrfs.php` - Workflow state and PFI fields
+   - `2026_01_16_000002_add_admin_permissions_to_users.php` - Admin permissions
+   - `2026_01_15_000001_add_sharing_urls_to_mrf_requests.php` - Sharing URLs for POs
+   - `2026_01_15_000002_add_urls_to_vendor_registration_documents.php` - Vendor document URLs
 
----
+2. **Services** ✅
+   - `WorkflowStateService.php` - State machine implementation
+   - `PermissionService.php` - Role-based permission checks
+   - `OneDriveService.php` - Document storage (already exists, extended)
 
-## Implementation Plan
+3. **Controllers** ✅
+   - `MRFController.php` - Updated with PFI upload and workflow state
+   - `MRFWorkflowController.php` - Updated with state machine integration
+   - `GRNController.php` - GRN request and completion
+   - `UserManagementController.php` - Admin user management
 
-### Phase 1: OneDrive Service Updates (Critical) ✅
+4. **Routes** ✅
+   - GRN endpoints added
+   - User management endpoints added
 
-**Current State:**
-- OneDriveService uses `/me/drive` endpoint (requires user context)
-- Uses client credentials flow (application permissions)
-- Works with individual user accounts
+### **Frontend**
 
-**Required Changes:**
-- Change endpoints from `/me/drive` to `/users/{email}/drive`
-- Use `procurement@emeraldcfze.com` as the target user
-- Add `ONEDRIVE_USER_EMAIL` environment variable
-- Update all upload/download/delete methods
+1. **PFI Upload** ✅
+   - `NewMRF.tsx` - Added PFI file input
+   - `api.ts` - Added `createWithPFI` method
 
-**Files to Update:**
-- `app/Services/OneDriveService.php`
-- `config/filesystems.php` (add ONEDRIVE_USER_EMAIL)
-- `.env.example` (document new variable)
-
-**Status:** ⏳ In Progress
-
----
-
-### Phase 2: Sharing Links (Important) ⏳
-
-**Requirements:**
-- Create view-only sharing links for PO documents
-- Share with organization members only
-- Store sharing links in database
-- Return sharing links in API responses
-
-**Files to Update:**
-- `app/Services/OneDriveService.php` (add `createSharingLink()` method)
-- `app/Http/Controllers/Api/MRFWorkflowController.php` (use sharing links)
-- Database migration (add `unsigned_po_share_url`, `signed_po_share_url` columns)
-
-**Status:** ⏳ Pending
+2. **Executive Approval Check** ✅
+   - `Procurement.tsx` - Only allows PO generation for Executive-approved MRFs
 
 ---
 
-### Phase 3: Vendor Document Service (Important) ⏳
+## ⚠️ Partially Completed / Needs Update
 
-**Requirements:**
-- Update VendorDocumentService to use OneDriveService
-- Save vendor documents to: `VendorDocuments/{year}/{company-name}/`
-- Update vendor registration flow
+### **Backend**
 
-**Files to Update:**
-- `app/Services/VendorDocumentService.php`
-- `app/Http/Controllers/Api/VendorController.php` (or vendor registration controller)
+1. **MRFWorkflowController** - State transitions
+   - ✅ Executive approval uses state machine
+   - ✅ PO generation uses state machine
+   - ✅ PO signing uses state machine
+   - ✅ Payment processing uses state machine
+   - ⚠️ PO rejection needs state transition
+   - ⚠️ PO review state needs to be set when Supply Chain reviews
 
-**Status:** ⏳ Pending
+2. **NotificationService** - Needs extension
+   - ⚠️ Add `notifyGRNRequested()` method
+   - ⚠️ Add `notifyGRNCompleted()` method
+   - ⚠️ Update existing notifications to include workflow state
+
+### **Frontend**
+
+1. **Role-Specific Dashboards** - Needs creation
+   - ⚠️ Regular Staff Dashboard - Show only their MRFs
+   - ⚠️ Executive Dashboard - Show MRFs awaiting approval
+   - ⚠️ Procurement Dashboard - Show approved MRFs for PO generation
+   - ⚠️ Supply Chain Dashboard - Show POs for review/signing
+   - ⚠️ Finance Dashboard - Show signed POs and GRN requests
+
+2. **Workflow State Display** - Needs implementation
+   - ⚠️ Visual state machine indicator
+   - ⚠️ State-based action buttons
+   - ⚠️ State history timeline
+
+3. **GRN Functionality** - Needs frontend
+   - ⚠️ Finance Officer: Request GRN button
+   - ⚠️ Procurement Manager: Complete GRN dialog with file upload
+
+4. **User Management** - Needs frontend
+   - ⚠️ Admin user management page
+   - ⚠️ Add/edit/delete users
+   - ⚠️ Role assignment
+
+5. **PFI Display** - Needs implementation
+   - ⚠️ Show PFI download link in MRF details
+   - ⚠️ OneDrive link for PFI
 
 ---
 
-### Phase 4: User Profile Enhancements (Nice to Have) ⏳
+## 📋 Remaining Tasks
 
-**Requirements:**
-- Update personal information
-- Change password (already exists, need to wire up)
-- Manage connected services
-- Better UI/UX
+### **High Priority**
 
-**Files to Update:**
-- `src/pages/Settings.tsx` (enhance existing page)
-- `src/services/api.ts` (add profile update endpoints)
-- Backend: Add `PUT /auth/profile` endpoint
+1. **Update NotificationService**
+   ```php
+   // Add to NotificationService.php
+   public function notifyGRNRequested(MRF $mrf, User $requestedBy) { ... }
+   public function notifyGRNCompleted(MRF $mrf, User $completedBy) { ... }
+   ```
 
-**Status:** ⏳ Pending
+2. **Update MRF Model**
+   - Add `workflow_state`, `pfi_url`, `pfi_share_url`, GRN fields to fillable
+   - Add casts for new fields
+
+3. **Update Frontend Types**
+   - Add `workflowState`, `pfiUrl`, `pfiShareUrl`, GRN fields to MRF type
+
+4. **Create Role Dashboards**
+   - Regular Staff: `/dashboard` (already exists, needs filtering)
+   - Executive: `/executive-dashboard` (exists, needs state filtering)
+   - Procurement: `/procurement` (exists, needs state filtering)
+   - Supply Chain: `/supply-chain-dashboard` (exists, needs state filtering)
+   - Finance: `/finance-dashboard` (exists, needs GRN request button)
+
+5. **Add GRN UI Components**
+   - Finance Dashboard: "Request GRN" button
+   - Procurement Dashboard: "Complete GRN" dialog
+
+6. **Add User Management UI**
+   - Settings page: "User Management" tab (admin only)
+   - User list, add, edit, delete
+
+7. **Create Test Users**
+   - Run seeder or manual SQL to create test accounts
 
 ---
 
-## Next Steps
+## 🚀 Quick Start Guide
 
-1. ✅ Update OneDriveService to use `/users/{email}/drive`
-2. ⏳ Add sharing link functionality
-3. ⏳ Update vendor document service
-4. ⏳ Enhance user profile page
-5. ⏳ Test all workflows
-6. ⏳ Update documentation
-
----
-
-## Important Notes
-
-### Azure AD Configuration
-
-For centralized OneDrive access, you need:
-
-1. **Application Permissions:**
-   - `Files.ReadWrite.All` (Application permission)
-   - Grant admin consent
-
-2. **User Account:**
-   - `procurement@emeraldcfze.com` must exist in your tenant
-   - Account must have OneDrive enabled
-   - Account should be a shared mailbox or service account
-
-3. **Security:**
-   - No password storage required (uses application permissions)
-   - Works with MFA-enabled tenants
-   - More secure than ROPC flow
-
-### Endpoint Changes
-
-**Old (User-specific):**
+### **1. Run Migrations**
+```bash
+cd "/Users/asukuonukaba/Desktop/SCM Backend/supply-chain-backend"
+php artisan migrate
 ```
-GET /me/drive/root:/path
-PUT /me/drive/root:/path:/content
+
+### **2. Update Environment**
+```env
+ONEDRIVE_USER_EMAIL=procurement@emeraldcfze.com
 ```
 
-**New (Centralized Account):**
+### **3. Clear Cache**
+```bash
+php artisan config:clear
+php artisan cache:clear
 ```
-GET /users/procurement@emeraldcfze.com/drive/root:/path
-PUT /users/procurement@emeraldcfze.com/drive/root:/path:/content
-```
+
+### **4. Create Test Users**
+See `CREATE_TEST_USERS.md` for SQL scripts
 
 ---
 
-## Testing Checklist
+## 📝 Next Steps
 
-- [ ] PO upload to procurement OneDrive
-- [ ] Vendor document upload to procurement OneDrive
-- [ ] Sharing links work (view-only)
-- [ ] User profile updates work
-- [ ] Password change works
-- [ ] All documents accessible from procurement@emeraldcfze.com
+1. Complete NotificationService methods
+2. Update frontend types
+3. Create role-specific dashboard filters
+4. Add GRN request/completion UI
+5. Add user management UI
+6. Test complete workflow
+7. Create test user accounts
 
 ---
 
-## Estimated Implementation Time
+## 🔍 Testing Checklist
 
-- Phase 1 (OneDrive Updates): 2-3 hours
-- Phase 2 (Sharing Links): 1-2 hours
-- Phase 3 (Vendor Docs): 1-2 hours
-- Phase 4 (User Profile): 1-2 hours
-- Testing: 1-2 hours
-
-**Total:** ~6-11 hours of development time
+- [ ] Regular Staff can create MRF with PFI
+- [ ] Executive can approve/reject MRF
+- [ ] Procurement can generate PO (only after Executive approval)
+- [ ] Supply Chain can review and sign PO
+- [ ] Finance can process payment
+- [ ] Finance can request GRN
+- [ ] Procurement can complete GRN
+- [ ] Workflow states transition correctly
+- [ ] Documents stored in OneDrive
+- [ ] Sharing links work
+- [ ] Admin can manage users
+- [ ] Role-based access enforced

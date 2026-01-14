@@ -25,6 +25,7 @@ class MRF extends Model
         'date',
         'status',
         'current_stage',
+        'workflow_state',
         'approval_history',
         'rejection_reason',
         'rejection_comments',
@@ -33,6 +34,9 @@ class MRF extends Model
         'is_resubmission',
         'previous_submission_id',
         'remarks',
+        // PFI (Proforma Invoice)
+        'pfi_url',
+        'pfi_share_url',
         // Executive approval
         'executive_approved',
         'executive_approved_by',
@@ -46,7 +50,9 @@ class MRF extends Model
         // PO information
         'po_number',
         'unsigned_po_url',
+        'unsigned_po_share_url',
         'signed_po_url',
+        'signed_po_share_url',
         'po_version',
         'po_generated_at',
         'po_signed_at',
@@ -54,6 +60,15 @@ class MRF extends Model
         'payment_status',
         'payment_approved_at',
         'payment_approved_by',
+        // GRN (Goods Received Note)
+        'grn_requested',
+        'grn_requested_at',
+        'grn_requested_by',
+        'grn_completed',
+        'grn_completed_at',
+        'grn_completed_by',
+        'grn_url',
+        'grn_share_url',
     ];
 
     protected $casts = [

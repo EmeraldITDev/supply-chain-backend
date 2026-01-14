@@ -692,4 +692,75 @@ class NotificationService
             ]);
         }
     }
+
+    /**
+     * Notify Procurement Manager about GRN request
+     */
+    public function notifyGRNRequested(MRF $mrf, User $requestedBy): void
+    {
+        try {
+            $procurementManagers = User::whereIn('role', ['procurement_manager', 'procurement', 'admin'])->get();
+
+            foreach ($procurementManagers as $manager) {
+                $manager->notify(new SystemAnnouncementNotification(
+                    'GRN Requested',
+                    "GRN has been requested for PO {$mrf->po_number} (MRF {$mrf->mrf_id}) by {$requestedBy->name}. Please complete the GRN.",
+                    "/mrfs/{$mrf->mrf_id}",
+                    'high'
+                ));
+            }
+
+            Log::info('GRN requested notification sent', [
+                'mrf_id' => $mrf->mrf_id,
+                'po_number' => $mrf->po_number,
+                'requested_by' => $requestedBy->id
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Failed to send GRN requested notification', [
+                'mrf_id' => $mrf->mrf_id,
+                'error' => $e->getMessage()
+            ]);
+        }
+    }
+
+    /**
+     * Notify Finance Officer about GRN completion
+     */
+    public function notifyGRNCompleted(MRF $mrf, User $completedBy): void
+    {
+        try {
+            $financeTeam = User::whereIn('role', ['finance', 'finance_officer', 'admin'])->get();
+
+            foreach ($financeTeam as $finance) {
+                $finance->notify(new SystemAnnouncementNotification(
+                    'GRN Completed',
+                    "GRN for PO {$mrf->po_number} (MRF {$mrf->mrf_id}) has been completed by {$completedBy->name}.",
+                    "/mrfs/{$mrf->mrf_id}",
+                    'normal'
+                ));
+            }
+
+            // Also notify the requester
+            $requester = $mrf->requester;
+            if ($requester) {
+                $requester->notify(new SystemAnnouncementNotification(
+                    'GRN Completed',
+                    "GRN for your MRF {$mrf->mrf_id} (PO {$mrf->po_number}) has been completed.",
+                    "/mrfs/{$mrf->mrf_id}",
+                    'normal'
+                ));
+            }
+
+            Log::info('GRN completed notification sent', [
+                'mrf_id' => $mrf->mrf_id,
+                'po_number' => $mrf->po_number,
+                'completed_by' => $completedBy->id
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Failed to send GRN completed notification', [
+                'mrf_id' => $mrf->mrf_id,
+                'error' => $e->getMessage()
+            ]);
+        }
+    }
 }
