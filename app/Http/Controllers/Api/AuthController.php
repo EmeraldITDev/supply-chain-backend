@@ -21,17 +21,28 @@ class AuthController extends Controller
             return true;
         }
 
-        // Allowed Spatie roles
+        // Allowed roles (check both Spatie roles and direct role field)
         $allowedRoles = [
             'procurement_manager',
+            'procurement', // Added for test users
             'supply_chain_director',
+            'supply_chain', // Added for test users
             'logistics_manager',
+            'logistics', // Added for test users
             'finance',
+            'finance_officer', // Added for test users
             'executive',
             'chairman',
+            'employee', // Added - regular employees can access to create MRFs
+            'admin', // Added for admin users
         ];
 
-        // Check if user has any of the allowed roles
+        // Check direct role field first (for users without Spatie roles)
+        if ($user->role && in_array($user->role, $allowedRoles)) {
+            return true;
+        }
+
+        // Check if user has any of the allowed Spatie roles
         if ($user->hasAnyRole($allowedRoles)) {
             return true;
         }
