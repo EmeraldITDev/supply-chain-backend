@@ -61,9 +61,19 @@ class SRFController extends Controller
 
     /**
      * Create new SRF
+     * Only employees (staff) can create SRF
      */
     public function store(Request $request)
     {
+        // Only employees can create SRF
+        $user = $request->user();
+        if (!$user || $user->role !== 'employee') {
+            return response()->json([
+                'success' => false,
+                'error' => 'Only staff members can create Service Request Forms. Please contact your administrator.',
+            ], 403);
+        }
+
         // Normalize urgency to proper case
         if ($request->has('urgency')) {
             $request->merge([

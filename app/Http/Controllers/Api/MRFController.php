@@ -153,25 +153,25 @@ class MRFController extends Controller
 
     /**
      * Create new MRF
+     * Only employees (staff) can create MRF
      */
     public function store(Request $request)
     {
+        // Only employees can create MRF
+        $user = $request->user();
+        if (!$user || $user->role !== 'employee') {
+            return response()->json([
+                'success' => false,
+                'error' => 'Only staff members can create Material Request Forms. Please contact your administrator.',
+            ], 403);
+        }
+
         try {
             // Normalize urgency to proper case
             if ($request->has('urgency') && $request->urgency) {
                 $request->merge([
                     'urgency' => ucfirst(strtolower($request->urgency))
                 ]);
-            }
-
-            // Check permission
-            $user = $request->user();
-            if (!$this->permissionService->canCreateMRF($user)) {
-                return response()->json([
-                    'success' => false,
-                    'error' => 'You do not have permission to create MRF requests',
-                    'code' => 'FORBIDDEN'
-                ], 403);
             }
 
             $validator = Validator::make($request->all(), [
