@@ -399,13 +399,13 @@ class MRFWorkflowController extends Controller
             $poNumber = $mrf->po_number;
         } else {
             // Use provided PO number or auto-generate a new one
-            $poNumber = $request->po_number ?? $this->generatePONumber();
+            $poNumber = $request->po_number ?? $this->generatePONumber($mrf);
             
             // If auto-generating, make sure it's unique (check database)
             if (empty($request->po_number)) {
                 $attempts = 0;
                 while (MRF::where('po_number', $poNumber)->where('id', '!=', $mrf->id)->exists() && $attempts < 10) {
-                    $poNumber = $this->generatePONumber();
+                    $poNumber = $this->generatePONumber($mrf);
                     $attempts++;
                 }
             }
@@ -1088,26 +1088,39 @@ class MRFWorkflowController extends Controller
         ]);
     }
 
-    private function generatePONumber(): string
+    private function generatePONumber(MRF $mrf): string
     {
         $year = date('Y');
         $month = date('m');
+        $day = date('d');
         
-        // Format: PO-YYYY-MM-XXX (e.g., PO-2026-01-001)
-        $prefix = "PO-{$year}-{$month}";
+        // Extract last 6 characters of MRF ID (UUID) to make it unique to the request
+        $mrfIdSuffix = substr(str_replace('-', '', $mrf->mrf_id), -6);
+        $mrfIdSuffix = strtoupper($mrfIdSuffix);
         
-        $lastPO = MRF::where('po_number', 'like', "{$prefix}-%")
-            ->orderBy('po_number', 'desc')
-            ->first();
-
-        if ($lastPO && preg_match('/-(\d+)$/', $lastPO->po_number, $matches)) {
-            $lastNumber = (int) $matches[1];
-            $newNumber = str_pad($lastNumber + 1, 3, '0', STR_PAD_LEFT);
-        } else {
-            $newNumber = '001';
+        // Format: PO-MRF-YYYYMMDD-XXXXXX (e.g., PO-MRF-20260115-A1B2C3)
+        // This includes: Request type (MRF), Date, and MRF ID suffix for uniqueness
+        $poNumber = "PO-MRF-{$year}{$month}{$day}-{$mrfIdSuffix}";
+        
+        // Check if this PO number already exists (for same MRF regenerating)
+        // If it exists and belongs to this MRF, it's fine (regeneration)
+        // If it exists for a different MRF, add a sequence number
+        $existingMRF = MRF::where('po_number', $poNumber)->first();
+        if ($existingMRF && $existingMRF->id !== $mrf->id) {
+            // Another MRF has this PO number, add sequence
+            $sequence = 1;
+            $lastPO = MRF::where('po_number', 'like', "{$poNumber}-%")
+                ->orderBy('po_number', 'desc')
+                ->first();
+            
+            if ($lastPO && preg_match('/-(\d+)$/', $lastPO->po_number, $matches)) {
+                $sequence = (int) $matches[1] + 1;
+            }
+            
+            $poNumber = "{$poNumber}-{$sequence}";
         }
 
-        return "{$prefix}-{$newNumber}";
+        return $poNumber;
     }
 
     /**
