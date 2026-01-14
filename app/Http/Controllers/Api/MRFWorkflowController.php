@@ -1042,21 +1042,34 @@ class MRFWorkflowController extends Controller
      * Helper: Generate unique PO number
      */
     /**
-     * Delete/Clear PO for an MRF (Procurement Manager only)
-     * This allows procurement managers to clear a PO and regenerate it
+     * Delete/Clear PO for an MRF (Procurement Manager or Admin)
+     * This allows procurement managers/admins to clear a PO and regenerate it
+     * Admin can delete PO regardless of MRF status
      */
     public function deletePO(Request $request, $id)
     {
         $user = $request->user();
 
-        // Check role - only procurement managers can delete POs
-        if (!in_array($user->role, ['procurement_manager', 'procurement', 'admin'])) {
+        // Check role - procurement managers and admin can delete POs
+        // Use case-insensitive comparison for role
+        $userRole = strtolower(trim($user->role ?? ''));
+        $allowedRoles = ['procurement_manager', 'procurement', 'admin'];
+        
+        if (!in_array($userRole, array_map('strtolower', $allowedRoles))) {
+            Log::warning('Unauthorized PO deletion attempt', [
+                'user_id' => $user->id,
+                'user_role' => $user->role,
+                'mrf_id' => $id
+            ]);
+            
             return response()->json([
                 'success' => false,
-                'error' => 'Only procurement managers can delete POs',
+                'error' => 'Only procurement managers and admins can delete POs',
                 'code' => 'FORBIDDEN'
             ], 403);
         }
+
+        $isAdmin = ($userRole === 'admin');
 
         $mrf = MRF::where('mrf_id', $id)->first();
 
@@ -1068,13 +1081,39 @@ class MRFWorkflowController extends Controller
             ], 404);
         }
 
-        // Check if PO exists
-        if (empty($mrf->po_number) && empty($mrf->unsigned_po_url)) {
+        // Check if PO exists - be more lenient with whitespace/null checks
+        $hasPONumber = !empty(trim($mrf->po_number ?? ''));
+        $hasPOUrl = !empty(trim($mrf->unsigned_po_url ?? ''));
+        
+        if (!$hasPONumber && !$hasPOUrl) {
+            Log::info('PO deletion attempted but no PO exists', [
+                'mrf_id' => $id,
+                'po_number' => $mrf->po_number,
+                'po_url_exists' => !empty($mrf->unsigned_po_url)
+            ]);
+            
             return response()->json([
                 'success' => false,
                 'error' => 'No PO found for this MRF',
-                'code' => 'NO_PO'
+                'code' => 'NO_PO',
+                'details' => [
+                    'mrf_id' => $id,
+                    'has_po_number' => $hasPONumber,
+                    'has_po_url' => $hasPOUrl
+                ]
             ], 422);
+        }
+        
+        // Admin can always delete, but for non-admins, log status check
+        if (!$isAdmin) {
+            Log::info('PO deletion initiated', [
+                'mrf_id' => $id,
+                'mrf_status' => $mrf->status,
+                'current_stage' => $mrf->current_stage,
+                'po_number' => $mrf->po_number,
+                'deleted_by' => $user->id,
+                'deleted_by_role' => $user->role
+            ]);
         }
 
         // Delete PO files from storage if they exist
@@ -1102,20 +1141,57 @@ class MRFWorkflowController extends Controller
             if ($mrf->unsigned_po_url && !$this->oneDriveService) {
                 try {
                     $disk = config('filesystems.documents_disk', 'public');
-                    // Extract path from URL
                     $urlPath = parse_url($mrf->unsigned_po_url, PHP_URL_PATH);
+                    
                     if ($urlPath) {
-                        $filePath = ltrim($urlPath, '/storage/');
-                        if (Storage::disk($disk)->exists($filePath)) {
-                            Storage::disk($disk)->delete($filePath);
-                            Log::info('Deleted PO file from storage', ['path' => $filePath]);
+                        // Try multiple path extraction methods
+                        $possiblePaths = [
+                            ltrim($urlPath, '/storage/'),
+                            ltrim(str_replace('/storage/', '', $urlPath), '/'),
+                            ltrim($urlPath, '/'),
+                            basename($urlPath),
+                        ];
+                        
+                        // Also try extracting from full URL path
+                        $baseUrl = Storage::disk($disk)->url('');
+                        $pathWithoutBase = str_replace($baseUrl, '', $mrf->unsigned_po_url);
+                        if ($pathWithoutBase && $pathWithoutBase !== $mrf->unsigned_po_url) {
+                            $possiblePaths[] = ltrim($pathWithoutBase, '/');
+                        }
+                        
+                        $deleted = false;
+                        foreach ($possiblePaths as $filePath) {
+                            if (empty($filePath)) continue;
+                            
+                            if (Storage::disk($disk)->exists($filePath)) {
+                                Storage::disk($disk)->delete($filePath);
+                                Log::info('Deleted PO file from storage', [
+                                    'path' => $filePath,
+                                    'disk' => $disk,
+                                    'mrf_id' => $id
+                                ]);
+                                $deleted = true;
+                                break;
+                            }
+                        }
+                        
+                        if (!$deleted) {
+                            Log::warning('PO file not found in storage for deletion', [
+                                'url' => $mrf->unsigned_po_url,
+                                'possible_paths' => $possiblePaths,
+                                'disk' => $disk,
+                                'mrf_id' => $id
+                            ]);
                         }
                     }
                 } catch (\Exception $e) {
                     Log::warning('Failed to delete PO file from storage', [
                         'error' => $e->getMessage(),
-                        'mrf_id' => $id
+                        'trace' => $e->getTraceAsString(),
+                        'mrf_id' => $id,
+                        'url' => $mrf->unsigned_po_url
                     ]);
+                    // Continue - don't fail deletion if file cleanup fails
                 }
             }
 
@@ -1124,14 +1200,41 @@ class MRFWorkflowController extends Controller
                 try {
                     $disk = config('filesystems.documents_disk', 'public');
                     $urlPath = parse_url($mrf->signed_po_url, PHP_URL_PATH);
+                    
                     if ($urlPath) {
-                        $filePath = ltrim($urlPath, '/storage/');
-                        if (Storage::disk($disk)->exists($filePath)) {
-                            Storage::disk($disk)->delete($filePath);
+                        // Try multiple path extraction methods
+                        $possiblePaths = [
+                            ltrim($urlPath, '/storage/'),
+                            ltrim(str_replace('/storage/', '', $urlPath), '/'),
+                            ltrim($urlPath, '/'),
+                            basename($urlPath),
+                        ];
+                        
+                        $baseUrl = Storage::disk($disk)->url('');
+                        $pathWithoutBase = str_replace($baseUrl, '', $mrf->signed_po_url);
+                        if ($pathWithoutBase && $pathWithoutBase !== $mrf->signed_po_url) {
+                            $possiblePaths[] = ltrim($pathWithoutBase, '/');
+                        }
+                        
+                        foreach ($possiblePaths as $filePath) {
+                            if (empty($filePath)) continue;
+                            
+                            if (Storage::disk($disk)->exists($filePath)) {
+                                Storage::disk($disk)->delete($filePath);
+                                Log::info('Deleted signed PO file from storage', [
+                                    'path' => $filePath,
+                                    'disk' => $disk
+                                ]);
+                                break;
+                            }
                         }
                     }
                 } catch (\Exception $e) {
-                    Log::warning('Failed to delete signed PO file', ['error' => $e->getMessage()]);
+                    Log::warning('Failed to delete signed PO file', [
+                        'error' => $e->getMessage(),
+                        'url' => $mrf->signed_po_url
+                    ]);
+                    // Continue - don't fail deletion if file cleanup fails
                 }
             }
         } catch (\Exception $e) {
@@ -1142,8 +1245,31 @@ class MRFWorkflowController extends Controller
             // Continue with clearing database fields even if file deletion fails
         }
 
-        // Clear PO-related fields and reset status
-        $mrf->update([
+        // Determine what status to reset to based on MRF workflow position
+        $statusLower = strtolower(trim($mrf->status ?? ''));
+        $currentStageLower = strtolower(trim($mrf->current_stage ?? ''));
+        
+        // Reset status based on where MRF is in workflow
+        $newStatus = $mrf->status;
+        $newStage = $mrf->current_stage;
+        
+        // If MRF is in supply_chain or beyond (but not completed/paid), reset to procurement
+        if (in_array($statusLower, ['supply_chain', 'po rejected', 'finance']) || 
+            in_array($currentStageLower, ['supply_chain', 'finance'])) {
+            $newStatus = 'procurement';
+            $newStage = 'procurement';
+        } elseif (in_array($statusLower, ['completed', 'paid', 'chairman_payment'])) {
+            // If already completed/paid, keep status but reset stage to procurement
+            // This allows admin to clear PO even from completed MRFs
+            $newStage = 'procurement';
+            // Only reset status if admin (more permissive)
+            if ($isAdmin) {
+                $newStatus = 'procurement';
+            }
+        }
+
+        // Clear PO-related fields
+        $updateData = [
             'po_number' => null,
             'unsigned_po_url' => null,
             'unsigned_po_share_url' => null,
@@ -1153,30 +1279,67 @@ class MRFWorkflowController extends Controller
             'po_signed_at' => null,
             'po_version' => 1,
             'po_rejection_reason' => null,
-            // Reset status back to procurement stage if it was in supply_chain
-            'status' => in_array($mrf->status, ['supply_chain', 'PO Rejected']) ? 'procurement' : $mrf->status,
-            'current_stage' => in_array($mrf->current_stage, ['supply_chain']) ? 'procurement' : $mrf->current_stage,
-        ]);
+            'status' => $newStatus,
+            'current_stage' => $newStage,
+        ];
 
-        // Record in approval history
-        MRFApprovalHistory::record($mrf, 'po_deleted', 'procurement', $user, 'PO deleted by procurement manager for regeneration');
-
-        // Notify relevant parties
         try {
-            $this->notificationService->notifyMRFPendingProcurement($mrf);
-        } catch (\Exception $e) {
-            Log::warning('Failed to send notification after PO deletion', ['error' => $e->getMessage()]);
-        }
+            $mrf->update($updateData);
+            
+            Log::info('PO deleted successfully', [
+                'mrf_id' => $id,
+                'old_status' => $mrf->getOriginal('status'),
+                'new_status' => $newStatus,
+                'old_stage' => $mrf->getOriginal('current_stage'),
+                'new_stage' => $newStage,
+                'deleted_by' => $user->id,
+                'deleted_by_role' => $user->role,
+                'was_admin' => $isAdmin
+            ]);
 
-        return response()->json([
-            'success' => true,
-            'message' => 'PO deleted successfully. MRF is now ready for PO regeneration.',
-            'data' => [
-                'mrf_id' => $mrf->mrf_id,
-                'status' => $mrf->status,
-                'current_stage' => $mrf->current_stage,
-            ]
-        ]);
+            // Record in approval history
+            try {
+                MRFApprovalHistory::record($mrf, 'po_deleted', 'procurement', $user, 'PO deleted for regeneration' . ($isAdmin ? ' (admin override)' : ''));
+            } catch (\Exception $e) {
+                Log::warning('Failed to record PO deletion in approval history', [
+                    'error' => $e->getMessage(),
+                    'mrf_id' => $id
+                ]);
+            }
+
+            // Notify relevant parties (only if MRF is back in procurement stage)
+            if ($newStatus === 'procurement' || $newStage === 'procurement') {
+                try {
+                    $this->notificationService->notifyMRFPendingProcurement($mrf);
+                } catch (\Exception $e) {
+                    Log::warning('Failed to send notification after PO deletion', ['error' => $e->getMessage()]);
+                }
+            }
+
+            return response()->json([
+                'success' => true,
+                'message' => 'PO deleted successfully. MRF is now ready for PO regeneration.',
+                'data' => [
+                    'mrf_id' => $mrf->mrf_id,
+                    'status' => $mrf->status,
+                    'current_stage' => $mrf->current_stage,
+                    'previous_status' => $mrf->getOriginal('status'),
+                    'previous_stage' => $mrf->getOriginal('current_stage'),
+                ]
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Failed to update MRF after PO deletion', [
+                'mrf_id' => $id,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            
+            return response()->json([
+                'success' => false,
+                'error' => 'PO files deleted but failed to update MRF: ' . $e->getMessage(),
+                'code' => 'UPDATE_FAILED'
+            ], 500);
+        }
     }
 
     private function generatePONumber(MRF $mrf): string
