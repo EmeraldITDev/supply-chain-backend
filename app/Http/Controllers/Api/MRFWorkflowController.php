@@ -352,12 +352,14 @@ class MRFWorkflowController extends Controller
 
         // PO number validation: always exclude current MRF from unique check
         // This allows regeneration with the same PO number for this MRF
-        if ($request->has('po_number') && $request->po_number) {
+        // Only validate uniqueness if a PO number is provided in the request
+        if ($request->has('po_number') && !empty($request->po_number)) {
             $rules['po_number'] = [
                 'nullable',
                 'string',
                 'max:50',
-                \Illuminate\Validation\Rule::unique('m_r_f_s', 'po_number')->ignore($mrf->id)
+                \Illuminate\Validation\Rule::unique('m_r_f_s', 'po_number')
+                    ->ignore($mrf->id, 'id') // Explicitly specify primary key column to ignore this MRF
             ];
         } else {
             // If no PO number provided, it will be auto-generated, so no validation needed
@@ -367,16 +369,47 @@ class MRFWorkflowController extends Controller
         $validator = Validator::make($request->all(), $rules);
 
         if ($validator->fails()) {
+            // Log validation errors for debugging
+            Log::warning('PO generation validation failed', [
+                'mrf_id' => $id,
+                'mrf_db_id' => $mrf->id,
+                'request_po_number' => $request->po_number ?? 'not provided',
+                'existing_po_number' => $mrf->po_number,
+                'errors' => $validator->errors()->toArray(),
+                'is_regeneration' => $isRegeneration
+            ]);
+            
             return response()->json([
                 'success' => false,
                 'error' => 'Validation failed',
                 'errors' => $validator->errors(),
-                'code' => 'VALIDATION_ERROR'
+                'code' => 'VALIDATION_ERROR',
+                'debug' => [
+                    'mrf_id' => $id,
+                    'request_po_number' => $request->po_number ?? null,
+                    'existing_po_number' => $mrf->po_number,
+                    'is_regeneration' => $isRegeneration
+                ]
             ], 422);
         }
 
         // Auto-generate PO number if not provided, or reuse existing for regeneration
-        $poNumber = $request->po_number ?? $mrf->po_number ?? $this->generatePONumber();
+        // If regenerating and no new PO number provided, reuse the existing one
+        if ($isRegeneration && empty($request->po_number)) {
+            $poNumber = $mrf->po_number;
+        } else {
+            // Use provided PO number or auto-generate a new one
+            $poNumber = $request->po_number ?? $this->generatePONumber();
+            
+            // If auto-generating, make sure it's unique (check database)
+            if (empty($request->po_number)) {
+                $attempts = 0;
+                while (MRF::where('po_number', $poNumber)->where('id', '!=', $mrf->id)->exists() && $attempts < 10) {
+                    $poNumber = $this->generatePONumber();
+                    $attempts++;
+                }
+            }
+        }
 
         // Handle file upload
         $poUrl = null;
