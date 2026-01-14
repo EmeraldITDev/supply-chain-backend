@@ -14,6 +14,7 @@ class OneDriveService
     protected string $clientSecret;
     protected string $tenantId;
     protected string $rootFolder;
+    protected string $userEmail;
     protected ?string $accessToken = null;
 
     public function __construct()
@@ -22,6 +23,18 @@ class OneDriveService
         $this->clientSecret = config('filesystems.disks.onedrive.client_secret');
         $this->tenantId = config('filesystems.disks.onedrive.tenant_id');
         $this->rootFolder = config('filesystems.disks.onedrive.root', '/SupplyChainDocs');
+        // Centralized procurement account email
+        $this->userEmail = config('filesystems.disks.onedrive.user_email', 'procurement@emeraldcfze.com');
+    }
+
+    /**
+     * Get the base endpoint for the centralized procurement OneDrive account
+     */
+    protected function getDriveEndpoint(string $path = ''): string
+    {
+        $userEmail = urlencode($this->userEmail);
+        $baseEndpoint = "https://graph.microsoft.com/v1.0/users/{$userEmail}/drive";
+        return $path ? "{$baseEndpoint}{$path}" : $baseEndpoint;
     }
 
     /**
@@ -115,7 +128,7 @@ class OneDriveService
      */
     protected function simpleUpload(UploadedFile $file, string $fullPath, string $accessToken): array
     {
-        $endpoint = "https://graph.microsoft.com/v1.0/drive/root:/{$fullPath}:/content";
+        $endpoint = $this->getDriveEndpoint("/root:/{$fullPath}:/content");
         
         $response = Http::withToken($accessToken)
             ->withBody($file->getContent(), 'application/octet-stream')
@@ -146,7 +159,7 @@ class OneDriveService
     protected function uploadLargeFile(UploadedFile $file, string $fullPath, string $accessToken): array
     {
         // Create upload session
-        $sessionEndpoint = "https://graph.microsoft.com/v1.0/drive/root:/{$fullPath}:/createUploadSession";
+        $sessionEndpoint = $this->getDriveEndpoint("/root:/{$fullPath}:/createUploadSession");
         
         $sessionResponse = Http::withToken($accessToken)
             ->post($sessionEndpoint, [
@@ -226,7 +239,7 @@ class OneDriveService
     {
         try {
             $accessToken = $this->getAccessToken();
-            $endpoint = "https://graph.microsoft.com/v1.0/drive/root:/{$path}";
+            $endpoint = $this->getDriveEndpoint("/root:/{$path}");
             
             $response = Http::withToken($accessToken)->get($endpoint);
             
@@ -260,7 +273,7 @@ class OneDriveService
     {
         try {
             $accessToken = $this->getAccessToken();
-            $endpoint = "https://graph.microsoft.com/v1.0/drive/root:/{$path}";
+            $endpoint = $this->getDriveEndpoint("/root:/{$path}");
             
             $response = Http::withToken($accessToken)->get($endpoint);
             
@@ -294,7 +307,7 @@ class OneDriveService
     {
         try {
             $accessToken = $this->getAccessToken();
-            $endpoint = "https://graph.microsoft.com/v1.0/drive/root:/{$path}";
+            $endpoint = $this->getDriveEndpoint("/root:/{$path}");
             
             $response = Http::withToken($accessToken)->delete($endpoint);
             
@@ -335,7 +348,7 @@ class OneDriveService
             $fullParentPath = $rootFolder . ($parentPath ? '/' . $parentPath : '');
             
             $accessToken = $this->getAccessToken();
-            $endpoint = "https://graph.microsoft.com/v1.0/drive/root:/{$fullParentPath}:/children";
+            $endpoint = $this->getDriveEndpoint("/root:/{$fullParentPath}:/children");
             
             $response = Http::withToken($accessToken)
                 ->post($endpoint, [
@@ -381,7 +394,7 @@ class OneDriveService
             $fullPath = $rootFolder . '/' . trim($folderPath, '/');
             
             $accessToken = $this->getAccessToken();
-            $endpoint = "https://graph.microsoft.com/v1.0/drive/root:/{$fullPath}";
+            $endpoint = $this->getDriveEndpoint("/root:/{$fullPath}");
             
             $response = Http::withToken($accessToken)->get($endpoint);
             
@@ -398,6 +411,74 @@ class OneDriveService
         } catch (\Exception $e) {
             Log::warning('Failed to get OneDrive folder URL', [
                 'path' => $folderPath,
+                'error' => $e->getMessage()
+            ]);
+            return null;
+        }
+    }
+
+    /**
+     * Create view-only sharing link for file
+     * 
+     * @param string $path File path on OneDrive
+     * @param string $type Link type: 'view' or 'edit' (default: 'view')
+     * @return string|null Sharing link URL
+     */
+    public function createSharingLink(string $path, string $type = 'view'): ?string
+    {
+        try {
+            $accessToken = $this->getAccessToken();
+            $endpoint = $this->getDriveEndpoint("/root:/{$path}:/createLink");
+            
+            $response = Http::withToken($accessToken)
+                ->post($endpoint, [
+                    'type' => $type, // 'view' for view-only, 'edit' for edit access
+                    'scope' => 'organization', // Only people in your organization
+                ]);
+            
+            if (!$response->successful()) {
+                Log::error('Failed to create OneDrive sharing link', [
+                    'status' => $response->status(),
+                    'body' => $response->body(),
+                    'path' => $path
+                ]);
+                return null;
+            }
+
+            $data = $response->json();
+            return $data['link']['webUrl'] ?? null;
+        } catch (\Exception $e) {
+            Log::error('Failed to create OneDrive sharing link', [
+                'path' => $path,
+                'error' => $e->getMessage()
+            ]);
+            return null;
+        }
+    }
+
+    /**
+     * Get file ID from path (needed for some operations)
+     * 
+     * @param string $path File path on OneDrive
+     * @return string|null File ID
+     */
+    public function getFileId(string $path): ?string
+    {
+        try {
+            $accessToken = $this->getAccessToken();
+            $endpoint = $this->getDriveEndpoint("/root:/{$path}");
+            
+            $response = Http::withToken($accessToken)->get($endpoint);
+            
+            if (!$response->successful()) {
+                return null;
+            }
+
+            $data = $response->json();
+            return $data['id'] ?? null;
+        } catch (\Exception $e) {
+            Log::error('Failed to get OneDrive file ID', [
+                'path' => $path,
                 'error' => $e->getMessage()
             ]);
             return null;

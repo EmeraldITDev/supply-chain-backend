@@ -232,6 +232,57 @@ class AuthController extends Controller
     }
 
     /**
+     * Update user profile
+     */
+    public function updateProfile(Request $request)
+    {
+        $user = $request->user();
+
+        $request->validate([
+            'name' => 'sometimes|string|max:255',
+            'department' => 'nullable|string|max:255',
+            'phone' => 'nullable|string|max:20',
+        ]);
+
+        $updateData = [];
+
+        if ($request->has('name')) {
+            $updateData['name'] = $request->name;
+        }
+
+        if ($request->has('department')) {
+            $updateData['department'] = $request->department;
+        }
+
+        // If user has employee record, update it too
+        if ($user->employee_id) {
+            $employee = \App\Models\Employee::find($user->employee_id);
+            if ($employee) {
+                if ($request->has('name')) {
+                    $employee->update(['full_name' => $request->name]);
+                }
+                if ($request->has('department')) {
+                    $employee->update(['department' => $request->department]);
+                }
+            }
+        }
+
+        $user->update($updateData);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Profile updated successfully',
+            'data' => [
+                'id' => $user->id,
+                'name' => $user->name,
+                'email' => $user->email,
+                'role' => $user->role,
+                'department' => $user->department,
+            ]
+        ]);
+    }
+
+    /**
      * Force password change for vendors on first login
      * This is used when vendor logs in with temporary password
      */

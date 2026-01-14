@@ -362,6 +362,7 @@ class MRFWorkflowController extends Controller
 
         // Handle file upload
         $poUrl = null;
+        $poShareUrl = null;
         $useOneDrive = $this->oneDriveService !== null;
         
         if ($request->hasFile('unsigned_po')) {
@@ -387,11 +388,28 @@ class MRFWorkflowController extends Controller
                     
                     $poUrl = $oneDriveResult['webUrl'];
                     
+                    // Create view-only sharing link for the PO document
+                    try {
+                        $poShareUrl = $this->oneDriveService->createSharingLink($oneDriveResult['path'], 'view');
+                        Log::info('OneDrive sharing link created for PO', [
+                            'mrf_id' => $id,
+                            'po_number' => $poNumber,
+                            'share_url' => $poShareUrl
+                        ]);
+                    } catch (\Exception $e) {
+                        Log::warning('Failed to create sharing link for PO', [
+                            'error' => $e->getMessage(),
+                            'mrf_id' => $id
+                        ]);
+                        // Continue without sharing link - web URL still works
+                    }
+                    
                     Log::info($isRegeneration ? 'PO file regenerated on OneDrive' : 'PO file uploaded to OneDrive', [
                         'mrf_id' => $id,
                         'po_number' => $poNumber,
                         'onedrive_path' => $oneDriveResult['path'],
                         'web_url' => $poUrl,
+                        'share_url' => $poShareUrl,
                         'is_regeneration' => $isRegeneration
                     ]);
                 } catch (\Exception $e) {
@@ -438,14 +456,24 @@ class MRFWorkflowController extends Controller
         }
 
         // Update MRF
-        $mrf->update([
+        $updateData = [
             'po_number' => $poNumber,
             'unsigned_po_url' => $poUrl,
             'po_generated_at' => now(),
             'status' => 'supply_chain',
             'current_stage' => 'supply_chain',
             'rejection_reason' => null, // Clear rejection reason if regenerating
-        ]);
+        ];
+        
+        // Add sharing URL if available (use web URL as fallback)
+        if (isset($poShareUrl) && $poShareUrl) {
+            $updateData['unsigned_po_share_url'] = $poShareUrl;
+        } elseif ($poUrl) {
+            // Use web URL as sharing URL if sharing link creation failed
+            $updateData['unsigned_po_share_url'] = $poUrl;
+        }
+        
+        $mrf->update($updateData);
 
         // Record in approval history
         $action = $isRegeneration ? 'regenerated_po' : 'generated_po';
@@ -520,6 +548,7 @@ class MRFWorkflowController extends Controller
         // Upload signed PO - use OneDrive if configured, otherwise use local/S3 storage
         $signedPOFile = $request->file('signed_po');
         $signedPOUrl = null;
+        $signedPOShareUrl = null;
         $useOneDrive = $this->oneDriveService !== null;
         
         if ($useOneDrive) {
@@ -531,11 +560,27 @@ class MRFWorkflowController extends Controller
                 $oneDriveResult = $this->oneDriveService->uploadFile($signedPOFile, $folder, $signedPOFileName);
                 $signedPOUrl = $oneDriveResult['webUrl'];
                 
+                // Create view-only sharing link for the signed PO
+                try {
+                    $signedPOShareUrl = $this->oneDriveService->createSharingLink($oneDriveResult['path'], 'view');
+                    Log::info('OneDrive sharing link created for signed PO', [
+                        'mrf_id' => $id,
+                        'po_number' => $mrf->po_number,
+                        'share_url' => $signedPOShareUrl
+                    ]);
+                } catch (\Exception $e) {
+                    Log::warning('Failed to create sharing link for signed PO', [
+                        'error' => $e->getMessage(),
+                        'mrf_id' => $id
+                    ]);
+                }
+                
                 Log::info('Signed PO uploaded to OneDrive', [
                     'mrf_id' => $id,
                     'po_number' => $mrf->po_number,
                     'onedrive_path' => $oneDriveResult['path'],
                     'web_url' => $signedPOUrl,
+                    'share_url' => $signedPOShareUrl,
                 ]);
             } catch (\Exception $e) {
                 Log::error('OneDrive upload failed for signed PO, falling back to local storage', [
@@ -556,12 +601,21 @@ class MRFWorkflowController extends Controller
         }
 
         // Update MRF
-        $mrf->update([
+        $updateData = [
             'signed_po_url' => $signedPOUrl,
             'po_signed_at' => now(),
             'status' => 'finance',
             'current_stage' => 'finance',
-        ]);
+        ];
+        
+        // Add sharing URL if available (use web URL as fallback)
+        if (isset($signedPOShareUrl) && $signedPOShareUrl) {
+            $updateData['signed_po_share_url'] = $signedPOShareUrl;
+        } elseif ($signedPOUrl) {
+            $updateData['signed_po_share_url'] = $signedPOUrl;
+        }
+        
+        $mrf->update($updateData);
 
         // Record in approval history
         MRFApprovalHistory::record($mrf, 'signed_po', 'supply_chain', $user, 'PO signed and uploaded');
