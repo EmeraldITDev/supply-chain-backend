@@ -111,6 +111,12 @@ class MRFController extends Controller
                 'grnCompletedAt' => $mrf->grn_completed_at?->toIso8601String(),
                 'grnUrl' => $mrf->grn_url,
                 'grnShareUrl' => $mrf->grn_share_url,
+                'executive_approved' => $mrf->executive_approved ?? false,
+                'executive_approved_at' => $mrf->executive_approved_at?->toIso8601String(),
+                'executive_remarks' => $mrf->executive_remarks,
+                'chairman_approved' => $mrf->chairman_approved ?? false,
+                'chairman_approved_at' => $mrf->chairman_approved_at?->toIso8601String(),
+                'chairman_remarks' => $mrf->chairman_remarks,
             ];
         }));
     }
@@ -845,8 +851,9 @@ class MRFController extends Controller
     /**
      * Delete MRF
      */
-    public function destroy($id)
+    public function destroy(Request $request, $id)
     {
+        $user = $request->user();
         $mrf = MRF::where('mrf_id', $id)->first();
 
         if (!$mrf) {
@@ -857,11 +864,33 @@ class MRFController extends Controller
             ], 404);
         }
 
-        // Only allow deletion if status is Pending or Rejected
-        if (!in_array($mrf->status, ['Pending', 'Rejected'])) {
+        // Check if user is the requester
+        $isRequester = $mrf->requester_id == $user->id;
+        
+        // Allow deletion if:
+        // 1. User is the requester AND MRF hasn't progressed beyond procurement stage (no PO generated)
+        // 2. OR status is Pending or Rejected (for any user with appropriate permissions)
+        $canDelete = false;
+        
+        if ($isRequester) {
+            // Requester can delete if no PO has been generated yet
+            $noPOGenerated = empty($mrf->po_number) && empty($mrf->unsigned_po_url);
+            $notTooFarInWorkflow = !in_array(strtolower($mrf->status), ['supply_chain', 'finance', 'paid', 'completed']);
+            
+            if ($noPOGenerated && $notTooFarInWorkflow) {
+                $canDelete = true;
+            }
+        }
+        
+        // Also allow deletion for pending/rejected statuses (original logic)
+        if (!$canDelete && in_array($mrf->status, ['Pending', 'Rejected', 'pending', 'rejected'])) {
+            $canDelete = true;
+        }
+
+        if (!$canDelete) {
             return response()->json([
                 'success' => false,
-                'error' => 'Cannot delete MRF in current status',
+                'error' => 'Cannot delete MRF. Either you are not the requester, or the MRF has progressed too far in the workflow.',
                 'code' => 'FORBIDDEN'
             ], 403);
         }

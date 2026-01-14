@@ -327,11 +327,12 @@ class MRFWorkflowController extends Controller
             ], 422);
         }
 
-        // Allow PO regeneration if it was rejected
-        $isRegeneration = !empty($mrf->po_number) && $mrf->status === 'PO Rejected';
+        // Allow PO regeneration if it was rejected or if PO already exists for this MRF
+        $isRegeneration = (!empty($mrf->po_number) && $mrf->status === 'PO Rejected') || 
+                         (!empty($mrf->po_number) && !empty($mrf->unsigned_po_url));
 
-        // If not a regeneration, check if PO already exists
-        if (!$isRegeneration && $mrf->po_number) {
+        // If not a regeneration and PO already exists, reject
+        if (!$isRegeneration && $mrf->po_number && $mrf->unsigned_po_url) {
             return response()->json([
                 'success' => false,
                 'error' => 'PO already generated for this MRF',
@@ -349,10 +350,17 @@ class MRFWorkflowController extends Controller
             'remarks' => 'nullable|string',
         ];
 
-        // Only validate PO number uniqueness if not regenerating
-        if (!$isRegeneration) {
-            $rules['po_number'] = 'nullable|string|max:50|unique:m_r_f_s,po_number';
+        // PO number validation: always exclude current MRF from unique check
+        // This allows regeneration with the same PO number for this MRF
+        if ($request->has('po_number') && $request->po_number) {
+            $rules['po_number'] = [
+                'nullable',
+                'string',
+                'max:50',
+                \Illuminate\Validation\Rule::unique('m_r_f_s', 'po_number')->ignore($mrf->id)
+            ];
         } else {
+            // If no PO number provided, it will be auto-generated, so no validation needed
             $rules['po_number'] = 'nullable|string|max:50';
         }
 
