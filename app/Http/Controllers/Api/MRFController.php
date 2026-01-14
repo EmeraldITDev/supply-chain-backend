@@ -913,22 +913,36 @@ class MRFController extends Controller
         $canDelete = false;
         
         // Check if MRF has PO or is too far in workflow
-        $hasPO = !empty($mrf->po_number) || !empty($mrf->unsigned_po_url);
-        $tooFarInWorkflow = in_array($statusLower, ['supply_chain', 'finance', 'paid', 'completed', 'chairman_payment']);
+        // Only count signed PO as "too far" - unsigned PO can be deleted
+        $hasSignedPO = !empty(trim($mrf->signed_po_url ?? ''));
+        $hasUnsignedPO = !empty(trim($mrf->po_number ?? '')) || !empty(trim($mrf->unsigned_po_url ?? ''));
+        $tooFarInWorkflow = in_array($statusLower, ['finance', 'paid', 'completed', 'chairman_payment']);
         
-        if ($isRequester) {
-            // Requester can delete if no PO has been generated and not too far in workflow
-            if (!$hasPO && !$tooFarInWorkflow) {
-                $canDelete = true;
+        // Procurement managers can delete MRFs in supply_chain if PO is not signed yet
+        // This allows them to delete MRFs that are stuck in supply_chain
+        if ($isProcurementManager) {
+            // Can delete if:
+            // 1. No PO at all, OR
+            // 2. Has unsigned PO but not signed (supply_chain status), OR
+            // 3. Is in early stages (pending, procurement, rejected)
+            $isSupplyChain = in_array($statusLower, ['supply_chain', 'supply chain']) || 
+                           in_array($currentStageLower, ['supply_chain', 'supply chain']);
+            
+            if (!$hasSignedPO) {
+                // No signed PO - can delete if:
+                // - No PO at all, OR
+                // - Has unsigned PO and is in supply_chain (can delete and regenerate), OR
+                // - Is in early stages
+                if (!$hasUnsignedPO || $isSupplyChain || 
+                    in_array($statusLower, ['pending', 'procurement', 'rejected', 'executive approval', 'executive_review', 'chairman_review'])) {
+                    $canDelete = true;
+                }
             }
         }
         
-        // Procurement managers can delete MRFs that haven't progressed beyond procurement stage
-        if (!$canDelete && $isProcurementManager) {
-            $isEarlyStage = in_array($statusLower, ['pending', 'procurement', 'rejected', 'executive approval', 'executive_review', 'chairman_review']) 
-                || in_array($currentStageLower, ['pending', 'procurement', 'executive', 'executive_review', 'chairman_review']);
-            
-            if (!$hasPO && ($isEarlyStage || !$tooFarInWorkflow)) {
+        if ($isRequester && !$canDelete) {
+            // Requester can delete if no PO has been generated and not too far in workflow
+            if (!$hasUnsignedPO && !$tooFarInWorkflow) {
                 $canDelete = true;
             }
         }

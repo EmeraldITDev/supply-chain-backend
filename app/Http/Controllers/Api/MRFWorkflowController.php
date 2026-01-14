@@ -341,19 +341,29 @@ class MRFWorkflowController extends Controller
             }
         }
 
-        // Allow PO regeneration if it was rejected or if PO already exists for this MRF
-        $isRegeneration = (!empty($mrf->po_number) && $mrf->status === 'PO Rejected') || 
-                         (!empty($mrf->po_number) && !empty($mrf->unsigned_po_url));
+        // Allow PO regeneration if:
+        // 1. MRF was rejected (PO Rejected status), OR
+        // 2. PO already exists but is unsigned (supply_chain status - can regenerate), OR
+        // 3. PO exists but not signed (supply_chain stage)
+        $hasExistingPO = !empty(trim($mrf->po_number ?? '')) || !empty(trim($mrf->unsigned_po_url ?? ''));
+        $hasSignedPO = !empty(trim($mrf->signed_po_url ?? ''));
+        $statusLower = strtolower(trim($mrf->status ?? ''));
+        $stageLower = strtolower(trim($mrf->current_stage ?? ''));
+        
+        $isRegeneration = ($hasExistingPO && $statusLower === 'po rejected') || 
+                         ($hasExistingPO && !$hasSignedPO && ($statusLower === 'supply_chain' || $stageLower === 'supply_chain')) ||
+                         ($hasExistingPO && !$hasSignedPO);
 
-        // If not a regeneration and PO already exists, reject
-        if (!$isRegeneration && $mrf->po_number && $mrf->unsigned_po_url) {
+        // If PO is already signed, don't allow regeneration (unless admin)
+        if ($hasSignedPO && !in_array(strtolower($user->role ?? ''), ['admin'])) {
             return response()->json([
                 'success' => false,
-                'error' => 'PO already generated for this MRF',
-                'code' => 'DUPLICATE_PO',
+                'error' => 'Cannot regenerate PO that has already been signed. Please contact an administrator.',
+                'code' => 'PO_ALREADY_SIGNED',
                 'data' => [
                     'existing_po_number' => $mrf->po_number,
-                    'po_url' => $mrf->unsigned_po_url
+                    'po_url' => $mrf->unsigned_po_url,
+                    'signed_po_url' => $mrf->signed_po_url
                 ]
             ], 422);
         }
@@ -380,40 +390,65 @@ class MRFWorkflowController extends Controller
                     $attempts++;
                 }
             } elseif ($requestPONumber) {
-                // If PO number was provided, validate it's unique (excluding this MRF for regeneration)
-                $existingMRF = MRF::where('po_number', $requestPONumber)
-                    ->where('id', '!=', $mrf->id)
-                    ->first();
-                    
-                if ($existingMRF) {
-                    return response()->json([
-                        'success' => false,
-                        'error' => 'Validation failed',
-                        'errors' => [
-                            'po_number' => ['The PO number has already been taken.']
-                        ],
-                        'code' => 'VALIDATION_ERROR',
-                        'debug' => [
-                            'mrf_id' => $id,
-                            'request_po_number' => $requestPONumber,
-                            'existing_po_number' => $mrf->po_number,
-                            'conflicting_mrf_id' => $existingMRF->mrf_id,
-                            'is_regeneration' => $isRegeneration
-                        ]
-                    ], 422);
+                // If PO number was provided, check if it's the same as existing (for regeneration) or new
+                if ($isRegeneration && $requestPONumber === $mrf->po_number) {
+                    // Reusing same PO number for regeneration - this is fine
+                    $poNumber = $requestPONumber;
+                } else {
+                    // New PO number provided - validate it's unique (excluding this MRF)
+                    $existingMRF = MRF::where('po_number', $requestPONumber)
+                        ->where('id', '!=', $mrf->id)
+                        ->first();
+                        
+                    if ($existingMRF) {
+                        return response()->json([
+                            'success' => false,
+                            'error' => 'Validation failed',
+                            'errors' => [
+                                'po_number' => ['The PO number "' . $requestPONumber . '" has already been taken by MRF ' . $existingMRF->mrf_id . '.']
+                            ],
+                            'code' => 'VALIDATION_ERROR',
+                            'debug' => [
+                                'mrf_id' => $id,
+                                'request_po_number' => $requestPONumber,
+                                'existing_po_number' => $mrf->po_number,
+                                'conflicting_mrf_id' => $existingMRF->mrf_id,
+                                'is_regeneration' => $isRegeneration
+                            ]
+                        ], 422);
+                    }
+                    $poNumber = $requestPONumber;
                 }
-                $poNumber = $requestPONumber;
             }
         }
 
         // Validate file upload - be more lenient with file types and increase max size
+        // Use 'sometimes' instead of 'required' to provide better error messages
         $rules = [
-            'unsigned_po' => 'required|file|mimes:pdf,doc,docx|max:20480', // 20MB max
+            'unsigned_po' => 'required|file', // First check if file exists
             'remarks' => 'nullable|string',
             // Note: po_number is validated manually above, not in validation rules
         ];
 
         $validator = Validator::make($request->all(), $rules);
+
+        // If basic validation passes, check file details
+        if (!$validator->fails() && $request->hasFile('unsigned_po')) {
+            $file = $request->file('unsigned_po');
+            
+            // Check file size (20MB = 20480 KB, but Laravel uses KB for max rule)
+            $maxSizeKB = 20480; // 20MB in KB
+            if ($file->getSize() > ($maxSizeKB * 1024)) {
+                $validator->errors()->add('unsigned_po', 'File size exceeds maximum allowed size of 20MB.');
+            }
+            
+            // Check file extension (be more lenient - check extension instead of MIME)
+            $allowedExtensions = ['pdf', 'doc', 'docx'];
+            $extension = strtolower($file->getClientOriginalExtension());
+            if (!in_array($extension, $allowedExtensions)) {
+                $validator->errors()->add('unsigned_po', 'Invalid file type. Only PDF, DOC, and DOCX files are allowed.');
+            }
+        }
 
         if ($validator->fails()) {
             // Log validation errors for debugging
@@ -426,15 +461,35 @@ class MRFWorkflowController extends Controller
                 'errors' => $validator->errors()->toArray(),
                 'is_regeneration' => $isRegeneration,
                 'will_reuse_po' => $willReusePO,
+                'has_file' => $request->hasFile('unsigned_po'),
                 'file_size' => $request->hasFile('unsigned_po') ? $request->file('unsigned_po')->getSize() : null,
                 'file_mime' => $request->hasFile('unsigned_po') ? $request->file('unsigned_po')->getMimeType() : null,
                 'file_error' => $request->hasFile('unsigned_po') ? $request->file('unsigned_po')->getError() : null,
+                'request_keys' => array_keys($request->all()),
             ]);
+            
+            // Format errors for better frontend display
+            $formattedErrors = [];
+            foreach ($validator->errors()->messages() as $key => $messages) {
+                if ($key === 'unsigned_po') {
+                    // Provide more helpful error messages for file upload
+                    $formattedErrors[$key] = $messages;
+                    // If it's a generic upload error, add helpful context
+                    if (stripos(implode(' ', $messages), 'upload') !== false && 
+                        $request->hasFile('unsigned_po') && 
+                        !$request->file('unsigned_po')->isValid()) {
+                        $file = $request->file('unsigned_po');
+                        $formattedErrors[$key][] = 'File upload error code: ' . $file->getError() . ' - ' . $file->getErrorMessage();
+                    }
+                } else {
+                    $formattedErrors[$key] = $messages;
+                }
+            }
             
             return response()->json([
                 'success' => false,
                 'error' => 'Validation failed',
-                'errors' => $validator->errors(),
+                'errors' => $formattedErrors,
                 'code' => 'VALIDATION_ERROR',
                 'debug' => [
                     'mrf_id' => $id,
@@ -442,13 +497,20 @@ class MRFWorkflowController extends Controller
                     'determined_po_number' => $poNumber,
                     'existing_po_number' => $mrf->po_number,
                     'is_regeneration' => $isRegeneration,
+                    'has_file_in_request' => $request->hasFile('unsigned_po'),
                     'file_info' => $request->hasFile('unsigned_po') ? [
                         'size' => $request->file('unsigned_po')->getSize(),
+                        'size_mb' => round($request->file('unsigned_po')->getSize() / 1024 / 1024, 2),
                         'mime' => $request->file('unsigned_po')->getMimeType(),
+                        'extension' => $request->file('unsigned_po')->getClientOriginalExtension(),
                         'name' => $request->file('unsigned_po')->getClientOriginalName(),
                         'error' => $request->file('unsigned_po')->getError(),
                         'error_message' => $request->file('unsigned_po')->getErrorMessage(),
-                    ] : null,
+                        'is_valid' => $request->file('unsigned_po')->isValid(),
+                    ] : [
+                        'message' => 'No file found in request. Make sure the file is being sent as multipart/form-data.',
+                        'request_has_file' => false,
+                    ],
                 ]
             ], 422);
         }
