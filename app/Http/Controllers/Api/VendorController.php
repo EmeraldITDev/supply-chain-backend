@@ -248,16 +248,20 @@ class VendorController extends Controller
             foreach ($documentMetadata as $doc) {
                 $filePath = $doc['file_path'] ?? null;
                 $fileUrl = null;
+                $fileShareUrl = $doc['file_share_url'] ?? null;
                 
-            if ($filePath) {
-                try {
-                    $fileUrl = $documentService->getDocumentUrl($filePath, $doc['id'] ?? null, $reg->id);
-                } catch (\Exception $e) {
-                    \Log::warning("Failed to generate document URL for {$filePath}: " . $e->getMessage());
-                    // Fallback to API download endpoint
-                    $fileUrl = url("/api/vendors/registrations/{$reg->id}/documents/{$doc['id']}/download");
+                if ($filePath && !$fileShareUrl) {
+                    try {
+                        $fileUrl = $documentService->getDocumentUrl($filePath, $doc['id'] ?? null, $reg->id);
+                    } catch (\Exception $e) {
+                        \Log::warning("Failed to generate document URL for {$filePath}: " . $e->getMessage());
+                        // Fallback to API download endpoint
+                        $fileUrl = url("/api/vendors/registrations/{$reg->id}/documents/{$doc['id']}/download");
+                    }
+                } else if ($fileShareUrl) {
+                    // If we have a OneDrive share URL, use it as the file URL
+                    $fileUrl = $fileShareUrl;
                 }
-            }
                 
                 $formattedDocuments[] = [
                     'id' => (string) ($doc['id'] ?? ''),
@@ -266,6 +270,8 @@ class VendorController extends Controller
                     'name' => $doc['file_name'] ?? 'Unknown',
                     'filePath' => $filePath,
                     'fileUrl' => $fileUrl,
+                    'file_share_url' => $fileShareUrl,
+                    'fileShareUrl' => $fileShareUrl, // Also include camelCase for frontend compatibility
                     'fileSize' => $doc['file_size'] ?? null,
                     'fileData' => $fileUrl,
                     'uploadedAt' => $doc['uploaded_at'] ?? now()->toIso8601String(),
@@ -340,8 +346,9 @@ class VendorController extends Controller
         foreach ($documentMetadata as $doc) {
             $filePath = $doc['file_path'] ?? null;
             $fileUrl = null;
+            $fileShareUrl = $doc['file_share_url'] ?? null;
             
-            if ($filePath) {
+            if ($filePath && !$fileShareUrl) {
                 try {
                     $fileUrl = $documentService->getDocumentUrl($filePath, $doc['id'] ?? null, $registration->id);
                 } catch (\Exception $e) {
@@ -349,6 +356,9 @@ class VendorController extends Controller
                     // Fallback to API download endpoint
                     $fileUrl = url("/api/vendors/registrations/{$registration->id}/documents/{$doc['id']}/download");
                 }
+            } else if ($fileShareUrl) {
+                // If we have a OneDrive share URL, use it as the file URL
+                $fileUrl = $fileShareUrl;
             }
             
             $formattedDocuments[] = [
@@ -358,6 +368,8 @@ class VendorController extends Controller
                 'name' => $doc['file_name'] ?? 'Unknown',
                 'filePath' => $filePath,
                 'fileUrl' => $fileUrl,
+                'file_share_url' => $fileShareUrl,
+                'fileShareUrl' => $fileShareUrl, // Also include camelCase for frontend compatibility
                 'fileSize' => $doc['file_size'] ?? null,
                 'fileData' => $fileUrl,
                 'uploadedAt' => $doc['uploaded_at'] ?? now()->toIso8601String(),
