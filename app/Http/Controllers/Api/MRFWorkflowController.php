@@ -662,59 +662,31 @@ class MRFWorkflowController extends Controller
             ], 422);
         }
 
-        // Determine PO number FIRST before validation
-        // This prevents validation errors when reusing existing PO numbers during regeneration
-        $requestPONumber = $request->input('po_number');
-        $requestPONumber = $requestPONumber ? trim($requestPONumber) : null;
-        
-        // If regenerating and no new PO number provided, reuse the existing one
-        if ($isRegeneration && empty($requestPONumber)) {
-            $poNumber = $mrf->po_number;
-            $willReusePO = true;
+        // Auto-generate PO number - always generate unique PO number automatically
+        // PO numbers are auto-generated to avoid conflicts and duplicates
+        if ($isRegeneration && !empty($mrf->po_number)) {
+            // For regeneration, generate a new PO number with version indicator
+            $poNumber = $this->generatePONumber($mrf);
+            // Add regeneration suffix if regenerating
+            $poNumber = $poNumber . '-R' . ($mrf->po_version + 1);
         } else {
-            // Use provided PO number or auto-generate a new one
-            $poNumber = $requestPONumber ?? $this->generatePONumber($mrf);
-            $willReusePO = false;
-            
-            // If auto-generating, make sure it's unique (check database)
-            if (empty($requestPONumber)) {
-                $attempts = 0;
-                while (MRF::where('po_number', $poNumber)->where('id', '!=', $mrf->id)->exists() && $attempts < 10) {
-                    $poNumber = $this->generatePONumber($mrf);
-                    $attempts++;
-                }
-            } elseif ($requestPONumber) {
-                // If PO number was provided, check if it's the same as existing (for regeneration) or new
-                if ($isRegeneration && $requestPONumber === $mrf->po_number) {
-                    // Reusing same PO number for regeneration - this is fine
-                    $poNumber = $requestPONumber;
-                } else {
-                    // New PO number provided - validate it's unique (excluding this MRF)
-                    $existingMRF = MRF::where('po_number', $requestPONumber)
-                        ->where('id', '!=', $mrf->id)
-                        ->first();
-                        
-                    if ($existingMRF) {
-                        return response()->json([
-                            'success' => false,
-                            'error' => 'Validation failed',
-                            'errors' => [
-                                'po_number' => ['The PO number "' . $requestPONumber . '" has already been taken by MRF ' . $existingMRF->mrf_id . '.']
-                            ],
-                            'code' => 'VALIDATION_ERROR',
-                            'debug' => [
-                                'mrf_id' => $id,
-                                'request_po_number' => $requestPONumber,
-                                'existing_po_number' => $mrf->po_number,
-                                'conflicting_mrf_id' => $existingMRF->mrf_id,
-                                'is_regeneration' => $isRegeneration
-                            ]
-                        ], 422);
-                    }
-                    $poNumber = $requestPONumber;
-                }
-            }
+            // For new PO, auto-generate unique number
+            $poNumber = $this->generatePONumber($mrf);
         }
+        
+        // Final uniqueness check (should never happen with timestamp-based generation)
+        $attempts = 0;
+        while (MRF::where('po_number', $poNumber)->where('id', '!=', $mrf->id)->exists() && $attempts < 10) {
+            // Add microsecond to ensure uniqueness
+            usleep(1000); // Wait 1ms
+            $poNumber = $this->generatePONumber($mrf);
+            if ($isRegeneration) {
+                $poNumber = $poNumber . '-R' . ($mrf->po_version + 1);
+            }
+            $attempts++;
+        }
+        
+        $willReusePO = false;
 
         // Validate file upload - check if file exists first
         // Don't use strict validation rules that might fail before we can inspect the file
@@ -724,7 +696,7 @@ class MRFWorkflowController extends Controller
         // Build validation rules dynamically based on file existence
         $rules = [
             'remarks' => 'nullable|string',
-            // Note: po_number is validated manually above, not in validation rules
+            // Note: po_number is auto-generated - not accepted from request
         ];
         
         // Only add file validation if file exists
@@ -1936,26 +1908,35 @@ class MRFWorkflowController extends Controller
         }
     }
 
+    /**
+     * Generate unique PO number automatically
+     * Format: PO-YYYY-MMDD-HHMMSS-XXXXX
+     * Ensures uniqueness by using timestamp and MRF ID suffix
+     */
     private function generatePONumber(MRF $mrf): string
     {
         $year = date('Y');
         $month = date('m');
         $day = date('d');
+        $hour = date('H');
+        $minute = date('i');
+        $second = date('s');
         
-        // Extract last 6 characters of MRF ID (UUID) to make it unique to the request
-        $mrfIdSuffix = substr(str_replace('-', '', $mrf->mrf_id), -6);
+        // Extract last 5 characters of MRF ID to make it unique to the request
+        $mrfIdSuffix = substr(str_replace('-', '', $mrf->mrf_id), -5);
         $mrfIdSuffix = strtoupper($mrfIdSuffix);
         
-        // Format: PO-MRF-YYYYMMDD-XXXXXX (e.g., PO-MRF-20260115-A1B2C3)
-        // This includes: Request type (MRF), Date, and MRF ID suffix for uniqueness
-        $poNumber = "PO-MRF-{$year}{$month}{$day}-{$mrfIdSuffix}";
+        // Format: PO-YYYY-MMDD-HHMMSS-XXXXX (e.g., PO-2026-0115-143052-A1B2C)
+        // This ensures uniqueness with timestamp + MRF ID suffix
+        $poNumber = "PO-{$year}-{$month}{$day}-{$hour}{$minute}{$second}-{$mrfIdSuffix}";
         
-        // Check if this PO number already exists (for same MRF regenerating)
-        // If it exists and belongs to this MRF, it's fine (regeneration)
-        // If it exists for a different MRF, add a sequence number
-        $existingMRF = MRF::where('po_number', $poNumber)->first();
-        if ($existingMRF && $existingMRF->id !== $mrf->id) {
-            // Another MRF has this PO number, add sequence
+        // Double-check uniqueness - if somehow duplicate exists, add sequence
+        $existingMRF = MRF::where('po_number', $poNumber)
+            ->where('id', '!=', $mrf->id)
+            ->first();
+            
+        if ($existingMRF) {
+            // Very rare case - add sequence number
             $sequence = 1;
             $lastPO = MRF::where('po_number', 'like', "{$poNumber}-%")
                 ->orderBy('po_number', 'desc')
