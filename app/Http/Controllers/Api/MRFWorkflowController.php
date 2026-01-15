@@ -445,13 +445,14 @@ class MRFWorkflowController extends Controller
             ], 404);
         }
 
-        // Check if MRF is in correct status (case-insensitive)
-        $statusLower = strtolower($mrf->status);
-        if ($statusLower !== 'pending' && $statusLower !== 'executive approval' && $statusLower !== 'executive_review') {
+        // Check if MRF is in correct workflow state
+        $currentState = $mrf->workflow_state ?? WorkflowStateService::STATE_MRF_CREATED;
+        if ($currentState !== WorkflowStateService::STATE_EXECUTIVE_REVIEW) {
             return response()->json([
                 'success' => false,
                 'error' => 'MRF is not pending executive approval',
                 'code' => 'INVALID_STATUS',
+                'current_state' => $currentState,
                 'current_status' => $mrf->status
             ], 422);
         }
@@ -478,8 +479,43 @@ class MRFWorkflowController extends Controller
         ]);
 
         // Transition to executive_approved state, then to procurement_review
-        $this->workflowService->transition($mrf, WorkflowStateService::STATE_EXECUTIVE_APPROVED, $user);
-        $this->workflowService->transition($mrf, WorkflowStateService::STATE_PROCUREMENT_REVIEW, $user);
+        // First transition: executive_review -> executive_approved
+        $transitionSuccess1 = $this->workflowService->transition($mrf, WorkflowStateService::STATE_EXECUTIVE_APPROVED, $user);
+        
+        if (!$transitionSuccess1) {
+            Log::error('Failed to transition MRF to executive_approved', [
+                'mrf_id' => $mrf->mrf_id,
+                'current_state' => $mrf->workflow_state,
+                'user_id' => $user->id
+            ]);
+            return response()->json([
+                'success' => false,
+                'error' => 'Failed to transition MRF state',
+                'code' => 'TRANSITION_FAILED'
+            ], 500);
+        }
+        
+        // Refresh MRF to get updated state
+        $mrf->refresh();
+        
+        // Second transition: executive_approved -> procurement_review
+        $transitionSuccess2 = $this->workflowService->transition($mrf, WorkflowStateService::STATE_PROCUREMENT_REVIEW, $user);
+        
+        if (!$transitionSuccess2) {
+            Log::error('Failed to transition MRF to procurement_review', [
+                'mrf_id' => $mrf->mrf_id,
+                'current_state' => $mrf->workflow_state,
+                'user_id' => $user->id
+            ]);
+            return response()->json([
+                'success' => false,
+                'error' => 'Failed to transition MRF to procurement review',
+                'code' => 'TRANSITION_FAILED'
+            ], 500);
+        }
+        
+        // Refresh MRF again to get final state
+        $mrf->refresh();
         
         // Update status fields
         $mrf->update([
@@ -488,13 +524,13 @@ class MRFWorkflowController extends Controller
         ]);
 
         // Record in approval history
-        MRFApprovalHistory::record($mrf, 'approved', 'executive_review', $user, $request->remarks);
+        MRFApprovalHistory::record($mrf, 'approved', 'executive_review', $user, $request->remarks ?? '');
 
         // Send notifications
-        if ($nextStatus === 'chairman_review') {
-            $this->notificationService->notifyMRFPendingChairmanApproval($mrf);
-        } else {
+        try {
             $this->notificationService->notifyMRFPendingProcurement($mrf);
+        } catch (\Exception $e) {
+            Log::warning('Failed to send procurement notification', ['error' => $e->getMessage()]);
         }
 
         return response()->json([
@@ -504,7 +540,8 @@ class MRFWorkflowController extends Controller
                 'mrf_id' => $mrf->mrf_id,
                 'status' => $mrf->status,
                 'current_stage' => $mrf->current_stage,
-                'next_approver' => $nextStatus === 'chairman_review' ? 'Chairman' : 'Procurement Manager',
+                'workflow_state' => $mrf->workflow_state,
+                'next_approver' => 'Procurement Manager',
             ]
         ]);
     }
