@@ -11,53 +11,63 @@ class WorkflowStateService
      * Valid workflow states
      */
     const STATE_MRF_CREATED = 'mrf_created';
-    const STATE_MRF_APPROVED = 'mrf_approved';
-    const STATE_MRF_REJECTED = 'mrf_rejected';
+    const STATE_EXECUTIVE_REVIEW = 'executive_review';
+    const STATE_EXECUTIVE_APPROVED = 'executive_approved';
+    const STATE_EXECUTIVE_REJECTED = 'executive_rejected';
+    const STATE_PROCUREMENT_REVIEW = 'procurement_review';
+    const STATE_VENDOR_SELECTED = 'vendor_selected';
+    const STATE_INVOICE_RECEIVED = 'invoice_received';
+    const STATE_INVOICE_APPROVED = 'invoice_approved';
     const STATE_PO_GENERATED = 'po_generated';
-    const STATE_PO_REVIEWED = 'po_reviewed';
     const STATE_PO_SIGNED = 'po_signed';
-    const STATE_PO_REJECTED = 'po_rejected';
     const STATE_PAYMENT_PROCESSED = 'payment_processed';
     const STATE_GRN_REQUESTED = 'grn_requested';
     const STATE_GRN_COMPLETED = 'grn_completed';
+    const STATE_CLOSED = 'closed';
 
     /**
      * Valid state transitions
      */
     private array $validTransitions = [
-        self::STATE_MRF_CREATED => [self::STATE_MRF_APPROVED, self::STATE_MRF_REJECTED],
-        self::STATE_MRF_APPROVED => [self::STATE_PO_GENERATED],
-        self::STATE_MRF_REJECTED => [self::STATE_MRF_CREATED], // Resubmission
-        self::STATE_PO_GENERATED => [self::STATE_PO_REVIEWED, self::STATE_PO_REJECTED],
-        self::STATE_PO_REVIEWED => [self::STATE_PO_SIGNED, self::STATE_PO_REJECTED],
+        self::STATE_MRF_CREATED => [self::STATE_EXECUTIVE_REVIEW],
+        self::STATE_EXECUTIVE_REVIEW => [self::STATE_EXECUTIVE_APPROVED, self::STATE_EXECUTIVE_REJECTED],
+        self::STATE_EXECUTIVE_APPROVED => [self::STATE_PROCUREMENT_REVIEW],
+        self::STATE_EXECUTIVE_REJECTED => [], // Terminal state (can resubmit by creating new MRF)
+        self::STATE_PROCUREMENT_REVIEW => [self::STATE_VENDOR_SELECTED],
+        self::STATE_VENDOR_SELECTED => [self::STATE_INVOICE_RECEIVED],
+        self::STATE_INVOICE_RECEIVED => [self::STATE_INVOICE_APPROVED],
+        self::STATE_INVOICE_APPROVED => [self::STATE_PO_GENERATED],
+        self::STATE_PO_GENERATED => [self::STATE_PO_SIGNED],
         self::STATE_PO_SIGNED => [self::STATE_PAYMENT_PROCESSED],
-        self::STATE_PO_REJECTED => [self::STATE_PO_GENERATED], // Regeneration
         self::STATE_PAYMENT_PROCESSED => [self::STATE_GRN_REQUESTED],
         self::STATE_GRN_REQUESTED => [self::STATE_GRN_COMPLETED],
-        self::STATE_GRN_COMPLETED => [], // Terminal state
+        self::STATE_GRN_COMPLETED => [self::STATE_CLOSED],
+        self::STATE_CLOSED => [], // Terminal state
     ];
 
     /**
      * Role permissions for state transitions
      */
     private array $rolePermissions = [
-        'employee' => [
+        'staff' => [
             self::STATE_MRF_CREATED => ['create'],
         ],
         'executive' => [
-            self::STATE_MRF_CREATED => ['approve', 'reject'],
+            self::STATE_EXECUTIVE_REVIEW => ['approve', 'reject'],
         ],
         'procurement' => [
-            self::STATE_MRF_APPROVED => ['generate_po'],
-            self::STATE_GRN_REQUESTED => ['complete_grn'],
+            self::STATE_EXECUTIVE_APPROVED => ['select_vendors'],
+            self::STATE_INVOICE_RECEIVED => ['approve_invoice'],
+            self::STATE_INVOICE_APPROVED => ['generate_po'],
+            self::STATE_GRN_REQUESTED => ['upload_grn'],
         ],
         'supply_chain_director' => [
-            self::STATE_PO_GENERATED => ['review', 'reject'],
-            self::STATE_PO_REVIEWED => ['sign'],
+            self::STATE_VENDOR_SELECTED => ['approve_vendor'],
         ],
         'finance' => [
             self::STATE_PO_SIGNED => ['process_payment'],
             self::STATE_PAYMENT_PROCESSED => ['request_grn'],
+            self::STATE_GRN_COMPLETED => ['review_grn'],
         ],
     ];
 
@@ -106,16 +116,19 @@ class WorkflowStateService
     public function getRequiredRoleForTransition(string $fromState, string $toState): ?string
     {
         $transitionMap = [
-            self::STATE_MRF_CREATED . '->' . self::STATE_MRF_APPROVED => 'executive',
-            self::STATE_MRF_CREATED . '->' . self::STATE_MRF_REJECTED => 'executive',
-            self::STATE_MRF_APPROVED . '->' . self::STATE_PO_GENERATED => 'procurement',
-            self::STATE_PO_GENERATED . '->' . self::STATE_PO_REVIEWED => 'supply_chain_director',
-            self::STATE_PO_GENERATED . '->' . self::STATE_PO_REJECTED => 'supply_chain_director',
-            self::STATE_PO_REVIEWED . '->' . self::STATE_PO_SIGNED => 'supply_chain_director',
-            self::STATE_PO_REVIEWED . '->' . self::STATE_PO_REJECTED => 'supply_chain_director',
+            self::STATE_MRF_CREATED . '->' . self::STATE_EXECUTIVE_REVIEW => 'staff',
+            self::STATE_EXECUTIVE_REVIEW . '->' . self::STATE_EXECUTIVE_APPROVED => 'executive',
+            self::STATE_EXECUTIVE_REVIEW . '->' . self::STATE_EXECUTIVE_REJECTED => 'executive',
+            self::STATE_EXECUTIVE_APPROVED . '->' . self::STATE_PROCUREMENT_REVIEW => 'system',
+            self::STATE_PROCUREMENT_REVIEW . '->' . self::STATE_VENDOR_SELECTED => 'procurement',
+            self::STATE_VENDOR_SELECTED . '->' . self::STATE_INVOICE_RECEIVED => 'vendor',
+            self::STATE_INVOICE_RECEIVED . '->' . self::STATE_INVOICE_APPROVED => 'procurement',
+            self::STATE_INVOICE_APPROVED . '->' . self::STATE_PO_GENERATED => 'procurement',
+            self::STATE_PO_GENERATED . '->' . self::STATE_PO_SIGNED => 'system',
             self::STATE_PO_SIGNED . '->' . self::STATE_PAYMENT_PROCESSED => 'finance',
             self::STATE_PAYMENT_PROCESSED . '->' . self::STATE_GRN_REQUESTED => 'finance',
             self::STATE_GRN_REQUESTED . '->' . self::STATE_GRN_COMPLETED => 'procurement',
+            self::STATE_GRN_COMPLETED . '->' . self::STATE_CLOSED => 'finance',
         ];
 
         $key = $fromState . '->' . $toState;
@@ -180,15 +193,19 @@ class WorkflowStateService
     {
         $displayNames = [
             self::STATE_MRF_CREATED => 'MRF Created',
-            self::STATE_MRF_APPROVED => 'MRF Approved',
-            self::STATE_MRF_REJECTED => 'MRF Rejected',
+            self::STATE_EXECUTIVE_REVIEW => 'Executive Review',
+            self::STATE_EXECUTIVE_APPROVED => 'Executive Approved',
+            self::STATE_EXECUTIVE_REJECTED => 'Executive Rejected',
+            self::STATE_PROCUREMENT_REVIEW => 'Procurement Review',
+            self::STATE_VENDOR_SELECTED => 'Vendor Selected',
+            self::STATE_INVOICE_RECEIVED => 'Invoice Received',
+            self::STATE_INVOICE_APPROVED => 'Invoice Approved',
             self::STATE_PO_GENERATED => 'PO Generated',
-            self::STATE_PO_REVIEWED => 'PO Reviewed',
             self::STATE_PO_SIGNED => 'PO Signed',
-            self::STATE_PO_REJECTED => 'PO Rejected',
             self::STATE_PAYMENT_PROCESSED => 'Payment Processed',
             self::STATE_GRN_REQUESTED => 'GRN Requested',
             self::STATE_GRN_COMPLETED => 'GRN Completed',
+            self::STATE_CLOSED => 'Closed',
         ];
 
         return $displayNames[$state] ?? $state;

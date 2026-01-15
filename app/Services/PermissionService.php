@@ -23,7 +23,23 @@ class PermissionService
     }
 
     /**
-     * Check if user can approve/reject MRF
+     * Check if user can edit MRF (only before submission)
+     */
+    public function canEditMRF(User $user, MRF $mrf): bool
+    {
+        // Staff can only edit their own MRF before submission
+        if (in_array($user->role, ['employee', 'staff', 'regular_staff'])) {
+            $currentState = $mrf->workflow_state ?? WorkflowStateService::STATE_MRF_CREATED;
+            return $mrf->requester_id === $user->id && 
+                   $currentState === WorkflowStateService::STATE_MRF_CREATED;
+        }
+        
+        // No one else can edit MRF after submission
+        return false;
+    }
+
+    /**
+     * Check if user can approve/reject MRF (Executive only)
      */
     public function canApproveMRF(User $user, MRF $mrf): bool
     {
@@ -32,11 +48,38 @@ class PermissionService
         }
 
         $currentState = $mrf->workflow_state ?? WorkflowStateService::STATE_MRF_CREATED;
-        return $currentState === WorkflowStateService::STATE_MRF_CREATED;
+        return $currentState === WorkflowStateService::STATE_EXECUTIVE_REVIEW;
     }
 
     /**
-     * Check if user can generate PO
+     * Check if user can select vendors (Procurement only)
+     */
+    public function canSelectVendors(User $user, MRF $mrf): bool
+    {
+        if (!in_array($user->role, ['procurement', 'procurement_manager', 'admin'])) {
+            return false;
+        }
+
+        $currentState = $mrf->workflow_state ?? WorkflowStateService::STATE_MRF_CREATED;
+        return $currentState === WorkflowStateService::STATE_EXECUTIVE_APPROVED ||
+               $currentState === WorkflowStateService::STATE_PROCUREMENT_REVIEW;
+    }
+
+    /**
+     * Check if user can approve invoice (Supply Chain Director only)
+     */
+    public function canApproveInvoice(User $user, MRF $mrf): bool
+    {
+        if (!in_array($user->role, ['supply_chain_director', 'supply_chain', 'admin'])) {
+            return false;
+        }
+
+        $currentState = $mrf->workflow_state ?? WorkflowStateService::STATE_MRF_CREATED;
+        return $currentState === WorkflowStateService::STATE_VENDOR_SELECTED;
+    }
+
+    /**
+     * Check if user can generate PO (Procurement only, after invoice approval)
      */
     public function canGeneratePO(User $user, MRF $mrf): bool
     {
@@ -45,40 +88,32 @@ class PermissionService
         }
 
         $currentState = $mrf->workflow_state ?? WorkflowStateService::STATE_MRF_CREATED;
-        return $currentState === WorkflowStateService::STATE_MRF_APPROVED;
+        return $currentState === WorkflowStateService::STATE_INVOICE_APPROVED;
     }
 
     /**
-     * Check if user can review/reject PO
+     * Check if user can view invoices (Procurement and Finance)
      */
-    public function canReviewPO(User $user, MRF $mrf): bool
+    public function canViewInvoices(User $user, MRF $mrf): bool
     {
-        if (!in_array($user->role, ['supply_chain_director', 'supply_chain', 'admin'])) {
-            return false;
+        if (in_array($user->role, ['procurement', 'procurement_manager', 'finance', 'finance_officer', 'admin'])) {
+            $currentState = $mrf->workflow_state ?? WorkflowStateService::STATE_MRF_CREATED;
+            return in_array($currentState, [
+                WorkflowStateService::STATE_INVOICE_RECEIVED,
+                WorkflowStateService::STATE_INVOICE_APPROVED,
+                WorkflowStateService::STATE_PO_GENERATED,
+                WorkflowStateService::STATE_PO_SIGNED,
+                WorkflowStateService::STATE_PAYMENT_PROCESSED,
+                WorkflowStateService::STATE_GRN_REQUESTED,
+                WorkflowStateService::STATE_GRN_COMPLETED,
+                WorkflowStateService::STATE_CLOSED,
+            ]);
         }
-
-        $currentState = $mrf->workflow_state ?? WorkflowStateService::STATE_MRF_CREATED;
-        return in_array($currentState, [
-            WorkflowStateService::STATE_PO_GENERATED,
-            WorkflowStateService::STATE_PO_REVIEWED
-        ]);
+        return false;
     }
 
     /**
-     * Check if user can sign PO
-     */
-    public function canSignPO(User $user, MRF $mrf): bool
-    {
-        if (!in_array($user->role, ['supply_chain_director', 'supply_chain', 'admin'])) {
-            return false;
-        }
-
-        $currentState = $mrf->workflow_state ?? WorkflowStateService::STATE_MRF_CREATED;
-        return $currentState === WorkflowStateService::STATE_PO_REVIEWED;
-    }
-
-    /**
-     * Check if user can process payment
+     * Check if user can process payment (Finance only)
      */
     public function canProcessPayment(User $user, MRF $mrf): bool
     {
@@ -104,9 +139,9 @@ class PermissionService
     }
 
     /**
-     * Check if user can complete GRN
+     * Check if user can upload GRN (Procurement only)
      */
-    public function canCompleteGRN(User $user, MRF $mrf): bool
+    public function canUploadGRN(User $user, MRF $mrf): bool
     {
         if (!in_array($user->role, ['procurement', 'procurement_manager', 'admin'])) {
             return false;
@@ -114,6 +149,27 @@ class PermissionService
 
         $currentState = $mrf->workflow_state ?? WorkflowStateService::STATE_MRF_CREATED;
         return $currentState === WorkflowStateService::STATE_GRN_REQUESTED;
+    }
+
+    /**
+     * Check if user can view GRN (All roles can view after upload)
+     */
+    public function canViewGRN(User $user, MRF $mrf): bool
+    {
+        $currentState = $mrf->workflow_state ?? WorkflowStateService::STATE_MRF_CREATED;
+        return in_array($currentState, [
+            WorkflowStateService::STATE_GRN_COMPLETED,
+            WorkflowStateService::STATE_CLOSED,
+        ]) && !empty($mrf->grn_url);
+    }
+
+    /**
+     * Check if MRF is closed (read-only)
+     */
+    public function isMRFClosed(MRF $mrf): bool
+    {
+        $currentState = $mrf->workflow_state ?? WorkflowStateService::STATE_MRF_CREATED;
+        return $currentState === WorkflowStateService::STATE_CLOSED;
     }
 
     /**
@@ -142,6 +198,67 @@ class PermissionService
         }
 
         return false;
+    }
+
+    /**
+     * Get all available actions for a user on a specific MRF
+     * This is the main method the frontend should use to determine what to show
+     */
+    public function getAvailableActions(User $user, MRF $mrf): array
+    {
+        $isClosed = $this->isMRFClosed($mrf);
+        
+        // If MRF is closed, no actions are available
+        if ($isClosed) {
+            return [
+                'canEdit' => false,
+                'canApprove' => false,
+                'canReject' => false,
+                'canSelectVendors' => false,
+                'canViewInvoices' => true, // Can still view for reference
+                'canApproveInvoice' => false,
+                'canGeneratePO' => false,
+                'canSignPO' => false,
+                'canProcessPayment' => false,
+                'canRequestGRN' => false,
+                'canUploadGRN' => false,
+                'canViewGRN' => $this->canViewGRN($user, $mrf),
+                'availableActions' => ['view'],
+            ];
+        }
+        
+        $actions = [
+            'canEdit' => $this->canEditMRF($user, $mrf),
+            'canApprove' => $this->canApproveMRF($user, $mrf),
+            'canReject' => $this->canApproveMRF($user, $mrf), // Same permission as approve
+            'canSelectVendors' => $this->canSelectVendors($user, $mrf),
+            'canViewInvoices' => $this->canViewInvoices($user, $mrf),
+            'canApproveInvoice' => $this->canApproveInvoice($user, $mrf),
+            'canGeneratePO' => $this->canGeneratePO($user, $mrf),
+            'canSignPO' => false, // PO signing is automatic after generation in new workflow
+            'canProcessPayment' => $this->canProcessPayment($user, $mrf),
+            'canRequestGRN' => $this->canRequestGRN($user, $mrf),
+            'canUploadGRN' => $this->canUploadGRN($user, $mrf),
+            'canViewGRN' => $this->canViewGRN($user, $mrf),
+        ];
+        
+        // Build list of available action keys
+        $availableActions = ['view']; // Always can view
+        if ($actions['canEdit']) $availableActions[] = 'edit';
+        if ($actions['canApprove']) $availableActions[] = 'approve';
+        if ($actions['canReject']) $availableActions[] = 'reject';
+        if ($actions['canSelectVendors']) $availableActions[] = 'select_vendors';
+        if ($actions['canViewInvoices']) $availableActions[] = 'view_invoices';
+        if ($actions['canApproveInvoice']) $availableActions[] = 'approve_invoice';
+        if ($actions['canGeneratePO']) $availableActions[] = 'generate_po';
+        if ($actions['canProcessPayment']) $availableActions[] = 'process_payment';
+        if ($actions['canRequestGRN']) $availableActions[] = 'request_grn';
+        if ($actions['canUploadGRN']) $availableActions[] = 'upload_grn';
+        if ($actions['canViewGRN']) $availableActions[] = 'view_grn';
+        
+        $actions['availableActions'] = $availableActions;
+        
+        return $actions;
     }
 
     /**
@@ -184,8 +301,7 @@ class PermissionService
                 'can_create_mrf' => false,
                 'can_approve' => false,
                 'can_generate_po' => false,
-                'can_review_po' => true,
-                'can_sign_po' => true,
+                'can_review_po' => false,
                 'can_process_payment' => false,
                 'can_request_grn' => false,
                 'can_manage_users' => true,

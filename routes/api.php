@@ -60,6 +60,7 @@ Route::middleware('auth:sanctum')->group(function () {
     // MRF routes
     Route::get('/mrfs', [MRFController::class, 'index']);
     Route::get('/mrfs/{id}', [MRFController::class, 'show']);
+    Route::get('/mrfs/{id}/available-actions', [MRFController::class, 'getAvailableActions']);
     Route::post('/mrfs', [MRFController::class, 'store']);
     Route::put('/mrfs/{id}', [MRFController::class, 'update']);
     Route::post('/mrfs/{id}/approve', [MRFController::class, 'approve']); // Legacy
@@ -70,6 +71,11 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/mrfs/{id}/procurement-approve', [\App\Http\Controllers\Api\MRFWorkflowController::class, 'procurementApprove']);
     Route::post('/mrfs/{id}/executive-approve', [\App\Http\Controllers\Api\MRFWorkflowController::class, 'executiveApprove']);
     Route::post('/mrfs/{id}/chairman-approve', [\App\Http\Controllers\Api\MRFWorkflowController::class, 'chairmanApprove']);
+    
+    // Vendor selection workflow routes
+    Route::post('/mrfs/{id}/send-vendor-for-approval', [\App\Http\Controllers\Api\MRFWorkflowController::class, 'sendVendorForApproval']);
+    Route::post('/mrfs/{id}/approve-vendor-selection', [\App\Http\Controllers\Api\MRFWorkflowController::class, 'approveVendorSelection']);
+    Route::post('/mrfs/{id}/reject-vendor-selection', [\App\Http\Controllers\Api\MRFWorkflowController::class, 'rejectVendorSelection']);
     Route::post('/mrfs/{id}/generate-po', [\App\Http\Controllers\Api\MRFWorkflowController::class, 'generatePO']);
     Route::delete('/mrfs/{id}/po', [\App\Http\Controllers\Api\MRFWorkflowController::class, 'deletePO']); // Delete/clear PO
     Route::post('/mrfs/{id}/upload-signed-po', [\App\Http\Controllers\Api\MRFWorkflowController::class, 'uploadSignedPO']);

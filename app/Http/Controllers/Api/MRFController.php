@@ -122,6 +122,30 @@ class MRFController extends Controller
     }
 
     /**
+     * Get available actions for current user on an MRF
+     */
+    public function getAvailableActions(Request $request, $id)
+    {
+        $user = $request->user();
+        $mrf = MRF::where('mrf_id', $id)->first();
+
+        if (!$mrf) {
+            return response()->json([
+                'success' => false,
+                'error' => 'MRF not found',
+                'code' => 'NOT_FOUND'
+            ], 404);
+        }
+
+        $availableActions = $this->permissionService->getAvailableActions($user, $mrf);
+
+        return response()->json([
+            'success' => true,
+            'data' => $availableActions
+        ]);
+    }
+
+    /**
      * Get single MRF by ID
      */
     public function show($id)
@@ -293,7 +317,7 @@ class MRFController extends Controller
                 'date' => now(),
                 'status' => 'pending',
                 'current_stage' => 'executive_review',
-                'workflow_state' => WorkflowStateService::STATE_MRF_CREATED,
+                'workflow_state' => WorkflowStateService::STATE_EXECUTIVE_REVIEW, // Immediately move to executive review
                 'approval_history' => [],
                 'is_resubmission' => false,
                 'pfi_url' => $pfiUrl,
@@ -353,9 +377,11 @@ class MRFController extends Controller
 
     /**
      * Update existing MRF
+     * Staff can only edit their own MRF before submission (workflow_state = mrf_created)
      */
     public function update(Request $request, $id)
     {
+        $user = $request->user();
         $mrf = MRF::where('mrf_id', $id)->first();
 
         if (!$mrf) {
@@ -366,11 +392,11 @@ class MRFController extends Controller
             ], 404);
         }
 
-        // Only allow updates if status is Pending or Rejected
-        if (!in_array($mrf->status, ['Pending', 'Rejected'])) {
+        // Check if user can edit this MRF
+        if (!$this->permissionService->canEditMRF($user, $mrf)) {
             return response()->json([
                 'success' => false,
-                'error' => 'Cannot update MRF in current status',
+                'error' => 'You cannot edit this MRF. MRFs cannot be edited after submission.',
                 'code' => 'FORBIDDEN'
             ], 403);
         }

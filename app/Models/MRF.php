@@ -69,6 +69,14 @@ class MRF extends Model
         'grn_completed_by',
         'grn_url',
         'grn_share_url',
+        // Vendor selection and invoice
+        'selected_vendor_id',
+        'invoice_url',
+        'invoice_share_url',
+        'invoice_approved_by',
+        'invoice_approved_at',
+        'invoice_remarks',
+        'expected_delivery_date',
     ];
 
     protected $casts = [
@@ -88,6 +96,8 @@ class MRF extends Model
         'grn_requested_at' => 'datetime',
         'grn_completed' => 'boolean',
         'grn_completed_at' => 'datetime',
+        'invoice_approved_at' => 'datetime',
+        'expected_delivery_date' => 'date',
     ];
 
     /**
@@ -160,6 +170,22 @@ class MRF extends Model
     public function paymentApprover(): BelongsTo
     {
         return $this->belongsTo(User::class, 'payment_approved_by');
+    }
+
+    /**
+     * Get selected vendor
+     */
+    public function selectedVendor(): BelongsTo
+    {
+        return $this->belongsTo(Vendor::class, 'selected_vendor_id');
+    }
+
+    /**
+     * Get user who approved the invoice
+     */
+    public function invoiceApprover(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'invoice_approved_by');
     }
 
     /**
