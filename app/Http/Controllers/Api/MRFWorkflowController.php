@@ -203,6 +203,15 @@ class MRFWorkflowController extends Controller
             'current_stage' => 'supply_chain_review',
         ]);
 
+        // Update RFQ workflow state to supply_chain_review
+        $rfq = \App\Models\RFQ::where('mrf_id', $mrf->id)->first();
+        if ($rfq) {
+            $rfq->update([
+                'workflow_state' => 'supply_chain_review',
+            ]);
+            Log::info('RFQ workflow state updated to supply_chain_review', ['rfq_id' => $rfq->rfq_id, 'mrf_id' => $mrf->mrf_id]);
+        }
+
         // Record in approval history
         MRFApprovalHistory::record($mrf, 'vendor_selected', 'procurement', $user, 
             "Vendor {$vendor->name} selected and sent for Supply Chain Director approval. " . ($request->remarks ?? ''));
@@ -301,17 +310,27 @@ class MRFWorkflowController extends Controller
             'current_stage' => 'procurement',
         ]);
 
+        // Update RFQ status to approved
+        $rfq = \App\Models\RFQ::where('mrf_id', $mrf->id)->first();
+        if ($rfq) {
+            $rfq->update([
+                'workflow_state' => 'approved',
+                'status' => 'Awarded',
+            ]);
+            Log::info('RFQ status updated to approved', ['rfq_id' => $rfq->rfq_id, 'mrf_id' => $mrf->mrf_id]);
+        }
+
         // Record in approval history
         MRFApprovalHistory::record($mrf, 'vendor_approved', 'supply_chain', $user, 
             'Vendor selection approved. ' . ($request->remarks ?? ''));
 
-        // Notify Procurement that vendor is approved
+        // Notify Procurement that vendor is approved and PO can be generated
         try {
             $procurementUsers = \App\Models\User::whereIn('role', ['procurement', 'procurement_manager', 'admin'])->get();
             foreach ($procurementUsers as $procUser) {
                 $procUser->notify(new \App\Notifications\SystemAnnouncementNotification(
-                    'Vendor Selection Approved',
-                    "MRF {$mrf->mrf_id} - Vendor selection has been approved. You can now proceed with invoice review."
+                    'Vendor Selection Approved - PO Generation Ready',
+                    "MRF {$mrf->mrf_id} - Vendor selection has been approved by Supply Chain Director. You can now generate the Purchase Order."
                 ));
             }
             Log::info('Vendor approved notification sent', ['mrf_id' => $mrf->mrf_id]);
@@ -389,6 +408,15 @@ class MRFWorkflowController extends Controller
             'status' => 'procurement_review',
             'current_stage' => 'procurement',
         ]);
+
+        // Update RFQ status back to procurement_review
+        $rfq = \App\Models\RFQ::where('mrf_id', $mrf->id)->first();
+        if ($rfq) {
+            $rfq->update([
+                'workflow_state' => 'procurement_review',
+            ]);
+            Log::info('RFQ status updated to procurement_review', ['rfq_id' => $rfq->rfq_id, 'mrf_id' => $mrf->mrf_id]);
+        }
 
         // Record in approval history
         MRFApprovalHistory::record($mrf, 'vendor_rejected', 'supply_chain', $user, 
@@ -648,6 +676,37 @@ class MRFWorkflowController extends Controller
             ], 404);
         }
 
+        // Check permissions using PermissionService (includes RFQ approval check)
+        if (!$this->permissionService->canGeneratePO($user, $mrf)) {
+            return response()->json([
+                'success' => false,
+                'error' => 'PO generation not allowed at this stage. RFQ must be approved by Supply Chain Director first.',
+                'code' => 'FORBIDDEN'
+            ], 403);
+        }
+
+        // Verify RFQ is approved
+        $rfq = \App\Models\RFQ::where('mrf_id', $mrf->id)->first();
+        if (!$rfq) {
+            return response()->json([
+                'success' => false,
+                'error' => 'RFQ not found for this MRF. Please create an RFQ first.',
+                'code' => 'NOT_FOUND'
+            ], 404);
+        }
+        
+        if ($rfq->workflow_state !== 'approved') {
+            return response()->json([
+                'success' => false,
+                'error' => 'RFQ must be approved by Supply Chain Director before generating PO. Current RFQ status: ' . ($rfq->workflow_state ?? 'unknown'),
+                'code' => 'RFQ_NOT_APPROVED',
+                'data' => [
+                    'rfq_id' => $rfq->rfq_id,
+                    'rfq_workflow_state' => $rfq->workflow_state,
+                ]
+            ], 400);
+        }
+
         // Check if MRF is in procurement status (allow both 'procurement' and rejected PO statuses)
         // Use case-insensitive comparison
         $statusLower = strtolower(trim($mrf->status ?? ''));
@@ -712,16 +771,16 @@ class MRFWorkflowController extends Controller
         }
         
         // Final uniqueness check (should never happen with timestamp-based generation)
-        $attempts = 0;
-        while (MRF::where('po_number', $poNumber)->where('id', '!=', $mrf->id)->exists() && $attempts < 10) {
+                $attempts = 0;
+                while (MRF::where('po_number', $poNumber)->where('id', '!=', $mrf->id)->exists() && $attempts < 10) {
             // Add microsecond to ensure uniqueness
             usleep(1000); // Wait 1ms
-            $poNumber = $this->generatePONumber($mrf);
+                    $poNumber = $this->generatePONumber($mrf);
             if ($isRegeneration) {
                 $poNumber = $poNumber . '-R' . ($mrf->po_version + 1);
             }
-            $attempts++;
-        }
+                    $attempts++;
+                }
         
         $willReusePO = false;
 

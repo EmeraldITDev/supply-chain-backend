@@ -79,7 +79,7 @@ class PermissionService
     }
 
     /**
-     * Check if user can generate PO (Procurement only, after invoice approval)
+     * Check if user can generate PO (Procurement only, after RFQ approval by Supply Chain Director)
      */
     public function canGeneratePO(User $user, MRF $mrf): bool
     {
@@ -89,14 +89,24 @@ class PermissionService
 
         $currentState = $mrf->workflow_state ?? WorkflowStateService::STATE_MRF_CREATED;
         
-        // Allow PO generation (sending request to vendors) after Executive approval
-        // This includes: procurement_review, vendor_selected, invoice_received, invoice_approved
-        $allowedStates = [
-            WorkflowStateService::STATE_PROCUREMENT_REVIEW,
-            WorkflowStateService::STATE_VENDOR_SELECTED,
-            WorkflowStateService::STATE_INVOICE_RECEIVED,
-            WorkflowStateService::STATE_INVOICE_APPROVED,
-        ];
+        // PO generation is only allowed after Supply Chain Director approves vendor selection
+        // This sets the state to invoice_approved
+        if ($currentState !== WorkflowStateService::STATE_INVOICE_APPROVED) {
+            return false;
+        }
+        
+        // Check if RFQ exists and is approved
+        $rfq = \App\Models\RFQ::where('mrf_id', $mrf->id)->first();
+        if (!$rfq) {
+            return false; // No RFQ exists yet
+        }
+        
+        // RFQ must be approved by Supply Chain Director
+        if ($rfq->workflow_state !== 'approved') {
+            return false;
+        }
+        
+        return true;
         
         return in_array($currentState, $allowedStates);
     }

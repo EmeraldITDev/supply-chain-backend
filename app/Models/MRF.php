@@ -14,6 +14,7 @@ class MRF extends Model
         'mrf_id',
         'title',
         'category',
+        'contract_type',
         'urgency',
         'description',
         'quantity',
@@ -189,22 +190,29 @@ class MRF extends Model
     }
 
     /**
-     * Generate MRF ID
+     * Generate MRF ID with contract type prefix
+     * Format: MRF-{CONTRACT_TYPE}-{YEAR}-{NUMBER}
+     * Example: MRF-EMERALD-2026-001, MRF-OANDO-2026-001
      */
-    public static function generateMRFId(): string
+    public static function generateMRFId(?string $contractType = null): string
     {
         $year = date('Y');
-        $lastMRF = self::where('mrf_id', 'like', "MRF-{$year}-%")
+        $contractPrefix = $contractType ? strtoupper($contractType) : 'EMERALD'; // Default to EMERALD if not provided
+        
+        // Build pattern to find last MRF for this contract type and year
+        $pattern = "MRF-{$contractPrefix}-{$year}-%";
+        $lastMRF = self::where('mrf_id', 'like', $pattern)
             ->orderBy('mrf_id', 'desc')
             ->first();
 
         if ($lastMRF) {
+            // Extract number from MRF ID (last 3 digits)
             $lastNumber = (int) substr($lastMRF->mrf_id, -3);
             $newNumber = str_pad($lastNumber + 1, 3, '0', STR_PAD_LEFT);
         } else {
             $newNumber = '001';
         }
 
-        return "MRF-{$year}-{$newNumber}";
+        return "MRF-{$contractPrefix}-{$year}-{$newNumber}";
     }
 }

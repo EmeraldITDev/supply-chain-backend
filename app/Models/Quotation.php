@@ -25,7 +25,9 @@ class Quotation extends Model
         'attachments',
         'notes',
         'status',
+        'review_status',
         'rejection_reason',
+        'revision_notes',
         'approval_remarks',
         'approved_by',
         'approved_at',
@@ -44,6 +46,7 @@ class Quotation extends Model
         'attachments' => 'array',
         'delivery_days' => 'integer',
         'validity_days' => 'integer',
+        'review_status' => 'string',
     ];
 
     /**

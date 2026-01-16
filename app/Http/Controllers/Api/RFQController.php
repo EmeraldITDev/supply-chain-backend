@@ -30,11 +30,15 @@ class RFQController extends Controller
                 'id' => $rfq->rfq_id,
                 'mrfId' => $rfq->mrf_id ? (string) $rfq->mrf->mrf_id : null,
                 'mrfTitle' => $rfq->mrf_title ?? ($rfq->mrf ? $rfq->mrf->title : null),
+                'title' => $rfq->title,
                 'description' => $rfq->description,
                 'quantity' => $rfq->quantity,
                 'estimatedCost' => (float) $rfq->estimated_cost,
+                'paymentTerms' => $rfq->payment_terms,
+                'notes' => $rfq->notes,
                 'deadline' => $rfq->deadline->format('Y-m-d'),
                 'status' => $rfq->status,
+                'workflowState' => $rfq->workflow_state,
                 'vendorIds' => $rfq->vendors->pluck('vendor_id')->toArray(),
                 'createdAt' => $rfq->created_at->toIso8601String(),
             ];
@@ -47,13 +51,16 @@ class RFQController extends Controller
     public function store(Request $request)
     {
         $validator = Validator::make($request->all(), [
-            'mrfId' => 'nullable|exists:m_r_f_s,mrf_id',
+            'mrfId' => 'required|string|exists:m_r_f_s,mrf_id',
+            'title' => 'required|string',
             'description' => 'required|string',
             'quantity' => 'required|string',
-            'estimatedCost' => 'required|numeric|min:0',
+            'estimatedCost' => 'required|string|numeric',
             'deadline' => 'required|date',
             'vendorIds' => 'required|array|min:1',
-            'vendorIds.*' => 'exists:vendors,vendor_id',
+            'vendorIds.*' => 'required|string|exists:vendors,vendor_id',
+            'paymentTerms' => 'nullable|string',
+            'notes' => 'nullable|string',
         ]);
 
         if ($validator->fails()) {
@@ -79,11 +86,15 @@ class RFQController extends Controller
             'rfq_id' => RFQ::generateRFQId(),
             'mrf_id' => $mrf ? $mrf->id : null,
             'mrf_title' => $mrfTitle,
+            'title' => $request->title,
             'description' => $request->description,
             'quantity' => $request->quantity,
             'estimated_cost' => $request->estimatedCost,
             'deadline' => $request->deadline,
+            'payment_terms' => $request->paymentTerms,
+            'notes' => $request->notes,
             'status' => 'Open',
+            'workflow_state' => 'open',
             'created_by' => $user->id,
         ]);
 
@@ -97,11 +108,15 @@ class RFQController extends Controller
             'id' => $rfq->rfq_id,
             'mrfId' => $rfq->mrf_id ? (string) $rfq->mrf->mrf_id : null,
             'mrfTitle' => $rfq->mrf_title,
+            'title' => $rfq->title,
             'description' => $rfq->description,
             'quantity' => $rfq->quantity,
             'estimatedCost' => (float) $rfq->estimated_cost,
+            'paymentTerms' => $rfq->payment_terms,
+            'notes' => $rfq->notes,
             'deadline' => $rfq->deadline->format('Y-m-d'),
             'status' => $rfq->status,
+            'workflowState' => $rfq->workflow_state,
             'vendorIds' => $rfq->vendors->pluck('vendor_id')->toArray(),
             'createdAt' => $rfq->created_at->toIso8601String(),
         ], 201);

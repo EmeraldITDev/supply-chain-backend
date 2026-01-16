@@ -48,10 +48,13 @@ class QuotationController extends Controller
                 'vendorId' => $quotation->vendor ? $quotation->vendor->vendor_id : null,
                 'vendorName' => $quotation->vendor_name,
                 'price' => (float) $quotation->price,
-                'deliveryDate' => $quotation->delivery_date->format('Y-m-d'),
+                'totalAmount' => (float) $quotation->total_amount,
+                'deliveryDate' => $quotation->delivery_date ? $quotation->delivery_date->format('Y-m-d') : null,
                 'notes' => $quotation->notes,
                 'status' => $quotation->status,
+                'reviewStatus' => $quotation->review_status ?? 'pending',
                 'rejectionReason' => $quotation->rejection_reason,
+                'revisionNotes' => $quotation->revision_notes,
                 'approvalRemarks' => $quotation->approval_remarks,
             ];
         }));
@@ -114,24 +117,42 @@ class QuotationController extends Controller
             ->where('vendor_id', $vendor->id)
             ->first();
 
+        // If existing and revision was requested, allow resubmission
         if ($existing) {
-            return response()->json([
-                'success' => false,
-                'error' => 'Quotation already submitted for this RFQ',
-                'code' => 'VALIDATION_ERROR'
-            ], 422);
+            if ($existing->review_status === 'revision_requested') {
+                // Update existing quotation (resubmission)
+                $existing->update([
+                    'vendor_name' => $request->vendorName,
+                    'price' => $request->price,
+                    'delivery_date' => $request->deliveryDate,
+                    'notes' => $request->notes,
+                    'status' => 'Pending',
+                    'review_status' => 'pending', // Reset to pending
+                    'revision_notes' => null, // Clear revision notes
+                    'submitted_at' => now(),
+                ]);
+                $quotation = $existing;
+            } else {
+                return response()->json([
+                    'success' => false,
+                    'error' => 'Quotation already submitted for this RFQ',
+                    'code' => 'VALIDATION_ERROR'
+                ], 422);
+            }
+        } else {
+            $quotation = Quotation::create([
+                'quotation_id' => Quotation::generateQuotationId(),
+                'rfq_id' => $rfq->id,
+                'vendor_id' => $vendor->id,
+                'vendor_name' => $request->vendorName,
+                'price' => $request->price,
+                'delivery_date' => $request->deliveryDate,
+                'notes' => $request->notes,
+                'status' => 'Pending',
+                'review_status' => 'pending',
+                'submitted_at' => now(),
+            ]);
         }
-
-        $quotation = Quotation::create([
-            'quotation_id' => Quotation::generateQuotationId(),
-            'rfq_id' => $rfq->id,
-            'vendor_id' => $vendor->id,
-            'vendor_name' => $request->vendorName,
-            'price' => $request->price,
-            'delivery_date' => $request->deliveryDate,
-            'notes' => $request->notes,
-            'status' => 'Pending',
-        ]);
 
         return response()->json([
             'id' => $quotation->quotation_id,
@@ -244,18 +265,101 @@ class QuotationController extends Controller
             ], 422);
         }
 
+        $validator = Validator::make($request->all(), [
+            'reason' => 'required|string',
+            'comments' => 'nullable|string',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Validation failed',
+                'errors' => $validator->errors(),
+                'code' => 'VALIDATION_ERROR'
+            ], 422);
+        }
+
         $quotation->update([
             'status' => 'Rejected',
+            'review_status' => 'rejected',
             'rejection_reason' => $request->reason,
+            'revision_notes' => $request->comments,
+            'reviewed_by' => $user->id,
+            'reviewed_at' => now(),
         ]);
+
+        // TODO: Send notification/email to vendor with rejection reason
 
         return response()->json([
             'success' => true,
             'message' => 'Quotation rejected',
-            'quotation' => [
+            'data' => [
                 'id' => $quotation->quotation_id,
                 'status' => $quotation->status,
+                'reviewStatus' => $quotation->review_status,
                 'rejectionReason' => $quotation->rejection_reason,
+                'revisionNotes' => $quotation->revision_notes,
+            ]
+        ]);
+    }
+
+    /**
+     * Request revision of quotation
+     */
+    public function requestRevision(Request $request, $id)
+    {
+        $user = $request->user();
+
+        // Only Procurement Manager can request revision
+        if (!in_array($user->role, ['procurement', 'procurement_manager', 'admin'])) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Unauthorized. Only Procurement Managers can request revisions.',
+                'code' => 'FORBIDDEN'
+            ], 403);
+        }
+
+        $quotation = Quotation::where('quotation_id', $id)->first();
+
+        if (!$quotation) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Quotation not found',
+                'code' => 'NOT_FOUND'
+            ], 404);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'revisionNotes' => 'required|string',
+            'deadline' => 'nullable|date',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Validation failed',
+                'errors' => $validator->errors(),
+                'code' => 'VALIDATION_ERROR'
+            ], 422);
+        }
+
+        $quotation->update([
+            'review_status' => 'revision_requested',
+            'revision_notes' => $request->revisionNotes,
+            'reviewed_by' => $user->id,
+            'reviewed_at' => now(),
+        ]);
+
+        // TODO: Send notification/email to vendor with revision request
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Revision requested from vendor',
+            'data' => [
+                'id' => $quotation->quotation_id,
+                'reviewStatus' => $quotation->review_status,
+                'revisionNotes' => $quotation->revision_notes,
+                'reviewedAt' => $quotation->reviewed_at->toIso8601String(),
             ]
         ]);
     }

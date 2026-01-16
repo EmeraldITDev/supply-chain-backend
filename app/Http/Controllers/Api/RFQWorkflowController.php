@@ -60,10 +60,15 @@ class RFQWorkflowController extends Controller
             return [
                 'id' => $rfq->rfq_id,
                 'mrf_id' => $rfq->mrf_id ? $rfq->mrf->mrf_id : null,
-                'title' => $rfq->mrf_title ?? $rfq->description,
+                'title' => $rfq->title ?? $rfq->mrf_title ?? $rfq->description,
                 'description' => $rfq->description,
+                'quantity' => $rfq->quantity,
+                'estimatedCost' => (float) $rfq->estimated_cost,
+                'paymentTerms' => $rfq->payment_terms,
+                'notes' => $rfq->notes,
                 'deadline' => $rfq->deadline->format('Y-m-d'),
                 'status' => $rfq->status,
+                'workflowState' => $rfq->workflow_state,
                 'items' => $rfq->items->map(function ($item) {
                     return [
                         'id' => $item->id,
@@ -282,6 +287,7 @@ class RFQWorkflowController extends Controller
             // Update RFQ
             $rfq->update([
                 'status' => 'Awarded',
+                'workflow_state' => 'supply_chain_review', // Move to Supply Chain Director for approval
                 'selected_vendor_id' => $selectedQuotation->vendor_id,
                 'selected_quotation_id' => $selectedQuotation->id,
             ]);

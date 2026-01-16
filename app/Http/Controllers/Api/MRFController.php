@@ -89,6 +89,7 @@ class MRFController extends Controller
                 'id' => $mrf->mrf_id,
                 'title' => $mrf->title,
                 'category' => $mrf->category,
+                'contractType' => $mrf->contract_type,
                 'urgency' => $mrf->urgency,
                 'description' => $mrf->description,
                 'quantity' => $mrf->quantity,
@@ -164,6 +165,7 @@ class MRFController extends Controller
             'id' => $mrf->mrf_id,
             'title' => $mrf->title,
             'category' => $mrf->category,
+            'contractType' => $mrf->contract_type,
             'urgency' => $mrf->urgency,
             'description' => $mrf->description,
             'quantity' => $mrf->quantity,
@@ -174,6 +176,7 @@ class MRFController extends Controller
             'date' => $mrf->date->format('Y-m-d'),
             'status' => $mrf->status,
             'currentStage' => $mrf->current_stage,
+            'workflowState' => $mrf->workflow_state,
             'approvalHistory' => $mrf->approval_history ?? [],
             'rejectionReason' => $mrf->rejection_reason,
             'isResubmission' => $mrf->is_resubmission,
@@ -215,6 +218,7 @@ class MRFController extends Controller
             $validator = Validator::make($request->all(), [
                 'title' => 'required|string|max:255',
                 'category' => 'required|string|max:255',
+                'contractType' => 'required|string|in:emerald,oando,dangote,heritage',
                 'urgency' => 'required|in:Low,Medium,High,Critical',
                 'description' => 'required|string',
                 'quantity' => 'required|string',
@@ -242,8 +246,8 @@ class MRFController extends Controller
                 ], 401);
             }
 
-            // Generate MRF ID first
-            $mrfId = MRF::generateMRFId();
+            // Generate MRF ID with contract type
+            $mrfId = MRF::generateMRFId($request->contractType);
             
             // Handle PFI upload if provided
             $pfiUrl = null;
@@ -307,6 +311,7 @@ class MRFController extends Controller
                 'mrf_id' => $mrfId,
                 'title' => $request->title,
                 'category' => $request->category,
+                'contract_type' => $request->contractType,
                 'urgency' => $request->urgency,
                 'description' => $request->description,
                 'quantity' => $request->quantity,
