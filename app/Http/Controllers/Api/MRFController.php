@@ -298,7 +298,7 @@ class MRFController extends Controller
                 } else {
                     // Local storage fallback
                     $disk = config('filesystems.documents_disk', 'public');
-                    $mrfId = MRF::generateMRFId();
+                    // Use the already generated $mrfId (don't regenerate)
                     $pfiFileName = "pfi_{$mrfId}_" . time() . "." . $pfiFile->getClientOriginalExtension();
                     $pfiPath = "mrfs/{$mrfId}/{$pfiFileName}";
                     $pfiFile->storeAs(dirname($pfiPath), basename($pfiPath), $disk);
@@ -307,27 +307,49 @@ class MRFController extends Controller
                 }
             }
 
-            $mrf = MRF::create([
-                'mrf_id' => $mrfId,
-                'title' => $request->title,
-                'category' => $request->category,
-                'contract_type' => $request->contractType,
-                'urgency' => $request->urgency,
-                'description' => $request->description,
-                'quantity' => $request->quantity,
-                'estimated_cost' => $request->estimatedCost,
-                'justification' => $request->justification,
-                'requester_id' => $user->id,
-                'requester_name' => $user->name,
-                'date' => now(),
-                'status' => 'pending',
-                'current_stage' => 'executive_review',
-                'workflow_state' => WorkflowStateService::STATE_EXECUTIVE_REVIEW, // Immediately move to executive review
-                'approval_history' => [],
-                'is_resubmission' => false,
-                'pfi_url' => $pfiUrl,
-                'pfi_share_url' => $pfiShareUrl,
-            ]);
+            try {
+                $mrf = MRF::create([
+                    'mrf_id' => $mrfId,
+                    'title' => $request->title,
+                    'category' => $request->category,
+                    'contract_type' => $request->contractType,
+                    'urgency' => $request->urgency,
+                    'description' => $request->description,
+                    'quantity' => $request->quantity,
+                    'estimated_cost' => $request->estimatedCost,
+                    'justification' => $request->justification,
+                    'requester_id' => $user->id,
+                    'requester_name' => $user->name,
+                    'date' => now(),
+                    'status' => 'pending',
+                    'current_stage' => 'executive_review',
+                    'workflow_state' => WorkflowStateService::STATE_EXECUTIVE_REVIEW, // Immediately move to executive review
+                    'approval_history' => [],
+                    'is_resubmission' => false,
+                    'pfi_url' => $pfiUrl,
+                    'pfi_share_url' => $pfiShareUrl,
+                ]);
+            } catch (\Illuminate\Database\QueryException $e) {
+                // Check if it's a column not found error
+                $errorMessage = $e->getMessage();
+                if (str_contains($errorMessage, 'contract_type') || 
+                    str_contains($errorMessage, 'column') || 
+                    str_contains($errorMessage, 'does not exist') ||
+                    str_contains($errorMessage, 'Unknown column')) {
+                    Log::error('Database column missing - migration may not have been run', [
+                        'error' => $errorMessage,
+                        'mrf_id' => $mrfId
+                    ]);
+                    return response()->json([
+                        'success' => false,
+                        'error' => 'Database schema is not up to date. Please run migrations: php artisan migrate',
+                        'code' => 'DATABASE_ERROR',
+                        'details' => config('app.debug') ? $errorMessage : null
+                    ], 500);
+                }
+                // Re-throw if it's a different error
+                throw $e;
+            }
 
             // Send notification to Executive
             try {
@@ -346,6 +368,7 @@ class MRFController extends Controller
                     'id' => $mrf->mrf_id,
                     'title' => $mrf->title,
                     'category' => $mrf->category,
+                    'contractType' => $mrf->contract_type,
                     'urgency' => $mrf->urgency,
                     'description' => $mrf->description,
                     'quantity' => $mrf->quantity,
