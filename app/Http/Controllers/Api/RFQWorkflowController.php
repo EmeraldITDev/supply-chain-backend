@@ -26,31 +26,52 @@ class RFQWorkflowController extends Controller
 
     /**
      * Get RFQs for vendor portal (vendor-specific view)
+     * Returns only RFQs where the logged-in vendor is associated via the RFQ-vendor relationship
      */
     public function getVendorRFQs(Request $request)
     {
         $user = $request->user();
         
+        // Verify user is a vendor
+        if ($user->role !== 'vendor') {
+            return response()->json([
+                'success' => false,
+                'error' => 'Only vendors can access this endpoint',
+                'code' => 'FORBIDDEN'
+            ], 403);
+        }
+        
         // Get vendor from authenticated user
-        $vendor = Vendor::where('user_id', $user->id)->first();
+        // Users have vendor_id field that links to vendors
+        $vendor = $user->vendor ?? Vendor::find($user->vendor_id);
         
         if (!$vendor) {
             return response()->json([
                 'success' => false,
-                'error' => 'Vendor profile not found',
+                'error' => 'Vendor profile not found. Please ensure your account is linked to a vendor.',
                 'code' => 'NOT_FOUND'
             ], 404);
         }
 
-        // Get RFQs assigned to this vendor with engagement tracking
+        // Get RFQs assigned to this vendor via the many-to-many relationship
+        // Using whereHas ensures we only get RFQs where this vendor is in the rfq_vendors pivot table
         $rfqs = RFQ::whereHas('vendors', function ($query) use ($vendor) {
-            $query->where('vendor_id', $vendor->id);
+            $query->where('vendors.id', $vendor->id);
         })
-        ->with(['items', 'mrf'])
+        ->with([
+            'items', 
+            'mrf',
+            'vendors' => function ($query) use ($vendor) {
+                // Only load the current vendor's pivot data for efficiency
+                $query->where('vendors.id', $vendor->id);
+            }
+        ])
+        ->orderBy('created_at', 'desc')
         ->get()
         ->map(function ($rfq) use ($vendor) {
-            // Get pivot data for this vendor
-            $pivot = $rfq->vendors()->where('vendor_id', $vendor->id)->first()->pivot ?? null;
+            // Get pivot data for this vendor (should be loaded from the relationship)
+            $vendorPivot = $rfq->vendors->firstWhere('id', $vendor->id);
+            $pivot = $vendorPivot ? $vendorPivot->pivot : null;
             
             // Check if vendor has submitted quotation
             $hasSubmitted = Quotation::where('rfq_id', $rfq->id)
@@ -59,14 +80,14 @@ class RFQWorkflowController extends Controller
 
             return [
                 'id' => $rfq->rfq_id,
-                'mrf_id' => $rfq->mrf_id ? $rfq->mrf->mrf_id : null,
+                'mrf_id' => $rfq->mrf_id ? ($rfq->mrf ? $rfq->mrf->mrf_id : null) : null,
                 'title' => $rfq->title ?? $rfq->mrf_title ?? $rfq->description,
                 'description' => $rfq->description,
                 'quantity' => $rfq->quantity,
                 'estimatedCost' => (float) $rfq->estimated_cost,
                 'paymentTerms' => $rfq->payment_terms,
                 'notes' => $rfq->notes,
-                'deadline' => $rfq->deadline->format('Y-m-d'),
+                'deadline' => $rfq->deadline ? $rfq->deadline->format('Y-m-d') : null,
                 'status' => $rfq->status,
                 'workflowState' => $rfq->workflow_state,
                 'items' => $rfq->items->map(function ($item) {
@@ -79,10 +100,10 @@ class RFQWorkflowController extends Controller
                         'specifications' => $item->specifications,
                     ];
                 }),
-                'sent_at' => $pivot?->sent_at?->toIso8601String(),
-                'viewed_at' => $pivot?->viewed_at?->toIso8601String(),
+                'sent_at' => $pivot?->sent_at ? $pivot->sent_at->toIso8601String() : null,
+                'viewed_at' => $pivot?->viewed_at ? $pivot->viewed_at->toIso8601String() : null,
                 'responded' => $pivot?->responded ?? false,
-                'responded_at' => $pivot?->responded_at?->toIso8601String(),
+                'responded_at' => $pivot?->responded_at ? $pivot->responded_at->toIso8601String() : null,
                 'has_submitted_quote' => $hasSubmitted,
                 'created_at' => $rfq->created_at->toIso8601String(),
             ];
@@ -91,6 +112,7 @@ class RFQWorkflowController extends Controller
         return response()->json([
             'success' => true,
             'data' => $rfqs,
+            'count' => $rfqs->count(),
         ]);
     }
 
@@ -100,7 +122,18 @@ class RFQWorkflowController extends Controller
     public function markAsViewed(Request $request, $id)
     {
         $user = $request->user();
-        $vendor = Vendor::where('user_id', $user->id)->first();
+        
+        // Verify user is a vendor
+        if ($user->role !== 'vendor') {
+            return response()->json([
+                'success' => false,
+                'error' => 'Only vendors can access this endpoint',
+                'code' => 'FORBIDDEN'
+            ], 403);
+        }
+        
+        // Get vendor from authenticated user
+        $vendor = $user->vendor ?? Vendor::find($user->vendor_id);
         
         if (!$vendor) {
             return response()->json([
