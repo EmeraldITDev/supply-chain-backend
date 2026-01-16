@@ -294,10 +294,10 @@ class MRFWorkflowController extends Controller
             ], 422);
         }
 
-        // Update MRF - approve vendor selection (invoice approval happens separately)
+        // Update MRF - approve vendor selection (this allows PO generation)
         $mrf->update([
-            'workflow_state' => WorkflowStateService::STATE_INVOICE_RECEIVED,
-            'status' => 'invoice_received',
+            'workflow_state' => WorkflowStateService::STATE_INVOICE_APPROVED,
+            'status' => 'invoice_approved',
             'current_stage' => 'procurement',
         ]);
 

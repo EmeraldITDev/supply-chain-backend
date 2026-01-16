@@ -88,7 +88,17 @@ class PermissionService
         }
 
         $currentState = $mrf->workflow_state ?? WorkflowStateService::STATE_MRF_CREATED;
-        return $currentState === WorkflowStateService::STATE_INVOICE_APPROVED;
+        
+        // Allow PO generation (sending request to vendors) after Executive approval
+        // This includes: procurement_review, vendor_selected, invoice_received, invoice_approved
+        $allowedStates = [
+            WorkflowStateService::STATE_PROCUREMENT_REVIEW,
+            WorkflowStateService::STATE_VENDOR_SELECTED,
+            WorkflowStateService::STATE_INVOICE_RECEIVED,
+            WorkflowStateService::STATE_INVOICE_APPROVED,
+        ];
+        
+        return in_array($currentState, $allowedStates);
     }
 
     /**
