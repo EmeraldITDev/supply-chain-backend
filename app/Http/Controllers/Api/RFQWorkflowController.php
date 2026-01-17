@@ -31,43 +31,25 @@ class RFQWorkflowController extends Controller
     public function getVendorRFQs(Request $request)
     {
         $user = $request->user();
-        
-        // Verify user is a vendor or has vendor_id
-        if ($user->role !== 'vendor' && !$user->vendor_id) {
+
+        // Verify user is a vendor
+        if ($user->role !== 'vendor') {
             return response()->json([
                 'success' => false,
                 'error' => 'Only vendors can access this endpoint',
                 'code' => 'FORBIDDEN'
             ], 403);
         }
-        
+
         // Get vendor from authenticated user
-        // Try multiple methods to find vendor
-        $vendor = null;
-        
-        // Method 1: Check if user has vendor relationship
-        if (method_exists($user, 'vendor') && $user->vendor) {
-            $vendor = $user->vendor;
-        }
-        // Method 2: Find vendor by vendor_id field
-        elseif ($user->vendor_id) {
-            $vendor = Vendor::find($user->vendor_id);
-        }
-        // Method 3: Find vendor by user email (fallback)
-        else {
-            $vendor = Vendor::where('email', $user->email)->first();
-        }
-        
+        // Users have vendor_id field that links to vendors
+        $vendor = $user->vendor ?? Vendor::find($user->vendor_id);
+
         if (!$vendor) {
             return response()->json([
                 'success' => false,
                 'error' => 'Vendor profile not found. Please ensure your account is linked to a vendor.',
-                'code' => 'NOT_FOUND',
-                'debug' => [
-                    'user_role' => $user->role,
-                    'user_vendor_id' => $user->vendor_id,
-                    'user_email' => $user->email,
-                ]
+                'code' => 'NOT_FOUND'
             ], 404);
         }
 
@@ -77,7 +59,7 @@ class RFQWorkflowController extends Controller
             $query->where('vendors.id', $vendor->id);
         })
         ->with([
-            'items', 
+            'items',
             'mrf',
             'vendors' => function ($query) use ($vendor) {
                 // Only load the current vendor's pivot data for efficiency
@@ -90,7 +72,7 @@ class RFQWorkflowController extends Controller
             // Get pivot data for this vendor (should be loaded from the relationship)
             $vendorPivot = $rfq->vendors->firstWhere('id', $vendor->id);
             $pivot = $vendorPivot ? $vendorPivot->pivot : null;
-            
+
             // Check if vendor has submitted quotation
             $hasSubmitted = Quotation::where('rfq_id', $rfq->id)
                 ->where('vendor_id', $vendor->id)
@@ -99,14 +81,14 @@ class RFQWorkflowController extends Controller
             // Get estimated cost with fallback to MRF's estimated_cost
             // Cast to float to ensure proper numeric handling
             $estimatedCost = $rfq->estimated_cost ? (float) $rfq->estimated_cost : null;
-            
+
             // If RFQ's estimated_cost is null, 0, or not set, use MRF's estimated_cost
             if (!$estimatedCost || $estimatedCost == 0) {
-                $estimatedCost = $rfq->mrf && $rfq->mrf->estimated_cost 
-                    ? (float) $rfq->mrf->estimated_cost 
+                $estimatedCost = $rfq->mrf && $rfq->mrf->estimated_cost
+                    ? (float) $rfq->mrf->estimated_cost
                     : 0;
             }
-            
+
             return [
                 'id' => $rfq->rfq_id,
                 'mrf_id' => $rfq->mrf_id ? ($rfq->mrf ? $rfq->mrf->mrf_id : null) : null,
@@ -116,7 +98,7 @@ class RFQWorkflowController extends Controller
                 'quantity' => $rfq->quantity,
                 'estimatedCost' => (float) $estimatedCost,
                 'budget' => (float) $estimatedCost, // Alias for estimatedCost for frontend compatibility
-                'paymentTerms' => $rfq->payment_terms ?? '', // Ensure payment terms are always included (empty string if null)
+                'paymentTerms' => $rfq->payment_terms,
                 'notes' => $rfq->notes,
                 'supportingDocuments' => $rfq->supporting_documents ?? [],
                 'deadline' => $rfq->deadline ? $rfq->deadline->format('Y-m-d') : null,
@@ -154,7 +136,7 @@ class RFQWorkflowController extends Controller
     public function markAsViewed(Request $request, $id)
     {
         $user = $request->user();
-        
+
         // Verify user is a vendor
         if ($user->role !== 'vendor') {
             return response()->json([
@@ -163,10 +145,10 @@ class RFQWorkflowController extends Controller
                 'code' => 'FORBIDDEN'
             ], 403);
         }
-        
+
         // Get vendor from authenticated user
         $vendor = $user->vendor ?? Vendor::find($user->vendor_id);
-        
+
         if (!$vendor) {
             return response()->json([
                 'success' => false,
@@ -212,7 +194,7 @@ class RFQWorkflowController extends Controller
             ], 403);
         }
 
-        $rfq = RFQ::where('rfq_id', $id)->with(['items', 'mrf'])->first();
+        $rfq = RFQ::where('rfq_id', $id)->with(['items'])->first();
 
         if (!$rfq) {
             return response()->json([
@@ -226,7 +208,7 @@ class RFQWorkflowController extends Controller
         $quotations = Quotation::where('rfq_id', $rfq->id)
             ->with(['vendor', 'items.rfqItem'])
             ->get()
-            ->map(function ($quotation) use ($rfq) {
+            ->map(function ($quotation) {
                 return [
                     'quotation' => [
                         'id' => $quotation->quotation_id,
@@ -240,7 +222,6 @@ class RFQWorkflowController extends Controller
                         'warranty_period' => $quotation->warranty_period,
                         'notes' => $quotation->notes,
                         'status' => $quotation->status,
-                        'reviewStatus' => $quotation->review_status ?? 'pending',
                         'attachments' => $quotation->attachments,
                         'submitted_at' => $quotation->submitted_at?->toIso8601String(),
                     ],
@@ -250,17 +231,6 @@ class RFQWorkflowController extends Controller
                         'email' => $quotation->vendor->email,
                         'phone' => $quotation->vendor->phone,
                         'rating' => (float) $quotation->vendor->rating,
-                    ],
-                    // Include MRF link for each quotation
-                    'mrf' => [
-                        'id' => $rfq->mrf_id ? ($rfq->mrf ? $rfq->mrf->mrf_id : null) : null,
-                        'title' => $rfq->mrf_title ?? ($rfq->mrf ? $rfq->mrf->title : null),
-                        'category' => $rfq->mrf ? $rfq->mrf->category : null,
-                    ],
-                    'rfq' => [
-                        'id' => $rfq->rfq_id,
-                        'title' => $rfq->title,
-                        'description' => $rfq->description,
                     ],
                     'items' => $quotation->items->map(function ($item) {
                         return [
@@ -283,9 +253,6 @@ class RFQWorkflowController extends Controller
             'data' => [
                 'rfq' => [
                     'id' => $rfq->rfq_id,
-                    'mrfId' => $rfq->mrf_id ? ($rfq->mrf ? $rfq->mrf->mrf_id : null) : null,
-                    'mrfTitle' => $rfq->mrf_title ?? ($rfq->mrf ? $rfq->mrf->title : null),
-                    'title' => $rfq->title,
                     'description' => $rfq->description,
                     'deadline' => $rfq->deadline->format('Y-m-d'),
                     'status' => $rfq->status,
@@ -395,13 +362,13 @@ class RFQWorkflowController extends Controller
 
             // Send notifications
             $this->notificationService->notifyQuotationAwarded($selectedQuotation);
-            
+
             // Notify rejected vendors
             $rejectedQuotations = Quotation::where('rfq_id', $rfq->id)
                 ->where('id', '!=', $selectedQuotation->id)
                 ->with('vendor')
                 ->get();
-                
+
             foreach ($rejectedQuotations as $rejectedQuotation) {
                 $this->notificationService->notifyQuotationRejected($rejectedQuotation);
             }
@@ -424,7 +391,7 @@ class RFQWorkflowController extends Controller
             ]);
         } catch (\Exception $e) {
             DB::rollBack();
-            
+
             return response()->json([
                 'success' => false,
                 'error' => 'Failed to select vendor',

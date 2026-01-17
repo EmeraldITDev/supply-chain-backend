@@ -12,110 +12,6 @@ use Illuminate\Support\Facades\Validator;
 class RFQController extends Controller
 {
     /**
-     * Get single RFQ by ID
-     */
-    public function show(Request $request, $id)
-    {
-        $rfq = RFQ::where('rfq_id', $id)
-            ->with(['mrf', 'creator', 'vendors', 'items', 'quotations.vendor'])
-            ->first();
-
-        if (!$rfq) {
-            return response()->json([
-                'success' => false,
-                'error' => 'RFQ not found',
-                'code' => 'NOT_FOUND'
-            ], 404);
-        }
-
-        // Get estimated cost with fallback to MRF's estimated_cost
-        $estimatedCost = $rfq->estimated_cost ? (float) $rfq->estimated_cost : null;
-        if (!$estimatedCost || $estimatedCost == 0) {
-            $estimatedCost = $rfq->mrf && $rfq->mrf->estimated_cost
-                ? (float) $rfq->mrf->estimated_cost
-                : 0;
-        }
-
-        return response()->json([
-            'success' => true,
-            'data' => [
-                'id' => $rfq->rfq_id,
-                'mrfId' => $rfq->mrf_id ? ($rfq->mrf ? (string) $rfq->mrf->mrf_id : null) : null,
-                'mrfTitle' => $rfq->mrf_title ?? ($rfq->mrf ? $rfq->mrf->title : null),
-                'title' => $rfq->title,
-                'category' => $rfq->category,
-                'description' => $rfq->description,
-                'quantity' => $rfq->quantity,
-                'estimatedCost' => $estimatedCost,
-                'budget' => $estimatedCost, // Alias for frontend compatibility
-                'estimatedBudget' => $estimatedCost, // Another alias for clarity in RFQ details modal
-                'paymentTerms' => $rfq->payment_terms ?? '', // Ensure payment terms are always included (empty string if null)
-                'notes' => $rfq->notes,
-                'supportingDocuments' => $rfq->supporting_documents ?? [],
-                'deadline' => $rfq->deadline ? $rfq->deadline->format('Y-m-d') : null,
-                'status' => $rfq->status,
-                'workflowState' => $rfq->workflow_state,
-                'vendorIds' => $rfq->vendors->pluck('vendor_id')->toArray(),
-                'vendors' => $rfq->vendors->map(function($vendor) {
-                    return [
-                        'id' => $vendor->vendor_id,
-                        'name' => $vendor->name,
-                        'email' => $vendor->email,
-                    ];
-                }),
-                'items' => $rfq->items->map(function($item) {
-                    return [
-                        'id' => $item->id,
-                        'item_name' => $item->item_name,
-                        'description' => $item->description,
-                        'quantity' => $item->quantity,
-                        'unit' => $item->unit,
-                        'specifications' => $item->specifications,
-                    ];
-                }),
-                // Include quotations with MRF links for RFQ management
-                'quotations' => $rfq->quotations->map(function($quotation) use ($rfq) {
-                    return [
-                        'id' => $quotation->quotation_id,
-                        'quotation_id' => $quotation->quotation_id,
-                        'rfqId' => $rfq->rfq_id,
-                        'mrfId' => $rfq->mrf_id ? ($rfq->mrf ? $rfq->mrf->mrf_id : null) : null,
-                        'mrfTitle' => $rfq->mrf_title ?? ($rfq->mrf ? $rfq->mrf->title : null),
-                        'vendorId' => $quotation->vendor ? $quotation->vendor->vendor_id : null,
-                        'vendorName' => $quotation->vendor_name,
-                        'price' => (float) $quotation->price,
-                        'totalAmount' => (float) $quotation->total_amount,
-                        'currency' => $quotation->currency ?? 'NGN',
-                        'deliveryDate' => $quotation->delivery_date ? $quotation->delivery_date->format('Y-m-d') : null,
-                        'deliveryDays' => $quotation->delivery_days,
-                        'paymentTerms' => $quotation->payment_terms,
-                        'validityDays' => $quotation->validity_days,
-                        'warrantyPeriod' => $quotation->warranty_period,
-                        'notes' => $quotation->notes,
-                        'status' => $quotation->status,
-                        'reviewStatus' => $quotation->review_status ?? 'pending',
-                        'rejectionReason' => $quotation->rejection_reason,
-                        'revisionNotes' => $quotation->revision_notes,
-                        'approvalRemarks' => $quotation->approval_remarks,
-                        'submittedAt' => $quotation->submitted_at ? $quotation->submitted_at->toIso8601String() : null,
-                        'reviewedAt' => $quotation->reviewed_at ? $quotation->reviewed_at->toIso8601String() : null,
-                        'approvedAt' => $quotation->approved_at ? $quotation->approved_at->toIso8601String() : null,
-                        'attachments' => $quotation->attachments ?? [],
-                        'createdAt' => $quotation->created_at->toIso8601String(),
-                    ];
-                }),
-                'quotationsCount' => $rfq->quotations->count(),
-                'createdAt' => $rfq->created_at->toIso8601String(),
-                'createdBy' => $rfq->creator ? [
-                    'id' => $rfq->creator->id,
-                    'name' => $rfq->creator->name,
-                    'email' => $rfq->creator->email,
-                ] : null,
-            ]
-        ]);
-    }
-
-    /**
      * Get all RFQs
      */
     public function index(Request $request)
@@ -130,14 +26,6 @@ class RFQController extends Controller
         $rfqs = $query->orderBy('created_at', 'desc')->get();
 
         return response()->json($rfqs->map(function($rfq) {
-            // Get estimated cost with fallback to MRF's estimated_cost
-            $estimatedCost = $rfq->estimated_cost ? (float) $rfq->estimated_cost : null;
-            if (!$estimatedCost || $estimatedCost == 0) {
-                $estimatedCost = $rfq->mrf && $rfq->mrf->estimated_cost
-                    ? (float) $rfq->mrf->estimated_cost
-                    : 0;
-            }
-
             return [
                 'id' => $rfq->rfq_id,
                 'mrfId' => $rfq->mrf_id ? (string) $rfq->mrf->mrf_id : null,
@@ -146,13 +34,11 @@ class RFQController extends Controller
                 'category' => $rfq->category,
                 'description' => $rfq->description,
                 'quantity' => $rfq->quantity,
-                'estimatedCost' => $estimatedCost,
-                'budget' => $estimatedCost, // Alias for frontend compatibility
-                'estimatedBudget' => $estimatedCost, // Another alias for clarity
-                'paymentTerms' => $rfq->payment_terms ?? '', // Ensure payment terms are always included (empty string if null)
+                'estimatedCost' => (float) $rfq->estimated_cost,
+                'paymentTerms' => $rfq->payment_terms,
                 'notes' => $rfq->notes,
                 'supportingDocuments' => $rfq->supporting_documents ?? [],
-                'deadline' => $rfq->deadline ? $rfq->deadline->format('Y-m-d') : null,
+                'deadline' => $rfq->deadline->format('Y-m-d'),
                 'status' => $rfq->status,
                 'workflowState' => $rfq->workflow_state,
                 'vendorIds' => $rfq->vendors->pluck('vendor_id')->toArray(),

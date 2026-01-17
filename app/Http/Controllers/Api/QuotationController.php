@@ -16,7 +16,7 @@ class QuotationController extends Controller
      */
     public function index(Request $request)
     {
-        $query = Quotation::with(['rfq.mrf', 'vendor', 'approver']); // Load MRF through RFQ relationship
+        $query = Quotation::with(['rfq', 'vendor', 'approver']);
 
         // Filter by vendor
         if ($request->has('vendorId')) {
@@ -41,44 +41,23 @@ class QuotationController extends Controller
 
         $quotations = $query->orderBy('created_at', 'desc')->get();
 
-        return response()->json([
-            'success' => true,
-            'data' => $quotations->map(function($quotation) {
-                $rfq = $quotation->rfq;
-                $mrf = $rfq && $rfq->mrf ? $rfq->mrf : null;
-                
-                return [
-                    'id' => $quotation->quotation_id,
-                    'quotation_id' => $quotation->quotation_id,
-                    'rfqId' => $rfq ? $rfq->rfq_id : null,
-                    'rfqTitle' => $rfq ? ($rfq->title ?? $rfq->description) : null,
-                    // Include MRF link for RFQ management
-                    'mrfId' => $mrf ? $mrf->mrf_id : ($rfq ? ($rfq->mrf_id ? (string) $rfq->mrf_id : null) : null),
-                    'mrfTitle' => $mrf ? $mrf->title : ($rfq ? ($rfq->mrf_title ?? null) : null),
-                    'vendorId' => $quotation->vendor ? $quotation->vendor->vendor_id : null,
-                    'vendorName' => $quotation->vendor_name,
-                    'price' => (float) $quotation->price,
-                    'totalAmount' => (float) $quotation->total_amount,
-                    'currency' => $quotation->currency ?? 'NGN',
-                    'deliveryDate' => $quotation->delivery_date ? $quotation->delivery_date->format('Y-m-d') : null,
-                    'deliveryDays' => $quotation->delivery_days,
-                    'paymentTerms' => $quotation->payment_terms,
-                    'validityDays' => $quotation->validity_days,
-                    'warrantyPeriod' => $quotation->warranty_period,
-                    'notes' => $quotation->notes,
-                    'status' => $quotation->status,
-                    'reviewStatus' => $quotation->review_status ?? 'pending',
-                    'rejectionReason' => $quotation->rejection_reason,
-                    'revisionNotes' => $quotation->revision_notes,
-                    'approvalRemarks' => $quotation->approval_remarks,
-                    'submittedAt' => $quotation->submitted_at ? $quotation->submitted_at->toIso8601String() : null,
-                    'reviewedAt' => $quotation->reviewed_at ? $quotation->reviewed_at->toIso8601String() : null,
-                    'approvedAt' => $quotation->approved_at ? $quotation->approved_at->toIso8601String() : null,
-                    'createdAt' => $quotation->created_at->toIso8601String(),
-                ];
-            }),
-            'count' => $quotations->count(),
-        ]);
+        return response()->json($quotations->map(function($quotation) {
+            return [
+                'id' => $quotation->quotation_id,
+                'rfqId' => $quotation->rfq ? $quotation->rfq->rfq_id : null,
+                'vendorId' => $quotation->vendor ? $quotation->vendor->vendor_id : null,
+                'vendorName' => $quotation->vendor_name,
+                'price' => (float) $quotation->price,
+                'totalAmount' => (float) $quotation->total_amount,
+                'deliveryDate' => $quotation->delivery_date ? $quotation->delivery_date->format('Y-m-d') : null,
+                'notes' => $quotation->notes,
+                'status' => $quotation->status,
+                'reviewStatus' => $quotation->review_status ?? 'pending',
+                'rejectionReason' => $quotation->rejection_reason,
+                'revisionNotes' => $quotation->revision_notes,
+                'approvalRemarks' => $quotation->approval_remarks,
+            ];
+        }));
     }
 
     /**
@@ -154,25 +133,25 @@ class QuotationController extends Controller
                 ]);
                 $quotation = $existing;
             } else {
-                return response()->json([
-                    'success' => false,
-                    'error' => 'Quotation already submitted for this RFQ',
-                    'code' => 'VALIDATION_ERROR'
-                ], 422);
-            }
+            return response()->json([
+                'success' => false,
+                'error' => 'Quotation already submitted for this RFQ',
+                'code' => 'VALIDATION_ERROR'
+            ], 422);
+        }
         } else {
-            $quotation = Quotation::create([
-                'quotation_id' => Quotation::generateQuotationId(),
-                'rfq_id' => $rfq->id,
-                'vendor_id' => $vendor->id,
-                'vendor_name' => $request->vendorName,
-                'price' => $request->price,
-                'delivery_date' => $request->deliveryDate,
-                'notes' => $request->notes,
-                'status' => 'Pending',
+        $quotation = Quotation::create([
+            'quotation_id' => Quotation::generateQuotationId(),
+            'rfq_id' => $rfq->id,
+            'vendor_id' => $vendor->id,
+            'vendor_name' => $request->vendorName,
+            'price' => $request->price,
+            'delivery_date' => $request->deliveryDate,
+            'notes' => $request->notes,
+            'status' => 'Pending',
                 'review_status' => 'pending',
                 'submitted_at' => now(),
-            ]);
+        ]);
         }
 
         return response()->json([
@@ -321,175 +300,6 @@ class QuotationController extends Controller
                 'rejectionReason' => $quotation->rejection_reason,
                 'revisionNotes' => $quotation->revision_notes,
             ]
-        ]);
-    }
-
-    /**
-     * Get quotations for the logged-in vendor
-     * Used by vendors to view their own quotations (no vendorId needed)
-     */
-    public function getMyQuotations(Request $request)
-    {
-        $user = $request->user();
-
-        // Find vendor from authenticated user
-        $vendor = null;
-
-        // Try multiple methods to find vendor
-        if (method_exists($user, 'vendor') && $user->vendor) {
-            $vendor = $user->vendor;
-        } elseif ($user->vendor_id) {
-            $vendor = Vendor::find($user->vendor_id);
-        } elseif ($user->role === 'vendor') {
-            $vendor = Vendor::where('email', $user->email)->first();
-        }
-
-        if (!$vendor) {
-            return response()->json([
-                'success' => false,
-                'error' => 'Vendor profile not found. Please ensure your account is linked to a vendor.',
-                'code' => 'NOT_FOUND'
-            ], 404);
-        }
-
-        // Get quotations for this vendor
-        $query = Quotation::where('vendor_id', $vendor->id)
-            ->with(['rfq', 'approver'])
-            ->orderBy('created_at', 'desc');
-
-        // Filter by status if provided
-        if ($request->has('status')) {
-            $query->where('status', $request->status);
-        }
-
-        // Filter by RFQ if provided
-        if ($request->has('rfqId')) {
-            $rfq = RFQ::where('rfq_id', $request->rfqId)->first();
-            if ($rfq) {
-                $query->where('rfq_id', $rfq->id);
-            }
-        }
-
-        $quotations = $query->get();
-
-        return response()->json([
-            'success' => true,
-            'data' => $quotations->map(function($quotation) {
-                return [
-                    'id' => $quotation->quotation_id,
-                    'quotation_id' => $quotation->quotation_id,
-                    'rfqId' => $quotation->rfq ? $quotation->rfq->rfq_id : null,
-                    'rfqTitle' => $quotation->rfq ? ($quotation->rfq->title ?? $quotation->rfq->description) : null,
-                    'vendorId' => $quotation->vendor ? $quotation->vendor->vendor_id : null,
-                    'vendorName' => $quotation->vendor_name,
-                    'price' => (float) $quotation->price,
-                    'totalAmount' => (float) $quotation->total_amount,
-                    'currency' => $quotation->currency ?? 'NGN',
-                    'deliveryDate' => $quotation->delivery_date ? $quotation->delivery_date->format('Y-m-d') : null,
-                    'deliveryDays' => $quotation->delivery_days,
-                    'paymentTerms' => $quotation->payment_terms,
-                    'validityDays' => $quotation->validity_days,
-                    'warrantyPeriod' => $quotation->warranty_period,
-                    'notes' => $quotation->notes,
-                    'status' => $quotation->status,
-                    'reviewStatus' => $quotation->review_status ?? 'pending',
-                    'rejectionReason' => $quotation->rejection_reason,
-                    'revisionNotes' => $quotation->revision_notes,
-                    'approvalRemarks' => $quotation->approval_remarks,
-                    'submittedAt' => $quotation->submitted_at ? $quotation->submitted_at->toIso8601String() : null,
-                    'reviewedAt' => $quotation->reviewed_at ? $quotation->reviewed_at->toIso8601String() : null,
-                    'approvedAt' => $quotation->approved_at ? $quotation->approved_at->toIso8601String() : null,
-                    'attachments' => $quotation->attachments ?? [],
-                    'createdAt' => $quotation->created_at->toIso8601String(),
-                ];
-            }),
-            'count' => $quotations->count(),
-        ]);
-    }
-
-    /**
-     * Get quotations for a specific vendor (by vendor_id)
-     * Used by vendors to view their own quotations
-     */
-    public function getVendorQuotations(Request $request, $vendorId)
-    {
-        $user = $request->user();
-
-        // Find vendor by vendor_id
-        $vendor = Vendor::where('vendor_id', $vendorId)->first();
-
-        if (!$vendor) {
-            return response()->json([
-                'success' => false,
-                'error' => 'Vendor not found',
-                'code' => 'NOT_FOUND'
-            ], 404);
-        }
-
-        // If user is a vendor, ensure they can only see their own quotations
-        if ($user->role === 'vendor') {
-            $userVendor = $user->vendor ?? Vendor::find($user->vendor_id);
-            if (!$userVendor || $userVendor->id !== $vendor->id) {
-                return response()->json([
-                    'success' => false,
-                    'error' => 'You can only view your own quotations',
-                    'code' => 'FORBIDDEN'
-                ], 403);
-            }
-        }
-
-        // Get quotations for this vendor
-        $query = Quotation::where('vendor_id', $vendor->id)
-            ->with(['rfq', 'approver'])
-            ->orderBy('created_at', 'desc');
-
-        // Filter by status if provided
-        if ($request->has('status')) {
-            $query->where('status', $request->status);
-        }
-
-        // Filter by RFQ if provided
-        if ($request->has('rfqId')) {
-            $rfq = RFQ::where('rfq_id', $request->rfqId)->first();
-            if ($rfq) {
-                $query->where('rfq_id', $rfq->id);
-            }
-        }
-
-        $quotations = $query->get();
-
-        return response()->json([
-            'success' => true,
-            'data' => $quotations->map(function($quotation) {
-                return [
-                    'id' => $quotation->quotation_id,
-                    'quotation_id' => $quotation->quotation_id,
-                    'rfqId' => $quotation->rfq ? $quotation->rfq->rfq_id : null,
-                    'rfqTitle' => $quotation->rfq ? ($quotation->rfq->title ?? $quotation->rfq->description) : null,
-                    'vendorId' => $quotation->vendor ? $quotation->vendor->vendor_id : null,
-                    'vendorName' => $quotation->vendor_name,
-                    'price' => (float) $quotation->price,
-                    'totalAmount' => (float) $quotation->total_amount,
-                    'currency' => $quotation->currency ?? 'NGN',
-                    'deliveryDate' => $quotation->delivery_date ? $quotation->delivery_date->format('Y-m-d') : null,
-                    'deliveryDays' => $quotation->delivery_days,
-                    'paymentTerms' => $quotation->payment_terms,
-                    'validityDays' => $quotation->validity_days,
-                    'warrantyPeriod' => $quotation->warranty_period,
-                    'notes' => $quotation->notes,
-                    'status' => $quotation->status,
-                    'reviewStatus' => $quotation->review_status ?? 'pending',
-                    'rejectionReason' => $quotation->rejection_reason,
-                    'revisionNotes' => $quotation->revision_notes,
-                    'approvalRemarks' => $quotation->approval_remarks,
-                    'submittedAt' => $quotation->submitted_at ? $quotation->submitted_at->toIso8601String() : null,
-                    'reviewedAt' => $quotation->reviewed_at ? $quotation->reviewed_at->toIso8601String() : null,
-                    'approvedAt' => $quotation->approved_at ? $quotation->approved_at->toIso8601String() : null,
-                    'attachments' => $quotation->attachments ?? [],
-                    'createdAt' => $quotation->created_at->toIso8601String(),
-                ];
-            }),
-            'count' => $quotations->count(),
         ]);
     }
 

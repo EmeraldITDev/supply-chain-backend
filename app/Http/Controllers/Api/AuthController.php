@@ -158,44 +158,13 @@ class AuthController extends Controller
      */
     public function me(Request $request)
     {
-        $user = $request->user();
-        $token = $user->currentAccessToken();
+        $user = $request->user()->load('employee');
+        $token = $request->user()->currentAccessToken();
 
         // Get user role (from Spatie or fallback to role field)
         $role = $user->getRoleNames()->first() ?? $user->role ?? 'employee';
         
-        // If user is a vendor, load vendor relationship and return vendor-specific data
-        if ($role === 'vendor' || $user->vendor_id) {
-            $user->load('vendor');
-            $vendor = $user->vendor ?? \App\Models\Vendor::find($user->vendor_id);
-            
-            if ($vendor) {
-                return response()->json([
-                    'id' => $user->id,
-                    'email' => $user->email,
-                    'name' => $user->name,
-                    'role' => 'vendor',
-                    'vendorId' => $vendor->vendor_id,
-                    'vendor' => [
-                        'id' => $vendor->vendor_id,
-                        'name' => $vendor->name,
-                        'email' => $vendor->email,
-                        'phone' => $vendor->phone,
-                        'address' => $vendor->address,
-                        'contactPerson' => $vendor->contact_person,
-                        'category' => $vendor->category,
-                        'status' => $vendor->status,
-                        'rating' => (float) ($vendor->rating ?? 0),
-                    ],
-                    'createdAt' => $user->created_at->toIso8601String(),
-                    'requiresPasswordChange' => $user->must_change_password ?? false,
-                    'tokenExpiresAt' => $token->expires_at ? $token->expires_at->toIso8601String() : null,
-                ]);
-            }
-        }
-        
-        // For non-vendor users, load employee relationship
-        $user->load('employee');
+        // Get department from employee or user
         $department = $user->employee->department ?? $user->department ?? null;
 
         return response()->json([

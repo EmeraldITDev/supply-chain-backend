@@ -30,7 +30,7 @@ class NotificationController extends Controller
             $perPage = $request->input('per_page', 15);
             $unreadOnly = $request->boolean('unread_only', false);
 
-            $query = $user->notifications();
+            $query = $user->notifications()->orderBy('created_at', 'desc');
 
             if ($unreadOnly) {
                 $query->whereNull('read_at');
@@ -38,27 +38,24 @@ class NotificationController extends Controller
 
             $notifications = $query->paginate($perPage);
             
-            // Format notifications for frontend with clickable action URLs
+            // Format notifications for frontend
             $formattedNotifications = collect($notifications->items())->map(function ($notification) {
-                $data = $notification->data ?? [];
+                $data = $notification->data;
                 
                 return [
                     'id' => $notification->id,
-                    'type' => $notification->type,
-                    'data' => $data,
-                    // Extract key fields for easy frontend access
+                    'type' => $data['type'] ?? 'unknown',
                     'title' => $data['title'] ?? 'Notification',
                     'message' => $data['message'] ?? '',
                     'action_url' => $data['action_url'] ?? null,
                     'icon' => $data['icon'] ?? 'bell',
-                    'color' => $data['color'] ?? 'gray',
+                    'color' => $data['color'] ?? 'blue',
                     'priority' => $data['priority'] ?? 'normal',
-                    // Include type-specific IDs for routing
-                    'mrf_id' => $data['mrf_number'] ?? $data['mrf_id'] ?? null,
-                    'rfq_id' => $data['rfq_number'] ?? $data['rfq_id'] ?? null,
-                    'quotation_id' => $data['quotation_id'] ?? null,
-                    'read_at' => $notification->read_at?->toIso8601String(),
+                    'read_at' => $notification->read_at ? $notification->read_at->toIso8601String() : null,
                     'created_at' => $notification->created_at->toIso8601String(),
+                    'is_read' => $notification->read_at !== null,
+                    // Include additional context based on notification type
+                    'data' => $data,
                 ];
             });
 
@@ -134,23 +131,22 @@ class NotificationController extends Controller
                 ], 404);
             }
 
+            $data = $notification->data;
+            
             // Format notification for frontend
-            $data = $notification->data ?? [];
             $formattedNotification = [
                 'id' => $notification->id,
-                'type' => $notification->type,
-                'data' => $data,
+                'type' => $data['type'] ?? 'unknown',
                 'title' => $data['title'] ?? 'Notification',
                 'message' => $data['message'] ?? '',
                 'action_url' => $data['action_url'] ?? null,
                 'icon' => $data['icon'] ?? 'bell',
-                'color' => $data['color'] ?? 'gray',
+                'color' => $data['color'] ?? 'blue',
                 'priority' => $data['priority'] ?? 'normal',
-                'mrf_id' => $data['mrf_number'] ?? $data['mrf_id'] ?? null,
-                'rfq_id' => $data['rfq_number'] ?? $data['rfq_id'] ?? null,
-                'quotation_id' => $data['quotation_id'] ?? null,
-                'read_at' => $notification->read_at?->toIso8601String(),
+                'read_at' => $notification->read_at ? $notification->read_at->toIso8601String() : null,
                 'created_at' => $notification->created_at->toIso8601String(),
+                'is_read' => $notification->read_at !== null,
+                'data' => $data,
             ];
 
             return response()->json([
@@ -187,24 +183,22 @@ class NotificationController extends Controller
             }
 
             $notification->markAsRead();
-
-            // Format notification for frontend
-            $data = $notification->data ?? [];
+            
+            // Format notification for response
+            $data = $notification->data;
             $formattedNotification = [
                 'id' => $notification->id,
-                'type' => $notification->type,
-                'data' => $data,
+                'type' => $data['type'] ?? 'unknown',
                 'title' => $data['title'] ?? 'Notification',
                 'message' => $data['message'] ?? '',
                 'action_url' => $data['action_url'] ?? null,
                 'icon' => $data['icon'] ?? 'bell',
-                'color' => $data['color'] ?? 'gray',
+                'color' => $data['color'] ?? 'blue',
                 'priority' => $data['priority'] ?? 'normal',
-                'mrf_id' => $data['mrf_number'] ?? $data['mrf_id'] ?? null,
-                'rfq_id' => $data['rfq_number'] ?? $data['rfq_id'] ?? null,
-                'quotation_id' => $data['quotation_id'] ?? null,
-                'read_at' => $notification->read_at?->toIso8601String(),
+                'read_at' => $notification->read_at ? $notification->read_at->toIso8601String() : null,
                 'created_at' => $notification->created_at->toIso8601String(),
+                'is_read' => true,
+                'data' => $data,
             ];
 
             return response()->json([
