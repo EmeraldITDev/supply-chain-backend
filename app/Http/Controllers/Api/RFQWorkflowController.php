@@ -32,8 +32,8 @@ class RFQWorkflowController extends Controller
     {
         $user = $request->user();
         
-        // Verify user is a vendor
-        if ($user->role !== 'vendor') {
+        // Verify user is a vendor or has vendor_id
+        if ($user->role !== 'vendor' && !$user->vendor_id) {
             return response()->json([
                 'success' => false,
                 'error' => 'Only vendors can access this endpoint',
@@ -42,14 +42,32 @@ class RFQWorkflowController extends Controller
         }
         
         // Get vendor from authenticated user
-        // Users have vendor_id field that links to vendors
-        $vendor = $user->vendor ?? Vendor::find($user->vendor_id);
+        // Try multiple methods to find vendor
+        $vendor = null;
+        
+        // Method 1: Check if user has vendor relationship
+        if (method_exists($user, 'vendor') && $user->vendor) {
+            $vendor = $user->vendor;
+        }
+        // Method 2: Find vendor by vendor_id field
+        elseif ($user->vendor_id) {
+            $vendor = Vendor::find($user->vendor_id);
+        }
+        // Method 3: Find vendor by user email (fallback)
+        else {
+            $vendor = Vendor::where('email', $user->email)->first();
+        }
         
         if (!$vendor) {
             return response()->json([
                 'success' => false,
                 'error' => 'Vendor profile not found. Please ensure your account is linked to a vendor.',
-                'code' => 'NOT_FOUND'
+                'code' => 'NOT_FOUND',
+                'debug' => [
+                    'user_role' => $user->role,
+                    'user_vendor_id' => $user->vendor_id,
+                    'user_email' => $user->email,
+                ]
             ], 404);
         }
 

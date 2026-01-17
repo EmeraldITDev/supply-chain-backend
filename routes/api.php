@@ -113,6 +113,7 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // Quotation routes
     Route::get('/quotations', [QuotationController::class, 'index']);
+    Route::get('/quotations/vendor/{vendorId}', [QuotationController::class, 'getVendorQuotations']); // Get quotations for a vendor
     Route::post('/quotations', [QuotationController::class, 'store']);
     Route::post('/quotations/{id}/approve', [QuotationController::class, 'approve']);
     Route::post('/quotations/{id}/reject', [QuotationController::class, 'reject']);
@@ -136,6 +137,22 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/dashboard/procurement-manager', [DashboardController::class, 'procurementManagerDashboard']);
     Route::get('/dashboard/supply-chain-director', [DashboardController::class, 'supplyChainDirectorDashboard']);
     Route::get('/dashboard/vendor', [DashboardController::class, 'vendorDashboard']);
+    
+    // Refresh endpoint - returns current user info and timestamp for cache busting
+    Route::get('/refresh', function (Request $request) {
+        $user = $request->user();
+        return response()->json([
+            'success' => true,
+            'message' => 'Refresh successful',
+            'timestamp' => now()->toIso8601String(),
+            'user' => [
+                'id' => $user->id,
+                'name' => $user->name,
+                'email' => $user->email,
+                'role' => $user->role,
+            ],
+        ]);
+    });
 
     // Notification routes
     Route::get('/notifications', [NotificationController::class, 'index']);
