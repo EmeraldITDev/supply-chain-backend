@@ -89,8 +89,15 @@ class VendorAuthController extends Controller
                 ], 401);
             }
 
-            // Create authentication token
-            $token = $user->createToken('vendor-auth-token')->plainTextToken;
+            // Ensure user role is set to 'vendor'
+            if ($user->role !== 'vendor') {
+                $user->update(['role' => 'vendor']);
+                Log::info('Updated user role to vendor', ['user_id' => $user->id, 'email' => $user->email]);
+            }
+
+            // Create authentication token with expiration (30 days for vendors)
+            $expiresAt = now()->addDays(30);
+            $token = $user->createToken('vendor-auth-token', ['*'], $expiresAt)->plainTextToken;
 
             Log::info('Vendor logged in successfully', [
                 'vendor_id' => $vendor->vendor_id,
@@ -111,7 +118,14 @@ class VendorAuthController extends Controller
                         'status' => $vendor->status,
                         'rating' => (float) ($vendor->rating ?? 0),
                     ],
+                    'user' => [
+                        'id' => $user->id,
+                        'email' => $user->email,
+                        'name' => $user->name,
+                        'role' => 'vendor',
+                    ],
                     'token' => $token,
+                    'expiresAt' => $expiresAt->toIso8601String(),
                     'requiresPasswordChange' => $user->must_change_password ?? false,
                 ]
             ], 200);
