@@ -308,27 +308,27 @@ class MRFController extends Controller
             }
 
             try {
-                $mrf = MRF::create([
-                    'mrf_id' => $mrfId,
-                    'title' => $request->title,
-                    'category' => $request->category,
+            $mrf = MRF::create([
+                'mrf_id' => $mrfId,
+                'title' => $request->title,
+                'category' => $request->category,
                     'contract_type' => $request->contractType,
-                    'urgency' => $request->urgency,
-                    'description' => $request->description,
-                    'quantity' => $request->quantity,
-                    'estimated_cost' => $request->estimatedCost,
-                    'justification' => $request->justification,
-                    'requester_id' => $user->id,
-                    'requester_name' => $user->name,
-                    'date' => now(),
-                    'status' => 'pending',
-                    'current_stage' => 'executive_review',
+                'urgency' => $request->urgency,
+                'description' => $request->description,
+                'quantity' => $request->quantity,
+                'estimated_cost' => $request->estimatedCost,
+                'justification' => $request->justification,
+                'requester_id' => $user->id,
+                'requester_name' => $user->name,
+                'date' => now(),
+                'status' => 'pending',
+                'current_stage' => 'executive_review',
                     'workflow_state' => WorkflowStateService::STATE_EXECUTIVE_REVIEW, // Immediately move to executive review
-                    'approval_history' => [],
-                    'is_resubmission' => false,
-                    'pfi_url' => $pfiUrl,
-                    'pfi_share_url' => $pfiShareUrl,
-                ]);
+                'approval_history' => [],
+                'is_resubmission' => false,
+                'pfi_url' => $pfiUrl,
+                'pfi_share_url' => $pfiShareUrl,
+            ]);
             } catch (\Illuminate\Database\QueryException $e) {
                 // Check if it's a column not found error
                 $errorMessage = $e->getMessage();

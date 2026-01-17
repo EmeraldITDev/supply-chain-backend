@@ -12,6 +12,78 @@ use Illuminate\Support\Facades\Validator;
 class RFQController extends Controller
 {
     /**
+     * Get single RFQ by ID
+     */
+    public function show(Request $request, $id)
+    {
+        $rfq = RFQ::where('rfq_id', $id)
+            ->with(['mrf', 'creator', 'vendors', 'items'])
+            ->first();
+
+        if (!$rfq) {
+            return response()->json([
+                'success' => false,
+                'error' => 'RFQ not found',
+                'code' => 'NOT_FOUND'
+            ], 404);
+        }
+
+        // Get estimated cost with fallback to MRF's estimated_cost
+        $estimatedCost = $rfq->estimated_cost ? (float) $rfq->estimated_cost : null;
+        if (!$estimatedCost || $estimatedCost == 0) {
+            $estimatedCost = $rfq->mrf && $rfq->mrf->estimated_cost
+                ? (float) $rfq->mrf->estimated_cost
+                : 0;
+        }
+
+        return response()->json([
+            'success' => true,
+            'data' => [
+                'id' => $rfq->rfq_id,
+                'mrfId' => $rfq->mrf_id ? (string) $rfq->mrf->mrf_id : null,
+                'mrfTitle' => $rfq->mrf_title ?? ($rfq->mrf ? $rfq->mrf->title : null),
+                'title' => $rfq->title,
+                'category' => $rfq->category,
+                'description' => $rfq->description,
+                'quantity' => $rfq->quantity,
+                'estimatedCost' => $estimatedCost,
+                'budget' => $estimatedCost, // Alias for frontend compatibility
+                'estimatedBudget' => $estimatedCost, // Another alias for clarity in RFQ details modal
+                'paymentTerms' => $rfq->payment_terms,
+                'notes' => $rfq->notes,
+                'supportingDocuments' => $rfq->supporting_documents ?? [],
+                'deadline' => $rfq->deadline ? $rfq->deadline->format('Y-m-d') : null,
+                'status' => $rfq->status,
+                'workflowState' => $rfq->workflow_state,
+                'vendorIds' => $rfq->vendors->pluck('vendor_id')->toArray(),
+                'vendors' => $rfq->vendors->map(function($vendor) {
+                    return [
+                        'id' => $vendor->vendor_id,
+                        'name' => $vendor->name,
+                        'email' => $vendor->email,
+                    ];
+                }),
+                'items' => $rfq->items->map(function($item) {
+                    return [
+                        'id' => $item->id,
+                        'item_name' => $item->item_name,
+                        'description' => $item->description,
+                        'quantity' => $item->quantity,
+                        'unit' => $item->unit,
+                        'specifications' => $item->specifications,
+                    ];
+                }),
+                'createdAt' => $rfq->created_at->toIso8601String(),
+                'createdBy' => $rfq->creator ? [
+                    'id' => $rfq->creator->id,
+                    'name' => $rfq->creator->name,
+                    'email' => $rfq->creator->email,
+                ] : null,
+            ]
+        ]);
+    }
+
+    /**
      * Get all RFQs
      */
     public function index(Request $request)
@@ -26,6 +98,14 @@ class RFQController extends Controller
         $rfqs = $query->orderBy('created_at', 'desc')->get();
 
         return response()->json($rfqs->map(function($rfq) {
+            // Get estimated cost with fallback to MRF's estimated_cost
+            $estimatedCost = $rfq->estimated_cost ? (float) $rfq->estimated_cost : null;
+            if (!$estimatedCost || $estimatedCost == 0) {
+                $estimatedCost = $rfq->mrf && $rfq->mrf->estimated_cost
+                    ? (float) $rfq->mrf->estimated_cost
+                    : 0;
+            }
+
             return [
                 'id' => $rfq->rfq_id,
                 'mrfId' => $rfq->mrf_id ? (string) $rfq->mrf->mrf_id : null,
@@ -34,11 +114,13 @@ class RFQController extends Controller
                 'category' => $rfq->category,
                 'description' => $rfq->description,
                 'quantity' => $rfq->quantity,
-                'estimatedCost' => (float) $rfq->estimated_cost,
+                'estimatedCost' => $estimatedCost,
+                'budget' => $estimatedCost, // Alias for frontend compatibility
+                'estimatedBudget' => $estimatedCost, // Another alias for clarity
                 'paymentTerms' => $rfq->payment_terms,
                 'notes' => $rfq->notes,
                 'supportingDocuments' => $rfq->supporting_documents ?? [],
-                'deadline' => $rfq->deadline->format('Y-m-d'),
+                'deadline' => $rfq->deadline ? $rfq->deadline->format('Y-m-d') : null,
                 'status' => $rfq->status,
                 'workflowState' => $rfq->workflow_state,
                 'vendorIds' => $rfq->vendors->pluck('vendor_id')->toArray(),
@@ -94,7 +176,7 @@ class RFQController extends Controller
 
         // Prepare supporting documents array
         $supportingDocuments = $request->supportingDocuments ?? [];
-        
+
         // If MRF has supporting documents (e.g., PFI), include them
         if ($mrf && $mrf->pfi_url) {
             // Ensure PFI is included in supporting documents if not already present
@@ -108,7 +190,7 @@ class RFQController extends Controller
                     break;
                 }
             }
-            
+
             if (!$pfiExists) {
                 $supportingDocuments[] = [
                     'url' => $mrf->pfi_url,

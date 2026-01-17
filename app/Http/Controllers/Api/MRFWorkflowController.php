@@ -769,7 +769,7 @@ class MRFWorkflowController extends Controller
             // For new PO, auto-generate unique number
             $poNumber = $this->generatePONumber($mrf);
         }
-        
+            
         // Final uniqueness check (should never happen with timestamp-based generation)
                 $attempts = 0;
                 while (MRF::where('po_number', $poNumber)->where('id', '!=', $mrf->id)->exists() && $attempts < 10) {
