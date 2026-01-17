@@ -78,6 +78,12 @@ class RFQWorkflowController extends Controller
                 ->where('vendor_id', $vendor->id)
                 ->exists();
 
+            // Get estimated cost with fallback to MRF's estimated_cost
+            $estimatedCost = $rfq->estimated_cost;
+            if (!$estimatedCost || $estimatedCost == 0) {
+                $estimatedCost = $rfq->mrf ? $rfq->mrf->estimated_cost : 0;
+            }
+            
             return [
                 'id' => $rfq->rfq_id,
                 'mrf_id' => $rfq->mrf_id ? ($rfq->mrf ? $rfq->mrf->mrf_id : null) : null,
@@ -85,7 +91,8 @@ class RFQWorkflowController extends Controller
                 'category' => $rfq->category ?? ($rfq->mrf ? $rfq->mrf->category : null),
                 'description' => $rfq->description,
                 'quantity' => $rfq->quantity,
-                'estimatedCost' => (float) $rfq->estimated_cost,
+                'estimatedCost' => (float) $estimatedCost,
+                'budget' => (float) $estimatedCost, // Alias for estimatedCost for frontend compatibility
                 'paymentTerms' => $rfq->payment_terms,
                 'notes' => $rfq->notes,
                 'supportingDocuments' => $rfq->supporting_documents ?? [],
