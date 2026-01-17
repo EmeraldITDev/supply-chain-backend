@@ -16,7 +16,7 @@ class QuotationController extends Controller
      */
     public function index(Request $request)
     {
-        $query = Quotation::with(['rfq', 'vendor', 'approver']);
+        $query = Quotation::with(['rfq.mrf', 'vendor', 'approver']); // Load MRF through RFQ relationship
 
         // Filter by vendor
         if ($request->has('vendorId')) {
@@ -41,23 +41,44 @@ class QuotationController extends Controller
 
         $quotations = $query->orderBy('created_at', 'desc')->get();
 
-        return response()->json($quotations->map(function($quotation) {
-            return [
-                'id' => $quotation->quotation_id,
-                'rfqId' => $quotation->rfq ? $quotation->rfq->rfq_id : null,
-                'vendorId' => $quotation->vendor ? $quotation->vendor->vendor_id : null,
-                'vendorName' => $quotation->vendor_name,
-                'price' => (float) $quotation->price,
-                'totalAmount' => (float) $quotation->total_amount,
-                'deliveryDate' => $quotation->delivery_date ? $quotation->delivery_date->format('Y-m-d') : null,
-                'notes' => $quotation->notes,
-                'status' => $quotation->status,
-                'reviewStatus' => $quotation->review_status ?? 'pending',
-                'rejectionReason' => $quotation->rejection_reason,
-                'revisionNotes' => $quotation->revision_notes,
-                'approvalRemarks' => $quotation->approval_remarks,
-            ];
-        }));
+        return response()->json([
+            'success' => true,
+            'data' => $quotations->map(function($quotation) {
+                $rfq = $quotation->rfq;
+                $mrf = $rfq && $rfq->mrf ? $rfq->mrf : null;
+                
+                return [
+                    'id' => $quotation->quotation_id,
+                    'quotation_id' => $quotation->quotation_id,
+                    'rfqId' => $rfq ? $rfq->rfq_id : null,
+                    'rfqTitle' => $rfq ? ($rfq->title ?? $rfq->description) : null,
+                    // Include MRF link for RFQ management
+                    'mrfId' => $mrf ? $mrf->mrf_id : ($rfq ? ($rfq->mrf_id ? (string) $rfq->mrf_id : null) : null),
+                    'mrfTitle' => $mrf ? $mrf->title : ($rfq ? ($rfq->mrf_title ?? null) : null),
+                    'vendorId' => $quotation->vendor ? $quotation->vendor->vendor_id : null,
+                    'vendorName' => $quotation->vendor_name,
+                    'price' => (float) $quotation->price,
+                    'totalAmount' => (float) $quotation->total_amount,
+                    'currency' => $quotation->currency ?? 'NGN',
+                    'deliveryDate' => $quotation->delivery_date ? $quotation->delivery_date->format('Y-m-d') : null,
+                    'deliveryDays' => $quotation->delivery_days,
+                    'paymentTerms' => $quotation->payment_terms,
+                    'validityDays' => $quotation->validity_days,
+                    'warrantyPeriod' => $quotation->warranty_period,
+                    'notes' => $quotation->notes,
+                    'status' => $quotation->status,
+                    'reviewStatus' => $quotation->review_status ?? 'pending',
+                    'rejectionReason' => $quotation->rejection_reason,
+                    'revisionNotes' => $quotation->revision_notes,
+                    'approvalRemarks' => $quotation->approval_remarks,
+                    'submittedAt' => $quotation->submitted_at ? $quotation->submitted_at->toIso8601String() : null,
+                    'reviewedAt' => $quotation->reviewed_at ? $quotation->reviewed_at->toIso8601String() : null,
+                    'approvedAt' => $quotation->approved_at ? $quotation->approved_at->toIso8601String() : null,
+                    'createdAt' => $quotation->created_at->toIso8601String(),
+                ];
+            }),
+            'count' => $quotations->count(),
+        ]);
     }
 
     /**

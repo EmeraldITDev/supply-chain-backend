@@ -17,7 +17,7 @@ class RFQController extends Controller
     public function show(Request $request, $id)
     {
         $rfq = RFQ::where('rfq_id', $id)
-            ->with(['mrf', 'creator', 'vendors', 'items'])
+            ->with(['mrf', 'creator', 'vendors', 'items', 'quotations.vendor'])
             ->first();
 
         if (!$rfq) {
@@ -40,7 +40,7 @@ class RFQController extends Controller
             'success' => true,
             'data' => [
                 'id' => $rfq->rfq_id,
-                'mrfId' => $rfq->mrf_id ? (string) $rfq->mrf->mrf_id : null,
+                'mrfId' => $rfq->mrf_id ? ($rfq->mrf ? (string) $rfq->mrf->mrf_id : null) : null,
                 'mrfTitle' => $rfq->mrf_title ?? ($rfq->mrf ? $rfq->mrf->title : null),
                 'title' => $rfq->title,
                 'category' => $rfq->category,
@@ -49,7 +49,7 @@ class RFQController extends Controller
                 'estimatedCost' => $estimatedCost,
                 'budget' => $estimatedCost, // Alias for frontend compatibility
                 'estimatedBudget' => $estimatedCost, // Another alias for clarity in RFQ details modal
-                'paymentTerms' => $rfq->payment_terms,
+                'paymentTerms' => $rfq->payment_terms ?? '', // Ensure payment terms are always included (empty string if null)
                 'notes' => $rfq->notes,
                 'supportingDocuments' => $rfq->supporting_documents ?? [],
                 'deadline' => $rfq->deadline ? $rfq->deadline->format('Y-m-d') : null,
@@ -73,6 +73,38 @@ class RFQController extends Controller
                         'specifications' => $item->specifications,
                     ];
                 }),
+                // Include quotations with MRF links for RFQ management
+                'quotations' => $rfq->quotations->map(function($quotation) use ($rfq) {
+                    return [
+                        'id' => $quotation->quotation_id,
+                        'quotation_id' => $quotation->quotation_id,
+                        'rfqId' => $rfq->rfq_id,
+                        'mrfId' => $rfq->mrf_id ? ($rfq->mrf ? $rfq->mrf->mrf_id : null) : null,
+                        'mrfTitle' => $rfq->mrf_title ?? ($rfq->mrf ? $rfq->mrf->title : null),
+                        'vendorId' => $quotation->vendor ? $quotation->vendor->vendor_id : null,
+                        'vendorName' => $quotation->vendor_name,
+                        'price' => (float) $quotation->price,
+                        'totalAmount' => (float) $quotation->total_amount,
+                        'currency' => $quotation->currency ?? 'NGN',
+                        'deliveryDate' => $quotation->delivery_date ? $quotation->delivery_date->format('Y-m-d') : null,
+                        'deliveryDays' => $quotation->delivery_days,
+                        'paymentTerms' => $quotation->payment_terms,
+                        'validityDays' => $quotation->validity_days,
+                        'warrantyPeriod' => $quotation->warranty_period,
+                        'notes' => $quotation->notes,
+                        'status' => $quotation->status,
+                        'reviewStatus' => $quotation->review_status ?? 'pending',
+                        'rejectionReason' => $quotation->rejection_reason,
+                        'revisionNotes' => $quotation->revision_notes,
+                        'approvalRemarks' => $quotation->approval_remarks,
+                        'submittedAt' => $quotation->submitted_at ? $quotation->submitted_at->toIso8601String() : null,
+                        'reviewedAt' => $quotation->reviewed_at ? $quotation->reviewed_at->toIso8601String() : null,
+                        'approvedAt' => $quotation->approved_at ? $quotation->approved_at->toIso8601String() : null,
+                        'attachments' => $quotation->attachments ?? [],
+                        'createdAt' => $quotation->created_at->toIso8601String(),
+                    ];
+                }),
+                'quotationsCount' => $rfq->quotations->count(),
                 'createdAt' => $rfq->created_at->toIso8601String(),
                 'createdBy' => $rfq->creator ? [
                     'id' => $rfq->creator->id,
@@ -117,7 +149,7 @@ class RFQController extends Controller
                 'estimatedCost' => $estimatedCost,
                 'budget' => $estimatedCost, // Alias for frontend compatibility
                 'estimatedBudget' => $estimatedCost, // Another alias for clarity
-                'paymentTerms' => $rfq->payment_terms,
+                'paymentTerms' => $rfq->payment_terms ?? '', // Ensure payment terms are always included (empty string if null)
                 'notes' => $rfq->notes,
                 'supportingDocuments' => $rfq->supporting_documents ?? [],
                 'deadline' => $rfq->deadline ? $rfq->deadline->format('Y-m-d') : null,

@@ -116,7 +116,7 @@ class RFQWorkflowController extends Controller
                 'quantity' => $rfq->quantity,
                 'estimatedCost' => (float) $estimatedCost,
                 'budget' => (float) $estimatedCost, // Alias for estimatedCost for frontend compatibility
-                'paymentTerms' => $rfq->payment_terms,
+                'paymentTerms' => $rfq->payment_terms ?? '', // Ensure payment terms are always included (empty string if null)
                 'notes' => $rfq->notes,
                 'supportingDocuments' => $rfq->supporting_documents ?? [],
                 'deadline' => $rfq->deadline ? $rfq->deadline->format('Y-m-d') : null,
@@ -212,7 +212,7 @@ class RFQWorkflowController extends Controller
             ], 403);
         }
 
-        $rfq = RFQ::where('rfq_id', $id)->with(['items'])->first();
+        $rfq = RFQ::where('rfq_id', $id)->with(['items', 'mrf'])->first();
 
         if (!$rfq) {
             return response()->json([
@@ -226,7 +226,7 @@ class RFQWorkflowController extends Controller
         $quotations = Quotation::where('rfq_id', $rfq->id)
             ->with(['vendor', 'items.rfqItem'])
             ->get()
-            ->map(function ($quotation) {
+            ->map(function ($quotation) use ($rfq) {
                 return [
                     'quotation' => [
                         'id' => $quotation->quotation_id,
@@ -240,6 +240,7 @@ class RFQWorkflowController extends Controller
                         'warranty_period' => $quotation->warranty_period,
                         'notes' => $quotation->notes,
                         'status' => $quotation->status,
+                        'reviewStatus' => $quotation->review_status ?? 'pending',
                         'attachments' => $quotation->attachments,
                         'submitted_at' => $quotation->submitted_at?->toIso8601String(),
                     ],
@@ -249,6 +250,17 @@ class RFQWorkflowController extends Controller
                         'email' => $quotation->vendor->email,
                         'phone' => $quotation->vendor->phone,
                         'rating' => (float) $quotation->vendor->rating,
+                    ],
+                    // Include MRF link for each quotation
+                    'mrf' => [
+                        'id' => $rfq->mrf_id ? ($rfq->mrf ? $rfq->mrf->mrf_id : null) : null,
+                        'title' => $rfq->mrf_title ?? ($rfq->mrf ? $rfq->mrf->title : null),
+                        'category' => $rfq->mrf ? $rfq->mrf->category : null,
+                    ],
+                    'rfq' => [
+                        'id' => $rfq->rfq_id,
+                        'title' => $rfq->title,
+                        'description' => $rfq->description,
                     ],
                     'items' => $quotation->items->map(function ($item) {
                         return [
@@ -271,6 +283,9 @@ class RFQWorkflowController extends Controller
             'data' => [
                 'rfq' => [
                     'id' => $rfq->rfq_id,
+                    'mrfId' => $rfq->mrf_id ? ($rfq->mrf ? $rfq->mrf->mrf_id : null) : null,
+                    'mrfTitle' => $rfq->mrf_title ?? ($rfq->mrf ? $rfq->mrf->title : null),
+                    'title' => $rfq->title,
                     'description' => $rfq->description,
                     'deadline' => $rfq->deadline->format('Y-m-d'),
                     'status' => $rfq->status,
