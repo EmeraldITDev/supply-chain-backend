@@ -16,12 +16,14 @@ class RFQ extends Model
         'mrf_id',
         'mrf_title',
         'title',
+        'category',
         'description',
         'quantity',
         'estimated_cost',
         'deadline',
         'payment_terms',
         'notes',
+        'supporting_documents',
         'status',
         'workflow_state',
         'created_by',
@@ -32,6 +34,7 @@ class RFQ extends Model
     protected $casts = [
         'estimated_cost' => 'decimal:2',
         'deadline' => 'date',
+        'supporting_documents' => 'array',
     ];
 
     /**

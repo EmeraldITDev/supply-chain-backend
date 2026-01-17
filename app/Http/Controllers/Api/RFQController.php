@@ -31,11 +31,13 @@ class RFQController extends Controller
                 'mrfId' => $rfq->mrf_id ? (string) $rfq->mrf->mrf_id : null,
                 'mrfTitle' => $rfq->mrf_title ?? ($rfq->mrf ? $rfq->mrf->title : null),
                 'title' => $rfq->title,
+                'category' => $rfq->category,
                 'description' => $rfq->description,
                 'quantity' => $rfq->quantity,
                 'estimatedCost' => (float) $rfq->estimated_cost,
                 'paymentTerms' => $rfq->payment_terms,
                 'notes' => $rfq->notes,
+                'supportingDocuments' => $rfq->supporting_documents ?? [],
                 'deadline' => $rfq->deadline->format('Y-m-d'),
                 'status' => $rfq->status,
                 'workflowState' => $rfq->workflow_state,
@@ -53,6 +55,7 @@ class RFQController extends Controller
         $validator = Validator::make($request->all(), [
             'mrfId' => 'required|string|exists:m_r_f_s,mrf_id',
             'title' => 'required|string',
+            'category' => 'nullable|string|max:255',
             'description' => 'required|string',
             'quantity' => 'required|string',
             'estimatedCost' => 'required|string|numeric',
@@ -61,6 +64,8 @@ class RFQController extends Controller
             'vendorIds.*' => 'required|string|exists:vendors,vendor_id',
             'paymentTerms' => 'nullable|string',
             'notes' => 'nullable|string',
+            'supportingDocuments' => 'nullable|array',
+            'supportingDocuments.*' => 'nullable|string|url', // URLs to supporting documents
         ]);
 
         if ($validator->fails()) {
@@ -77,9 +82,41 @@ class RFQController extends Controller
         // Get MRF if provided
         $mrf = null;
         $mrfTitle = null;
+        $mrfCategory = null;
         if ($request->mrfId) {
             $mrf = MRF::where('mrf_id', $request->mrfId)->first();
             $mrfTitle = $mrf ? $mrf->title : null;
+            $mrfCategory = $mrf ? $mrf->category : null;
+        }
+
+        // Use category from request, or fallback to MRF category
+        $category = $request->category ?? $mrfCategory;
+
+        // Prepare supporting documents array
+        $supportingDocuments = $request->supportingDocuments ?? [];
+        
+        // If MRF has supporting documents (e.g., PFI), include them
+        if ($mrf && $mrf->pfi_url) {
+            // Ensure PFI is included in supporting documents if not already present
+            $pfiExists = false;
+            foreach ($supportingDocuments as $doc) {
+                if (is_array($doc) && isset($doc['url']) && $doc['url'] === $mrf->pfi_url) {
+                    $pfiExists = true;
+                    break;
+                } elseif (is_string($doc) && $doc === $mrf->pfi_url) {
+                    $pfiExists = true;
+                    break;
+                }
+            }
+            
+            if (!$pfiExists) {
+                $supportingDocuments[] = [
+                    'url' => $mrf->pfi_url,
+                    'shareUrl' => $mrf->pfi_share_url,
+                    'type' => 'PFI',
+                    'name' => 'Proforma Invoice'
+                ];
+            }
         }
 
         $rfq = RFQ::create([
@@ -87,12 +124,14 @@ class RFQController extends Controller
             'mrf_id' => $mrf ? $mrf->id : null,
             'mrf_title' => $mrfTitle,
             'title' => $request->title,
+            'category' => $category,
             'description' => $request->description,
             'quantity' => $request->quantity,
             'estimated_cost' => $request->estimatedCost,
             'deadline' => $request->deadline,
             'payment_terms' => $request->paymentTerms,
             'notes' => $request->notes,
+            'supporting_documents' => !empty($supportingDocuments) ? $supportingDocuments : null,
             'status' => 'Open',
             'workflow_state' => 'open',
             'created_by' => $user->id,
@@ -109,11 +148,13 @@ class RFQController extends Controller
             'mrfId' => $rfq->mrf_id ? (string) $rfq->mrf->mrf_id : null,
             'mrfTitle' => $rfq->mrf_title,
             'title' => $rfq->title,
+            'category' => $rfq->category,
             'description' => $rfq->description,
             'quantity' => $rfq->quantity,
             'estimatedCost' => (float) $rfq->estimated_cost,
             'paymentTerms' => $rfq->payment_terms,
             'notes' => $rfq->notes,
+            'supportingDocuments' => $rfq->supporting_documents ?? [],
             'deadline' => $rfq->deadline->format('Y-m-d'),
             'status' => $rfq->status,
             'workflowState' => $rfq->workflow_state,

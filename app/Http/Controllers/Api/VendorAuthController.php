@@ -415,6 +415,7 @@ class VendorAuthController extends Controller
 
     /**
      * Request password reset (for vendors)
+     * Notifies procurement managers when a vendor requests password reset
      */
     public function requestPasswordReset(Request $request)
     {
@@ -450,6 +451,9 @@ class VendorAuthController extends Controller
             ], 200);
         }
 
+        // Get vendor information
+        $vendor = Vendor::find($user->vendor_id);
+
         // Generate temporary password
         $temporaryPassword = $this->generateTemporaryPassword();
 
@@ -460,13 +464,45 @@ class VendorAuthController extends Controller
             'password_changed_at' => null,
         ]);
 
-        // Send password reset email
+        // Send password reset email to vendor
         $emailService = app(\App\Services\EmailService::class);
         $emailService->sendPasswordResetEmail(
             $user->email,
             $user->name,
             $temporaryPassword
         );
+
+        // Notify procurement managers about password reset request
+        try {
+            $notificationService = app(\App\Services\NotificationService::class);
+            
+            // Get all procurement managers and supply chain directors
+            $procurementManagers = User::whereIn('role', [
+                'procurement_manager',
+                'supply_chain_director',
+                'supply_chain',
+                'admin'
+            ])->get();
+
+            foreach ($procurementManagers as $manager) {
+                // Send notification to each procurement manager
+                $manager->notify(new \App\Notifications\VendorPasswordResetRequestNotification(
+                    $vendor ?? (object)['vendor_id' => 'N/A', 'name' => $user->name, 'email' => $user->email],
+                    $user->email
+                ));
+            }
+
+            Log::info('Vendor password reset request notification sent to procurement managers', [
+                'vendor_email' => $user->email,
+                'notified_count' => $procurementManagers->count()
+            ]);
+        } catch (\Exception $e) {
+            // Log error but don't fail the password reset
+            Log::error('Failed to notify procurement managers about vendor password reset', [
+                'vendor_email' => $user->email,
+                'error' => $e->getMessage()
+            ]);
+        }
 
         return response()->json([
             'success' => true,
