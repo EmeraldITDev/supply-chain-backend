@@ -41,7 +41,7 @@ class MRFSubmittedNotification extends Notification implements ShouldQueue
             'urgency' => $this->mrf->urgency,
             'category' => $this->mrf->category,
             'estimated_cost' => $this->mrf->estimated_cost,
-            'action_url' => "/mrfs/{$this->mrf->id}",
+            'action_url' => "/mrfs/{$this->mrf->mrf_id}",
             'icon' => 'document',
             'color' => 'blue',
             'priority' => $this->mrf->urgency === 'Critical' ? 'high' : 'normal',

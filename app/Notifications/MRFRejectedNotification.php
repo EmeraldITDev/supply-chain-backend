@@ -43,7 +43,7 @@ class MRFRejectedNotification extends Notification implements ShouldQueue
             'mrf_number' => $this->mrf->mrf_id,
             'rejector' => $this->rejectorName,
             'reason' => $this->reason,
-            'action_url' => "/mrfs/{$this->mrf->id}",
+            'action_url' => "/mrfs/{$this->mrf->mrf_id}",
             'icon' => 'x-circle',
             'color' => 'red',
             'priority' => 'high',

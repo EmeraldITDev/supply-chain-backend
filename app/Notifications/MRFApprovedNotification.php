@@ -43,7 +43,7 @@ class MRFApprovedNotification extends Notification implements ShouldQueue
             'mrf_number' => $this->mrf->mrf_id,
             'approver' => $this->approverName,
             'remarks' => $this->remarks,
-            'action_url' => "/mrfs/{$this->mrf->id}",
+            'action_url' => "/mrfs/{$this->mrf->mrf_id}",
             'icon' => 'check-circle',
             'color' => 'green',
             'priority' => 'normal',

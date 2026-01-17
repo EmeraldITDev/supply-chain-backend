@@ -42,7 +42,7 @@ class QuotationSubmittedNotification extends Notification implements ShouldQueue
             'total_amount' => $this->quotation->total_amount,
             'currency' => $this->quotation->currency ?? 'USD',
             'rfq_id' => $this->quotation->rfq_id,
-            'action_url' => "/quotations/{$this->quotation->id}",
+            'action_url' => "/quotations/{$this->quotation->quotation_id}",
             'icon' => 'document-text',
             'color' => 'purple',
             'priority' => 'normal',

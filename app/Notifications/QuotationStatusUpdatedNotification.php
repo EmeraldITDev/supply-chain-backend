@@ -52,7 +52,7 @@ class QuotationStatusUpdatedNotification extends Notification implements ShouldQ
             'old_status' => $this->oldStatus,
             'new_status' => $this->newStatus,
             'remarks' => $this->remarks,
-            'action_url' => "/quotations/{$this->quotation->id}",
+            'action_url' => "/quotations/{$this->quotation->quotation_id}",
             'icon' => 'refresh',
             'color' => $color,
             'priority' => in_array($this->newStatus, ['Approved', 'Rejected']) ? 'high' : 'normal',

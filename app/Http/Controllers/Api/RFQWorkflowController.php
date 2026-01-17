@@ -79,9 +79,14 @@ class RFQWorkflowController extends Controller
                 ->exists();
 
             // Get estimated cost with fallback to MRF's estimated_cost
-            $estimatedCost = $rfq->estimated_cost;
+            // Cast to float to ensure proper numeric handling
+            $estimatedCost = $rfq->estimated_cost ? (float) $rfq->estimated_cost : null;
+            
+            // If RFQ's estimated_cost is null, 0, or not set, use MRF's estimated_cost
             if (!$estimatedCost || $estimatedCost == 0) {
-                $estimatedCost = $rfq->mrf ? $rfq->mrf->estimated_cost : 0;
+                $estimatedCost = $rfq->mrf && $rfq->mrf->estimated_cost 
+                    ? (float) $rfq->mrf->estimated_cost 
+                    : 0;
             }
             
             return [
