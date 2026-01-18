@@ -363,4 +363,94 @@ class QuotationController extends Controller
             ]
         ]);
     }
+
+    /**
+     * Delete/remove quotation (vendor only - can only delete their own quotations)
+     */
+    public function destroy(Request $request, $id)
+    {
+        $user = $request->user();
+
+        // Verify user is a vendor - check both direct role field and Spatie roles
+        $isVendor = false;
+        if ($user->role === 'vendor') {
+            $isVendor = true;
+        } elseif (method_exists($user, 'hasRole') && $user->hasRole('vendor')) {
+            $isVendor = true;
+        }
+
+        if (!$isVendor) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Only vendors can delete quotations',
+                'code' => 'FORBIDDEN'
+            ], 403);
+        }
+
+        // Find quotation by quotation_id
+        $quotation = Quotation::where('quotation_id', $id)->first();
+
+        if (!$quotation) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Quotation not found',
+                'code' => 'NOT_FOUND'
+            ], 404);
+        }
+
+        // Get vendor from authenticated user
+        $vendor = null;
+        if ($user->vendor_id && method_exists($user, 'vendor')) {
+            $vendor = $user->vendor;
+        }
+        if (!$vendor && $user->vendor_id) {
+            $vendor = Vendor::find($user->vendor_id);
+        }
+        if (!$vendor) {
+            $vendor = Vendor::where('email', $user->email)->first();
+        }
+
+        if (!$vendor) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Vendor profile not found',
+                'code' => 'NOT_FOUND'
+            ], 404);
+        }
+
+        // Verify quotation belongs to this vendor
+        if ($quotation->vendor_id !== $vendor->id) {
+            return response()->json([
+                'success' => false,
+                'error' => 'You can only delete your own quotations',
+                'code' => 'FORBIDDEN'
+            ], 403);
+        }
+
+        // Only allow deletion if quotation is still pending (not approved/rejected)
+        // Vendors can't delete quotations that have been reviewed/approved by procurement
+        if ($quotation->status === 'Approved') {
+            return response()->json([
+                'success' => false,
+                'error' => 'Cannot delete an approved quotation. Please contact procurement to cancel it.',
+                'code' => 'VALIDATION_ERROR'
+            ], 422);
+        }
+
+        // Store quotation ID for response before deletion
+        $quotationId = $quotation->quotation_id;
+        $rfqId = $quotation->rfq ? $quotation->rfq->rfq_id : null;
+
+        // Delete the quotation
+        $quotation->delete();
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Quotation removed successfully',
+            'data' => [
+                'id' => $quotationId,
+                'rfqId' => $rfqId,
+            ]
+        ]);
+    }
 }
