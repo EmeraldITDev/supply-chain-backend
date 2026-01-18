@@ -1091,6 +1091,37 @@ class VendorController extends Controller
 
         // Format quotations for response
         $formattedQuotations = $quotations->map(function($quotation) use ($vendor) {
+            // Safely format dates to prevent time errors
+            $formatDate = function($date) {
+                if (!$date) {
+                    return null;
+                }
+                try {
+                    if ($date instanceof \Carbon\Carbon || $date instanceof \DateTime) {
+                        return $date->toIso8601String();
+                    }
+                    return null;
+                } catch (\Exception $e) {
+                    \Log::warning("Date formatting error: " . $e->getMessage());
+                    return null;
+                }
+            };
+
+            $formatDateOnly = function($date) {
+                if (!$date) {
+                    return null;
+                }
+                try {
+                    if ($date instanceof \Carbon\Carbon || $date instanceof \DateTime) {
+                        return $date->format('Y-m-d');
+                    }
+                    return null;
+                } catch (\Exception $e) {
+                    \Log::warning("Date formatting error: " . $e->getMessage());
+                    return null;
+                }
+            };
+
             return [
                 'id' => $quotation->quotation_id,
                 'quoteNumber' => $quotation->quote_number,
@@ -1104,7 +1135,7 @@ class VendorController extends Controller
                 'totalAmount' => (float) $quotation->total_amount,
                 'currency' => $quotation->currency ?? 'NGN',
                 'deliveryDays' => $quotation->delivery_days,
-                'deliveryDate' => $quotation->delivery_date ? $quotation->delivery_date->format('Y-m-d') : null,
+                'deliveryDate' => $formatDateOnly($quotation->delivery_date),
                 'paymentTerms' => $quotation->payment_terms,
                 'validityDays' => $quotation->validity_days,
                 'warrantyPeriod' => $quotation->warranty_period,
@@ -1115,15 +1146,16 @@ class VendorController extends Controller
                 'revisionNotes' => $quotation->revision_notes,
                 'approvalRemarks' => $quotation->approval_remarks,
                 'attachments' => $quotation->attachments ?? [],
-                'submittedAt' => $quotation->submitted_at ? $quotation->submitted_at->toIso8601String() : null,
-                'reviewedAt' => $quotation->reviewed_at ? $quotation->reviewed_at->toIso8601String() : null,
-                'approvedAt' => $quotation->approved_at ? $quotation->approved_at->toIso8601String() : null,
+                'submittedAt' => $formatDate($quotation->submitted_at),
+                'reviewedAt' => $formatDate($quotation->reviewed_at),
+                'approvedAt' => $formatDate($quotation->approved_at),
                 'approvedBy' => $quotation->approver ? [
                     'id' => $quotation->approver->id,
                     'name' => $quotation->approver->name,
                     'email' => $quotation->approver->email,
                 ] : null,
-                'createdAt' => $quotation->created_at->toIso8601String(),
+                'createdAt' => $formatDate($quotation->created_at) ?? ($quotation->created_at ? $quotation->created_at : null),
+                'updatedAt' => $formatDate($quotation->updated_at) ?? ($quotation->updated_at ? $quotation->updated_at : null),
             ];
         });
 
