@@ -8,6 +8,7 @@ use App\Models\Vendor;
 use App\Models\VendorRating;
 use App\Models\VendorRegistration;
 use App\Models\VendorRegistrationDocument;
+use App\Models\Quotation;
 use App\Services\NotificationService;
 use App\Services\VendorApprovalService;
 use App\Services\VendorDocumentService;
@@ -1023,6 +1024,117 @@ class VendorController extends Controller
 
         $vendor->update([
             'rating' => $avgRating ? round($avgRating, 2) : 0,
+        ]);
+    }
+
+    /**
+     * Get quotations for the logged-in vendor (vendor-specific endpoint)
+     */
+    public function getVendorQuotations(Request $request)
+    {
+        $user = $request->user();
+
+        // Verify user is a vendor
+        if ($user->role !== 'vendor') {
+            return response()->json([
+                'success' => false,
+                'error' => 'Only vendors can access this endpoint',
+                'code' => 'FORBIDDEN'
+            ], 403);
+        }
+
+        // Get vendor from authenticated user - try multiple methods
+        $vendor = null;
+        
+        // Method 1: Try vendor relationship
+        if ($user->vendor_id && method_exists($user, 'vendor')) {
+            $vendor = $user->vendor;
+        }
+        
+        // Method 2: Find vendor by vendor_id if relationship didn't work
+        if (!$vendor && $user->vendor_id) {
+            $vendor = Vendor::find($user->vendor_id);
+        }
+        
+        // Method 3: Try finding vendor by email as last resort
+        if (!$vendor) {
+            $vendor = Vendor::where('email', $user->email)->first();
+        }
+
+        if (!$vendor) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Vendor profile not found. Please ensure your account is linked to a vendor.',
+                'code' => 'NOT_FOUND'
+            ], 404);
+        }
+
+        // Build query for quotations
+        $query = Quotation::where('vendor_id', $vendor->id)
+            ->with(['rfq.mrf', 'rfq.items', 'approver']);
+
+        // Filter by status if provided
+        if ($request->has('status')) {
+            $query->where('status', $request->status);
+        }
+
+        // Filter by RFQ ID if provided
+        if ($request->has('rfqId')) {
+            $rfq = \App\Models\RFQ::where('rfq_id', $request->rfqId)->first();
+            if ($rfq) {
+                $query->where('rfq_id', $rfq->id);
+            }
+        }
+
+        // Order by most recent first
+        $quotations = $query->orderBy('created_at', 'desc')->get();
+
+        // Format quotations for response
+        $formattedQuotations = $quotations->map(function($quotation) use ($vendor) {
+            return [
+                'id' => $quotation->quotation_id,
+                'quoteNumber' => $quotation->quote_number,
+                'rfqId' => $quotation->rfq ? $quotation->rfq->rfq_id : null,
+                'rfqTitle' => $quotation->rfq ? ($quotation->rfq->title ?? $quotation->rfq->description) : null,
+                'mrfId' => $quotation->rfq && $quotation->rfq->mrf ? $quotation->rfq->mrf->mrf_id : null,
+                'mrfTitle' => $quotation->rfq && $quotation->rfq->mrf ? $quotation->rfq->mrf->title : null,
+                'vendorId' => $vendor->vendor_id,
+                'vendorName' => $quotation->vendor_name,
+                'price' => (float) $quotation->price,
+                'totalAmount' => (float) $quotation->total_amount,
+                'currency' => $quotation->currency ?? 'NGN',
+                'deliveryDays' => $quotation->delivery_days,
+                'deliveryDate' => $quotation->delivery_date ? $quotation->delivery_date->format('Y-m-d') : null,
+                'paymentTerms' => $quotation->payment_terms,
+                'validityDays' => $quotation->validity_days,
+                'warrantyPeriod' => $quotation->warranty_period,
+                'notes' => $quotation->notes,
+                'status' => $quotation->status,
+                'reviewStatus' => $quotation->review_status ?? 'pending',
+                'rejectionReason' => $quotation->rejection_reason,
+                'revisionNotes' => $quotation->revision_notes,
+                'approvalRemarks' => $quotation->approval_remarks,
+                'attachments' => $quotation->attachments ?? [],
+                'submittedAt' => $quotation->submitted_at ? $quotation->submitted_at->toIso8601String() : null,
+                'reviewedAt' => $quotation->reviewed_at ? $quotation->reviewed_at->toIso8601String() : null,
+                'approvedAt' => $quotation->approved_at ? $quotation->approved_at->toIso8601String() : null,
+                'approvedBy' => $quotation->approver ? [
+                    'id' => $quotation->approver->id,
+                    'name' => $quotation->approver->name,
+                    'email' => $quotation->approver->email,
+                ] : null,
+                'createdAt' => $quotation->created_at->toIso8601String(),
+            ];
+        });
+
+        return response()->json([
+            'success' => true,
+            'data' => $formattedQuotations,
+            'count' => $formattedQuotations->count(),
+            'vendor' => [
+                'id' => $vendor->vendor_id,
+                'name' => $vendor->name,
+            ],
         ]);
     }
 

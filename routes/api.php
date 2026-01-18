@@ -122,6 +122,7 @@ Route::middleware('auth:sanctum')->group(function () {
     // Vendor routes
     Route::get('/vendors', [VendorController::class, 'index']);
     Route::get('/vendors/{id}', [VendorController::class, 'show']);
+    Route::get('/vendors/quotations', [VendorController::class, 'getVendorQuotations']);
     Route::delete('/vendors/{id}', [VendorController::class, 'destroy']);
     Route::post('/vendors/invite', [VendorController::class, 'inviteVendor']);
     Route::post('/vendors/{id}/rating', [VendorController::class, 'addRating']);
