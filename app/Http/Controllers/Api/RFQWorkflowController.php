@@ -417,6 +417,168 @@ class RFQWorkflowController extends Controller
     }
 
     /**
+     * Submit quotation for a specific RFQ (vendor endpoint)
+     * Route: POST /api/rfqs/{rfq-id}/submit-quotation
+     */
+    public function submitQuotation(Request $request, $id)
+    {
+        $user = $request->user();
+
+        // Verify user is a vendor
+        if ($user->role !== 'vendor') {
+            return response()->json([
+                'success' => false,
+                'error' => 'Only vendors can submit quotations',
+                'code' => 'FORBIDDEN'
+            ], 403);
+        }
+
+        // Get vendor from authenticated user
+        $vendor = $user->vendor ?? Vendor::find($user->vendor_id);
+        if (!$vendor) {
+            // Try finding vendor by email as fallback
+            $vendor = Vendor::where('email', $user->email)->first();
+        }
+
+        if (!$vendor) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Vendor profile not found. Please ensure your account is linked to a vendor.',
+                'code' => 'NOT_FOUND'
+            ], 404);
+        }
+
+        // Find RFQ by RFQ ID (the $id parameter from URL)
+        $rfq = RFQ::where('rfq_id', $id)->first();
+
+        if (!$rfq) {
+            return response()->json([
+                'success' => false,
+                'error' => 'RFQ not found',
+                'code' => 'NOT_FOUND'
+            ], 404);
+        }
+
+        // Validate request
+        $validator = Validator::make($request->all(), [
+            'vendorName' => 'nullable|string|max:255',
+            'price' => 'required|numeric|min:0',
+            'totalAmount' => 'nullable|numeric|min:0',
+            'deliveryDate' => 'required|date',
+            'deliveryDays' => 'nullable|integer|min:0',
+            'paymentTerms' => 'nullable|string',
+            'validityDays' => 'nullable|integer|min:0',
+            'warrantyPeriod' => 'nullable|string',
+            'notes' => 'nullable|string',
+            'attachments' => 'nullable|array',
+            'currency' => 'nullable|string|max:10',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Validation failed',
+                'errors' => $validator->errors(),
+                'code' => 'VALIDATION_ERROR'
+            ], 422);
+        }
+
+        // Check if RFQ is still open
+        if ($rfq->status !== 'Open' && $rfq->workflow_state !== 'open') {
+            return response()->json([
+                'success' => false,
+                'error' => 'RFQ is not open for quotations',
+                'code' => 'VALIDATION_ERROR'
+            ], 422);
+        }
+
+        // Check if vendor is associated with this RFQ
+        if (!$rfq->vendors->contains($vendor->id)) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Vendor is not associated with this RFQ',
+                'code' => 'FORBIDDEN'
+            ], 403);
+        }
+
+        // Check if quotation already exists
+        $existing = Quotation::where('rfq_id', $rfq->id)
+            ->where('vendor_id', $vendor->id)
+            ->first();
+
+        // If existing and revision was requested, allow resubmission
+        if ($existing) {
+            if ($existing->review_status === 'revision_requested') {
+                // Update existing quotation (resubmission)
+                $existing->update([
+                    'vendor_name' => $request->vendorName ?? $vendor->name,
+                    'price' => $request->price,
+                    'total_amount' => $request->totalAmount ?? $request->price,
+                    'currency' => $request->currency ?? 'NGN',
+                    'delivery_date' => $request->deliveryDate,
+                    'delivery_days' => $request->deliveryDays,
+                    'payment_terms' => $request->paymentTerms,
+                    'validity_days' => $request->validityDays,
+                    'warranty_period' => $request->warrantyPeriod,
+                    'notes' => $request->notes,
+                    'attachments' => $request->attachments,
+                    'status' => 'Pending',
+                    'review_status' => 'pending', // Reset to pending
+                    'revision_notes' => null, // Clear revision notes
+                    'submitted_at' => now(),
+                ]);
+                $quotation = $existing;
+            } else {
+                return response()->json([
+                    'success' => false,
+                    'error' => 'Quotation already submitted for this RFQ',
+                    'code' => 'VALIDATION_ERROR'
+                ], 422);
+            }
+        } else {
+            // Create new quotation
+            $quotation = Quotation::create([
+                'quotation_id' => Quotation::generateQuotationId(),
+                'rfq_id' => $rfq->id,
+                'vendor_id' => $vendor->id,
+                'vendor_name' => $request->vendorName ?? $vendor->name,
+                'price' => $request->price,
+                'total_amount' => $request->totalAmount ?? $request->price,
+                'currency' => $request->currency ?? 'NGN',
+                'delivery_date' => $request->deliveryDate,
+                'delivery_days' => $request->deliveryDays,
+                'payment_terms' => $request->paymentTerms,
+                'validity_days' => $request->validityDays,
+                'warranty_period' => $request->warrantyPeriod,
+                'notes' => $request->notes,
+                'attachments' => $request->attachments,
+                'status' => 'Pending',
+                'review_status' => 'pending',
+                'submitted_at' => now(),
+            ]);
+        }
+
+        // Notify procurement managers
+        $this->notificationService->notifyQuotationSubmitted($quotation, $quotation->vendor_name);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Quotation submitted successfully',
+            'data' => [
+                'id' => $quotation->quotation_id,
+                'rfqId' => $rfq->rfq_id,
+                'vendorId' => $vendor->vendor_id,
+                'vendorName' => $quotation->vendor_name,
+                'price' => (float) $quotation->price,
+                'totalAmount' => (float) $quotation->total_amount,
+                'deliveryDate' => $quotation->delivery_date ? $quotation->delivery_date->format('Y-m-d') : null,
+                'status' => $quotation->status,
+                'reviewStatus' => $quotation->review_status,
+            ]
+        ], 201);
+    }
+
+    /**
      * Close RFQ without selecting a vendor
      */
     public function closeRFQ(Request $request, $id)

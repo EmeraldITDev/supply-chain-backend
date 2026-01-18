@@ -108,6 +108,7 @@ Route::middleware('auth:sanctum')->group(function () {
     // RFQ Workflow routes (enhanced)
     Route::get('/vendors/rfqs', [\App\Http\Controllers\Api\RFQWorkflowController::class, 'getVendorRFQs']); // Vendor portal
     Route::post('/rfqs/{id}/mark-viewed', [\App\Http\Controllers\Api\RFQWorkflowController::class, 'markAsViewed']); // Vendor marks as viewed
+    Route::post('/rfqs/{id}/submit-quotation', [\App\Http\Controllers\Api\RFQWorkflowController::class, 'submitQuotation']); // Submit quotation for RFQ
     Route::get('/rfqs/{id}/quotations', [\App\Http\Controllers\Api\RFQWorkflowController::class, 'getQuotationsForRFQ']); // Comparison view
     Route::post('/rfqs/{id}/select-vendor', [\App\Http\Controllers\Api\RFQWorkflowController::class, 'selectVendor']); // Award RFQ
     Route::post('/rfqs/{id}/close', [\App\Http\Controllers\Api\RFQWorkflowController::class, 'closeRFQ']); // Close without award
@@ -119,10 +120,10 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/quotations/{id}/reject', [QuotationController::class, 'reject']);
     Route::post('/quotations/{id}/request-revision', [QuotationController::class, 'requestRevision']);
 
-    // Vendor routes
+    // Vendor routes - specific routes must come before parameterized routes
     Route::get('/vendors', [VendorController::class, 'index']);
-    Route::get('/vendors/{id}', [VendorController::class, 'show']);
     Route::get('/vendors/quotations', [VendorController::class, 'getVendorQuotations']);
+    Route::get('/vendors/{id}', [VendorController::class, 'show']);
     Route::delete('/vendors/{id}', [VendorController::class, 'destroy']);
     Route::post('/vendors/invite', [VendorController::class, 'inviteVendor']);
     Route::post('/vendors/{id}/rating', [VendorController::class, 'addRating']);
