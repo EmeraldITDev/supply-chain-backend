@@ -727,7 +727,7 @@ class MRFWorkflowController extends Controller
                     'current_status' => $mrf->status,
                     'current_stage' => $mrf->current_stage,
                     'has_existing_po' => $hasExistingPO
-                ], 422);
+            ], 422);
             }
         }
 
@@ -1094,7 +1094,7 @@ class MRFWorkflowController extends Controller
                 // Delete old PO file if regenerating
                 if ($isRegeneration && $mrf->unsigned_po_url) {
                     try {
-                        $disk = config('filesystems.documents_disk', 'public');
+        $disk = config('filesystems.documents_disk', 'public');
                         $oldPath = str_replace(Storage::disk($disk)->url(''), '', $mrf->unsigned_po_url);
                         // Clean up path
                         $oldPath = ltrim(str_replace('/storage/', '', $oldPath), '/');
@@ -1115,7 +1115,7 @@ class MRFWorkflowController extends Controller
                 }
                 
                 $poFileName = "po_{$poNumber}_" . time() . "." . $file->getClientOriginalExtension();
-                $poPath = "purchase-orders/{$poFileName}";
+        $poPath = "purchase-orders/{$poFileName}";
                 
                 // Ensure directory exists
                 try {
@@ -2035,13 +2035,13 @@ class MRFWorkflowController extends Controller
             // Very rare case - add sequence number
             $sequence = 1;
             $lastPO = MRF::where('po_number', 'like', "{$poNumber}-%")
-                ->orderBy('po_number', 'desc')
-                ->first();
-            
-            if ($lastPO && preg_match('/-(\d+)$/', $lastPO->po_number, $matches)) {
+            ->orderBy('po_number', 'desc')
+            ->first();
+
+        if ($lastPO && preg_match('/-(\d+)$/', $lastPO->po_number, $matches)) {
                 $sequence = (int) $matches[1] + 1;
-            }
-            
+        }
+
             $poNumber = "{$poNumber}-{$sequence}";
         }
 

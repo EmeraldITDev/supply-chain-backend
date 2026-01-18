@@ -125,24 +125,24 @@ class VendorDocumentService
                 if (!$useOneDrive) {
                     $disk = $this->getStorageDisk();
                     $basePath = "vendor_documents/{$registration->id}";
-                    $filePath = $document->storeAs($basePath, $fileName, $disk);
+                $filePath = $document->storeAs($basePath, $fileName, $disk);
                     $fileUrl = Storage::disk($disk)->url($filePath);
 
-                    if (!$filePath) {
-                        \Log::error("Failed to store document", [
-                            'file_name' => $originalName,
-                            'disk' => $disk
-                        ]);
-                        continue;
-                    }
+                if (!$filePath) {
+                    \Log::error("Failed to store document", [
+                        'file_name' => $originalName,
+                        'disk' => $disk
+                    ]);
+                    continue;
+                }
 
                     // Verify file was actually stored (only for local/S3)
-                    if (!Storage::disk($disk)->exists($filePath)) {
-                        \Log::error("File stored but doesn't exist in storage", [
-                            'file_path' => $filePath,
-                            'disk' => $disk
-                        ]);
-                        continue;
+                if (!Storage::disk($disk)->exists($filePath)) {
+                    \Log::error("File stored but doesn't exist in storage", [
+                        'file_path' => $filePath,
+                        'disk' => $disk
+                    ]);
+                    continue;
                     }
                 }
                 
