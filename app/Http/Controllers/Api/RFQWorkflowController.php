@@ -40,11 +40,11 @@ class RFQWorkflowController extends Controller
                 'code' => 'FORBIDDEN'
             ], 403);
         }
-
+        
         // Get vendor from authenticated user
         // Users have vendor_id field that links to vendors
         $vendor = $user->vendor ?? Vendor::find($user->vendor_id);
-
+        
         if (!$vendor) {
             return response()->json([
                 'success' => false,
@@ -72,7 +72,7 @@ class RFQWorkflowController extends Controller
             // Get pivot data for this vendor (should be loaded from the relationship)
             $vendorPivot = $rfq->vendors->firstWhere('id', $vendor->id);
             $pivot = $vendorPivot ? $vendorPivot->pivot : null;
-
+            
             // Check if vendor has submitted quotation
             $hasSubmitted = Quotation::where('rfq_id', $rfq->id)
                 ->where('vendor_id', $vendor->id)
@@ -148,7 +148,7 @@ class RFQWorkflowController extends Controller
 
         // Get vendor from authenticated user
         $vendor = $user->vendor ?? Vendor::find($user->vendor_id);
-
+        
         if (!$vendor) {
             return response()->json([
                 'success' => false,
@@ -371,20 +371,20 @@ class RFQWorkflowController extends Controller
 
             // Send notifications
             $this->notificationService->notifyQuotationAwarded($selectedQuotation);
-
+            
             // Notify rejected vendors
             $rejectedQuotations = Quotation::where('rfq_id', $rfq->id)
                 ->where('id', '!=', $selectedQuotation->id)
                 ->with('vendor')
                 ->get();
-
+                
             foreach ($rejectedQuotations as $rejectedQuotation) {
                 $this->notificationService->notifyQuotationRejected($rejectedQuotation);
             }
 
             // Get vendor info safely
             $selectedVendor = $selectedQuotation->vendor;
-            
+
             return response()->json([
                 'success' => true,
                 'message' => 'Vendor selected successfully',
@@ -406,7 +406,7 @@ class RFQWorkflowController extends Controller
             ]);
         } catch (\Exception $e) {
             DB::rollBack();
-
+            
             return response()->json([
                 'success' => false,
                 'error' => 'Failed to select vendor',
@@ -424,13 +424,32 @@ class RFQWorkflowController extends Controller
     {
         $user = $request->user();
 
-        // Verify user is a vendor
-        if ($user->role !== 'vendor') {
-            return response()->json([
+        // Verify user is a vendor - check both direct role field and Spatie roles
+        $isVendor = false;
+        if ($user->role === 'vendor') {
+            $isVendor = true;
+        } elseif (method_exists($user, 'hasRole') && $user->hasRole('vendor')) {
+            $isVendor = true;
+        }
+
+        if (!$isVendor) {
+            $response = [
                 'success' => false,
                 'error' => 'Only vendors can submit quotations',
-                'code' => 'FORBIDDEN'
-            ], 403);
+                'code' => 'FORBIDDEN',
+            ];
+            
+            // Include debug info only in debug mode
+            if (config('app.debug')) {
+                $response['debug'] = [
+                    'user_role' => $user->role,
+                    'has_vendor_role' => method_exists($user, 'hasRole') ? $user->hasRole('vendor') : 'method_not_available',
+                    'user_id' => $user->id,
+                    'user_email' => $user->email,
+                ];
+            }
+            
+            return response()->json($response, 403);
         }
 
         // Get vendor from authenticated user
