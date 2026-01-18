@@ -239,13 +239,28 @@ class DashboardController extends Controller
             ], 403);
         }
 
-        // Get vendor information
-        $vendor = $user->vendor;
+        // Get vendor information - try multiple methods
+        $vendor = null;
+        
+        // Method 1: Try vendor relationship
+        if ($user->vendor_id && method_exists($user, 'vendor')) {
+            $vendor = $user->vendor;
+        }
+        
+        // Method 2: Find vendor by vendor_id if relationship didn't work
+        if (!$vendor && $user->vendor_id) {
+            $vendor = \App\Models\Vendor::find($user->vendor_id);
+        }
+        
+        // Method 3: Try finding vendor by email as last resort
+        if (!$vendor) {
+            $vendor = \App\Models\Vendor::where('email', $user->email)->first();
+        }
         
         if (!$vendor) {
             return response()->json([
                 'success' => false,
-                'error' => 'Vendor information not found',
+                'error' => 'Vendor information not found. Please ensure your account is linked to a vendor profile.',
                 'code' => 'NOT_FOUND'
             ], 404);
         }

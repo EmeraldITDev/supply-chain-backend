@@ -209,6 +209,9 @@ class RFQWorkflowController extends Controller
             ->with(['vendor', 'items.rfqItem'])
             ->get()
             ->map(function ($quotation) {
+                // Handle missing vendor gracefully
+                $vendor = $quotation->vendor;
+                
                 return [
                     'quotation' => [
                         'id' => $quotation->quotation_id,
@@ -225,12 +228,18 @@ class RFQWorkflowController extends Controller
                         'attachments' => $quotation->attachments,
                         'submitted_at' => $quotation->submitted_at?->toIso8601String(),
                     ],
-                    'vendor' => [
-                        'id' => $quotation->vendor->vendor_id,
-                        'name' => $quotation->vendor->name,
-                        'email' => $quotation->vendor->email,
-                        'phone' => $quotation->vendor->phone,
-                        'rating' => (float) $quotation->vendor->rating,
+                    'vendor' => $vendor ? [
+                        'id' => $vendor->vendor_id,
+                        'name' => $vendor->name,
+                        'email' => $vendor->email,
+                        'phone' => $vendor->phone,
+                        'rating' => (float) $vendor->rating,
+                    ] : [
+                        'id' => null,
+                        'name' => $quotation->vendor_name ?? 'Unknown Vendor',
+                        'email' => null,
+                        'phone' => null,
+                        'rating' => 0,
                     ],
                     'items' => $quotation->items->map(function ($item) {
                         return [
@@ -373,15 +382,21 @@ class RFQWorkflowController extends Controller
                 $this->notificationService->notifyQuotationRejected($rejectedQuotation);
             }
 
+            // Get vendor info safely
+            $selectedVendor = $selectedQuotation->vendor;
+            
             return response()->json([
                 'success' => true,
                 'message' => 'Vendor selected successfully',
                 'data' => [
                     'rfq_id' => $rfq->rfq_id,
                     'status' => $rfq->status,
-                    'selected_vendor' => [
-                        'id' => $selectedQuotation->vendor->vendor_id,
-                        'name' => $selectedQuotation->vendor->name,
+                    'selected_vendor' => $selectedVendor ? [
+                        'id' => $selectedVendor->vendor_id,
+                        'name' => $selectedVendor->name,
+                    ] : [
+                        'id' => null,
+                        'name' => $selectedQuotation->vendor_name ?? 'Unknown Vendor',
                     ],
                     'selected_quotation' => [
                         'id' => $selectedQuotation->quotation_id,
