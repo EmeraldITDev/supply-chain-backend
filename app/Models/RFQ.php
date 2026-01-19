@@ -122,13 +122,34 @@ class RFQ extends Model
      */
     public function getDisplayTitle(): string
     {
-        // Get product/service name from title, category, or description
-        $productName = $this->title ?? $this->category ?? 'Request';
+        // Ensure MRF relationship is loaded if not already
+        if (!$this->relationLoaded('mrf') && $this->mrf_id) {
+            $this->load('mrf');
+        }
         
-        // If title is generic, try to extract from description or use category
-        if (in_array(strtolower($productName), ['rfq', 'request', 'quotation request', '']))
-        {
-            $productName = $this->category ?? 'Supply';
+        // Get product/service name from title, category, or MRF title
+        $productName = $this->title;
+        
+        // If title is empty or generic, try alternatives
+        if (empty($productName) || in_array(strtolower(trim($productName)), ['rfq', 'request', 'quotation request', 'unknown rfq', 'unknown'])) {
+            // Try category first
+            $productName = $this->category;
+            
+            // If category is also empty, try MRF title
+            if (empty($productName) && $this->mrf) {
+                $productName = $this->mrf->title ?? $this->mrf_title;
+            }
+            
+            // If still empty, try description (first few words)
+            if (empty($productName) && !empty($this->description)) {
+                $words = explode(' ', trim($this->description));
+                $productName = implode(' ', array_slice($words, 0, 3)); // First 3 words
+            }
+            
+            // Final fallback
+            if (empty($productName)) {
+                $productName = 'Supply';
+            }
         }
         
         // Get contract type from MRF

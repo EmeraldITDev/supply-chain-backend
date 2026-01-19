@@ -1069,7 +1069,7 @@ class VendorController extends Controller
             ], 404);
         }
 
-        // Build query for quotations
+        // Build query for quotations - ensure MRF relationship is loaded for title generation
         $query = Quotation::where('vendor_id', $vendor->id)
             ->with(['rfq.mrf', 'rfq.items', 'approver']);
 
@@ -1126,7 +1126,7 @@ class VendorController extends Controller
                 'id' => $quotation->quotation_id,
                 'quoteNumber' => $quotation->quote_number,
                 'rfqId' => $quotation->rfq ? $quotation->rfq->rfq_id : null,
-                'rfqTitle' => $quotation->rfq ? ($quotation->rfq->getDisplayTitle() ?? $quotation->rfq->title ?? $quotation->rfq->description) : null,
+                'rfqTitle' => $quotation->rfq ? $quotation->rfq->getDisplayTitle() : 'Unknown RFQ',
                 'mrfId' => $quotation->rfq && $quotation->rfq->mrf ? $quotation->rfq->mrf->mrf_id : null,
                 'mrfTitle' => $quotation->rfq && $quotation->rfq->mrf ? $quotation->rfq->mrf->title : null,
                 'vendorId' => $vendor->vendor_id,
