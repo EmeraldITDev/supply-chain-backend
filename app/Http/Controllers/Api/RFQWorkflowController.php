@@ -550,6 +550,9 @@ class RFQWorkflowController extends Controller
         if ($existing) {
             if ($existing->review_status === 'revision_requested') {
                 // Update existing quotation (resubmission)
+                // Provide default value for validity_days if not provided (default is 30 days)
+                $validityDays = $request->validityDays ?? $existing->validity_days ?? 30;
+                
                 $existing->update([
                     'vendor_name' => $request->vendorName ?? $vendor->name,
                     'price' => $request->price,
@@ -558,7 +561,7 @@ class RFQWorkflowController extends Controller
                     'delivery_date' => $request->deliveryDate,
                     'delivery_days' => $request->deliveryDays,
                     'payment_terms' => $request->paymentTerms,
-                    'validity_days' => $request->validityDays,
+                    'validity_days' => $validityDays,
                     'warranty_period' => $request->warrantyPeriod,
                     'notes' => $request->notes,
                     'attachments' => $request->attachments,
@@ -577,6 +580,9 @@ class RFQWorkflowController extends Controller
             }
         } else {
             // Create new quotation
+            // Provide default value for validity_days if not provided (default is 30 days)
+            $validityDays = $request->validityDays ?? 30;
+            
             $quotation = Quotation::create([
                 'quotation_id' => Quotation::generateQuotationId(),
                 'rfq_id' => $rfq->id,
@@ -588,7 +594,7 @@ class RFQWorkflowController extends Controller
                 'delivery_date' => $request->deliveryDate,
                 'delivery_days' => $request->deliveryDays,
                 'payment_terms' => $request->paymentTerms,
-                'validity_days' => $request->validityDays,
+                'validity_days' => $validityDays,
                 'warranty_period' => $request->warrantyPeriod,
                 'notes' => $request->notes,
                 'attachments' => $request->attachments,

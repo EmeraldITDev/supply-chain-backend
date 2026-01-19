@@ -146,11 +146,14 @@ class QuotationController extends Controller
             'vendor_id' => $vendor->id,
             'vendor_name' => $request->vendorName,
             'price' => $request->price,
+            'total_amount' => $request->price, // Set total_amount same as price if not provided
+            'currency' => 'NGN', // Default currency
             'delivery_date' => $request->deliveryDate,
+            'validity_days' => 30, // Default validity period
             'notes' => $request->notes,
             'status' => 'Pending',
-                'review_status' => 'pending',
-                'submitted_at' => now(),
+            'review_status' => 'pending',
+            'submitted_at' => now(),
         ]);
         }
 
