@@ -225,8 +225,11 @@ class MRFController extends Controller
                 'requester',
                 'executiveApprover',
                 'chairmanApprover',
+                'selectedVendor',
                 'rfqs.quotations.vendor',
-                'rfqs.quotations.items',
+                'rfqs.quotations.items.rfqItem',
+                'rfqs.selectedQuotation.vendor',
+                'rfqs.selectedQuotation.items.rfqItem',
                 'rfqs.vendors',
                 'items',
             ])
@@ -244,9 +247,15 @@ class MRFController extends Controller
         $rfqs = $mrf->rfqs;
         
         // Collect all quotations from all RFQs
+        // Exclude rejected quotations from active view (they remain accessible for historical tracking)
         $allQuotations = collect();
         foreach ($rfqs as $rfq) {
             foreach ($rfq->quotations as $quotation) {
+                // Skip rejected quotations from active view
+                if ($quotation->status === 'Rejected' || $quotation->review_status === 'rejected') {
+                    continue; // Rejected quotations are not shown in active view but remain in database for historical tracking
+                }
+                
                 $allQuotations->push([
                     'id' => $quotation->quotation_id,
                     'rfqId' => $rfq->rfq_id,
@@ -329,6 +338,74 @@ class MRFController extends Controller
                     ];
                 }),
                 'quotations' => $allQuotations,
+                // Include selected quotation details for SCD approval view
+                // This provides complete quotation information when MRF is in vendor_selected state
+                'selectedQuotation' => (function() use ($mrf) {
+                    $selectedQuotation = $mrf->selectedQuotation();
+                    if (!$selectedQuotation) {
+                        return null;
+                    }
+                    // Load relationships if not already loaded
+                    if (!$selectedQuotation->relationLoaded('vendor')) {
+                        $selectedQuotation->load('vendor');
+                    }
+                    if (!$selectedQuotation->relationLoaded('items')) {
+                        $selectedQuotation->load('items.rfqItem');
+                    }
+                    $rfq = $mrf->rfqs->firstWhere('id', $selectedQuotation->rfq_id);
+                    return [
+                        'id' => $selectedQuotation->quotation_id,
+                        'rfqId' => $rfq ? $rfq->rfq_id : null,
+                        'rfqTitle' => $rfq ? $rfq->getDisplayTitle() : null,
+                        'quoteNumber' => $selectedQuotation->quote_number,
+                        'vendor' => $selectedQuotation->vendor ? [
+                            'id' => $selectedQuotation->vendor->vendor_id,
+                            'name' => $selectedQuotation->vendor->name,
+                            'email' => $selectedQuotation->vendor->email,
+                            'phone' => $selectedQuotation->vendor->phone,
+                            'address' => $selectedQuotation->vendor->address,
+                            'contactPerson' => $selectedQuotation->vendor->contact_person,
+                            'rating' => (float) $selectedQuotation->vendor->rating,
+                        ] : [
+                            'id' => null,
+                            'name' => $selectedQuotation->vendor_name ?? 'Unknown Vendor',
+                        ],
+                        'totalAmount' => (float) $selectedQuotation->total_amount,
+                        'currency' => $selectedQuotation->currency ?? 'NGN',
+                        'price' => (float) $selectedQuotation->price,
+                        'deliveryDays' => $selectedQuotation->delivery_days,
+                        'deliveryDate' => $selectedQuotation->delivery_date ? $selectedQuotation->delivery_date->format('Y-m-d') : null,
+                        'paymentTerms' => $selectedQuotation->payment_terms,
+                        'validityDays' => $selectedQuotation->validity_days,
+                        'warrantyPeriod' => $selectedQuotation->warranty_period,
+                        'notes' => $selectedQuotation->notes,
+                        'scopeOfWork' => $selectedQuotation->notes, // Scope of work
+                        'specifications' => $selectedQuotation->notes, // Specifications
+                        'attachments' => $selectedQuotation->attachments ?? [], // All uploaded documents
+                        'items' => $selectedQuotation->items->map(function ($item) {
+                            return [
+                                'id' => $item->id,
+                                'itemName' => $item->item_name,
+                                'description' => $item->description,
+                                'quantity' => $item->quantity,
+                                'unit' => $item->unit,
+                                'unitPrice' => (float) $item->unit_price,
+                                'totalPrice' => (float) $item->total_price,
+                                'specifications' => $item->specifications,
+                            ];
+                        }),
+                        'status' => $selectedQuotation->status,
+                        'reviewStatus' => $selectedQuotation->review_status ?? 'pending',
+                        'submittedAt' => $selectedQuotation->submitted_at ? $selectedQuotation->submitted_at->toIso8601String() : null,
+                    ];
+                })() : null,
+                'selectedVendor' => $mrf->selectedVendor ? [
+                    'id' => $mrf->selectedVendor->vendor_id,
+                    'name' => $mrf->selectedVendor->name,
+                    'email' => $mrf->selectedVendor->email,
+                    'phone' => $mrf->selectedVendor->phone,
+                    'address' => $mrf->selectedVendor->address,
+                ] : null,
                 'statistics' => [
                     'totalQuotations' => $allQuotations->count(),
                     'totalRfqs' => $rfqs->count(),

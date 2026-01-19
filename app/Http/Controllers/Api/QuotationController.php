@@ -230,22 +230,25 @@ class QuotationController extends Controller
     }
 
     /**
-     * Reject quotation
+     * Reject quotation (Procurement Manager)
+     * Rejected quotations are removed from active/visible quotations but remain accessible for historical tracking
      */
     public function reject(Request $request, $id)
     {
         $user = $request->user();
 
-        // Check permission
-        if (!in_array($user->role, ['procurement', 'admin'])) {
+        // Check permission - procurement managers can reject quotations
+        if (!in_array($user->role, ['procurement', 'procurement_manager', 'admin'])) {
             return response()->json([
                 'success' => false,
-                'error' => 'Insufficient permissions',
+                'error' => 'Only procurement managers can reject quotations',
                 'code' => 'FORBIDDEN'
             ], 403);
         }
 
-        $quotation = Quotation::where('quotation_id', $id)->first();
+        $quotation = Quotation::where('quotation_id', $id)
+            ->with(['rfq.mrf', 'vendor'])
+            ->first();
 
         if (!$quotation) {
             return response()->json([
@@ -255,21 +258,17 @@ class QuotationController extends Controller
             ], 404);
         }
 
-        $validator = Validator::make($request->all(), [
-            'reason' => 'required|string',
-        ]);
-
-        if ($validator->fails()) {
+        // Check if quotation can be rejected (not already approved or selected)
+        if ($quotation->status === 'Approved' || $quotation->review_status === 'approved') {
             return response()->json([
                 'success' => false,
-                'error' => 'Validation failed',
-                'errors' => $validator->errors(),
+                'error' => 'Cannot reject an approved quotation',
                 'code' => 'VALIDATION_ERROR'
             ], 422);
         }
 
         $validator = Validator::make($request->all(), [
-            'reason' => 'required|string',
+            'reason' => 'required|string|min:10',
             'comments' => 'nullable|string',
         ]);
 
@@ -282,26 +281,60 @@ class QuotationController extends Controller
             ], 422);
         }
 
+        // Update quotation status
         $quotation->update([
             'status' => 'Rejected',
             'review_status' => 'rejected',
             'rejection_reason' => $request->reason,
-            'revision_notes' => $request->comments,
+            'revision_notes' => $request->comments ?? null,
             'reviewed_by' => $user->id,
             'reviewed_at' => now(),
         ]);
 
-        // TODO: Send notification/email to vendor with rejection reason
+        // Log rejection for audit purposes
+        \Log::info('Quotation rejected by procurement manager', [
+            'quotation_id' => $quotation->quotation_id,
+            'rfq_id' => $quotation->rfq ? $quotation->rfq->rfq_id : null,
+            'mrf_id' => $quotation->rfq && $quotation->rfq->mrf ? $quotation->rfq->mrf->mrf_id : null,
+            'vendor_id' => $quotation->vendor ? $quotation->vendor->vendor_id : null,
+            'vendor_name' => $quotation->vendor_name,
+            'rejected_by' => $user->id,
+            'rejected_by_name' => $user->name,
+            'rejection_reason' => $request->reason,
+            'rejected_at' => now()->toIso8601String(),
+        ]);
+
+        // Send notification to vendor
+        try {
+            if ($quotation->vendor) {
+                $quotation->vendor->notify(new \App\Notifications\QuotationStatusUpdatedNotification(
+                    $quotation,
+                    'rejected',
+                    "Your quotation has been rejected. Reason: {$request->reason}"
+                ));
+            }
+        } catch (\Exception $e) {
+            \Log::warning('Failed to send rejection notification to vendor', [
+                'quotation_id' => $quotation->quotation_id,
+                'error' => $e->getMessage()
+            ]);
+        }
 
         return response()->json([
             'success' => true,
-            'message' => 'Quotation rejected',
+            'message' => 'Quotation rejected successfully. It has been removed from active quotations but remains accessible for historical tracking.',
             'data' => [
                 'id' => $quotation->quotation_id,
                 'status' => $quotation->status,
                 'reviewStatus' => $quotation->review_status,
                 'rejectionReason' => $quotation->rejection_reason,
                 'revisionNotes' => $quotation->revision_notes,
+                'reviewedBy' => [
+                    'id' => $user->id,
+                    'name' => $user->name,
+                    'email' => $user->email,
+                ],
+                'reviewedAt' => $quotation->reviewed_at->toIso8601String(),
             ]
         ]);
     }

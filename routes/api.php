@@ -145,6 +145,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/dashboard/procurement-manager', [DashboardController::class, 'procurementManagerDashboard']);
     Route::get('/dashboard/supply-chain-director', [DashboardController::class, 'supplyChainDirectorDashboard']);
     Route::get('/dashboard/vendor', [DashboardController::class, 'vendorDashboard']);
+    Route::get('/dashboard/finance', [DashboardController::class, 'financeDashboard']);
 
     // Notification routes
     Route::get('/notifications', [NotificationController::class, 'index']);

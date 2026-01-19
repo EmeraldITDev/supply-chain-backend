@@ -226,7 +226,17 @@ class RFQWorkflowController extends Controller
         }
 
         // Get all quotations with items and vendor details
+        // Exclude rejected quotations from active view (they remain accessible for historical tracking via RFQ Management)
+        // Rejected quotations should not be selectable or forwarded for approval
         $quotations = Quotation::where('rfq_id', $rfq->id)
+            ->where(function($query) {
+                $query->where('status', '!=', 'Rejected')
+                    ->where(function($q) {
+                        $q->where('review_status', '!=', 'rejected')
+                            ->orWhereNull('review_status');
+                    })
+                    ->orWhereNull('status');
+            })
             ->with(['vendor', 'items.rfqItem'])
             ->get()
             ->map(function ($quotation) {

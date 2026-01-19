@@ -182,6 +182,29 @@ class MRF extends Model
     }
 
     /**
+     * Get selected quotation through RFQ
+     */
+    public function selectedQuotation()
+    {
+        // Find quotation through RFQ's selected_quotation_id
+        $rfq = $this->rfqs()->first();
+        if ($rfq && $rfq->selected_quotation_id) {
+            return Quotation::find($rfq->selected_quotation_id);
+        }
+        // Fallback: find approved quotation by selected vendor
+        if ($this->selected_vendor_id) {
+            return Quotation::where('vendor_id', $this->selected_vendor_id)
+                ->whereHas('rfq', function($query) {
+                    $query->where('mrf_id', $this->id);
+                })
+                ->where('status', 'Approved')
+                ->orderBy('created_at', 'desc')
+                ->first();
+        }
+        return null;
+    }
+
+    /**
      * Get user who approved the invoice
      */
     public function invoiceApprover(): BelongsTo
@@ -198,7 +221,7 @@ class MRF extends Model
     {
         $year = date('Y');
         $contractPrefix = $contractType ? strtoupper($contractType) : 'EMERALD'; // Default to EMERALD if not provided
-        
+
         // Build pattern to find last MRF for this contract type and year
         $pattern = "MRF-{$contractPrefix}-{$year}-%";
         $lastMRF = self::where('mrf_id', 'like', $pattern)

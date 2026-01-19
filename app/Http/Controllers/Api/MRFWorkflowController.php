@@ -193,9 +193,11 @@ class MRFWorkflowController extends Controller
             ], 422);
         }
 
-        // Get vendor and quotation
+        // Get vendor and quotation with all relationships
         $vendor = \App\Models\Vendor::where('vendor_id', $request->vendor_id)->first();
-        $quotation = \App\Models\Quotation::where('quotation_id', $request->quotation_id)->first();
+        $quotation = \App\Models\Quotation::where('quotation_id', $request->quotation_id)
+            ->with(['rfq.mrf', 'rfq.items', 'vendor', 'items.rfqItem'])
+            ->first();
 
         if (!$vendor || !$quotation) {
             return response()->json([
@@ -205,20 +207,35 @@ class MRFWorkflowController extends Controller
             ], 404);
         }
 
+        // Verify quotation belongs to the MRF
+        $rfq = $quotation->rfq;
+        if (!$rfq || $rfq->mrf_id !== $mrf->id) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Quotation does not belong to this MRF',
+                'code' => 'VALIDATION_ERROR'
+            ], 422);
+        }
+
+        // Load MRF with all relationships for complete context
+        $mrf->load(['requester', 'executiveApprover', 'chairmanApprover', 'items']);
+
         // Update MRF with selected vendor and invoice
         $mrf->update([
             'selected_vendor_id' => $vendor->id,
-            'invoice_url' => $request->invoice_url ?? $quotation->attachments[0] ?? null,
+            'selected_quotation_id' => $quotation->id,
+            'invoice_url' => $request->invoice_url ?? ($quotation->attachments[0] ?? null),
             'workflow_state' => WorkflowStateService::STATE_VENDOR_SELECTED,
             'status' => 'vendor_selected',
             'current_stage' => 'supply_chain_review',
         ]);
 
         // Update RFQ workflow state to supply_chain_review
-        $rfq = \App\Models\RFQ::where('mrf_id', $mrf->id)->first();
         if ($rfq) {
             $rfq->update([
                 'workflow_state' => 'supply_chain_review',
+                'selected_vendor_id' => $vendor->id,
+                'selected_quotation_id' => $quotation->id,
             ]);
             Log::info('RFQ workflow state updated to supply_chain_review', ['rfq_id' => $rfq->rfq_id, 'mrf_id' => $mrf->mrf_id]);
         }
@@ -227,16 +244,119 @@ class MRFWorkflowController extends Controller
         MRFApprovalHistory::record($mrf, 'vendor_selected', 'procurement', $user, 
             "Vendor {$vendor->name} selected and sent for Supply Chain Director approval. " . ($request->remarks ?? ''));
 
-        // Notify Supply Chain Director
+        // Prepare complete data for notification and response
+        // Include ALL quotation details - nothing should be hidden or summarized
+        $completeQuotationData = [
+            'quotation' => [
+                'id' => $quotation->quotation_id,
+                'quoteNumber' => $quotation->quote_number,
+                'totalAmount' => (float) $quotation->total_amount,
+                'currency' => $quotation->currency ?? 'NGN',
+                'price' => (float) $quotation->price,
+                'deliveryDays' => $quotation->delivery_days,
+                'deliveryDate' => $quotation->delivery_date ? $quotation->delivery_date->format('Y-m-d') : null,
+                'paymentTerms' => $quotation->payment_terms,
+                'validityDays' => $quotation->validity_days,
+                'warrantyPeriod' => $quotation->warranty_period,
+                'notes' => $quotation->notes,
+                'scopeOfWork' => $quotation->notes, // Scope of work is in notes field
+                'specifications' => $quotation->notes, // Specifications may be in notes or items
+                'attachments' => $quotation->attachments ?? [], // All uploaded documents
+                'submittedAt' => $quotation->submitted_at ? $quotation->submitted_at->toIso8601String() : null,
+                'status' => $quotation->status,
+                'reviewStatus' => $quotation->review_status ?? 'pending',
+            ],
+            'vendor' => [
+                'id' => $vendor->vendor_id,
+                'name' => $vendor->name,
+                'email' => $vendor->email,
+                'phone' => $vendor->phone,
+                'address' => $vendor->address,
+                'contactPerson' => $vendor->contact_person,
+                'rating' => (float) $vendor->rating,
+            ],
+            'rfq' => [
+                'id' => $rfq->rfq_id,
+                'title' => $rfq->getDisplayTitle(),
+                'description' => $rfq->description,
+                'category' => $rfq->category,
+                'deadline' => $rfq->deadline ? $rfq->deadline->format('Y-m-d') : null,
+                'estimatedCost' => (float) $rfq->estimated_cost,
+                'paymentTerms' => $rfq->payment_terms,
+                'supportingDocuments' => $rfq->supporting_documents ?? [],
+                'items' => $rfq->items->map(function ($item) {
+                    return [
+                        'id' => $item->id,
+                        'itemName' => $item->item_name,
+                        'description' => $item->description,
+                        'quantity' => $item->quantity,
+                        'unit' => $item->unit,
+                        'specifications' => $item->specifications,
+                    ];
+                }),
+            ],
+            'mrf' => [
+                'id' => $mrf->mrf_id,
+                'title' => $mrf->title,
+                'category' => $mrf->category,
+                'contractType' => $mrf->contract_type,
+                'description' => $mrf->description,
+                'estimatedCost' => (float) $mrf->estimated_cost,
+                'currency' => $mrf->currency ?? 'NGN',
+                'urgency' => $mrf->urgency,
+                'executiveApproved' => (bool) $mrf->executive_approved,
+                'executiveApprovedAt' => $mrf->executive_approved_at ? $mrf->executive_approved_at->toIso8601String() : null,
+                'executiveApprovedBy' => $mrf->executiveApprover ? [
+                    'id' => $mrf->executiveApprover->id,
+                    'name' => $mrf->executiveApprover->name,
+                    'email' => $mrf->executiveApprover->email,
+                ] : null,
+                'chairmanApproved' => (bool) $mrf->chairman_approved,
+                'chairmanApprovedAt' => $mrf->chairman_approved_at ? $mrf->chairman_approved_at->toIso8601String() : null,
+                'requester' => $mrf->requester ? [
+                    'id' => $mrf->requester->id,
+                    'name' => $mrf->requester->name,
+                    'email' => $mrf->requester->email,
+                ] : null,
+                'items' => $mrf->items->map(function ($item) {
+                    return [
+                        'id' => $item->id,
+                        'itemName' => $item->item_name,
+                        'description' => $item->description,
+                        'quantity' => $item->quantity,
+                        'unit' => $item->unit,
+                        'estimatedCost' => (float) $item->estimated_cost,
+                    ];
+                }),
+            ],
+            'quotationItems' => $quotation->items->map(function ($item) {
+                return [
+                    'id' => $item->id,
+                    'itemName' => $item->item_name,
+                    'description' => $item->description,
+                    'quantity' => $item->quantity,
+                    'unit' => $item->unit,
+                    'unitPrice' => (float) $item->unit_price,
+                    'totalPrice' => (float) $item->total_price,
+                    'specifications' => $item->specifications,
+                ];
+            }),
+        ];
+
+        // Notify Supply Chain Director with complete information
         try {
             $scdUsers = \App\Models\User::whereIn('role', ['supply_chain_director', 'supply_chain', 'admin'])->get();
             foreach ($scdUsers as $scdUser) {
                 $scdUser->notify(new \App\Notifications\SystemAnnouncementNotification(
                     'Vendor Selection Pending Approval',
-                    "MRF {$mrf->mrf_id} - Vendor {$vendor->name} selected and pending your approval"
+                    "MRF {$mrf->mrf_id} - Vendor {$vendor->name} selected and pending your approval",
+                    [
+                        'action_url' => "/mrfs/{$mrf->mrf_id}",
+                        'quotation_data' => $completeQuotationData,
+                    ]
                 ));
             }
-            Log::info('Vendor approval notification sent', ['mrf_id' => $mrf->mrf_id, 'vendor_id' => $vendor->vendor_id]);
+            Log::info('Vendor approval notification sent with complete data', ['mrf_id' => $mrf->mrf_id, 'vendor_id' => $vendor->vendor_id]);
         } catch (\Exception $e) {
             Log::warning('Failed to send vendor approval notification', ['error' => $e->getMessage()]);
         }
@@ -251,6 +371,7 @@ class MRFWorkflowController extends Controller
                     'name' => $vendor->name,
                 ],
                 'workflow_state' => $mrf->workflow_state,
+                'quotation_data' => $completeQuotationData, // Include complete data in response
             ]
         ]);
     }
@@ -314,11 +435,12 @@ class MRFWorkflowController extends Controller
             ], 422);
         }
 
-        // Update MRF - approve vendor selection (this allows PO generation)
+        // Update MRF - approve vendor selection (move to Pending PO Upload)
+        // After SCD approval, workflow moves back to Procurement Manager for PO upload
         $mrf->update([
             'workflow_state' => WorkflowStateService::STATE_INVOICE_APPROVED,
-            'status' => 'invoice_approved',
-            'current_stage' => 'procurement',
+            'status' => 'pending_po_upload', // Clear status indicating PO upload is required
+            'current_stage' => 'procurement', // Return to procurement for PO generation
         ]);
 
         // Update RFQ status to approved
@@ -335,26 +457,36 @@ class MRFWorkflowController extends Controller
         MRFApprovalHistory::record($mrf, 'vendor_approved', 'supply_chain', $user, 
             'Vendor selection approved. ' . ($request->remarks ?? ''));
 
-        // Notify Procurement that vendor is approved and PO can be generated
+        // Notify Procurement that vendor is approved and PO upload is required
+        // Provide clear actionable guidance: "Upload PO" is the next step
         try {
             $procurementUsers = \App\Models\User::whereIn('role', ['procurement', 'procurement_manager', 'admin'])->get();
             foreach ($procurementUsers as $procUser) {
                 $procUser->notify(new \App\Notifications\SystemAnnouncementNotification(
-                    'Vendor Selection Approved - PO Generation Ready',
-                    "MRF {$mrf->mrf_id} - Vendor selection has been approved by Supply Chain Director. You can now generate the Purchase Order."
+                    'Vendor Selection Approved - PO Upload Required',
+                    "MRF {$mrf->mrf_id} - Vendor selection has been approved by Supply Chain Director. Please upload the Purchase Order.",
+                    [
+                        'action_url' => "/mrfs/{$mrf->mrf_id}",
+                        'action_label' => 'Upload PO',
+                        'next_action' => 'upload_po',
+                    ]
                 ));
             }
-            Log::info('Vendor approved notification sent', ['mrf_id' => $mrf->mrf_id]);
+            Log::info('Vendor approved notification sent with PO upload action', ['mrf_id' => $mrf->mrf_id]);
         } catch (\Exception $e) {
             Log::warning('Failed to send vendor approval notification', ['error' => $e->getMessage()]);
         }
 
         return response()->json([
             'success' => true,
-            'message' => 'Vendor selection approved',
+            'message' => 'Vendor selection approved. MRF is now pending PO upload.',
             'data' => [
                 'mrf_id' => $mrf->mrf_id,
                 'workflow_state' => $mrf->workflow_state,
+                'status' => $mrf->status,
+                'current_stage' => $mrf->current_stage,
+                'next_action' => 'upload_po',
+                'next_action_label' => 'Upload Purchase Order',
             ]
         ]);
     }
@@ -718,10 +850,22 @@ class MRFWorkflowController extends Controller
             ], 400);
         }
 
-        // Check if MRF is in procurement status (allow both 'procurement' and rejected PO statuses)
+        // Check if MRF is in procurement status (allow both 'procurement', 'pending_po_upload', and rejected PO statuses)
         // Use case-insensitive comparison
         $statusLower = strtolower(trim($mrf->status ?? ''));
-        $allowedStatuses = ['procurement', 'po rejected', 'pending']; // Also allow pending for flexibility
+        $allowedStatuses = ['procurement', 'pending_po_upload', 'po rejected', 'pending']; // Allow pending_po_upload for PO upload after SCD approval
+        
+        // Special case: If MRF is in pending_po_upload status, this is the expected flow after SCD approval
+        if ($statusLower === 'pending_po_upload') {
+            // Verify RFQ is approved (SCD must have approved)
+            if ($rfq && $rfq->workflow_state !== 'approved') {
+                return response()->json([
+                    'success' => false,
+                    'error' => 'RFQ must be approved by Supply Chain Director before PO can be generated. Current RFQ status: ' . ($rfq->workflow_state ?? 'unknown'),
+                    'code' => 'RFQ_NOT_APPROVED',
+                ], 400);
+            }
+        }
         
         // Also check if MRF has no PO yet (can always generate first PO)
         $hasExistingPO = !empty(trim($mrf->po_number ?? '')) || !empty(trim($mrf->unsigned_po_url ?? ''));

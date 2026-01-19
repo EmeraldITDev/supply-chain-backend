@@ -341,4 +341,145 @@ class DashboardController extends Controller
             'quotations' => $quotations,
         ]);
     }
+
+    /**
+     * Get Finance Dashboard
+     * Shows only MRFs that have legitimately reached the finance stage
+     */
+    public function financeDashboard(Request $request)
+    {
+        $user = $request->user();
+
+        // Check permission - only finance team can access
+        if (!in_array($user->role, ['finance', 'admin'])) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Insufficient permissions',
+                'code' => 'FORBIDDEN'
+            ], 403);
+        }
+
+        // Get MRFs that have reached finance stage (have signed PO)
+        // Only show real, live data - no dummy/placeholder data
+        $financeMRFs = MRF::where(function($query) {
+                $query->where('status', 'finance')
+                    ->orWhere('current_stage', 'finance');
+            })
+            ->whereNotNull('signed_po_url') // Must have signed PO - legitimate finance stage
+            ->with([
+                'requester',
+                'selectedVendor',
+                'rfqs.selectedQuotation',
+                'rfqs.quotations.vendor',
+                'executiveApprover',
+            ])
+            ->orderBy('created_at', 'desc')
+            ->get()
+            ->map(function($mrf) {
+                $rfq = $mrf->rfqs->first();
+                $selectedQuotation = $rfq ? $rfq->selectedQuotation : null;
+                
+                return [
+                    'id' => $mrf->id,
+                    'mrfId' => $mrf->mrf_id,
+                    'title' => $mrf->title,
+                    'category' => $mrf->category,
+                    'contractType' => $mrf->contract_type,
+                    'estimatedCost' => (float) $mrf->estimated_cost,
+                    'currency' => $mrf->currency ?? 'NGN',
+                    'requester' => $mrf->requester ? [
+                        'id' => $mrf->requester->id,
+                        'name' => $mrf->requester->name,
+                        'email' => $mrf->requester->email,
+                    ] : null,
+                    'poNumber' => $mrf->po_number,
+                    'unsignedPoUrl' => $mrf->unsigned_po_url,
+                    'signedPoUrl' => $mrf->signed_po_url,
+                    'signedPoShareUrl' => $mrf->signed_po_share_url,
+                    'poGeneratedAt' => $mrf->po_generated_at ? $mrf->po_generated_at->toIso8601String() : null,
+                    'poSignedAt' => $mrf->po_signed_at ? $mrf->po_signed_at->toIso8601String() : null,
+                    'selectedVendor' => $mrf->selectedVendor ? [
+                        'id' => $mrf->selectedVendor->vendor_id,
+                        'name' => $mrf->selectedVendor->name,
+                        'email' => $mrf->selectedVendor->email,
+                        'phone' => $mrf->selectedVendor->phone,
+                        'address' => $mrf->selectedVendor->address,
+                    ] : null,
+                    'selectedQuotation' => $selectedQuotation ? [
+                        'id' => $selectedQuotation->quotation_id,
+                        'totalAmount' => (float) $selectedQuotation->total_amount,
+                        'currency' => $selectedQuotation->currency ?? 'NGN',
+                        'paymentTerms' => $selectedQuotation->payment_terms,
+                        'deliveryDate' => $selectedQuotation->delivery_date ? $selectedQuotation->delivery_date->format('Y-m-d') : null,
+                        'validityDays' => $selectedQuotation->validity_days,
+                        'warrantyPeriod' => $selectedQuotation->warranty_period,
+                    ] : null,
+                    'rfqId' => $rfq ? $rfq->rfq_id : null,
+                    'rfqTitle' => $rfq ? $rfq->getDisplayTitle() : null,
+                    'paymentStatus' => $mrf->payment_status,
+                    'paymentProcessedAt' => $mrf->payment_processed_at ? $mrf->payment_processed_at->toIso8601String() : null,
+                    'executiveApproved' => (bool) $mrf->executive_approved,
+                    'executiveApprovedAt' => $mrf->executive_approved_at ? $mrf->executive_approved_at->toIso8601String() : null,
+                    'createdAt' => $mrf->created_at->toIso8601String(),
+                ];
+            });
+
+        // Get pending payments (MRFs in finance stage awaiting processing)
+        $pendingPayments = MRF::where('status', 'finance')
+            ->where('current_stage', 'finance')
+            ->whereNotNull('signed_po_url')
+            ->whereNull('payment_processed_at')
+            ->count();
+
+        // Get processed payments (awaiting chairman approval)
+        $processedPayments = MRF::where('status', 'chairman_payment')
+            ->where('payment_status', 'processing')
+            ->count();
+
+        // Get approved payments
+        $approvedPayments = MRF::where('payment_status', 'approved')
+            ->count();
+
+        // Calculate financial metrics
+        $totalPendingAmount = MRF::where('status', 'finance')
+            ->whereNotNull('signed_po_url')
+            ->whereNull('payment_processed_at')
+            ->whereHas('selectedQuotation')
+            ->get()
+            ->sum(function($mrf) {
+                return (float) ($mrf->selectedQuotation->total_amount ?? $mrf->estimated_cost ?? 0);
+            });
+
+        $totalProcessedAmount = MRF::where('status', 'chairman_payment')
+            ->where('payment_status', 'processing')
+            ->whereHas('selectedQuotation')
+            ->get()
+            ->sum(function($mrf) {
+                return (float) ($mrf->selectedQuotation->total_amount ?? $mrf->estimated_cost ?? 0);
+            });
+
+        $totalApprovedAmount = MRF::where('payment_status', 'approved')
+            ->whereHas('selectedQuotation')
+            ->get()
+            ->sum(function($mrf) {
+                return (float) ($mrf->selectedQuotation->total_amount ?? $mrf->estimated_cost ?? 0);
+            });
+
+        // Statistics
+        $stats = [
+            'totalFinanceMRFs' => $financeMRFs->count(),
+            'pendingPayments' => $pendingPayments,
+            'processedPayments' => $processedPayments,
+            'approvedPayments' => $approvedPayments,
+            'totalPendingAmount' => (float) $totalPendingAmount,
+            'totalProcessedAmount' => (float) $totalProcessedAmount,
+            'totalApprovedAmount' => (float) $totalApprovedAmount,
+        ];
+
+        return response()->json([
+            'success' => true,
+            'stats' => $stats,
+            'financeMRFs' => $financeMRFs,
+        ]);
+    }
 }
