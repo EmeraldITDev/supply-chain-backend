@@ -215,7 +215,7 @@ class RFQWorkflowController extends Controller
             ], 403);
         }
 
-        $rfq = RFQ::where('rfq_id', $id)->with(['items'])->first();
+        $rfq = RFQ::where('rfq_id', $id)->with(['items', 'mrf.executiveApprover', 'mrf.chairmanApprover'])->first();
 
         if (!$rfq) {
             return response()->json([
@@ -238,7 +238,7 @@ class RFQWorkflowController extends Controller
                         'id' => $quotation->quotation_id,
                         'quote_number' => $quotation->quote_number,
                         'total_amount' => (float) $quotation->total_amount,
-                        'currency' => $quotation->currency,
+                        'currency' => $quotation->currency ?? 'NGN',
                         'delivery_days' => $quotation->delivery_days,
                         'delivery_date' => $quotation->delivery_date?->format('Y-m-d'),
                         'payment_terms' => $quotation->payment_terms,
@@ -246,7 +246,8 @@ class RFQWorkflowController extends Controller
                         'warranty_period' => $quotation->warranty_period,
                         'notes' => $quotation->notes,
                         'status' => $quotation->status,
-                        'attachments' => $quotation->attachments,
+                        'reviewStatus' => $quotation->review_status ?? 'pending',
+                        'attachments' => $quotation->attachments ?? [],
                         'submitted_at' => $quotation->submitted_at?->toIso8601String(),
                     ],
                     'vendor' => $vendor ? [
@@ -278,8 +279,7 @@ class RFQWorkflowController extends Controller
                 ];
             });
 
-        // Load MRF for full details
-        $rfq->load('mrf');
+        // Get MRF with all relationships
         $mrf = $rfq->mrf;
 
         return response()->json([
