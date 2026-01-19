@@ -398,7 +398,7 @@ class MRFController extends Controller
                         'reviewStatus' => $selectedQuotation->review_status ?? 'pending',
                         'submittedAt' => $selectedQuotation->submitted_at ? $selectedQuotation->submitted_at->toIso8601String() : null,
                     ];
-                })() : null,
+                })(),
                 'selectedVendor' => $mrf->selectedVendor ? [
                     'id' => $mrf->selectedVendor->vendor_id,
                     'name' => $mrf->selectedVendor->name,
