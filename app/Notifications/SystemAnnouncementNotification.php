@@ -14,17 +14,44 @@ class SystemAnnouncementNotification extends Notification implements ShouldQueue
     protected string $message;
     protected ?string $actionUrl;
     protected string $priority;
+    protected array $metadata;
 
     public function __construct(
         string $title,
         string $message,
-        ?string $actionUrl = null,
-        string $priority = 'normal'
+        $actionUrl = null,
+        $priority = 'normal',
+        array $metadata = []
     ) {
         $this->title = $title;
         $this->message = $message;
-        $this->actionUrl = $actionUrl;
-        $this->priority = $priority;
+        
+        // Handle case where array was passed as 3rd parameter (backward compatibility)
+        if (is_array($actionUrl)) {
+            $this->metadata = $actionUrl;
+            $this->actionUrl = $actionUrl['action_url'] ?? null;
+            // Priority might be in metadata array or as 4th parameter
+            if (is_string($priority) && $priority !== 'normal') {
+                $this->priority = $priority;
+            } else {
+                $this->priority = $actionUrl['priority'] ?? (is_string($priority) ? $priority : 'normal');
+            }
+        } else {
+            // Standard usage: actionUrl is string, priority might be array or string
+            $this->actionUrl = $actionUrl;
+            if (is_array($priority)) {
+                $this->metadata = $priority;
+                $this->priority = $priority['priority'] ?? 'normal';
+            } else {
+                $this->priority = $priority;
+                $this->metadata = $metadata;
+            }
+        }
+        
+        // Extract action_url from metadata if provided and actionUrl is null
+        if (empty($this->actionUrl) && isset($this->metadata['action_url'])) {
+            $this->actionUrl = $this->metadata['action_url'];
+        }
     }
 
     /**
@@ -40,7 +67,7 @@ class SystemAnnouncementNotification extends Notification implements ShouldQueue
      */
     public function toArray($notifiable): array
     {
-        return [
+        $data = [
             'type' => 'system_announcement',
             'title' => $this->title,
             'message' => $this->message,
@@ -49,5 +76,12 @@ class SystemAnnouncementNotification extends Notification implements ShouldQueue
             'color' => 'indigo',
             'priority' => $this->priority,
         ];
+        
+        // Merge any additional metadata
+        if (!empty($this->metadata)) {
+            $data = array_merge($data, $this->metadata);
+        }
+        
+        return $data;
     }
 }
