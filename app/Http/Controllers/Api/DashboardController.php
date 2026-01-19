@@ -376,9 +376,22 @@ class DashboardController extends Controller
             ->orderBy('created_at', 'desc')
             ->get()
             ->map(function($mrf) {
+                // Get RFQ and selected quotation safely
                 $rfq = $mrf->rfqs->first();
-                $selectedQuotation = $rfq ? $rfq->selectedQuotation : null;
+                $selectedQuotation = null;
                 
+                if ($rfq) {
+                    // Check if selectedQuotation relationship is loaded
+                    if ($rfq->relationLoaded('selectedQuotation') && $rfq->selectedQuotation) {
+                        $selectedQuotation = $rfq->selectedQuotation;
+                    } elseif ($rfq->selected_quotation_id) {
+                        // Load it if not already loaded
+                        $selectedQuotation = $rfq->selectedQuotation;
+                    }
+                }
+                
+                // Only return real data - ensure we have essential finance data
+                // Must have signed PO and should have selected quotation for proper finance tracking
                 return [
                     'id' => $mrf->id,
                     'mrfId' => $mrf->mrf_id,
@@ -409,10 +422,10 @@ class DashboardController extends Controller
                         'id' => $selectedQuotation->quotation_id,
                         'totalAmount' => (float) $selectedQuotation->total_amount,
                         'currency' => $selectedQuotation->currency ?? 'NGN',
-                        'paymentTerms' => $selectedQuotation->payment_terms,
+                        'paymentTerms' => $selectedQuotation->payment_terms ?? null,
                         'deliveryDate' => $selectedQuotation->delivery_date ? $selectedQuotation->delivery_date->format('Y-m-d') : null,
-                        'validityDays' => $selectedQuotation->validity_days,
-                        'warrantyPeriod' => $selectedQuotation->warranty_period,
+                        'validityDays' => $selectedQuotation->validity_days ?? null,
+                        'warrantyPeriod' => $selectedQuotation->warranty_period ?? null,
                     ] : null,
                     'rfqId' => $rfq ? $rfq->rfq_id : null,
                     'rfqTitle' => $rfq ? $rfq->getDisplayTitle() : null,
@@ -422,7 +435,8 @@ class DashboardController extends Controller
                     'executiveApprovedAt' => $mrf->executive_approved_at ? $mrf->executive_approved_at->toIso8601String() : null,
                     'createdAt' => $mrf->created_at->toIso8601String(),
                 ];
-            });
+            })
+            ->filter(); // Remove any null/empty entries (shouldn't happen, but safety check)
 
         // Get pending payments (MRFs in finance stage awaiting processing)
         $pendingPayments = MRF::where('status', 'finance')
@@ -441,28 +455,44 @@ class DashboardController extends Controller
             ->count();
 
         // Calculate financial metrics
+        // Check for MRFs that have RFQs with selected quotations
         $totalPendingAmount = MRF::where('status', 'finance')
             ->whereNotNull('signed_po_url')
             ->whereNull('payment_processed_at')
-            ->whereHas('selectedQuotation')
+            ->whereHas('rfqs', function($query) {
+                $query->whereNotNull('selected_quotation_id');
+            })
+            ->with(['rfqs.selectedQuotation'])
             ->get()
             ->sum(function($mrf) {
-                return (float) ($mrf->selectedQuotation->total_amount ?? $mrf->estimated_cost ?? 0);
+                $rfq = $mrf->rfqs->first();
+                $selectedQuotation = $rfq && $rfq->relationLoaded('selectedQuotation') ? $rfq->selectedQuotation : null;
+                return (float) ($selectedQuotation->total_amount ?? $mrf->estimated_cost ?? 0);
             });
 
         $totalProcessedAmount = MRF::where('status', 'chairman_payment')
             ->where('payment_status', 'processing')
-            ->whereHas('selectedQuotation')
+            ->whereHas('rfqs', function($query) {
+                $query->whereNotNull('selected_quotation_id');
+            })
+            ->with(['rfqs.selectedQuotation'])
             ->get()
             ->sum(function($mrf) {
-                return (float) ($mrf->selectedQuotation->total_amount ?? $mrf->estimated_cost ?? 0);
+                $rfq = $mrf->rfqs->first();
+                $selectedQuotation = $rfq && $rfq->relationLoaded('selectedQuotation') ? $rfq->selectedQuotation : null;
+                return (float) ($selectedQuotation->total_amount ?? $mrf->estimated_cost ?? 0);
             });
 
         $totalApprovedAmount = MRF::where('payment_status', 'approved')
-            ->whereHas('selectedQuotation')
+            ->whereHas('rfqs', function($query) {
+                $query->whereNotNull('selected_quotation_id');
+            })
+            ->with(['rfqs.selectedQuotation'])
             ->get()
             ->sum(function($mrf) {
-                return (float) ($mrf->selectedQuotation->total_amount ?? $mrf->estimated_cost ?? 0);
+                $rfq = $mrf->rfqs->first();
+                $selectedQuotation = $rfq && $rfq->relationLoaded('selectedQuotation') ? $rfq->selectedQuotation : null;
+                return (float) ($selectedQuotation->total_amount ?? $mrf->estimated_cost ?? 0);
             });
 
         // Statistics
