@@ -59,6 +59,7 @@ class MRF extends Model
         'po_signed_at',
         // Payment
         'payment_status',
+        'payment_processed_at',
         'payment_approved_at',
         'payment_approved_by',
         // GRN (Goods Received Note)
@@ -92,6 +93,7 @@ class MRF extends Model
         'rejected_at' => 'datetime',
         'po_generated_at' => 'datetime',
         'po_signed_at' => 'datetime',
+        'payment_processed_at' => 'datetime',
         'payment_approved_at' => 'datetime',
         'grn_requested' => 'boolean',
         'grn_requested_at' => 'datetime',
