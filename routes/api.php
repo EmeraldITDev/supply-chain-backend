@@ -63,6 +63,8 @@ Route::middleware('auth:sanctum')->group(function () {
     // MRF routes
     Route::get('/mrfs', [MRFController::class, 'index']);
     Route::get('/mrfs/{id}', [MRFController::class, 'show']);
+    Route::get('/mrfs/{id}/full-details', [MRFController::class, 'getFullDetails']); // Full MRF with all quotations
+    Route::get('/mrfs/{id}/progress-tracker', [MRFController::class, 'getProgressTracker']); // Progress tracker
     Route::get('/mrfs/{id}/available-actions', [MRFController::class, 'getAvailableActions']);
     Route::post('/mrfs', [MRFController::class, 'store']);
     Route::put('/mrfs/{id}', [MRFController::class, 'update']);

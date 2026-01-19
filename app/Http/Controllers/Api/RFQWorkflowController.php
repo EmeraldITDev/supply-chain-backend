@@ -278,23 +278,54 @@ class RFQWorkflowController extends Controller
                 ];
             });
 
+        // Load MRF for full details
+        $rfq->load('mrf');
+        $mrf = $rfq->mrf;
+
         return response()->json([
             'success' => true,
             'data' => [
                 'rfq' => [
                     'id' => $rfq->rfq_id,
+                    'title' => $rfq->getDisplayTitle(),
                     'description' => $rfq->description,
+                    'category' => $rfq->category,
                     'deadline' => $rfq->deadline->format('Y-m-d'),
                     'status' => $rfq->status,
+                    'workflowState' => $rfq->workflow_state,
+                    'estimatedCost' => (float) $rfq->estimated_cost,
+                    'paymentTerms' => $rfq->payment_terms,
+                    'supportingDocuments' => $rfq->supporting_documents ?? [],
                     'items' => $rfq->items->map(function ($item) {
                         return [
                             'id' => $item->id,
                             'item_name' => $item->item_name,
+                            'description' => $item->description,
                             'quantity' => $item->quantity,
                             'unit' => $item->unit,
+                            'specifications' => $item->specifications,
                         ];
                     }),
                 ],
+                'mrf' => $mrf ? [
+                    'id' => $mrf->mrf_id,
+                    'title' => $mrf->title,
+                    'category' => $mrf->category,
+                    'contractType' => $mrf->contract_type,
+                    'description' => $mrf->description,
+                    'estimatedCost' => (float) $mrf->estimated_cost,
+                    'executiveApproved' => (bool) $mrf->executive_approved,
+                    'executiveApprovedAt' => $mrf->executive_approved_at ? $mrf->executive_approved_at->toIso8601String() : null,
+                    'executiveApprovedBy' => $mrf->executiveApprover ? [
+                        'id' => $mrf->executiveApprover->id,
+                        'name' => $mrf->executiveApprover->name,
+                        'email' => $mrf->executiveApprover->email,
+                    ] : null,
+                    'chairmanApproved' => (bool) $mrf->chairman_approved,
+                    'chairmanApprovedAt' => $mrf->chairman_approved_at ? $mrf->chairman_approved_at->toIso8601String() : null,
+                    'workflowState' => $mrf->workflow_state,
+                    'status' => $mrf->status,
+                ] : null,
                 'quotations' => $quotations,
                 'statistics' => [
                     'total_quotations' => $quotations->count(),

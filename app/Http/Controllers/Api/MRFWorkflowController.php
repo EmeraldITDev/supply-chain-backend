@@ -155,14 +155,25 @@ class MRFWorkflowController extends Controller
             ], 404);
         }
 
-        // Check if MRF is in correct state
+        // Check if MRF is in correct state - allow multiple states where vendor selection is valid
         $currentState = $mrf->workflow_state ?? WorkflowStateService::STATE_MRF_CREATED;
-        if ($currentState !== WorkflowStateService::STATE_PROCUREMENT_REVIEW) {
+        $allowedStates = [
+            WorkflowStateService::STATE_PROCUREMENT_REVIEW,
+            WorkflowStateService::STATE_EXECUTIVE_APPROVED,
+            'executive_approved',
+            'procurement_review',
+        ];
+        
+        // Also check if executive has approved (which means procurement can proceed)
+        $isExecutiveApproved = $mrf->executive_approved ?? false;
+        
+        if (!in_array($currentState, $allowedStates) && !$isExecutiveApproved) {
             return response()->json([
                 'success' => false,
-                'error' => 'MRF is not in procurement review stage',
+                'error' => 'MRF is not in a valid state for vendor selection. Executive approval may be required first.',
                 'code' => 'INVALID_STATUS',
-                'current_state' => $currentState
+                'current_state' => $currentState,
+                'executive_approved' => $isExecutiveApproved
             ], 422);
         }
 

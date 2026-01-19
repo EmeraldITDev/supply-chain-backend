@@ -114,4 +114,34 @@ class RFQ extends Model
 
         return "RFQ-{$year}-{$newNumber}";
     }
+
+    /**
+     * Generate meaningful RFQ title based on MRF details
+     * Format: "{Product/Service} – {Contract Type} RFQ"
+     * Example: "Laptop Supply – Heritage RFQ"
+     */
+    public function getDisplayTitle(): string
+    {
+        // Get product/service name from title, category, or description
+        $productName = $this->title ?? $this->category ?? 'Request';
+        
+        // If title is generic, try to extract from description or use category
+        if (in_array(strtolower($productName), ['rfq', 'request', 'quotation request', '']))
+        {
+            $productName = $this->category ?? 'Supply';
+        }
+        
+        // Get contract type from MRF
+        $contractType = null;
+        if ($this->mrf && $this->mrf->contract_type) {
+            $contractType = ucfirst($this->mrf->contract_type);
+        }
+        
+        // Build title
+        if ($contractType) {
+            return "{$productName} – {$contractType} RFQ";
+        }
+        
+        return "{$productName} RFQ";
+    }
 }

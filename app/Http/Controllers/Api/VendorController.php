@@ -1126,7 +1126,7 @@ class VendorController extends Controller
                 'id' => $quotation->quotation_id,
                 'quoteNumber' => $quotation->quote_number,
                 'rfqId' => $quotation->rfq ? $quotation->rfq->rfq_id : null,
-                'rfqTitle' => $quotation->rfq ? ($quotation->rfq->title ?? $quotation->rfq->description) : null,
+                'rfqTitle' => $quotation->rfq ? ($quotation->rfq->getDisplayTitle() ?? $quotation->rfq->title ?? $quotation->rfq->description) : null,
                 'mrfId' => $quotation->rfq && $quotation->rfq->mrf ? $quotation->rfq->mrf->mrf_id : null,
                 'mrfTitle' => $quotation->rfq && $quotation->rfq->mrf ? $quotation->rfq->mrf->title : null,
                 'vendorId' => $vendor->vendor_id,

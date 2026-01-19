@@ -131,11 +131,26 @@ class RFQController extends Controller
             $estimatedCost = (float) $estimatedCost;
         }
 
+        // Generate meaningful RFQ title if not provided or generic
+        $rfqTitle = $request->title;
+        if (empty($rfqTitle) || in_array(strtolower(trim($rfqTitle)), ['rfq', 'request', 'quotation request', '']))
+        {
+            // Generate title from MRF details: "{Product/Service} – {Contract Type} RFQ"
+            $productName = $category ?? $mrfTitle ?? 'Supply';
+            $contractType = $mrf && $mrf->contract_type ? ucfirst($mrf->contract_type) : null;
+            
+            if ($contractType) {
+                $rfqTitle = "{$productName} – {$contractType} RFQ";
+            } else {
+                $rfqTitle = "{$productName} RFQ";
+            }
+        }
+
         $rfq = RFQ::create([
             'rfq_id' => RFQ::generateRFQId(),
             'mrf_id' => $mrf ? $mrf->id : null,
             'mrf_title' => $mrfTitle,
-            'title' => $request->title,
+            'title' => $rfqTitle,
             'category' => $category,
             'description' => $request->description,
             'quantity' => $request->quantity,
@@ -149,9 +164,9 @@ class RFQController extends Controller
             'created_by' => $user->id,
         ]);
 
-        // Attach vendors
+        // Attach vendors (syncWithoutDetaching ensures existing vendors are preserved)
         $vendorIds = Vendor::whereIn('vendor_id', $request->vendorIds)->pluck('id');
-        $rfq->vendors()->attach($vendorIds);
+        $rfq->vendors()->syncWithoutDetaching($vendorIds);
 
         $rfq->load('vendors');
 

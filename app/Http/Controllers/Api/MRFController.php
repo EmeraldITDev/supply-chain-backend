@@ -181,6 +181,17 @@ class MRFController extends Controller
             'rejectionReason' => $mrf->rejection_reason,
             'isResubmission' => $mrf->is_resubmission,
             'remarks' => $mrf->remarks,
+            // Executive approval - make it clearly visible
+            'executiveApproved' => (bool) $mrf->executive_approved,
+            'executiveApprovedAt' => $mrf->executive_approved_at ? $mrf->executive_approved_at->toIso8601String() : null,
+            'executiveApprovedBy' => $mrf->executiveApprover ? [
+                'id' => $mrf->executiveApprover->id,
+                'name' => $mrf->executiveApprover->name,
+                'email' => $mrf->executiveApprover->email,
+            ] : null,
+            'executiveRemarks' => $mrf->executive_remarks,
+            'chairmanApproved' => (bool) $mrf->chairman_approved,
+            'chairmanApprovedAt' => $mrf->chairman_approved_at ? $mrf->chairman_approved_at->toIso8601String() : null,
             // PO information - allows Supply Chain to review/download unsigned PO
             'poNumber' => $mrf->po_number,
             'unsignedPoUrl' => $mrf->unsigned_po_url,
@@ -189,6 +200,234 @@ class MRFController extends Controller
             'signedPoShareUrl' => $mrf->signed_po_share_url,
             'poGeneratedAt' => $mrf->po_generated_at?->toIso8601String(),
             'poSignedAt' => $mrf->po_signed_at?->toIso8601String(),
+        ]);
+    }
+
+    /**
+     * Get full MRF details with all quotations (for procurement managers)
+     * Provides end-to-end visibility including all vendor quotations
+     */
+    public function getFullDetails(Request $request, $id)
+    {
+        $user = $request->user();
+
+        // Check role - procurement managers and above
+        if (!in_array($user->role, ['procurement_manager', 'procurement', 'supply_chain_director', 'supply_chain', 'admin'])) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Insufficient permissions',
+                'code' => 'FORBIDDEN'
+            ], 403);
+        }
+
+        $mrf = MRF::where('mrf_id', $id)
+            ->with([
+                'requester',
+                'executiveApprover',
+                'chairmanApprover',
+                'rfqs.quotations.vendor',
+                'rfqs.quotations.items',
+                'rfqs.vendors',
+                'items',
+            ])
+            ->first();
+
+        if (!$mrf) {
+            return response()->json([
+                'success' => false,
+                'error' => 'MRF not found',
+                'code' => 'NOT_FOUND'
+            ], 404);
+        }
+
+        // Get all RFQs for this MRF
+        $rfqs = $mrf->rfqs;
+        
+        // Collect all quotations from all RFQs
+        $allQuotations = collect();
+        foreach ($rfqs as $rfq) {
+            foreach ($rfq->quotations as $quotation) {
+                $allQuotations->push([
+                    'id' => $quotation->quotation_id,
+                    'rfqId' => $rfq->rfq_id,
+                    'rfqTitle' => $rfq->getDisplayTitle(),
+                    'quoteNumber' => $quotation->quote_number,
+                    'vendor' => $quotation->vendor ? [
+                        'id' => $quotation->vendor->vendor_id,
+                        'name' => $quotation->vendor->name,
+                        'email' => $quotation->vendor->email,
+                        'phone' => $quotation->vendor->phone,
+                        'rating' => (float) $quotation->vendor->rating,
+                    ] : [
+                        'id' => null,
+                        'name' => $quotation->vendor_name ?? 'Unknown Vendor',
+                    ],
+                    'totalAmount' => (float) $quotation->total_amount,
+                    'currency' => $quotation->currency ?? 'NGN',
+                    'deliveryDays' => $quotation->delivery_days,
+                    'deliveryDate' => $quotation->delivery_date ? $quotation->delivery_date->format('Y-m-d') : null,
+                    'paymentTerms' => $quotation->payment_terms,
+                    'validityDays' => $quotation->validity_days,
+                    'warrantyPeriod' => $quotation->warranty_period,
+                    'notes' => $quotation->notes,
+                    'attachments' => $quotation->attachments ?? [],
+                    'status' => $quotation->status,
+                    'reviewStatus' => $quotation->review_status ?? 'pending',
+                    'submittedAt' => $quotation->submitted_at ? $quotation->submitted_at->toIso8601String() : null,
+                ]);
+            }
+        }
+
+        return response()->json([
+            'success' => true,
+            'data' => [
+                'mrf' => [
+                    'id' => $mrf->mrf_id,
+                    'title' => $mrf->title,
+                    'category' => $mrf->category,
+                    'contractType' => $mrf->contract_type,
+                    'urgency' => $mrf->urgency,
+                    'description' => $mrf->description,
+                    'quantity' => $mrf->quantity,
+                    'estimatedCost' => (float) $mrf->estimated_cost,
+                    'justification' => $mrf->justification,
+                    'requester' => [
+                        'id' => $mrf->requester_id,
+                        'name' => $mrf->requester_name,
+                        'email' => $mrf->requester ? $mrf->requester->email : null,
+                    ],
+                    'date' => $mrf->date->format('Y-m-d'),
+                    'status' => $mrf->status,
+                    'workflowState' => $mrf->workflow_state,
+                    // Executive approval - clearly visible
+                    'executiveApproved' => (bool) $mrf->executive_approved,
+                    'executiveApprovedAt' => $mrf->executive_approved_at ? $mrf->executive_approved_at->toIso8601String() : null,
+                    'executiveApprovedBy' => $mrf->executiveApprover ? [
+                        'id' => $mrf->executiveApprover->id,
+                        'name' => $mrf->executiveApprover->name,
+                        'email' => $mrf->executiveApprover->email,
+                    ] : null,
+                    'executiveRemarks' => $mrf->executive_remarks,
+                    'chairmanApproved' => (bool) $mrf->chairman_approved,
+                    'chairmanApprovedAt' => $mrf->chairman_approved_at ? $mrf->chairman_approved_at->toIso8601String() : null,
+                ],
+                'rfqs' => $rfqs->map(function ($rfq) {
+                    return [
+                        'id' => $rfq->rfq_id,
+                        'title' => $rfq->getDisplayTitle(),
+                        'description' => $rfq->description,
+                        'status' => $rfq->status,
+                        'workflowState' => $rfq->workflow_state,
+                        'deadline' => $rfq->deadline ? $rfq->deadline->format('Y-m-d') : null,
+                        'vendors' => $rfq->vendors->map(function ($vendor) {
+                            return [
+                                'id' => $vendor->vendor_id,
+                                'name' => $vendor->name,
+                                'email' => $vendor->email,
+                            ];
+                        }),
+                    ];
+                }),
+                'quotations' => $allQuotations,
+                'statistics' => [
+                    'totalQuotations' => $allQuotations->count(),
+                    'totalRfqs' => $rfqs->count(),
+                    'lowestBid' => $allQuotations->min('totalAmount'),
+                    'highestBid' => $allQuotations->max('totalAmount'),
+                    'averageBid' => $allQuotations->avg('totalAmount'),
+                ],
+            ],
+        ]);
+    }
+
+    /**
+     * Get progress tracker for MRF
+     * Shows the complete workflow sequence with status
+     */
+    public function getProgressTracker(Request $request, $id)
+    {
+        $mrf = MRF::where('mrf_id', $id)
+            ->with(['requester', 'executiveApprover', 'selectedVendor'])
+            ->first();
+
+        if (!$mrf) {
+            return response()->json([
+                'success' => false,
+                'error' => 'MRF not found',
+                'code' => 'NOT_FOUND'
+            ], 404);
+        }
+
+        $steps = [
+            [
+                'step' => 1,
+                'name' => 'MRF Created',
+                'status' => 'completed',
+                'completedAt' => $mrf->created_at ? $mrf->created_at->toIso8601String() : null,
+                'completedBy' => $mrf->requester ? [
+                    'id' => $mrf->requester->id,
+                    'name' => $mrf->requester->name,
+                ] : null,
+            ],
+            [
+                'step' => 2,
+                'name' => 'Executive Approval',
+                'status' => $mrf->executive_approved ? 'completed' : ($mrf->workflow_state === 'executive_review' ? 'pending' : 'not_started'),
+                'completedAt' => $mrf->executive_approved_at ? $mrf->executive_approved_at->toIso8601String() : null,
+                'completedBy' => $mrf->executiveApprover ? [
+                    'id' => $mrf->executiveApprover->id,
+                    'name' => $mrf->executiveApprover->name,
+                ] : null,
+                'remarks' => $mrf->executive_remarks,
+            ],
+            [
+                'step' => 3,
+                'name' => 'RFQ Issued',
+                'status' => $mrf->rfqs()->exists() ? 'completed' : 'not_started',
+                'completedAt' => $mrf->rfqs()->exists() ? $mrf->rfqs()->first()->created_at->toIso8601String() : null,
+            ],
+            [
+                'step' => 4,
+                'name' => 'Supply Chain Director Approval',
+                'status' => ($mrf->workflow_state === 'invoice_approved' || $mrf->workflow_state === 'vendor_approved') ? 'completed' : 
+                           (in_array($mrf->workflow_state, ['vendor_selected', 'supply_chain_review']) ? 'pending' : 'not_started'),
+            ],
+            [
+                'step' => 5,
+                'name' => 'Procurement Generates PO',
+                'status' => $mrf->po_number ? 'completed' : ($mrf->workflow_state === 'invoice_approved' ? 'pending' : 'not_started'),
+                'completedAt' => $mrf->po_generated_at ? $mrf->po_generated_at->toIso8601String() : null,
+                'poNumber' => $mrf->po_number,
+            ],
+            [
+                'step' => 6,
+                'name' => 'Finance Review & Processing',
+                'status' => $mrf->payment_status === 'approved' ? 'completed' : 
+                           ($mrf->po_number ? 'pending' : 'not_started'),
+                'completedAt' => $mrf->payment_approved_at ? $mrf->payment_approved_at->toIso8601String() : null,
+            ],
+            [
+                'step' => 7,
+                'name' => 'Goods Received Note (GRN)',
+                'status' => $mrf->grn_completed ? 'completed' : ($mrf->grn_requested ? 'pending' : 'not_started'),
+                'completedAt' => $mrf->grn_completed_at ? $mrf->grn_completed_at->toIso8601String() : null,
+            ],
+            [
+                'step' => 8,
+                'name' => 'Mark as Paid / Closed',
+                'status' => $mrf->status === 'Completed' ? 'completed' : 'not_started',
+            ],
+        ];
+
+        return response()->json([
+            'success' => true,
+            'data' => [
+                'mrfId' => $mrf->mrf_id,
+                'title' => $mrf->title,
+                'currentStep' => collect($steps)->where('status', 'pending')->first()['step'] ?? 
+                                 (collect($steps)->where('status', 'completed')->last()['step'] ?? 1),
+                'steps' => $steps,
+            ],
         ]);
     }
 
