@@ -54,6 +54,8 @@ Route::middleware('auth:sanctum')->group(function () {
     // Vendor authentication (protected)
     Route::post('/vendors/auth/logout', [VendorAuthController::class, 'logout']);
     Route::get('/vendors/auth/me', [VendorAuthController::class, 'me']);
+    Route::post('/vendors/auth/refresh-token', [VendorAuthController::class, 'refreshToken']);
+    Route::post('/vendors/auth/refresh', [VendorAuthController::class, 'refreshToken']); // Alias for frontend compatibility
     Route::get('/vendors/auth/profile', [VendorAuthController::class, 'getProfile']);
     Route::put('/vendors/auth/profile', [VendorAuthController::class, 'updateProfile']);
     Route::post('/vendors/auth/change-password', [VendorAuthController::class, 'changePassword']);

@@ -89,8 +89,9 @@ class VendorAuthController extends Controller
                 ], 401);
             }
 
-            // Create authentication token
-            $token = $user->createToken('vendor-auth-token')->plainTextToken;
+            // Create authentication token with expiration (30 days for vendors)
+            $expiresAt = now()->addDays(30);
+            $token = $user->createToken('vendor-auth-token', ['*'], $expiresAt)->plainTextToken;
 
             Log::info('Vendor logged in successfully', [
                 'vendor_id' => $vendor->vendor_id,
@@ -112,6 +113,7 @@ class VendorAuthController extends Controller
                         'rating' => (float) ($vendor->rating ?? 0),
                     ],
                     'token' => $token,
+                    'expiresAt' => $expiresAt->toIso8601String(),
                     'requiresPasswordChange' => $user->must_change_password ?? false,
                 ]
             ], 200);
@@ -165,11 +167,25 @@ class VendorAuthController extends Controller
     {
         try {
             $user = $request->user();
+            $currentToken = $request->user()->currentAccessToken();
 
-            // Get vendor record
-            $vendor = Vendor::where('user_id', $user->id)
-                ->orWhere('id', $user->vendor_id)
-                ->first();
+            // Get vendor record - use vendor_id from users table
+            $vendor = null;
+            
+            // Method 1: Try vendor relationship
+            if ($user->vendor_id && method_exists($user, 'vendor')) {
+                $vendor = $user->vendor;
+            }
+            
+            // Method 2: Find vendor by vendor_id if relationship didn't work
+            if (!$vendor && $user->vendor_id) {
+                $vendor = Vendor::find($user->vendor_id);
+            }
+            
+            // Method 3: Try finding vendor by email as last resort
+            if (!$vendor) {
+                $vendor = Vendor::where('email', $user->email)->first();
+            }
 
             if (!$vendor) {
                 return response()->json([
@@ -199,7 +215,8 @@ class VendorAuthController extends Controller
                         'email' => $user->email,
                         'role' => $user->role,
                         'mustChangePassword' => $user->must_change_password ?? false,
-                    ]
+                    ],
+                    'tokenExpiresAt' => $currentToken->expires_at ? $currentToken->expires_at->toIso8601String() : null,
                 ]
             ], 200);
         } catch (\Exception $e) {
@@ -527,5 +544,47 @@ class VendorAuthController extends Controller
         $password .= substr(str_shuffle($special), 0, 3);
         
         return str_shuffle($password);
+    }
+
+    /**
+     * Refresh authentication token for vendors (extends session)
+     */
+    public function refreshToken(Request $request)
+    {
+        try {
+            $user = $request->user();
+            $currentToken = $request->user()->currentAccessToken();
+            
+            // Create new token with 30 days expiration for vendors
+            $expiresAt = now()->addDays(30);
+            $tokenName = 'vendor-auth-token';
+            
+            // Delete old token
+            $currentToken->delete();
+            
+            // Create new token
+            $newToken = $user->createToken($tokenName, ['*'], $expiresAt)->plainTextToken;
+
+            Log::info('Vendor token refreshed', [
+                'user_id' => $user->id,
+                'vendor_id' => $user->vendor_id
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'token' => $newToken,
+                'expiresAt' => $expiresAt->toIso8601String(),
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Vendor token refresh error', [
+                'error' => $e->getMessage()
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'error' => 'Failed to refresh token',
+                'code' => 'SERVER_ERROR'
+            ], 500);
+        }
     }
 }
