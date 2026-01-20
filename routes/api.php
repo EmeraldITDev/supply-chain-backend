@@ -71,12 +71,12 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/mrfs/{id}/approve', [MRFController::class, 'approve']); // Legacy
     Route::post('/mrfs/{id}/reject', [MRFController::class, 'reject']); // Legacy
     Route::delete('/mrfs/{id}', [MRFController::class, 'destroy']);
-    
+
     // MRF Workflow routes (new multi-stage approval)
     Route::post('/mrfs/{id}/procurement-approve', [\App\Http\Controllers\Api\MRFWorkflowController::class, 'procurementApprove']);
     Route::post('/mrfs/{id}/executive-approve', [\App\Http\Controllers\Api\MRFWorkflowController::class, 'executiveApprove']);
     Route::post('/mrfs/{id}/chairman-approve', [\App\Http\Controllers\Api\MRFWorkflowController::class, 'chairmanApprove']);
-    
+
     // Vendor selection workflow routes
     Route::post('/mrfs/{id}/send-vendor-for-approval', [\App\Http\Controllers\Api\MRFWorkflowController::class, 'sendVendorForApproval']);
     Route::post('/mrfs/{id}/approve-vendor-selection', [\App\Http\Controllers\Api\MRFWorkflowController::class, 'approveVendorSelection']);
@@ -87,11 +87,11 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/mrfs/{id}/reject-po', [\App\Http\Controllers\Api\MRFWorkflowController::class, 'rejectPO']);
     Route::post('/mrfs/{id}/process-payment', [\App\Http\Controllers\Api\MRFWorkflowController::class, 'processPayment']);
     Route::post('/mrfs/{id}/approve-payment', [\App\Http\Controllers\Api\MRFWorkflowController::class, 'approvePayment']);
-    
+
     // GRN endpoints
     Route::post('/mrfs/{id}/request-grn', [\App\Http\Controllers\Api\GRNController::class, 'requestGRN']);
     Route::post('/mrfs/{id}/complete-grn', [\App\Http\Controllers\Api\GRNController::class, 'completeGRN']);
-    
+
     // User management (admin only)
     Route::get('/users', [\App\Http\Controllers\Api\UserManagementController::class, 'index']);
     Route::post('/users', [\App\Http\Controllers\Api\UserManagementController::class, 'store']);
@@ -108,7 +108,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/rfqs', [RFQController::class, 'index']);
     Route::post('/rfqs', [RFQController::class, 'store']);
     Route::put('/rfqs/{id}', [RFQController::class, 'update']);
-    
+
     // RFQ Workflow routes (enhanced)
     Route::get('/vendors/rfqs', [\App\Http\Controllers\Api\RFQWorkflowController::class, 'getVendorRFQs']); // Vendor portal
     Route::post('/rfqs/{id}/mark-viewed', [\App\Http\Controllers\Api\RFQWorkflowController::class, 'markAsViewed']); // Vendor marks as viewed
