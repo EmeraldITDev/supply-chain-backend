@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\Activity;
 use App\Models\RFQ;
 use App\Models\MRF;
 use App\Models\Vendor;
@@ -169,6 +170,22 @@ class RFQController extends Controller
         $rfq->vendors()->syncWithoutDetaching($vendorIds);
 
         $rfq->load('vendors');
+
+        // Log activity - RFQ sent to vendors
+        try {
+            Activity::create([
+                'type' => 'rfq_sent',
+                'title' => 'RFQ Sent to Vendors',
+                'description' => "RFQ {$rfq->rfq_id} was sent to " . count($vendorIds) . " vendor(s)",
+                'user_id' => $user->id,
+                'user_name' => $user->name,
+                'entity_type' => 'rfq',
+                'entity_id' => $rfq->rfq_id,
+                'status' => 'open',
+            ]);
+        } catch (\Exception $e) {
+            \Log::warning('Failed to log RFQ sent activity', ['error' => $e->getMessage()]);
+        }
 
         return response()->json([
             'id' => $rfq->rfq_id,

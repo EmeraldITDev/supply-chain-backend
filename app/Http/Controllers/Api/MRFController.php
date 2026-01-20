@@ -667,6 +667,25 @@ class MRFController extends Controller
                 throw $e;
             }
 
+            // Log activity
+            try {
+                Activity::create([
+                    'type' => 'mrf_created',
+                    'title' => 'MRF Created',
+                    'description' => "MRF {$mrf->mrf_id} was created by {$user->name}",
+                    'user_id' => $user->id,
+                    'user_name' => $user->name,
+                    'entity_type' => 'mrf',
+                    'entity_id' => $mrf->mrf_id,
+                    'status' => 'pending',
+                ]);
+            } catch (\Exception $e) {
+                \Log::warning('Failed to log MRF creation activity', [
+                    'mrf_id' => $mrf->mrf_id,
+                    'error' => $e->getMessage()
+                ]);
+            }
+
             // Send notification to Executive
             try {
                 $this->notificationService->notifyMRFSubmitted($mrf);

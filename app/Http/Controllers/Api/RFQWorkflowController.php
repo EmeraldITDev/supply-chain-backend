@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\Activity;
 use App\Models\RFQ;
 use App\Models\RFQItem;
 use App\Models\Quotation;
@@ -643,6 +644,22 @@ class RFQWorkflowController extends Controller
                 'review_status' => 'pending',
                 'submitted_at' => now(),
             ]);
+        }
+
+        // Log activity
+        try {
+            Activity::create([
+                'type' => 'quotation_submitted',
+                'title' => 'Quotation Submitted',
+                'description' => "Vendor {$quotation->vendor_name} submitted quotation {$quotation->quotation_id} for RFQ {$rfq->rfq_id}",
+                'user_id' => $user->id,
+                'user_name' => $quotation->vendor_name,
+                'entity_type' => 'quotation',
+                'entity_id' => $quotation->quotation_id,
+                'status' => 'submitted',
+            ]);
+        } catch (\Exception $e) {
+            \Log::warning('Failed to log quotation submission activity', ['error' => $e->getMessage()]);
         }
 
         // Notify procurement managers

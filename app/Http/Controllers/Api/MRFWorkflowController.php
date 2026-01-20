@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\Activity;
 use App\Models\MRF;
 use App\Models\MRFApprovalHistory;
 use App\Services\NotificationService;
@@ -696,6 +697,22 @@ class MRFWorkflowController extends Controller
 
         // Record in approval history
         MRFApprovalHistory::record($mrf, 'approved', 'executive_review', $user, $request->remarks ?? '');
+
+        // Log activity
+        try {
+            Activity::create([
+                'type' => 'mrf_approved',
+                'title' => 'MRF Approved by Executive',
+                'description' => "MRF {$mrf->mrf_id} was approved by {$user->name}",
+                'user_id' => $user->id,
+                'user_name' => $user->name,
+                'entity_type' => 'mrf',
+                'entity_id' => $mrf->mrf_id,
+                'status' => 'approved',
+            ]);
+        } catch (\Exception $e) {
+            Log::warning('Failed to log MRF approval activity', ['error' => $e->getMessage()]);
+        }
 
         // Send notifications
         try {
@@ -1840,6 +1857,22 @@ class MRFWorkflowController extends Controller
 
         // Record in approval history
         MRFApprovalHistory::record($mrf, 'rejected', $mrf->current_stage, $user, $request->reason . ($request->comments ? "\n" . $request->comments : ''));
+
+        // Log activity
+        try {
+            Activity::create([
+                'type' => 'mrf_rejected',
+                'title' => 'MRF Rejected',
+                'description' => "MRF {$mrf->mrf_id} was rejected by {$user->name}. Reason: {$request->reason}",
+                'user_id' => $user->id,
+                'user_name' => $user->name,
+                'entity_type' => 'mrf',
+                'entity_id' => $mrf->mrf_id,
+                'status' => 'rejected',
+            ]);
+        } catch (\Exception $e) {
+            Log::warning('Failed to log MRF rejection activity', ['error' => $e->getMessage()]);
+        }
 
         // Notify requester
         $this->notificationService->notifyMRFRejected($mrf, $user, $request->reason);

@@ -124,6 +124,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/quotations/{id}/approve', [QuotationController::class, 'approve']);
     Route::post('/quotations/{id}/reject', [QuotationController::class, 'reject']);
     Route::post('/quotations/{id}/request-revision', [QuotationController::class, 'requestRevision']);
+    Route::post('/quotations/{id}/close', [QuotationController::class, 'close']);
+    Route::post('/quotations/{id}/reopen', [QuotationController::class, 'reopen']);
 
     // Vendor routes - specific routes must come before parameterized routes
     Route::get('/vendors', [VendorController::class, 'index']);
@@ -146,6 +148,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/dashboard/supply-chain-director', [DashboardController::class, 'supplyChainDirectorDashboard']);
     Route::get('/dashboard/vendor', [DashboardController::class, 'vendorDashboard']);
     Route::get('/dashboard/finance', [DashboardController::class, 'financeDashboard']);
+    Route::get('/dashboard/recent-activities', [DashboardController::class, 'getRecentActivities']);
 
     // Notification routes
     Route::get('/notifications', [NotificationController::class, 'index']);

@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\Activity;
 use App\Models\Quotation;
 use App\Models\RFQ;
 use App\Models\Vendor;
@@ -215,6 +216,22 @@ class QuotationController extends Controller
             'approval_remarks' => $request->remarks,
         ]);
 
+        // Log activity
+        try {
+            Activity::create([
+                'type' => 'quotation_approved',
+                'title' => 'Quotation Approved',
+                'description' => "Quotation {$quotation->quotation_id} was approved by {$user->name}",
+                'user_id' => $user->id,
+                'user_name' => $user->name,
+                'entity_type' => 'quotation',
+                'entity_id' => $quotation->quotation_id,
+                'status' => 'approved',
+            ]);
+        } catch (\Exception $e) {
+            \Log::warning('Failed to log quotation approval activity', ['error' => $e->getMessage()]);
+        }
+
         // Close the RFQ
         $quotation->rfq->update(['status' => 'Awarded']);
 
@@ -290,6 +307,22 @@ class QuotationController extends Controller
             'reviewed_by' => $user->id,
             'reviewed_at' => now(),
         ]);
+
+        // Log activity
+        try {
+            Activity::create([
+                'type' => 'quotation_rejected',
+                'title' => 'Quotation Rejected',
+                'description' => "Quotation {$quotation->quotation_id} was rejected by {$user->name}. Reason: {$request->reason}",
+                'user_id' => $user->id,
+                'user_name' => $user->name,
+                'entity_type' => 'quotation',
+                'entity_id' => $quotation->quotation_id,
+                'status' => 'rejected',
+            ]);
+        } catch (\Exception $e) {
+            \Log::warning('Failed to log quotation rejection activity', ['error' => $e->getMessage()]);
+        }
 
         // Log rejection for audit purposes
         \Log::info('Quotation rejected by procurement manager', [
@@ -486,6 +519,130 @@ class QuotationController extends Controller
             'data' => [
                 'id' => $quotationId,
                 'rfqId' => $rfqId,
+            ]
+        ]);
+    }
+
+    /**
+     * Close quotation
+     * Endpoint: POST /api/quotations/{id}/close
+     */
+    public function close(Request $request, $id)
+    {
+        $user = $request->user();
+        
+        // Authorization check - only procurement can close
+        if (!in_array($user->role, ['procurement_manager', 'procurement', 'admin'])) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Unauthorized',
+                'code' => 'FORBIDDEN'
+            ], 403);
+        }
+
+        $quotation = Quotation::where('quotation_id', $id)->first();
+
+        if (!$quotation) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Quotation not found',
+                'code' => 'NOT_FOUND'
+            ], 404);
+        }
+
+        // Only allow closing submitted/pending quotations
+        if (!in_array($quotation->status, ['submitted', 'Submitted', 'Pending', 'pending'])) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Only submitted quotations can be closed',
+                'code' => 'VALIDATION_ERROR'
+            ], 400);
+        }
+
+        $quotation->status = 'closed';
+        $quotation->updated_at = now();
+        $quotation->save();
+
+        // Log activity
+        Activity::create([
+            'type' => 'quotation_closed',
+            'title' => 'Quotation Closed',
+            'description' => "Quotation {$quotation->quotation_id} was closed by {$user->name}",
+            'user_id' => $user->id,
+            'user_name' => $user->name,
+            'entity_type' => 'quotation',
+            'entity_id' => $quotation->quotation_id,
+            'status' => 'closed'
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'data' => [
+                'id' => $quotation->quotation_id,
+                'status' => $quotation->status,
+                'updated_at' => $quotation->updated_at->toIso8601String(),
+            ]
+        ]);
+    }
+
+    /**
+     * Reopen quotation
+     * Endpoint: POST /api/quotations/{id}/reopen
+     */
+    public function reopen(Request $request, $id)
+    {
+        $user = $request->user();
+        
+        // Authorization check - only procurement can reopen
+        if (!in_array($user->role, ['procurement_manager', 'procurement', 'admin'])) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Unauthorized',
+                'code' => 'FORBIDDEN'
+            ], 403);
+        }
+
+        $quotation = Quotation::where('quotation_id', $id)->first();
+
+        if (!$quotation) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Quotation not found',
+                'code' => 'NOT_FOUND'
+            ], 404);
+        }
+
+        // Only allow reopening closed quotations
+        if ($quotation->status !== 'closed') {
+            return response()->json([
+                'success' => false,
+                'error' => 'Only closed quotations can be reopened',
+                'code' => 'VALIDATION_ERROR'
+            ], 400);
+        }
+
+        $quotation->status = 'submitted';
+        $quotation->updated_at = now();
+        $quotation->save();
+
+        // Log activity
+        Activity::create([
+            'type' => 'quotation_reopened',
+            'title' => 'Quotation Reopened',
+            'description' => "Quotation {$quotation->quotation_id} was reopened by {$user->name}",
+            'user_id' => $user->id,
+            'user_name' => $user->name,
+            'entity_type' => 'quotation',
+            'entity_id' => $quotation->quotation_id,
+            'status' => 'submitted'
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'data' => [
+                'id' => $quotation->quotation_id,
+                'status' => $quotation->status,
+                'updated_at' => $quotation->updated_at->toIso8601String(),
             ]
         ]);
     }

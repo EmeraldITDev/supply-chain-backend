@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\Activity;
 use App\Models\MRF;
 use App\Models\Quotation;
 use App\Models\RFQ;
@@ -510,6 +511,114 @@ class DashboardController extends Controller
             'success' => true,
             'stats' => $stats,
             'financeMRFs' => $financeMRFs,
+        ]);
+    }
+
+    /**
+     * Get recent activities for a specific role
+     * Endpoint: GET /api/dashboard/recent-activities?role={role}&limit={limit}
+     */
+    public function getRecentActivities(Request $request)
+    {
+        $user = $request->user();
+        $role = $request->query('role', $user->role);
+        $limit = (int) $request->query('limit', 10);
+
+        // Build base query
+        $query = Activity::query()
+            ->orderBy('created_at', 'desc')
+            ->limit($limit);
+
+        // Role-specific filtering logic
+        if ($role === 'employee') {
+            // Show only activities for user's own MRFs
+            $query->where(function($q) use ($user) {
+                $q->where('user_id', $user->id)
+                  ->orWhere(function($subQ) use ($user) {
+                      $subQ->where('entity_type', 'mrf')
+                           ->whereIn('entity_id', function($entityQuery) use ($user) {
+                               $entityQuery->select('mrf_id')
+                                          ->from('m_r_f_s')
+                                          ->where('requester_id', $user->id);
+                           });
+                  });
+            });
+        } elseif ($role === 'executive') {
+            // Show MRF approvals/rejections, high-value items
+            $query->whereIn('type', ['mrf_created', 'mrf_approved', 'mrf_rejected']);
+        } elseif ($role === 'procurement_manager' || $role === 'procurement') {
+            // Show RFQ, quotation activities
+            $query->whereIn('type', [
+                'rfq_sent',
+                'quotation_submitted',
+                'quotation_approved',
+                'quotation_rejected',
+                'quotation_closed',
+                'quotation_reopened',
+                'po_generated'
+            ]);
+        } elseif ($role === 'supply_chain_director' || $role === 'supply_chain') {
+            // Show PO, vendor selection activities
+            $query->whereIn('type', [
+                'quotation_approved',
+                'vendor_selected',
+                'vendor_approved',
+                'vendor_rejected',
+                'po_generated'
+            ]);
+        } elseif ($role === 'finance') {
+            // Show payment, PO activities
+            $query->whereIn('type', ['po_generated', 'payment_processed', 'payment_approved']);
+        } elseif ($role === 'chairman') {
+            // Show high-value approvals, payment approvals
+            $query->whereIn('type', ['mrf_approved', 'payment_processed', 'payment_approved']);
+        } elseif ($role === 'vendor') {
+            // Show RFQ received, quotation submitted activities
+            $query->where(function($q) use ($user) {
+                $q->whereIn('type', [
+                    'rfq_sent',
+                    'quotation_submitted',
+                    'quotation_approved',
+                    'quotation_rejected',
+                    'quotation_closed',
+                    'quotation_reopened'
+                ])
+                ->where(function($subQ) use ($user) {
+                    // Match activities where user_id matches or entity relates to vendor
+                    $subQ->where('user_id', $user->id)
+                         ->orWhere(function($vendorQ) use ($user) {
+                             // Find vendor ID from user
+                             $vendor = Vendor::where('email', $user->email)->first();
+                             if ($vendor) {
+                                 $vendorQ->where('entity_type', 'quotation')
+                                        ->whereIn('entity_id', function($quoteQuery) use ($vendor) {
+                                            $quoteQuery->select('quotation_id')
+                                                      ->from('quotations')
+                                                      ->where('vendor_id', $vendor->id);
+                                        });
+                             }
+                         });
+                });
+            });
+        }
+
+        $activities = $query->get()->map(function($activity) {
+            return [
+                'id' => (string) $activity->id,
+                'type' => $activity->type,
+                'title' => $activity->title,
+                'description' => $activity->description,
+                'timestamp' => $activity->created_at->toIso8601String(),
+                'user' => $activity->user_name,
+                'entityId' => $activity->entity_id,
+                'entityType' => $activity->entity_type,
+                'status' => $activity->status,
+            ];
+        });
+
+        return response()->json([
+            'success' => true,
+            'data' => $activities
         ]);
     }
 }
