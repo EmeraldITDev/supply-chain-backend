@@ -115,6 +115,22 @@ class MRFWorkflowController extends Controller
             'remarks' => $request->remarks,
         ]);
 
+        // Log activity
+        try {
+            Activity::create([
+                'type' => 'mrf_approved',
+                'title' => 'MRF Approved by Procurement',
+                'description' => "MRF {$mrf->mrf_id} was approved by {$user->name} and forwarded to Executive",
+                'user_id' => $user->id,
+                'user_name' => $user->name,
+                'entity_type' => 'mrf',
+                'entity_id' => $mrf->mrf_id,
+                'status' => 'approved',
+            ]);
+        } catch (\Exception $e) {
+            Log::warning('Failed to log MRF procurement approval activity', ['error' => $e->getMessage()]);
+        }
+
         // Notify executives
         $this->notificationService->notifyMRFForwardedToExecutive($mrf, $user);
 
@@ -795,6 +811,22 @@ class MRFWorkflowController extends Controller
 
         // Record in approval history
         MRFApprovalHistory::record($mrf, 'approved', 'chairman_review', $user, $request->remarks);
+
+        // Log activity
+        try {
+            Activity::create([
+                'type' => 'mrf_approved',
+                'title' => 'MRF Approved by Chairman',
+                'description' => "MRF {$mrf->mrf_id} was approved by {$user->name}",
+                'user_id' => $user->id,
+                'user_name' => $user->name,
+                'entity_type' => 'mrf',
+                'entity_id' => $mrf->mrf_id,
+                'status' => 'approved',
+            ]);
+        } catch (\Exception $e) {
+            Log::warning('Failed to log MRF chairman approval activity', ['error' => $e->getMessage()]);
+        }
 
         // Notify procurement
         $this->notificationService->notifyMRFPendingProcurement($mrf);

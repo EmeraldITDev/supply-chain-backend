@@ -515,92 +515,60 @@ class DashboardController extends Controller
     }
 
     /**
-     * Get recent activities for a specific role
-     * Endpoint: GET /api/dashboard/recent-activities?role={role}&limit={limit}
+     * Get recent activities for the authenticated user
+     * Endpoint: GET /api/dashboard/recent-activities?limit={limit}
+     * 
+     * Returns activities where:
+     * 1. The user performed the action (user_id matches)
+     * 2. The activity relates to entities the user owns/is involved in (MRFs they created, RFQs they manage, etc.)
      */
     public function getRecentActivities(Request $request)
     {
         $user = $request->user();
-        $role = $request->query('role', $user->role);
-        $limit = (int) $request->query('limit', 10);
+        $limit = (int) $request->query('limit', 20);
 
-        // Build base query
+        // Get MRF IDs where user is the requester
+        $userMRFIds = MRF::where('requester_id', $user->id)->pluck('mrf_id')->toArray();
+        
+        // Get vendor ID if user is a vendor
+        $vendorId = null;
+        if ($user->role === 'vendor') {
+            $vendor = Vendor::where('email', $user->email)->first();
+            if ($vendor) {
+                $vendorId = $vendor->id;
+            }
+        }
+
+        // Build query: Show activities where:
+        // 1. User performed the action (user_id matches)
+        // 2. OR activity relates to user's MRFs
+        // 3. OR activity relates to user's quotations (if vendor)
         $query = Activity::query()
+            ->where(function($q) use ($user, $userMRFIds, $vendorId) {
+                // Activities performed by this user
+                $q->where('user_id', $user->id)
+                  // OR activities related to user's MRFs
+                  ->orWhere(function($mrfQ) use ($userMRFIds) {
+                      if (!empty($userMRFIds)) {
+                          $mrfQ->where('entity_type', 'mrf')
+                               ->whereIn('entity_id', $userMRFIds);
+                      }
+                  });
+                
+                // For vendors, also include activities related to their quotations
+                if ($vendorId) {
+                    $q->orWhere(function($vendorQ) use ($vendorId) {
+                        $vendorQ->where('entity_type', 'quotation')
+                                ->whereIn('entity_id', function($quoteQuery) use ($vendorId) {
+                                    $quoteQuery->select('quotation_id')
+                                              ->from('quotations')
+                                              ->where('vendor_id', $vendorId);
+                                });
+                    });
+                }
+            })
             ->orderBy('created_at', 'desc')
             ->limit($limit);
-
-        // Role-specific filtering logic
-        if ($role === 'employee') {
-            // Show only activities for user's own MRFs
-            $query->where(function($q) use ($user) {
-                $q->where('user_id', $user->id)
-                  ->orWhere(function($subQ) use ($user) {
-                      $subQ->where('entity_type', 'mrf')
-                           ->whereIn('entity_id', function($entityQuery) use ($user) {
-                               $entityQuery->select('mrf_id')
-                                          ->from('m_r_f_s')
-                                          ->where('requester_id', $user->id);
-                           });
-                  });
-            });
-        } elseif ($role === 'executive') {
-            // Show MRF approvals/rejections, high-value items
-            $query->whereIn('type', ['mrf_created', 'mrf_approved', 'mrf_rejected']);
-        } elseif ($role === 'procurement_manager' || $role === 'procurement') {
-            // Show RFQ, quotation activities
-            $query->whereIn('type', [
-                'rfq_sent',
-                'quotation_submitted',
-                'quotation_approved',
-                'quotation_rejected',
-                'quotation_closed',
-                'quotation_reopened',
-                'po_generated'
-            ]);
-        } elseif ($role === 'supply_chain_director' || $role === 'supply_chain') {
-            // Show PO, vendor selection activities
-            $query->whereIn('type', [
-                'quotation_approved',
-                'vendor_selected',
-                'vendor_approved',
-                'vendor_rejected',
-                'po_generated'
-            ]);
-        } elseif ($role === 'finance') {
-            // Show payment, PO activities
-            $query->whereIn('type', ['po_generated', 'payment_processed', 'payment_approved']);
-        } elseif ($role === 'chairman') {
-            // Show high-value approvals, payment approvals
-            $query->whereIn('type', ['mrf_approved', 'payment_processed', 'payment_approved']);
-        } elseif ($role === 'vendor') {
-            // Show RFQ received, quotation submitted activities
-            $query->where(function($q) use ($user) {
-                $q->whereIn('type', [
-                    'rfq_sent',
-                    'quotation_submitted',
-                    'quotation_approved',
-                    'quotation_rejected',
-                    'quotation_closed',
-                    'quotation_reopened'
-                ])
-                ->where(function($subQ) use ($user) {
-                    // Match activities where user_id matches or entity relates to vendor
-                    $subQ->where('user_id', $user->id)
-                         ->orWhere(function($vendorQ) use ($user) {
-                             // Find vendor ID from user
-                             $vendor = Vendor::where('email', $user->email)->first();
-                             if ($vendor) {
-                                 $vendorQ->where('entity_type', 'quotation')
-                                        ->whereIn('entity_id', function($quoteQuery) use ($vendor) {
-                                            $quoteQuery->select('quotation_id')
-                                                      ->from('quotations')
-                                                      ->where('vendor_id', $vendor->id);
-                                        });
-                             }
-                         });
-                });
-            });
-        }
 
         $activities = $query->get()->map(function($activity) {
             return [
