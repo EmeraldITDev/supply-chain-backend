@@ -6,6 +6,10 @@ use App\Http\Controllers\Controller;
 use App\Models\Activity;
 use App\Models\MRF;
 use App\Models\MRFApprovalHistory;
+use App\Models\RFQ;
+use App\Models\Quotation;
+use App\Models\Vendor;
+use App\Models\QuotationItem;
 use App\Services\NotificationService;
 use App\Services\EmailService;
 use App\Services\OneDriveService;
@@ -15,6 +19,8 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Log;
+use Dompdf\Dompdf;
+use Dompdf\Options;
 
 class MRFWorkflowController extends Controller
 {
@@ -962,295 +968,90 @@ class MRFWorkflowController extends Controller
             ], 422);
         }
 
-        // Auto-generate PO number - always generate unique PO number automatically
-        // PO numbers are auto-generated to avoid conflicts and duplicates
-        if ($isRegeneration && !empty($mrf->po_number)) {
-            // For regeneration, generate a new PO number with version indicator
-            $poNumber = $this->generatePONumber($mrf);
-            // Add regeneration suffix if regenerating
-            $poNumber = $poNumber . '-R' . ($mrf->po_version + 1);
-        } else {
-            // For new PO, auto-generate unique number
-            $poNumber = $this->generatePONumber($mrf);
-        }
-            
-        // Final uniqueness check (should never happen with timestamp-based generation)
-                $attempts = 0;
-                while (MRF::where('po_number', $poNumber)->where('id', '!=', $mrf->id)->exists() && $attempts < 10) {
-            // Add microsecond to ensure uniqueness
-            usleep(1000); // Wait 1ms
-                    $poNumber = $this->generatePONumber($mrf);
-            if ($isRegeneration) {
-                $poNumber = $poNumber . '-R' . ($mrf->po_version + 1);
-            }
-                    $attempts++;
-                }
-        
-        $willReusePO = false;
-
-        // Validate file upload - check if file exists first
-        // Don't use strict validation rules that might fail before we can inspect the file
-        $fileExists = $request->hasFile('unsigned_po');
-        $file = $fileExists ? $request->file('unsigned_po') : null;
-        
-        // Build validation rules dynamically based on file existence
-        $rules = [
+        // Validate request - accept JSON body with po_number
+        $validator = Validator::make($request->all(), [
+            'po_number' => 'required|string|max:255',
             'remarks' => 'nullable|string',
-            // Note: po_number is auto-generated - not accepted from request
-        ];
-        
-        // Only add file validation if file exists
-        if ($fileExists && $file) {
-            // Check if file is valid first
-            if ($file->isValid()) {
-                $rules['unsigned_po'] = 'file|mimes:pdf,doc,docx|max:20480'; // 20MB max
-            } else {
-                // File exists but is invalid - we'll handle this separately
-                $rules['unsigned_po'] = 'required'; // This will fail and we can provide better error
-            }
-        } else {
-            // File doesn't exist - make it required
-            $rules['unsigned_po'] = 'required|file';
-        }
-
-        $validator = Validator::make($request->all(), $rules);
-
-        // Handle file validation errors with better messages
-        if ($validator->fails()) {
-            $errors = $validator->errors();
-            
-            // If file validation failed, provide detailed diagnostics
-            if ($errors->has('unsigned_po')) {
-                if ($fileExists && $file) {
-                    // File exists but failed validation - check why
-                    if (!$file->isValid()) {
-                        $errorCode = $file->getError();
-                        $errorMessage = $file->getErrorMessage();
-                        
-                        $userMessage = match($errorCode) {
-                            UPLOAD_ERR_INI_SIZE, UPLOAD_ERR_FORM_SIZE => 'File is too large. Maximum size is 20MB. Please compress or reduce the file size.',
-                            UPLOAD_ERR_PARTIAL => 'File upload was incomplete. Please try again.',
-                            UPLOAD_ERR_NO_FILE => 'No file was selected. Please choose a file.',
-                            UPLOAD_ERR_NO_TMP_DIR => 'Server configuration error. Please contact administrator.',
-                            UPLOAD_ERR_CANT_WRITE => 'Server storage error. Please contact administrator.',
-                            UPLOAD_ERR_EXTENSION => 'File upload blocked by server settings. Please contact administrator.',
-                            default => 'File upload failed: ' . $errorMessage
-                        };
-                        
-                        $errors->add('unsigned_po', $userMessage);
-                    } else {
-                        // File is valid but failed other validation rules
-                        $originalErrors = $errors->get('unsigned_po');
-                        $errors->forget('unsigned_po');
-                        
-                        // Check file size manually
-                        $fileSize = $file->getSize();
-                        $maxSize = 20480 * 1024; // 20MB in bytes
-                        if ($fileSize > $maxSize) {
-                            $errors->add('unsigned_po', 'File size (' . round($fileSize / 1024 / 1024, 2) . 'MB) exceeds maximum allowed size of 20MB.');
-                        }
-                        
-                        // Check file extension
-                        $extension = strtolower($file->getClientOriginalExtension());
-                        $allowedExtensions = ['pdf', 'doc', 'docx'];
-                        if (!in_array($extension, $allowedExtensions)) {
-                            $errors->add('unsigned_po', 'Invalid file type. Only PDF, DOC, and DOCX files are allowed. Your file type: ' . $extension);
-                        }
-                        
-                        // If no specific error, use original error message
-                        if ($errors->get('unsigned_po')->isEmpty() && !empty($originalErrors)) {
-                            foreach ($originalErrors as $error) {
-                                $errors->add('unsigned_po', $error);
-                            }
-                        }
-                    }
-                } else {
-                    // File doesn't exist in request
-                    $errors->forget('unsigned_po');
-                    $errors->add('unsigned_po', 'Please select a file to upload. Supported formats: PDF, DOC, DOCX (Max 20MB)');
-                }
-            }
-        }
+        ]);
 
         if ($validator->fails()) {
-            // Log validation errors for debugging
-            Log::warning('PO generation validation failed', [
-                'mrf_id' => $id,
-                'mrf_db_id' => $mrf->id,
-                'request_po_number' => $requestPONumber ?? 'not provided',
-                'determined_po_number' => $poNumber,
-                'existing_po_number' => $mrf->po_number,
-                'errors' => $validator->errors()->toArray(),
-                'is_regeneration' => $isRegeneration,
-                'will_reuse_po' => $willReusePO,
-                'has_file' => $request->hasFile('unsigned_po'),
-                'file_size' => $request->hasFile('unsigned_po') ? $request->file('unsigned_po')->getSize() : null,
-                'file_mime' => $request->hasFile('unsigned_po') ? $request->file('unsigned_po')->getMimeType() : null,
-                'file_error' => $request->hasFile('unsigned_po') ? $request->file('unsigned_po')->getError() : null,
-                'request_keys' => array_keys($request->all()),
-            ]);
-            
-            // Format errors for better frontend display
-            $formattedErrors = [];
-            foreach ($validator->errors()->messages() as $key => $messages) {
-                if ($key === 'unsigned_po') {
-                    // Provide more helpful error messages for file upload
-                    $formattedErrors[$key] = $messages;
-                    // If it's a generic upload error, add helpful context
-                    if (stripos(implode(' ', $messages), 'upload') !== false && 
-                        $request->hasFile('unsigned_po') && 
-                        !$request->file('unsigned_po')->isValid()) {
-                        $file = $request->file('unsigned_po');
-                        $formattedErrors[$key][] = 'File upload error code: ' . $file->getError() . ' - ' . $file->getErrorMessage();
-                    }
-                } else {
-                    $formattedErrors[$key] = $messages;
-                }
-            }
-            
             return response()->json([
                 'success' => false,
                 'error' => 'Validation failed',
-                'errors' => $formattedErrors,
-                'code' => 'VALIDATION_ERROR',
-                'debug' => [
-                    'mrf_id' => $id,
-                    'request_po_number' => $requestPONumber ?? null,
-                    'determined_po_number' => $poNumber,
-                    'existing_po_number' => $mrf->po_number,
-                    'is_regeneration' => $isRegeneration,
-                    'has_file_in_request' => $request->hasFile('unsigned_po'),
-                    'file_info' => $request->hasFile('unsigned_po') ? [
-                        'size' => $request->file('unsigned_po')->getSize(),
-                        'size_mb' => round($request->file('unsigned_po')->getSize() / 1024 / 1024, 2),
-                        'mime' => $request->file('unsigned_po')->getMimeType(),
-                        'extension' => $request->file('unsigned_po')->getClientOriginalExtension(),
-                        'name' => $request->file('unsigned_po')->getClientOriginalName(),
-                        'error' => $request->file('unsigned_po')->getError(),
-                        'error_message' => $request->file('unsigned_po')->getErrorMessage(),
-                        'is_valid' => $request->file('unsigned_po')->isValid(),
-                    ] : [
-                        'message' => 'No file found in request. Make sure the file is being sent as multipart/form-data.',
-                        'request_has_file' => false,
-                    ],
-                ]
+                'errors' => $validator->errors(),
+                'code' => 'VALIDATION_ERROR'
             ], 422);
         }
 
-        // Handle file upload with improved error handling
-        $poUrl = null;
-        $poShareUrl = null;
-        $useOneDrive = $this->oneDriveService !== null;
+        // Use provided PO number or auto-generate
+        $poNumber = $request->po_number;
         
-        // Check if file was uploaded (handles both multipart/form-data and base64)
-        if (!$request->hasFile('unsigned_po') && !$request->has('unsigned_po')) {
+        // Check if PO number already exists (for uniqueness)
+        if (MRF::where('po_number', $poNumber)->where('id', '!=', $mrf->id)->exists()) {
             return response()->json([
                 'success' => false,
-                'error' => 'PO file is required',
-                'code' => 'FILE_REQUIRED',
-                'errors' => [
-                    'unsigned_po' => ['The unsigned po file is required.']
-                ]
+                'error' => 'PO number already exists. Please use a different PO number.',
+                'code' => 'DUPLICATE_PO_NUMBER'
             ], 422);
         }
+
+        // Fetch all required data for PO generation
+        $poData = $this->fetchPOData($mrf, $rfq);
         
-        // Get the file - could be UploadedFile or string (base64)
-        $file = $request->hasFile('unsigned_po') ? $request->file('unsigned_po') : null;
-        
-        if (!$file) {
+        if (!$poData['success']) {
             return response()->json([
                 'success' => false,
-                'error' => 'Invalid file upload - file not found in request',
-                'code' => 'FILE_UPLOAD_ERROR',
-                'errors' => [
-                    'unsigned_po' => ['The unsigned po failed to upload. Please ensure the file is not corrupted and try again.']
-                ]
-            ], 422);
+                'error' => $poData['error'],
+                'code' => $poData['code']
+            ], $poData['status'] ?? 400);
         }
-        
-        // Validate file before processing
-        if (!$file->isValid()) {
-            $errorMessage = $file->getErrorMessage();
-            $errorCode = $file->getError();
-            
-            // Provide user-friendly error messages
-            $userFriendlyMessage = match($errorCode) {
-                UPLOAD_ERR_INI_SIZE, UPLOAD_ERR_FORM_SIZE => 'File is too large. Maximum size is 20MB.',
-                UPLOAD_ERR_PARTIAL => 'File upload was interrupted. Please try again.',
-                UPLOAD_ERR_NO_FILE => 'No file was uploaded.',
-                UPLOAD_ERR_NO_TMP_DIR => 'Server configuration error. Please contact administrator.',
-                UPLOAD_ERR_CANT_WRITE => 'Server storage error. Please contact administrator.',
-                UPLOAD_ERR_EXTENSION => 'File upload blocked by server extension.',
-                default => 'File upload failed: ' . $errorMessage
-            };
-            
-            Log::error('Invalid file upload', [
-                'mrf_id' => $id,
-                'error_code' => $errorCode,
-                'error_message' => $errorMessage,
-                'file_name' => $file->getClientOriginalName(),
-                'file_size' => $file->getSize(),
-            ]);
-            
-            return response()->json([
-                'success' => false,
-                'error' => 'File upload failed',
-                'errors' => [
-                    'unsigned_po' => [$userFriendlyMessage]
-                ],
-                'code' => 'FILE_UPLOAD_ERROR',
-                'error_code' => $errorCode
-            ], 422);
-        }
-        
-        // Additional file validation
-        $fileSize = $file->getSize();
-        $maxSize = 20480 * 1024; // 20MB in bytes
-        
-        if ($fileSize > $maxSize) {
-            return response()->json([
-                'success' => false,
-                'error' => 'File is too large',
-                'errors' => [
-                    'unsigned_po' => ['File size exceeds maximum allowed size of 20MB.']
-                ],
-                'code' => 'FILE_TOO_LARGE',
-                'file_size' => $fileSize,
-                'max_size' => $maxSize
-            ], 422);
-        }
-        
-        // Check file MIME type
-        $allowedMimes = ['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
-        $fileMime = $file->getMimeType();
-        
-        if (!in_array($fileMime, $allowedMimes)) {
-            Log::warning('File MIME type not in allowed list', [
-                'mrf_id' => $id,
-                'file_mime' => $fileMime,
-                'file_name' => $file->getClientOriginalName(),
-                'allowed_mimes' => $allowedMimes
-            ]);
-            // Don't fail - some servers report different MIME types for the same file
-            // We'll rely on extension validation instead
-        }
-        
+
+
+        // Generate PO PDF document
         try {
-            // Use OneDrive if configured
-            if ($useOneDrive) {
+            $pdfContent = $this->generatePOPDF($poData['data'], $poNumber, $user);
+            
+            // Save PDF to storage
+            $poUrl = null;
+            $poShareUrl = null;
+            $useOneDrive = $this->oneDriveService !== null;
+            
+            // Delete old PO file if regenerating
+            if ($isRegeneration && $mrf->unsigned_po_url) {
                 try {
-                    // Delete old PO file from OneDrive if regenerating
-                    if ($isRegeneration && $mrf->unsigned_po_url) {
+                    if ($useOneDrive && $this->oneDriveService) {
                         Log::info('Attempting to delete old PO file from OneDrive', [
                             'po_url' => $mrf->unsigned_po_url
                         ]);
+                    } else {
+                        $disk = config('filesystems.documents_disk', 'public');
+                        $oldPath = str_replace(Storage::disk($disk)->url(''), '', $mrf->unsigned_po_url);
+                        $oldPath = ltrim(str_replace('/storage/', '', $oldPath), '/');
+                        if (Storage::disk($disk)->exists($oldPath)) {
+                            Storage::disk($disk)->delete($oldPath);
+                            Log::info('Deleted old PO file for regeneration', ['old_path' => $oldPath]);
+                        }
                     }
-
-                    // Upload to OneDrive in PurchaseOrders folder (organized by year/month)
+                } catch (\Exception $e) {
+                    Log::warning('Failed to delete old PO file', ['error' => $e->getMessage()]);
+                }
+            }
+            
+            // Upload to OneDrive if configured
+            if ($useOneDrive && $this->oneDriveService) {
+                try {
                     $folder = 'PurchaseOrders/' . date('Y/m');
-                    $poFileName = "PO_{$poNumber}_{$mrf->mrf_id}." . $file->getClientOriginalExtension();
+                    $poFileName = "PO_{$poNumber}_{$mrf->mrf_id}.pdf";
                     
-                    $oneDriveResult = $this->oneDriveService->uploadFile($file, $folder, $poFileName);
+                    // Create temporary file for OneDrive upload
+                    $tempFile = tmpfile();
+                    $tempPath = stream_get_meta_data($tempFile)['uri'];
+                    file_put_contents($tempPath, $pdfContent);
+                    
+                    $uploadedFile = new \Illuminate\Http\File($tempPath);
+                    $oneDriveResult = $this->oneDriveService->uploadFile($uploadedFile, $folder, $poFileName);
+                    
+                    fclose($tempFile); // Clean up temp file
                     
                     if (!isset($oneDriveResult['webUrl']) || empty($oneDriveResult['webUrl'])) {
                         throw new \Exception('OneDrive upload returned no URL');
@@ -1258,7 +1059,7 @@ class MRFWorkflowController extends Controller
                     
                     $poUrl = $oneDriveResult['webUrl'];
                     
-                    // Create view-only sharing link for the PO document
+                    // Create sharing link
                     try {
                         $poShareUrl = $this->oneDriveService->createSharingLink($oneDriveResult['path'], 'view');
                         Log::info('OneDrive sharing link created for PO', [
@@ -1271,16 +1072,14 @@ class MRFWorkflowController extends Controller
                             'error' => $e->getMessage(),
                             'mrf_id' => $id
                         ]);
-                        // Continue without sharing link - web URL still works
                     }
                     
-                    Log::info($isRegeneration ? 'PO file regenerated on OneDrive' : 'PO file uploaded to OneDrive', [
+                    Log::info('PO PDF generated and uploaded to OneDrive', [
                         'mrf_id' => $id,
                         'po_number' => $poNumber,
                         'onedrive_path' => $oneDriveResult['path'],
                         'web_url' => $poUrl,
-                        'share_url' => $poShareUrl,
-                        'is_regeneration' => $isRegeneration
+                        'share_url' => $poShareUrl
                     ]);
                 } catch (\Exception $e) {
                     Log::error('OneDrive upload failed, falling back to local storage', [
@@ -1288,157 +1087,69 @@ class MRFWorkflowController extends Controller
                         'trace' => $e->getTraceAsString(),
                         'mrf_id' => $id
                     ]);
-                    // Fall back to local storage on error
                     $useOneDrive = false;
                 }
             }
             
-            // Fallback to local/S3 storage if OneDrive is not configured or failed
+            // Fallback to local/S3 storage
             if (!$useOneDrive) {
-                // Delete old PO file if regenerating
-                if ($isRegeneration && $mrf->unsigned_po_url) {
-                    try {
-        $disk = config('filesystems.documents_disk', 'public');
-                        $oldPath = str_replace(Storage::disk($disk)->url(''), '', $mrf->unsigned_po_url);
-                        // Clean up path
-                        $oldPath = ltrim(str_replace('/storage/', '', $oldPath), '/');
-                        if (Storage::disk($disk)->exists($oldPath)) {
-                            Storage::disk($disk)->delete($oldPath);
-                            Log::info('Deleted old PO file for regeneration', ['old_path' => $oldPath]);
-                        }
-                    } catch (\Exception $e) {
-                        Log::warning('Failed to delete old PO file', ['error' => $e->getMessage()]);
-                    }
-                }
-
                 $disk = config('filesystems.documents_disk', env('DOCUMENTS_DISK', 'public'));
                 
-                // Verify disk is available
                 if (!config("filesystems.disks.{$disk}")) {
-                    throw new \Exception("Storage disk '{$disk}' is not configured. Please check your filesystem configuration.");
+                    throw new \Exception("Storage disk '{$disk}' is not configured.");
                 }
                 
-                $poFileName = "po_{$poNumber}_" . time() . "." . $file->getClientOriginalExtension();
-        $poPath = "purchase-orders/{$poFileName}";
+                $poFileName = "po_{$poNumber}_" . time() . ".pdf";
+                $poPath = "purchase-orders/{$poFileName}";
                 
                 // Ensure directory exists
-                try {
-                    $directory = dirname($poPath);
-                    if (!Storage::disk($disk)->exists($directory)) {
-                        $created = Storage::disk($disk)->makeDirectory($directory, 0755, true);
-                        if (!$created) {
-                            throw new \Exception("Failed to create directory: {$directory}");
-                        }
-                        Log::info('Created directory for PO storage', [
-                            'directory' => $directory,
-                            'disk' => $disk
-                        ]);
-                    }
-                } catch (\Exception $e) {
-                    Log::error('Directory creation failed', [
-                        'directory' => $directory ?? 'unknown',
-                        'disk' => $disk,
-                        'error' => $e->getMessage()
-                    ]);
-                    throw new \Exception('Failed to create storage directory. Please check file permissions.');
+                $directory = dirname($poPath);
+                if (!Storage::disk($disk)->exists($directory)) {
+                    Storage::disk($disk)->makeDirectory($directory, 0755, true);
                 }
                 
-                // Store the file - use putFileAs for better error handling
-                try {
-                    $storedPath = Storage::disk($disk)->putFileAs(
-                        dirname($poPath),
-                        $file,
-                        basename($poPath)
-                    );
-                    
-                    if (!$storedPath) {
-                        throw new \Exception('File storage returned null - storage may be full or permissions issue');
+                // Store PDF
+                Storage::disk($disk)->put($poPath, $pdfContent);
+                
+                // Get URL
+                if ($disk === 'public' || $disk === 'local') {
+                    $poUrl = Storage::disk($disk)->url($poPath);
+                    if (!filter_var($poUrl, FILTER_VALIDATE_URL)) {
+                        $baseUrl = config('app.url');
+                        $poUrl = rtrim($baseUrl, '/') . '/' . ltrim($poUrl, '/');
                     }
-                    
-                    // Verify file was actually stored
-                    if (!Storage::disk($disk)->exists($storedPath)) {
-                        throw new \Exception('File was not found after storage - upload may have failed');
-                    }
-                    
-                    Log::info('PO file stored successfully', [
-                        'stored_path' => $storedPath,
-                        'disk' => $disk,
-                        'file_size' => Storage::disk($disk)->size($storedPath)
-                    ]);
-                } catch (\Exception $e) {
-                    Log::error('File storage failed', [
-                        'disk' => $disk,
-                        'path' => $poPath,
-                        'error' => $e->getMessage(),
-                        'trace' => $e->getTraceAsString()
-                    ]);
-                    throw new \Exception('Failed to store file: ' . $e->getMessage());
+                } else {
+                    $poUrl = Storage::disk($disk)->url($poPath);
                 }
                 
-                // Get URL - handle both local and S3
-                try {
-                    if ($disk === 'public' || $disk === 'local') {
-                        $poUrl = Storage::disk($disk)->url($storedPath);
-                        // Ensure URL is absolute
-                        if (!filter_var($poUrl, FILTER_VALIDATE_URL)) {
-                            $baseUrl = config('app.url');
-                            $poUrl = rtrim($baseUrl, '/') . '/' . ltrim($poUrl, '/');
-                        }
-                    } else {
-                        // For S3 or other cloud storage
-                        $poUrl = Storage::disk($disk)->url($storedPath);
-                    }
-                    
-                    if (empty($poUrl)) {
-                        throw new \Exception('Failed to generate file URL');
-                    }
-                } catch (\Exception $e) {
-                    Log::error('URL generation failed', [
-                        'disk' => $disk,
-                        'path' => $storedPath,
-                        'error' => $e->getMessage()
-                    ]);
-                    // Don't fail completely - file is stored, URL can be generated later
-                    $poUrl = $storedPath; // Use path as fallback
-                }
+                $poShareUrl = $poUrl; // Use same URL for local storage
                 
-                Log::info($isRegeneration ? 'PO file regenerated' : 'PO file uploaded', [
+                Log::info('PO PDF generated and stored locally', [
                     'mrf_id' => $id,
                     'po_number' => $poNumber,
                     'file_name' => $poFileName,
-                    'stored_path' => $storedPath,
+                    'stored_path' => $poPath,
                     'url' => $poUrl,
-                    'disk' => $disk,
-                    'file_size' => $file->getSize(),
-                    'is_regeneration' => $isRegeneration
+                    'disk' => $disk
                 ]);
             }
             
-            // Verify upload was successful
             if (empty($poUrl)) {
-                throw new \Exception('PO file upload failed - no URL was generated');
+                throw new \Exception('PO PDF generation failed - no URL was generated');
             }
             
         } catch (\Exception $e) {
-            Log::error('PO file upload failed', [
+            Log::error('PO PDF generation failed', [
                 'mrf_id' => $id,
                 'po_number' => $poNumber,
                 'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString(),
-                'file_name' => $file->getClientOriginalName(),
-                'file_size' => $file->getSize(),
-                'file_mime' => $file->getMimeType(),
+                'trace' => $e->getTraceAsString()
             ]);
             
             return response()->json([
                 'success' => false,
-                'error' => 'Failed to upload PO file: ' . $e->getMessage(),
-                'code' => 'UPLOAD_FAILED',
-                'details' => [
-                    'file_name' => $file->getClientOriginalName(),
-                    'file_size' => $file->getSize(),
-                    'max_size' => $file->getMaxFilesize(),
-                ]
+                'error' => 'Failed to generate PO document: ' . $e->getMessage(),
+                'code' => 'PDF_GENERATION_FAILED'
             ], 500);
         }
 
@@ -1447,6 +1158,7 @@ class MRFWorkflowController extends Controller
             'po_number' => $poNumber,
             'unsigned_po_url' => $poUrl,
             'po_generated_at' => now(),
+            'workflow_state' => WorkflowStateService::STATE_PO_GENERATED,
             'status' => 'supply_chain',
             'current_stage' => 'supply_chain',
             'rejection_reason' => null, // Clear rejection reason if regenerating
@@ -1468,6 +1180,26 @@ class MRFWorkflowController extends Controller
             ? "PO regenerated after rejection: {$poNumber}" 
             : "PO generated: {$poNumber}";
         MRFApprovalHistory::record($mrf, $action, 'procurement', $user, $remarks);
+
+        // Log activity
+        try {
+            Activity::create([
+                'type' => 'po_generated',
+                'title' => 'PO Generated',
+                'description' => "Purchase Order {$poNumber} was generated for MRF {$mrf->mrf_id}",
+                'user_id' => $user->id,
+                'user_name' => $user->name,
+                'entity_type' => 'mrf',
+                'entity_id' => $mrf->mrf_id,
+                'status' => 'supply_chain',
+            ]);
+        } catch (\Exception $e) {
+            Log::warning('Failed to log PO generation activity', [
+                'mrf_id' => $mrf->mrf_id,
+                'po_number' => $poNumber,
+                'error' => $e->getMessage()
+            ]);
+        }
 
         // Notify Supply Chain Director
         $this->notificationService->notifyPOReadyForSignature($mrf);
@@ -2269,22 +2001,313 @@ class MRFWorkflowController extends Controller
     }
 
     /**
-     * Helper: Generate PO document (PDF)
+     * Fetch all required data for PO generation
      */
-    private function generatePODocument(MRF $mrf, string $poNumber): string
+    private function fetchPOData(MRF $mrf, RFQ $rfq): array
     {
-        // TODO: Implement actual PDF generation using library like dompdf or snappy
-        // For now, return a placeholder
-        $content = "Purchase Order: {$poNumber}\n";
-        $content .= "MRF: {$mrf->mrf_id}\n";
-        $content .= "Title: {$mrf->title}\n";
-        $content .= "Estimated Cost: {$mrf->currency} {$mrf->estimated_cost}\n";
-        $content .= "\nItems:\n";
-        
-        foreach ($mrf->items as $item) {
-            $content .= "- {$item->item_name} x {$item->quantity} {$item->unit}\n";
+        // Get selected quotation
+        $quotation = null;
+        if ($rfq->selected_quotation_id) {
+            $quotation = Quotation::where('id', $rfq->selected_quotation_id)
+                ->with(['vendor', 'items'])
+                ->first();
+        } else {
+            // Fallback: find approved quotation
+            $quotation = Quotation::where('rfq_id', $rfq->id)
+                ->where('status', 'Approved')
+                ->with(['vendor', 'items'])
+                ->orderBy('created_at', 'desc')
+                ->first();
         }
         
-        return $content;
+        if (!$quotation) {
+            return [
+                'success' => false,
+                'error' => 'No vendor has been selected for this MRF',
+                'code' => 'NO_SELECTED_QUOTATION',
+                'status' => 400
+            ];
+        }
+        
+        // Get vendor
+        $vendor = $quotation->vendor;
+        if (!$vendor) {
+            return [
+                'success' => false,
+                'error' => 'Selected vendor not found',
+                'code' => 'VENDOR_NOT_FOUND',
+                'status' => 400
+            ];
+        }
+        
+        // Get quotation items
+        $quotationItems = $quotation->items;
+        if ($quotationItems->isEmpty()) {
+            return [
+                'success' => false,
+                'error' => 'Quotation items are missing',
+                'code' => 'QUOTATION_ITEMS_MISSING',
+                'status' => 400
+            ];
+        }
+        
+        // Get company information from config
+        $companyName = config('app.name', env('APP_NAME', 'Company Name'));
+        $companyAddress = env('COMPANY_ADDRESS', '');
+        $companyPhone = env('COMPANY_PHONE', '');
+        $companyEmail = env('COMPANY_EMAIL', config('mail.from.address', ''));
+        $companyTaxId = env('COMPANY_TAX_ID', '');
+        
+        return [
+            'success' => true,
+            'data' => [
+                'mrf' => [
+                    'id' => $mrf->mrf_id,
+                    'title' => $mrf->title,
+                    'description' => $mrf->description,
+                    'justification' => $mrf->justification,
+                    'requester_name' => $mrf->requester_name,
+                    'department' => $mrf->department,
+                    'estimated_cost' => $mrf->estimated_cost,
+                    'currency' => $mrf->currency ?? 'NGN',
+                    'date' => $mrf->date ?? $mrf->created_at,
+                ],
+                'rfq' => [
+                    'id' => $rfq->rfq_id,
+                    'title' => $rfq->title,
+                ],
+                'quotation' => [
+                    'id' => $quotation->quotation_id,
+                    'total_amount' => $quotation->total_amount,
+                    'currency' => $quotation->currency ?? 'NGN',
+                    'delivery_days' => $quotation->delivery_days,
+                    'delivery_date' => $quotation->delivery_date ? ($quotation->delivery_date instanceof \DateTime || $quotation->delivery_date instanceof \Carbon\Carbon ? $quotation->delivery_date : \Carbon\Carbon::parse($quotation->delivery_date)) : null,
+                    'payment_terms' => $quotation->payment_terms,
+                    'validity_days' => $quotation->validity_days,
+                    'warranty_period' => $quotation->warranty_period,
+                ],
+                'vendor' => [
+                    'name' => $vendor->name,
+                    'contact_person' => $vendor->contact_person,
+                    'email' => $vendor->email,
+                    'phone' => $vendor->phone,
+                    'address' => $vendor->address,
+                    'tax_id' => $vendor->tax_id,
+                ],
+                'items' => $quotationItems->map(function($item) {
+                    return [
+                        'name' => $item->item_name,
+                        'description' => $item->description,
+                        'quantity' => $item->quantity,
+                        'unit' => $item->unit,
+                        'unit_price' => $item->unit_price,
+                        'total_price' => $item->total_price,
+                        'specifications' => $item->specifications,
+                    ];
+                })->toArray(),
+                'company' => [
+                    'name' => $companyName,
+                    'address' => $companyAddress,
+                    'phone' => $companyPhone,
+                    'email' => $companyEmail,
+                    'tax_id' => $companyTaxId,
+                ],
+            ]
+        ];
+    }
+    
+    /**
+     * Generate PO PDF document
+     */
+    private function generatePOPDF(array $data, string $poNumber, $user): string
+    {
+        $mrf = $data['mrf'];
+        $rfq = $data['rfq'];
+        $quotation = $data['quotation'];
+        $vendor = $data['vendor'];
+        $items = $data['items'];
+        $company = $data['company'];
+        
+        // Set timezone to Africa/Lagos
+        $date = now()->setTimezone('Africa/Lagos');
+        
+        // Build HTML template
+        $html = '<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Purchase Order - ' . htmlspecialchars($poNumber) . '</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; font-size: 12px; }
+        .header { text-align: center; margin-bottom: 30px; border-bottom: 2px solid #000; padding-bottom: 20px; }
+        .header h1 { margin: 0; font-size: 24px; }
+        .company-info, .vendor-info { margin-bottom: 20px; }
+        .info-section { display: inline-block; vertical-align: top; width: 48%; }
+        .info-section h3 { margin-top: 0; border-bottom: 1px solid #ccc; padding-bottom: 5px; }
+        .items-table { width: 100%; border-collapse: collapse; margin: 20px 0; }
+        .items-table th, .items-table td { border: 1px solid #000; padding: 8px; text-align: left; }
+        .items-table th { background-color: #f0f0f0; font-weight: bold; }
+        .items-table .text-right { text-align: right; }
+        .terms { margin-top: 30px; }
+        .terms h3 { border-bottom: 1px solid #ccc; padding-bottom: 5px; }
+        .footer { margin-top: 50px; }
+        .signature-section { margin-top: 40px; }
+        .signature-line { border-top: 1px solid #000; width: 200px; margin-top: 50px; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>PURCHASE ORDER</h1>
+        <p><strong>PO Number:</strong> ' . htmlspecialchars($poNumber) . '</p>
+        <p><strong>Date:</strong> ' . $date->format('F d, Y') . '</p>
+    </div>
+    
+    <div class="company-info">
+        <div class="info-section">
+            <h3>Company Information</h3>
+            <p><strong>' . htmlspecialchars($company['name']) . '</strong></p>';
+        
+        if (!empty($company['address'])) {
+            $html .= '<p>' . nl2br(htmlspecialchars($company['address'])) . '</p>';
+        }
+        if (!empty($company['phone'])) {
+            $html .= '<p><strong>Phone:</strong> ' . htmlspecialchars($company['phone']) . '</p>';
+        }
+        if (!empty($company['email'])) {
+            $html .= '<p><strong>Email:</strong> ' . htmlspecialchars($company['email']) . '</p>';
+        }
+        if (!empty($company['tax_id'])) {
+            $html .= '<p><strong>Tax ID:</strong> ' . htmlspecialchars($company['tax_id']) . '</p>';
+        }
+        
+        $html .= '</div>
+        <div class="info-section">
+            <h3>Vendor Information</h3>
+            <p><strong>' . htmlspecialchars($vendor['name']) . '</strong></p>';
+        
+        if (!empty($vendor['address'])) {
+            $html .= '<p>' . nl2br(htmlspecialchars($vendor['address'])) . '</p>';
+        }
+        if (!empty($vendor['contact_person'])) {
+            $html .= '<p><strong>Contact Person:</strong> ' . htmlspecialchars($vendor['contact_person']) . '</p>';
+        }
+        if (!empty($vendor['phone'])) {
+            $html .= '<p><strong>Phone:</strong> ' . htmlspecialchars($vendor['phone']) . '</p>';
+        }
+        if (!empty($vendor['email'])) {
+            $html .= '<p><strong>Email:</strong> ' . htmlspecialchars($vendor['email']) . '</p>';
+        }
+        if (!empty($vendor['tax_id'])) {
+            $html .= '<p><strong>Tax ID:</strong> ' . htmlspecialchars($vendor['tax_id']) . '</p>';
+        }
+        
+        $html .= '</div>
+    </div>
+    
+    <div class="mrf-reference">
+        <h3>MRF Reference</h3>
+        <p><strong>MRF ID:</strong> ' . htmlspecialchars($mrf['id']) . '</p>
+        <p><strong>MRF Title:</strong> ' . htmlspecialchars($mrf['title']) . '</p>
+        <p><strong>Requested by:</strong> ' . htmlspecialchars($mrf['requester_name']) . '</p>';
+        
+        if (!empty($mrf['department'])) {
+            $html .= '<p><strong>Department:</strong> ' . htmlspecialchars($mrf['department']) . '</p>';
+        }
+        
+        $html .= '</div>
+    
+    <table class="items-table">
+        <thead>
+            <tr>
+                <th>Item Name</th>
+                <th>Description</th>
+                <th>Quantity</th>
+                <th>Unit</th>
+                <th class="text-right">Unit Price</th>
+                <th class="text-right">Total</th>
+            </tr>
+        </thead>
+        <tbody>';
+        
+        $grandTotal = 0;
+        foreach ($items as $item) {
+            $total = $item['total_price'];
+            $grandTotal += $total;
+            $html .= '<tr>
+                <td>' . htmlspecialchars($item['name']) . '</td>
+                <td>' . htmlspecialchars($item['description'] ?? '') . '</td>
+                <td>' . htmlspecialchars($item['quantity']) . '</td>
+                <td>' . htmlspecialchars($item['unit'] ?? '') . '</td>
+                <td class="text-right">' . number_format($item['unit_price'], 2) . ' ' . htmlspecialchars($quotation['currency']) . '</td>
+                <td class="text-right">' . number_format($total, 2) . ' ' . htmlspecialchars($quotation['currency']) . '</td>
+            </tr>';
+        }
+        
+        $html .= '<tr>
+                <td colspan="5" style="text-align: right; font-weight: bold;">Total Amount:</td>
+                <td class="text-right" style="font-weight: bold;">' . number_format($grandTotal, 2) . ' ' . htmlspecialchars($quotation['currency']) . '</td>
+            </tr>
+        </tbody>
+    </table>
+    
+    <div class="terms">
+        <h3>Terms & Conditions</h3>
+        <p><strong>Total Amount:</strong> ' . number_format($grandTotal, 2) . ' ' . htmlspecialchars($quotation['currency']) . '</p>';
+        
+        if (!empty($quotation['delivery_days'])) {
+            $html .= '<p><strong>Delivery:</strong> ' . htmlspecialchars($quotation['delivery_days']) . ' days</p>';
+        } elseif (!empty($quotation['delivery_date'])) {
+            $deliveryDate = $quotation['delivery_date'];
+            if ($deliveryDate instanceof \DateTime || $deliveryDate instanceof \Carbon\Carbon) {
+                $html .= '<p><strong>Delivery Date:</strong> ' . $deliveryDate->format('F d, Y') . '</p>';
+            } else {
+                $html .= '<p><strong>Delivery Date:</strong> ' . htmlspecialchars($deliveryDate) . '</p>';
+            }
+        }
+        
+        if (!empty($quotation['payment_terms'])) {
+            $html .= '<p><strong>Payment Terms:</strong> ' . htmlspecialchars($quotation['payment_terms']) . '</p>';
+        }
+        
+        if (!empty($quotation['validity_days'])) {
+            $html .= '<p><strong>Validity:</strong> ' . htmlspecialchars($quotation['validity_days']) . ' days</p>';
+        }
+        
+        if (!empty($quotation['warranty_period'])) {
+            $html .= '<p><strong>Warranty Period:</strong> ' . htmlspecialchars($quotation['warranty_period']) . '</p>';
+        }
+        
+        $html .= '<p><strong>Standard Terms:</strong></p>
+        <ul>
+            <li>Payment shall be made according to the payment terms specified above.</li>
+            <li>Goods must be delivered in good condition and as per specifications.</li>
+            <li>All deliveries must be accompanied by proper documentation.</li>
+            <li>This Purchase Order is subject to our standard terms and conditions.</li>
+        </ul>
+    </div>
+    
+    <div class="footer">
+        <div class="signature-section">
+            <p><strong>Prepared by:</strong> ' . htmlspecialchars($user->name) . '</p>
+            <p><strong>Date:</strong> ' . $date->format('F d, Y') . '</p>
+            <div class="signature-line"></div>
+            <p><em>Signature: Supply Chain Director (To be signed)</em></p>
+        </div>
+    </div>
+</body>
+</html>';
+        
+        // Generate PDF using dompdf
+        $options = new Options();
+        $options->set('isHtml5ParserEnabled', true);
+        $options->set('isRemoteEnabled', true);
+        $options->set('defaultFont', 'Arial');
+        
+        $dompdf = new Dompdf($options);
+        $dompdf->loadHtml($html);
+        $dompdf->setPaper('A4', 'portrait');
+        $dompdf->render();
+        
+        return $dompdf->output();
     }
 }
