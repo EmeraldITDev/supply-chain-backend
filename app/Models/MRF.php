@@ -23,6 +23,7 @@ class MRF extends Model
         'justification',
         'requester_id',
         'requester_name',
+        'department',
         'date',
         'status',
         'current_stage',

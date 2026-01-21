@@ -98,6 +98,7 @@ class MRFController extends Controller
                 'justification' => $mrf->justification,
                 'requester' => $mrf->requester_name,
                 'requesterId' => (string) $mrf->requester_id,
+                'department' => $mrf->department,
                 'date' => $mrf->date->format('Y-m-d'),
                 'status' => $mrf->status,
                 'currentStage' => $mrf->current_stage,
@@ -174,6 +175,7 @@ class MRFController extends Controller
             'justification' => $mrf->justification,
             'requester' => $mrf->requester_name,
             'requesterId' => (string) $mrf->requester_id,
+            'department' => $mrf->department,
             'date' => $mrf->date->format('Y-m-d'),
             'status' => $mrf->status,
             'currentStage' => $mrf->current_stage,
@@ -306,6 +308,7 @@ class MRFController extends Controller
                         'name' => $mrf->requester_name,
                         'email' => $mrf->requester ? $mrf->requester->email : null,
                     ],
+                    'department' => $mrf->department,
                     'date' => $mrf->date->format('Y-m-d'),
                     'status' => $mrf->status,
                     'workflowState' => $mrf->workflow_state,
@@ -541,6 +544,7 @@ class MRFController extends Controller
                 'quantity' => 'required|string',
                 'estimatedCost' => 'required|numeric|min:0',
                 'justification' => 'required|string',
+                'department' => 'nullable|string|max:255',
                 'pfi' => 'nullable|file|mimes:pdf,doc,docx|max:10240', // Optional PFI upload (10MB max)
             ]);
 
@@ -637,6 +641,7 @@ class MRFController extends Controller
                 'justification' => $request->justification,
                 'requester_id' => $user->id,
                 'requester_name' => $user->name,
+                'department' => $request->department,
                 'date' => now(),
                 'status' => 'pending',
                 'current_stage' => 'executive_review',
@@ -712,6 +717,7 @@ class MRFController extends Controller
                 'justification' => $mrf->justification,
                 'requester' => $mrf->requester_name,
                 'requesterId' => (string) $mrf->requester_id,
+                'department' => $mrf->department,
                 'date' => $mrf->date->format('Y-m-d'),
                 'status' => $mrf->status,
                 'currentStage' => $mrf->current_stage,
@@ -780,6 +786,7 @@ class MRFController extends Controller
             'quantity' => 'sometimes|required|string',
             'estimatedCost' => 'sometimes|required|numeric|min:0',
             'justification' => 'sometimes|required|string',
+            'department' => 'sometimes|nullable|string|max:255',
         ]);
 
         if ($validator->fails()) {
@@ -797,6 +804,7 @@ class MRFController extends Controller
         if ($request->has('urgency')) $updateData['urgency'] = $request->urgency;
         if ($request->has('description')) $updateData['description'] = $request->description;
         if ($request->has('quantity')) $updateData['quantity'] = $request->quantity;
+        if ($request->has('department')) $updateData['department'] = $request->department;
         if ($request->has('estimatedCost')) $updateData['estimated_cost'] = $request->estimatedCost;
         if ($request->has('justification')) $updateData['justification'] = $request->justification;
 
