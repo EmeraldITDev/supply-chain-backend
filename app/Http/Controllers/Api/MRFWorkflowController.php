@@ -883,8 +883,8 @@ class MRFWorkflowController extends Controller
             ], 403);
         }
 
-        // Verify RFQ is approved
-        $rfq = \App\Models\RFQ::where('mrf_id', $mrf->id)->first();
+        // Verify RFQ is approved - load with items relationship
+        $rfq = \App\Models\RFQ::where('mrf_id', $mrf->id)->with('items')->first();
         if (!$rfq) {
             return response()->json([
                 'success' => false,
@@ -994,7 +994,7 @@ class MRFWorkflowController extends Controller
         } else {
             // Mode 2: Auto-Generation (JSON body)
             $validator = Validator::make($request->all(), [
-                'po_number' => 'required|string|max:255',
+                'po_number' => 'nullable|string|max:255',
             'remarks' => 'nullable|string',
             ]);
 
@@ -1007,8 +1007,8 @@ class MRFWorkflowController extends Controller
                 ], 422);
             }
 
-            // Use provided PO number
-            $poNumber = $request->po_number;
+            // Use provided PO number or auto-generate
+            $poNumber = $request->po_number ?? $this->generatePONumber($mrf);
         }
         
         // Check if PO number already exists (for uniqueness)
@@ -2178,16 +2178,31 @@ class MRFWorkflowController extends Controller
         
         // Fetch items in order: quotation_items -> RFQ items -> MRF items
         $items = [];
+        $quotationItems = collect();
+        $rfqItems = collect();
+        $mrfItems = collect();
         
         // 1. Check quotation_items table (use direct query with quotation auto-increment ID)
         $quotationItems = QuotationItem::where('quotation_id', $quotation->id)->get();
+        \Log::info('PO Generation: Checking quotation items', [
+            'quotation_id' => $quotation->id,
+            'quotation_string_id' => $quotation->quotation_id,
+            'quotation_items_count' => $quotationItems->count(),
+        ]);
+        
         if ($quotationItems->count() > 0) {
             $items = $quotationItems;
+            \Log::info('PO Generation: Using quotation items', ['count' => $items->count()]);
         }
         // 2. Fallback to RFQ items
         else {
             $rfq->load('items');
             $rfqItems = $rfq->items;
+            \Log::info('PO Generation: Checking RFQ items', [
+                'rfq_id' => $rfq->id,
+                'rfq_items_count' => $rfqItems->count(),
+            ]);
+            
             if ($rfqItems->count() > 0) {
                 // Calculate unit price from quotation total
                 $itemCount = $rfqItems->count();
@@ -2204,11 +2219,17 @@ class MRFWorkflowController extends Controller
                         'specifications' => $item->specifications ?? '',
                     ];
                 });
+                \Log::info('PO Generation: Using RFQ items', ['count' => $items->count()]);
             }
             // 3. Fallback to MRF items
             else {
                 $mrf->load('items');
                 $mrfItems = $mrf->items;
+                \Log::info('PO Generation: Checking MRF items', [
+                    'mrf_id' => $mrf->mrf_id,
+                    'mrf_items_count' => $mrfItems->count(),
+                ]);
+                
                 if ($mrfItems->count() > 0) {
                     // Calculate unit price from quotation total
                     $itemCount = $mrfItems->count();
@@ -2225,17 +2246,36 @@ class MRFWorkflowController extends Controller
                             'specifications' => $item->specifications ?? '',
                         ];
                     });
+                    \Log::info('PO Generation: Using MRF items', ['count' => $items->count()]);
                 }
             }
         }
         
         // If no items found after all fallbacks
         if (empty($items) || (is_countable($items) && count($items) === 0)) {
+            // Log detailed information for debugging
+            \Log::error('PO Generation: No items found', [
+                'mrf_id' => $mrf->mrf_id,
+                'rfq_id' => $rfq->rfq_id,
+                'quotation_id' => $quotation->id,
+                'quotation_string_id' => $quotation->quotation_id,
+                'quotation_items_count' => $quotationItems->count(),
+                'rfq_items_count' => $rfqItems->count(),
+                'mrf_items_count' => $mrfItems->count(),
+            ]);
+            
             return [
                 'success' => false,
-                'error' => 'No items found in quotation, RFQ, or MRF. Please ensure items are added.',
+                'error' => 'No items found in quotation, RFQ, or MRF. Please ensure items are added to the quotation when submitting.',
                 'code' => 'ITEMS_MISSING',
-                'status' => 400
+                'status' => 400,
+                'debug' => [
+                    'quotation_id' => $quotation->id,
+                    'quotation_string_id' => $quotation->quotation_id,
+                    'quotation_items_found' => $quotationItems->count(),
+                    'rfq_items_found' => $rfqItems->count(),
+                    'mrf_items_found' => $mrfItems->count(),
+                ]
             ];
         }
         
