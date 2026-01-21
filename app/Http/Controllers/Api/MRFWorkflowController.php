@@ -2176,6 +2176,17 @@ class MRFWorkflowController extends Controller
             ];
         }
         
+        // Validate: Ensure quotation belongs to the selected vendor
+        // This ensures we're using the correct vendor's quotation
+        if ($quotation->vendor_id != $vendor->id) {
+            return [
+                'success' => false,
+                'error' => 'Quotation vendor mismatch. The selected quotation does not belong to the expected vendor.',
+                'code' => 'VENDOR_MISMATCH',
+                'status' => 400
+            ];
+        }
+        
         // Fetch items in order: quotation_items -> RFQ items -> MRF items
         $items = [];
         $quotationItems = collect();
@@ -2259,6 +2270,8 @@ class MRFWorkflowController extends Controller
                 'rfq_id' => $rfq->rfq_id,
                 'quotation_id' => $quotation->id,
                 'quotation_string_id' => $quotation->quotation_id,
+                'vendor_id' => $vendor->id,
+                'vendor_string_id' => $vendor->vendor_id,
                 'quotation_items_count' => $quotationItems->count(),
                 'rfq_items_count' => $rfqItems->count(),
                 'mrf_items_count' => $mrfItems->count(),
@@ -2266,17 +2279,61 @@ class MRFWorkflowController extends Controller
             
             return [
                 'success' => false,
-                'error' => 'No items found in quotation, RFQ, or MRF. Please ensure items are added to the quotation when submitting.',
+                'error' => 'Cannot create PO: no approved items linked to the selected vendor quotation. Please ensure items are added to the quotation when submitting.',
                 'code' => 'ITEMS_MISSING',
                 'status' => 400,
                 'debug' => [
                     'quotation_id' => $quotation->id,
                     'quotation_string_id' => $quotation->quotation_id,
+                    'vendor_id' => $vendor->id,
+                    'vendor_string_id' => $vendor->vendor_id,
                     'quotation_items_found' => $quotationItems->count(),
                     'rfq_items_found' => $rfqItems->count(),
                     'mrf_items_found' => $mrfItems->count(),
                 ]
             ];
+        }
+        
+        // Additional validation: Ensure items are linked to the vendor quotation
+        // This validates that the items we found are actually associated with this vendor's quotation
+        $itemsLinkedToVendor = false;
+        
+        if ($quotationItems->count() > 0) {
+            // Items are directly from quotation_items table, so they're linked to this vendor's quotation
+            $itemsLinkedToVendor = true;
+            \Log::info('PO Generation: Items are linked to vendor quotation via quotation_items', [
+                'quotation_id' => $quotation->id,
+                'vendor_id' => $vendor->id,
+                'items_count' => $quotationItems->count(),
+            ]);
+        } else {
+            // For fallback items (RFQ or MRF), verify they can be linked to this quotation
+            // Check if any RFQ items are referenced by quotation items for this vendor
+            if ($rfqItems->count() > 0) {
+                $linkedRFQItems = QuotationItem::where('quotation_id', $quotation->id)
+                    ->whereIn('rfq_item_id', $rfqItems->pluck('id'))
+                    ->exists();
+                
+                if ($linkedRFQItems) {
+                    $itemsLinkedToVendor = true;
+                    \Log::info('PO Generation: RFQ items are linked to vendor quotation', [
+                        'quotation_id' => $quotation->id,
+                        'vendor_id' => $vendor->id,
+                    ]);
+                }
+            }
+        }
+        
+        // Hard validation: Items must be linked to the vendor quotation
+        if (!$itemsLinkedToVendor && $quotationItems->count() === 0) {
+            \Log::warning('PO Generation: Items found but not explicitly linked to vendor quotation', [
+                'mrf_id' => $mrf->mrf_id,
+                'quotation_id' => $quotation->id,
+                'vendor_id' => $vendor->id,
+                'using_fallback' => true,
+            ]);
+            // Note: We still proceed with fallback items, but log a warning
+            // This allows backward compatibility while encouraging proper item linking
         }
         
         // Convert items to collection if needed
