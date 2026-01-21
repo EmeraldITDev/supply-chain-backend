@@ -539,21 +539,53 @@ class DashboardController extends Controller
             }
         }
 
+        // Role-based MRF filtering
+        $relevantMRFIds = $userMRFIds;
+        
+        // Procurement managers see all MRFs in procurement stage
+        if (in_array($user->role, ['procurement_manager', 'procurement', 'admin'])) {
+            $procurementMRFIds = MRF::whereIn('status', ['procurement', 'pending_po_upload', 'procurement_review'])
+                ->orWhere('current_stage', 'procurement')
+                ->pluck('mrf_id')->toArray();
+            $relevantMRFIds = array_merge($relevantMRFIds, $procurementMRFIds);
+        }
+        
+        // Finance team sees MRFs in finance stage
+        if (in_array($user->role, ['finance', 'admin'])) {
+            $financeMRFIds = MRF::whereIn('status', ['finance', 'chairman_payment'])
+                ->orWhere('current_stage', 'finance')
+                ->orWhere('workflow_state', 'like', '%finance%')
+                ->pluck('mrf_id')->toArray();
+            $relevantMRFIds = array_merge($relevantMRFIds, $financeMRFIds);
+        }
+        
+        // Supply Chain Directors see MRFs they need to approve
+        if (in_array($user->role, ['supply_chain_director', 'supply_chain', 'admin'])) {
+            $scdMRFIds = MRF::whereIn('status', ['supply_chain', 'vendor_selected', 'vendor_approved'])
+                ->orWhere('current_stage', 'supply_chain')
+                ->pluck('mrf_id')->toArray();
+            $relevantMRFIds = array_merge($relevantMRFIds, $scdMRFIds);
+        }
+        
+        // Remove duplicates
+        $relevantMRFIds = array_unique($relevantMRFIds);
+
         // Build query: Show activities where:
         // 1. User performed the action (user_id matches)
-        // 2. OR activity relates to user's MRFs
+        // 2. OR activity relates to user's MRFs (based on role)
         // 3. OR activity relates to user's quotations (if vendor)
         $query = Activity::query()
-            ->where(function($q) use ($user, $userMRFIds, $vendorId) {
+            ->where(function($q) use ($user, $relevantMRFIds, $vendorId) {
                 // Activities performed by this user
-                $q->where('user_id', $user->id)
-                  // OR activities related to user's MRFs
-                  ->orWhere(function($mrfQ) use ($userMRFIds) {
-                      if (!empty($userMRFIds)) {
-                          $mrfQ->where('entity_type', 'mrf')
-                               ->whereIn('entity_id', $userMRFIds);
-                      }
-                  });
+                $q->where('user_id', $user->id);
+                
+                // OR activities related to relevant MRFs (based on role)
+                if (!empty($relevantMRFIds)) {
+                    $q->orWhere(function($mrfQ) use ($relevantMRFIds) {
+                        $mrfQ->where('entity_type', 'mrf')
+                             ->whereIn('entity_id', $relevantMRFIds);
+                    });
+                }
                 
                 // For vendors, also include activities related to their quotations
                 if ($vendorId) {

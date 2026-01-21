@@ -41,25 +41,101 @@ class QuotationController extends Controller
             $query->where('status', $request->status);
         }
 
-        $quotations = $query->orderBy('created_at', 'desc')->get();
+        $quotations = $query->with('items')->orderBy('created_at', 'desc')->get();
 
-        return response()->json($quotations->map(function($quotation) {
+        return response()->json([
+            'success' => true,
+            'data' => $quotations->map(function($quotation) {
+                // Calculate delivery_days from delivery_date if not provided
+                $deliveryDays = $quotation->delivery_days;
+                if (!$deliveryDays && $quotation->delivery_date) {
+                    $deliveryDays = now()->diffInDays($quotation->delivery_date, false);
+                    if ($deliveryDays < 0) {
+                        $deliveryDays = 0;
+                    }
+                }
+                
+                // Get submitted date (prefer submitted_at, fallback to created_at)
+                $submittedDate = $quotation->submitted_at ?? $quotation->created_at;
+                $createdAt = $quotation->created_at;
+                
             return [
+                    // ID fields
                 'id' => $quotation->quotation_id,
                 'rfqId' => $quotation->rfq ? $quotation->rfq->rfq_id : null,
+                    'rfq_id' => $quotation->rfq ? $quotation->rfq->rfq_id : null,
                 'vendorId' => $quotation->vendor ? $quotation->vendor->vendor_id : null,
+                    'vendor_id' => $quotation->vendor ? $quotation->vendor->vendor_id : null,
                 'vendorName' => $quotation->vendor_name,
-                'price' => (float) $quotation->price,
-                'totalAmount' => (float) $quotation->total_amount,
-                'deliveryDate' => $quotation->delivery_date ? $quotation->delivery_date->format('Y-m-d') : null,
-                'notes' => $quotation->notes,
-                'status' => $quotation->status,
-                'reviewStatus' => $quotation->review_status ?? 'pending',
-                'rejectionReason' => $quotation->rejection_reason,
-                'revisionNotes' => $quotation->revision_notes,
-                'approvalRemarks' => $quotation->approval_remarks,
-            ];
-        }));
+                    'vendor_name' => $quotation->vendor_name,
+                    
+                    // Amount fields (both formats)
+                    'price' => (string) ($quotation->price ?? $quotation->total_amount),
+                    'totalAmount' => (float) $quotation->total_amount,
+                    'total_amount' => (float) $quotation->total_amount,
+                    'currency' => $quotation->currency ?? 'NGN',
+                    
+                    // Delivery fields (both formats)
+                    'delivery_days' => $deliveryDays,
+                    'deliveryDays' => $deliveryDays,
+                    'delivery_date' => $quotation->delivery_date ? $quotation->delivery_date->format('Y-m-d') : null,
+                    'deliveryDate' => $quotation->delivery_date ? $quotation->delivery_date->format('Y-m-d') : null,
+                    
+                    // Payment terms (all variants)
+                    'payment_terms' => $quotation->payment_terms ?? null,
+                    'paymentTerms' => $quotation->payment_terms ?? null,
+                    'payment_terms_text' => $quotation->payment_terms ?? null,
+                    
+                    // Validity and warranty
+                    'validity_days' => $quotation->validity_days ?? null,
+                    'validityDays' => $quotation->validity_days ?? null,
+                    'warranty_period' => $quotation->warranty_period ?? null,
+                    'warrantyPeriod' => $quotation->warranty_period ?? null,
+                    
+                    // Date fields (all formats)
+                    'submitted_date' => $submittedDate ? $submittedDate->toIso8601String() : null,
+                    'submittedDate' => $submittedDate ? $submittedDate->toIso8601String() : null,
+                    'submitted_at' => $submittedDate ? $submittedDate->toIso8601String() : null,
+                    'created_at' => $createdAt ? $createdAt->toIso8601String() : null,
+                    'createdAt' => $createdAt ? $createdAt->toIso8601String() : null,
+                    
+                    // Status fields
+                    'status' => $quotation->status ?? 'Pending',
+                    'reviewStatus' => $quotation->review_status ?? 'pending',
+                    'review_status' => $quotation->review_status ?? 'pending',
+                    
+                    // Notes and remarks
+                    'notes' => $quotation->notes ?? null,
+                    'remarks' => $quotation->approval_remarks ?? $quotation->notes ?? null,
+                    'rejectionReason' => $quotation->rejection_reason ?? null,
+                    'rejection_reason' => $quotation->rejection_reason ?? null,
+                    'revisionNotes' => $quotation->revision_notes ?? null,
+                    'revision_notes' => $quotation->revision_notes ?? null,
+                    'approvalRemarks' => $quotation->approval_remarks ?? null,
+                    'approval_remarks' => $quotation->approval_remarks ?? null,
+                    
+                    // Attachments
+                    'attachments' => $quotation->attachments ?? [],
+                    
+                    // Items
+                    'items' => $quotation->items->map(function($item) {
+                        return [
+                            'id' => $item->id,
+                            'item_name' => $item->item_name,
+                            'name' => $item->item_name,
+                            'description' => $item->description ?? '',
+                            'quantity' => $item->quantity,
+                            'unit' => $item->unit ?? 'unit',
+                            'unit_price' => (float) $item->unit_price,
+                            'unitPrice' => (float) $item->unit_price,
+                            'total_price' => (float) $item->total_price,
+                            'totalPrice' => (float) $item->total_price,
+                            'specifications' => $item->specifications ?? '',
+                        ];
+                    }),
+                ];
+            })
+        ]);
     }
 
     /**
