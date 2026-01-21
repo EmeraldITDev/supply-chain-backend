@@ -937,7 +937,7 @@ class MRFWorkflowController extends Controller
                     'current_status' => $mrf->status,
                     'current_stage' => $mrf->current_stage,
                     'has_existing_po' => $hasExistingPO
-            ], 422);
+                ], 422);
             }
         }
 
@@ -968,23 +968,48 @@ class MRFWorkflowController extends Controller
             ], 422);
         }
 
-        // Validate request - accept JSON body with po_number
-        $validator = Validator::make($request->all(), [
-            'po_number' => 'required|string|max:255',
+        // Check if this is a file upload (Mode 1) or auto-generation (Mode 2)
+        $isFileUpload = $request->hasFile('unsigned_po');
+        $isAutoGeneration = $request->has('po_number') && !$isFileUpload;
+        
+        if ($isFileUpload) {
+            // Mode 1: File Upload (Existing behavior)
+            $validator = Validator::make($request->all(), [
+                'po_number' => 'nullable|string|max:255',
+                'unsigned_po' => 'required|file|mimes:pdf,doc,docx|max:20480',
+                'remarks' => 'nullable|string',
+            ]);
+            
+            if ($validator->fails()) {
+                        return response()->json([
+                            'success' => false,
+                            'error' => 'Validation failed',
+                    'errors' => $validator->errors(),
+                    'code' => 'VALIDATION_ERROR'
+                        ], 422);
+            }
+            
+            // Use provided PO number or auto-generate
+            $poNumber = $request->po_number ?? $this->generatePONumber($mrf);
+        } else {
+            // Mode 2: Auto-Generation (JSON body)
+            $validator = Validator::make($request->all(), [
+                'po_number' => 'required|string|max:255',
             'remarks' => 'nullable|string',
-        ]);
+            ]);
 
         if ($validator->fails()) {
-            return response()->json([
-                'success' => false,
-                'error' => 'Validation failed',
-                'errors' => $validator->errors(),
-                'code' => 'VALIDATION_ERROR'
-            ], 422);
-        }
+                return response()->json([
+                    'success' => false,
+                    'error' => 'Validation failed',
+                    'errors' => $validator->errors(),
+                    'code' => 'VALIDATION_ERROR'
+                ], 422);
+            }
 
-        // Use provided PO number or auto-generate
-        $poNumber = $request->po_number;
+            // Use provided PO number
+            $poNumber = $request->po_number;
+        }
         
         // Check if PO number already exists (for uniqueness)
         if (MRF::where('po_number', $poNumber)->where('id', '!=', $mrf->id)->exists()) {
@@ -995,29 +1020,102 @@ class MRFWorkflowController extends Controller
             ], 422);
         }
 
-        // Fetch all required data for PO generation
-        $poData = $this->fetchPOData($mrf, $rfq);
-        
-        if (!$poData['success']) {
+        // Handle file upload mode (Mode 1)
+        if ($isFileUpload) {
+                        $file = $request->file('unsigned_po');
+            
+            // Validate file
+            if (!$file->isValid()) {
             return response()->json([
                 'success' => false,
-                'error' => $poData['error'],
-                'code' => $poData['code']
-            ], $poData['status'] ?? 400);
+                    'error' => 'Invalid file upload',
+                    'code' => 'FILE_UPLOAD_ERROR'
+            ], 422);
         }
 
-
-        // Generate PO PDF document
-        try {
-            $pdfContent = $this->generatePOPDF($poData['data'], $poNumber, $user);
+            // Upload file to storage
+        $poUrl = null;
+        $poShareUrl = null;
+        $useOneDrive = $this->oneDriveService !== null;
+        
+            try {
+                if ($useOneDrive && $this->oneDriveService) {
+                    $folder = 'PurchaseOrders/' . date('Y/m');
+                    $poFileName = "PO_{$poNumber}_{$mrf->mrf_id}." . $file->getClientOriginalExtension();
+                    
+                    $oneDriveResult = $this->oneDriveService->uploadFile($file, $folder, $poFileName);
+                    $poUrl = $oneDriveResult['webUrl'] ?? null;
+                    
+                    try {
+                        $poShareUrl = $this->oneDriveService->createSharingLink($oneDriveResult['path'], 'view');
+                    } catch (\Exception $e) {
+                        Log::warning('Failed to create sharing link for PO', ['error' => $e->getMessage()]);
+                    }
+                } else {
+                    $disk = config('filesystems.documents_disk', env('DOCUMENTS_DISK', 'public'));
+                    $poFileName = "po_{$poNumber}_" . time() . "." . $file->getClientOriginalExtension();
+                    $poPath = "purchase-orders/{$poFileName}";
+                    
+                    $directory = dirname($poPath);
+                    if (!Storage::disk($disk)->exists($directory)) {
+                        Storage::disk($disk)->makeDirectory($directory, 0755, true);
+                    }
+                    
+                    Storage::disk($disk)->putFileAs(dirname($poPath), $file, basename($poPath));
+                    
+                    if ($disk === 'public' || $disk === 'local') {
+                        $poUrl = Storage::disk($disk)->url($poPath);
+                        if (!filter_var($poUrl, FILTER_VALIDATE_URL)) {
+                            $baseUrl = config('app.url');
+                            $poUrl = rtrim($baseUrl, '/') . '/' . ltrim($poUrl, '/');
+                        }
+                    } else {
+                        $poUrl = Storage::disk($disk)->url($poPath);
+                    }
+                    
+                    $poShareUrl = $poUrl;
+                }
+                
+                if (empty($poUrl)) {
+                    throw new \Exception('Failed to upload PO file');
+                }
+            } catch (\Exception $e) {
+                Log::error('PO file upload failed', [
+                'mrf_id' => $id,
+                    'po_number' => $poNumber,
+                    'error' => $e->getMessage()
+            ]);
             
-            // Save PDF to storage
-            $poUrl = null;
-            $poShareUrl = null;
-            $useOneDrive = $this->oneDriveService !== null;
+            return response()->json([
+                'success' => false,
+                    'error' => 'Failed to upload PO file: ' . $e->getMessage(),
+                    'code' => 'UPLOAD_FAILED'
+                ], 500);
+            }
+        } else {
+            // Mode 2: Auto-Generation
+            // Fetch all required data for PO generation
+            $poData = $this->fetchPOData($mrf, $rfq);
+            
+            if (!$poData['success']) {
+            return response()->json([
+                'success' => false,
+                    'error' => $poData['error'],
+                    'code' => $poData['code']
+                ], $poData['status'] ?? 400);
+            }
+
+            // Generate PO PDF document
+            try {
+                $pdfContent = $this->generatePOPDF($poData['data'], $poNumber, $user);
+                
+                // Save PDF to storage
+                $poUrl = null;
+                $poShareUrl = null;
+                $useOneDrive = $this->oneDriveService !== null;
             
             // Delete old PO file if regenerating
-            if ($isRegeneration && $mrf->unsigned_po_url) {
+                    if ($isRegeneration && $mrf->unsigned_po_url) {
                 try {
                     if ($useOneDrive && $this->oneDriveService) {
                         Log::info('Attempting to delete old PO file from OneDrive', [
@@ -1103,8 +1201,8 @@ class MRFWorkflowController extends Controller
                 $poPath = "purchase-orders/{$poFileName}";
                 
                 // Ensure directory exists
-                $directory = dirname($poPath);
-                if (!Storage::disk($disk)->exists($directory)) {
+                    $directory = dirname($poPath);
+                    if (!Storage::disk($disk)->exists($directory)) {
                     Storage::disk($disk)->makeDirectory($directory, 0755, true);
                 }
                 
@@ -1112,13 +1210,13 @@ class MRFWorkflowController extends Controller
                 Storage::disk($disk)->put($poPath, $pdfContent);
                 
                 // Get URL
-                if ($disk === 'public' || $disk === 'local') {
+                    if ($disk === 'public' || $disk === 'local') {
                     $poUrl = Storage::disk($disk)->url($poPath);
-                    if (!filter_var($poUrl, FILTER_VALIDATE_URL)) {
-                        $baseUrl = config('app.url');
-                        $poUrl = rtrim($baseUrl, '/') . '/' . ltrim($poUrl, '/');
-                    }
-                } else {
+                        if (!filter_var($poUrl, FILTER_VALIDATE_URL)) {
+                            $baseUrl = config('app.url');
+                            $poUrl = rtrim($baseUrl, '/') . '/' . ltrim($poUrl, '/');
+                        }
+                    } else {
                     $poUrl = Storage::disk($disk)->url($poPath);
                 }
                 
@@ -1135,32 +1233,33 @@ class MRFWorkflowController extends Controller
             }
             
             if (empty($poUrl)) {
-                throw new \Exception('PO PDF generation failed - no URL was generated');
+                    throw new \Exception('PO PDF generation failed - no URL was generated');
             }
             
         } catch (\Exception $e) {
-            Log::error('PO PDF generation failed', [
+                Log::error('PO PDF generation failed', [
                 'mrf_id' => $id,
                 'po_number' => $poNumber,
                 'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
+                    'trace' => $e->getTraceAsString()
             ]);
             
             return response()->json([
                 'success' => false,
-                'error' => 'Failed to generate PO document: ' . $e->getMessage(),
-                'code' => 'PDF_GENERATION_FAILED'
+                    'error' => 'Failed to generate PO document: ' . $e->getMessage(),
+                    'code' => 'PDF_GENERATION_FAILED'
             ], 500);
+            }
         }
 
-        // Update MRF
+        // Update MRF - set workflow state to finance after PO generation
         $updateData = [
             'po_number' => $poNumber,
             'unsigned_po_url' => $poUrl,
             'po_generated_at' => now(),
             'workflow_state' => WorkflowStateService::STATE_PO_GENERATED,
-            'status' => 'supply_chain',
-            'current_stage' => 'supply_chain',
+            'status' => 'finance', // Changed to finance as per requirements
+            'current_stage' => 'finance', // Changed to finance as per requirements
             'rejection_reason' => null, // Clear rejection reason if regenerating
         ];
         
@@ -1191,7 +1290,7 @@ class MRFWorkflowController extends Controller
                 'user_name' => $user->name,
                 'entity_type' => 'mrf',
                 'entity_id' => $mrf->mrf_id,
-                'status' => 'supply_chain',
+                'status' => 'finance',
             ]);
         } catch (\Exception $e) {
             Log::warning('Failed to log PO generation activity', [
@@ -1201,17 +1300,54 @@ class MRFWorkflowController extends Controller
             ]);
         }
 
-        // Notify Supply Chain Director
+        // Notify Finance team about PO generation
+        try {
+            $financeTeam = \App\Models\User::whereIn('role', ['finance', 'admin'])->get();
+            
+            foreach ($financeTeam as $finance) {
+                $finance->notify(new \App\Notifications\SystemAnnouncementNotification(
+                    'PO Generated',
+                    "Purchase Order {$poNumber} for MRF {$mrf->mrf_id} has been generated and is ready for review.",
+                    "/mrfs/{$mrf->mrf_id}",
+                    'high'
+                ));
+            }
+            
+            Log::info('PO generation notification sent to Finance team', [
+                'mrf_id' => $mrf->mrf_id,
+                'po_number' => $poNumber
+            ]);
+        } catch (\Exception $e) {
+            Log::warning('Failed to send PO generation notification to Finance team', [
+                'mrf_id' => $mrf->mrf_id,
+                'po_number' => $poNumber,
+                'error' => $e->getMessage()
+            ]);
+        }
+        
+        // Also notify Supply Chain Director (for signature workflow)
         $this->notificationService->notifyPOReadyForSignature($mrf);
+
+        // Refresh MRF to get updated values
+        $mrf->refresh();
 
         return response()->json([
             'success' => true,
             'message' => 'PO generated successfully',
             'data' => [
-                'mrf_id' => $mrf->mrf_id,
+                'mrf' => [
+                    'id' => $mrf->mrf_id,
                 'po_number' => $mrf->po_number,
+                    'poNumber' => $mrf->po_number,
                 'unsigned_po_url' => $mrf->unsigned_po_url,
+                    'unsignedPOUrl' => $mrf->unsigned_po_url,
+                    'unsigned_po_share_url' => $mrf->unsigned_po_share_url,
+                    'unsignedPOShareUrl' => $mrf->unsigned_po_share_url,
+                    'workflow_state' => $mrf->workflow_state,
+                    'workflowState' => $mrf->workflow_state,
                 'status' => $mrf->status,
+                ],
+                'po_url' => $mrf->unsigned_po_url,
             ]
         ]);
     }
@@ -1987,13 +2123,13 @@ class MRFWorkflowController extends Controller
             // Very rare case - add sequence number
             $sequence = 1;
             $lastPO = MRF::where('po_number', 'like', "{$poNumber}-%")
-            ->orderBy('po_number', 'desc')
-            ->first();
-
-        if ($lastPO && preg_match('/-(\d+)$/', $lastPO->po_number, $matches)) {
+                ->orderBy('po_number', 'desc')
+                ->first();
+            
+            if ($lastPO && preg_match('/-(\d+)$/', $lastPO->po_number, $matches)) {
                 $sequence = (int) $matches[1] + 1;
-        }
-
+            }
+            
             $poNumber = "{$poNumber}-{$sequence}";
         }
 

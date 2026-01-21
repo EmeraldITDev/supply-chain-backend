@@ -120,6 +120,17 @@ class MRFController extends Controller
                 'chairman_approved' => $mrf->chairman_approved ?? false,
                 'chairman_approved_at' => $mrf->chairman_approved_at?->toIso8601String(),
                 'chairman_remarks' => $mrf->chairman_remarks,
+                // PO information (both formats)
+                'po_number' => $mrf->po_number,
+                'poNumber' => $mrf->po_number,
+                'unsigned_po_url' => $mrf->unsigned_po_url,
+                'unsignedPOUrl' => $mrf->unsigned_po_url,
+                'unsigned_po_share_url' => $mrf->unsigned_po_share_url,
+                'unsignedPOShareUrl' => $mrf->unsigned_po_share_url,
+                'signed_po_url' => $mrf->signed_po_url,
+                'signedPOUrl' => $mrf->signed_po_url,
+                'po_generated_at' => $mrf->po_generated_at?->toIso8601String(),
+                'poGeneratedAt' => $mrf->po_generated_at?->toIso8601String(),
             ];
         }));
     }
@@ -196,12 +207,19 @@ class MRFController extends Controller
             'chairmanApproved' => (bool) $mrf->chairman_approved,
             'chairmanApprovedAt' => $mrf->chairman_approved_at ? $mrf->chairman_approved_at->toIso8601String() : null,
             // PO information - allows Supply Chain to review/download unsigned PO
+            'po_number' => $mrf->po_number,
             'poNumber' => $mrf->po_number,
+            'unsigned_po_url' => $mrf->unsigned_po_url,
             'unsignedPoUrl' => $mrf->unsigned_po_url,
+            'unsigned_po_share_url' => $mrf->unsigned_po_share_url,
             'unsignedPoShareUrl' => $mrf->unsigned_po_share_url,
+            'signed_po_url' => $mrf->signed_po_url,
             'signedPoUrl' => $mrf->signed_po_url,
+            'signed_po_share_url' => $mrf->signed_po_share_url,
             'signedPoShareUrl' => $mrf->signed_po_share_url,
+            'po_generated_at' => $mrf->po_generated_at?->toIso8601String(),
             'poGeneratedAt' => $mrf->po_generated_at?->toIso8601String(),
+            'po_signed_at' => $mrf->po_signed_at?->toIso8601String(),
             'poSignedAt' => $mrf->po_signed_at?->toIso8601String(),
         ]);
     }

@@ -245,47 +245,101 @@ class RFQWorkflowController extends Controller
                 // Handle missing vendor gracefully
                 $vendor = $quotation->vendor;
                 
+                // Calculate delivery_days from delivery_date if not provided
+                $deliveryDays = $quotation->delivery_days;
+                if (!$deliveryDays && $quotation->delivery_date) {
+                    $deliveryDays = now()->diffInDays($quotation->delivery_date, false);
+                    if ($deliveryDays < 0) {
+                        $deliveryDays = 0; // If delivery date is in the past, set to 0
+                    }
+                }
+                
+                // Get submitted date (prefer submitted_at, fallback to created_at)
+                $submittedDate = $quotation->submitted_at ?? $quotation->created_at;
+                $createdAt = $quotation->created_at;
+                
                 return [
                     'quotation' => [
+                        // ID fields
                         'id' => $quotation->quotation_id,
+                        'rfq_id' => $quotation->rfq_id,
+                        'vendor_id' => $quotation->vendor_id,
                         'quoteNumber' => $quotation->quote_number,
+                        
+                        // Amount fields (both formats)
+                        'total_amount' => (float) $quotation->total_amount,
                         'totalAmount' => (float) $quotation->total_amount,
+                        'price' => (string) ($quotation->price ?? $quotation->total_amount),
                         'currency' => $quotation->currency ?? 'NGN',
-                        'deliveryDays' => $quotation->delivery_days ?? null,
+                        
+                        // Delivery fields (both formats)
+                        'delivery_days' => $deliveryDays,
+                        'deliveryDays' => $deliveryDays,
+                        'delivery_date' => $quotation->delivery_date?->format('Y-m-d'),
                         'deliveryDate' => $quotation->delivery_date?->format('Y-m-d'),
+                        
+                        // Payment terms (both formats)
+                        'payment_terms' => $quotation->payment_terms ?? null,
                         'paymentTerms' => $quotation->payment_terms ?? null,
-                        'validityDays' => $quotation->validity_days,
-                        'warrantyPeriod' => $quotation->warranty_period,
-                        'notes' => $quotation->notes,
-                        'status' => $quotation->status,
+                        'payment_terms_text' => $quotation->payment_terms ?? null,
+                        
+                        // Validity and warranty
+                        'validity_days' => $quotation->validity_days ?? null,
+                        'validityDays' => $quotation->validity_days ?? null,
+                        'warranty_period' => $quotation->warranty_period ?? null,
+                        'warrantyPeriod' => $quotation->warranty_period ?? null,
+                        
+                        // Status fields
+                        'status' => $quotation->status ?? 'submitted',
                         'reviewStatus' => $quotation->review_status ?? 'pending',
+                        
+                        // Date fields (all formats)
+                        'submitted_date' => $submittedDate?->toIso8601String(),
+                        'submittedDate' => $submittedDate?->toIso8601String(),
+                        'submitted_at' => $submittedDate?->toIso8601String(),
+                        'created_at' => $createdAt?->toIso8601String(),
+                        'createdAt' => $createdAt?->toIso8601String(),
+                        
+                        // Notes and remarks
+                        'notes' => $quotation->notes ?? null,
+                        'remarks' => $quotation->approval_remarks ?? $quotation->notes ?? null,
+                        
+                        // Attachments
                         'attachments' => $quotation->attachments ?? [],
-                        'submittedAt' => $quotation->submitted_at?->toIso8601String(),
                     ],
                     'vendor' => $vendor ? [
                         'id' => $vendor->vendor_id,
                         'name' => $vendor->name,
+                        'company_name' => $vendor->name,
                         'email' => $vendor->email,
                         'phone' => $vendor->phone,
-                        'rating' => (float) $vendor->rating,
+                        'rating' => (float) ($vendor->rating ?? 0),
+                        'total_orders' => (int) ($vendor->total_orders ?? 0),
+                        'orders' => (int) ($vendor->total_orders ?? 0),
                     ] : [
                         'id' => null,
                         'name' => $quotation->vendor_name ?? 'Unknown Vendor',
+                        'company_name' => $quotation->vendor_name ?? 'Unknown Vendor',
                         'email' => null,
                         'phone' => null,
                         'rating' => 0,
+                        'total_orders' => 0,
+                        'orders' => 0,
                     ],
                     'items' => $quotation->items->map(function ($item) {
                         return [
                             'id' => $item->id,
                             'rfq_item_id' => $item->rfq_item_id,
                             'item_name' => $item->item_name,
-                            'description' => $item->description,
+                            'name' => $item->item_name,
+                            'description' => $item->description ?? '',
                             'quantity' => $item->quantity,
-                            'unit' => $item->unit,
+                            'unit' => $item->unit ?? 'unit',
                             'unit_price' => (float) $item->unit_price,
+                            'unitPrice' => (float) $item->unit_price,
                             'total_price' => (float) $item->total_price,
-                            'specifications' => $item->specifications,
+                            'totalPrice' => (float) $item->total_price,
+                            'specifications' => $item->specifications ?? '',
                         ];
                     }),
                 ];
