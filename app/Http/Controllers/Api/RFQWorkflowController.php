@@ -32,7 +32,7 @@ class RFQWorkflowController extends Controller
     public function getVendorRFQs(Request $request)
     {
         $user = $request->user();
-
+        
         // Verify user is a vendor - check both direct role field and Spatie roles
         $isVendor = false;
         if ($user->role === 'vendor') {

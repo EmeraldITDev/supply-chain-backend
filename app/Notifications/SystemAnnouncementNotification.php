@@ -38,12 +38,12 @@ class SystemAnnouncementNotification extends Notification implements ShouldQueue
             }
         } else {
             // Standard usage: actionUrl is string, priority might be array or string
-            $this->actionUrl = $actionUrl;
+        $this->actionUrl = $actionUrl;
             if (is_array($priority)) {
                 $this->metadata = $priority;
                 $this->priority = $priority['priority'] ?? 'normal';
             } else {
-                $this->priority = $priority;
+        $this->priority = $priority;
                 $this->metadata = $metadata;
             }
         }
