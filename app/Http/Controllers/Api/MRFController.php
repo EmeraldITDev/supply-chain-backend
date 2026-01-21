@@ -1306,8 +1306,8 @@ class MRFController extends Controller
                 $mrf->rfqs()->delete();
                 $mrf->items()->delete();
                 $mrf->approvalHistory()->delete();
-                
-                $mrf->delete();
+
+        $mrf->delete();
                 
                 Log::info('MRF force deleted by admin', [
                     'mrf_id' => $id,
@@ -1400,10 +1400,10 @@ class MRFController extends Controller
                 'status' => $mrf->status
             ]);
 
-            return response()->json([
-                'success' => true,
-                'message' => 'MRF deleted successfully'
-            ]);
+        return response()->json([
+            'success' => true,
+            'message' => 'MRF deleted successfully'
+        ]);
         } catch (\Exception $e) {
             Log::error('MRF deletion failed', [
                 'mrf_id' => $id,

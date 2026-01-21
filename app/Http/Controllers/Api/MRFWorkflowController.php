@@ -974,21 +974,21 @@ class MRFWorkflowController extends Controller
         
         if ($isFileUpload) {
             // Mode 1: File Upload (Existing behavior)
-            $validator = Validator::make($request->all(), [
+        $validator = Validator::make($request->all(), [
                 'po_number' => 'nullable|string|max:255',
                 'unsigned_po' => 'required|file|mimes:pdf,doc,docx|max:20480',
-                'remarks' => 'nullable|string',
-            ]);
-            
-            if ($validator->fails()) {
+            'remarks' => 'nullable|string',
+        ]);
+
+        if ($validator->fails()) {
                         return response()->json([
                             'success' => false,
                             'error' => 'Validation failed',
-                    'errors' => $validator->errors(),
-                    'code' => 'VALIDATION_ERROR'
+                'errors' => $validator->errors(),
+                'code' => 'VALIDATION_ERROR'
                         ], 422);
-            }
-            
+        }
+
             // Use provided PO number or auto-generate
             $poNumber = $request->po_number ?? $this->generatePONumber($mrf);
         } else {
@@ -1122,7 +1122,7 @@ class MRFWorkflowController extends Controller
                             'po_url' => $mrf->unsigned_po_url
                         ]);
                     } else {
-                        $disk = config('filesystems.documents_disk', 'public');
+        $disk = config('filesystems.documents_disk', 'public');
                         $oldPath = str_replace(Storage::disk($disk)->url(''), '', $mrf->unsigned_po_url);
                         $oldPath = ltrim(str_replace('/storage/', '', $oldPath), '/');
                         if (Storage::disk($disk)->exists($oldPath)) {
@@ -1197,7 +1197,7 @@ class MRFWorkflowController extends Controller
                     throw new \Exception("Storage disk '{$disk}' is not configured.");
                 }
                 
-                $poFileName = "po_{$poNumber}_" . time() . ".pdf";
+        $poFileName = "po_{$poNumber}_" . time() . ".pdf";
                 $poPath = "purchase-orders/{$poFileName}";
                 
                 // Ensure directory exists
@@ -1211,7 +1211,7 @@ class MRFWorkflowController extends Controller
                 
                 // Get URL
                     if ($disk === 'public' || $disk === 'local') {
-                    $poUrl = Storage::disk($disk)->url($poPath);
+        $poUrl = Storage::disk($disk)->url($poPath);
                         if (!filter_var($poUrl, FILTER_VALIDATE_URL)) {
                             $baseUrl = config('app.url');
                             $poUrl = rtrim($baseUrl, '/') . '/' . ltrim($poUrl, '/');
@@ -2145,13 +2145,13 @@ class MRFWorkflowController extends Controller
         $quotation = null;
         if ($rfq->selected_quotation_id) {
             $quotation = Quotation::where('id', $rfq->selected_quotation_id)
-                ->with(['vendor', 'items'])
+                ->with(['vendor'])
                 ->first();
         } else {
             // Fallback: find approved quotation
             $quotation = Quotation::where('rfq_id', $rfq->id)
                 ->where('status', 'Approved')
-                ->with(['vendor', 'items'])
+                ->with(['vendor'])
                 ->orderBy('created_at', 'desc')
                 ->first();
         }
@@ -2176,50 +2176,24 @@ class MRFWorkflowController extends Controller
             ];
         }
         
-        // Get quotation items
-        $quotationItems = $quotation->items;
+        // Fetch items in order: quotation_items -> RFQ items -> MRF items
+        $items = [];
         
-        // If quotation items don't exist, fallback to RFQ items
-        if ($quotationItems->isEmpty()) {
-            // Load RFQ items as fallback
+        // 1. Check quotation_items table (use direct query with quotation auto-increment ID)
+        $quotationItems = QuotationItem::where('quotation_id', $quotation->id)->get();
+        if ($quotationItems->count() > 0) {
+            $items = $quotationItems;
+        }
+        // 2. Fallback to RFQ items
+        else {
             $rfq->load('items');
             $rfqItems = $rfq->items;
-            
-            if ($rfqItems->isEmpty()) {
-                // Try MRF items as last resort
-                $mrf->load('items');
-                $mrfItems = $mrf->items;
-                
-                if ($mrfItems->isEmpty()) {
-                    return [
-                        'success' => false,
-                        'error' => 'No items found in quotation, RFQ, or MRF. Please ensure items are added.',
-                        'code' => 'ITEMS_MISSING',
-                        'status' => 400
-                    ];
-                }
-                
-                // Use MRF items - calculate unit price from total
-                $itemCount = $mrfItems->count();
-                $unitPrice = $itemCount > 0 ? ($quotation->total_amount / $itemCount) : 0;
-                
-                $quotationItems = $mrfItems->map(function($item) use ($unitPrice, $quotation) {
-                    return (object) [
-                        'item_name' => $item->item_name ?? 'Item',
-                        'description' => $item->description ?? '',
-                        'quantity' => $item->quantity ?? 1,
-                        'unit' => $item->unit ?? 'unit',
-                        'unit_price' => $unitPrice,
-                        'total_price' => $unitPrice * ($item->quantity ?? 1),
-                        'specifications' => $item->specifications ?? '',
-                    ];
-                });
-            } else {
-                // Use RFQ items - calculate unit price from total
+            if ($rfqItems->count() > 0) {
+                // Calculate unit price from quotation total
                 $itemCount = $rfqItems->count();
                 $unitPrice = $itemCount > 0 ? ($quotation->total_amount / $itemCount) : 0;
                 
-                $quotationItems = $rfqItems->map(function($item) use ($unitPrice, $quotation) {
+                $items = $rfqItems->map(function($item) use ($unitPrice) {
                     return (object) [
                         'item_name' => $item->item_name ?? 'Item',
                         'description' => $item->description ?? '',
@@ -2231,6 +2205,43 @@ class MRFWorkflowController extends Controller
                     ];
                 });
             }
+            // 3. Fallback to MRF items
+            else {
+                $mrf->load('items');
+                $mrfItems = $mrf->items;
+                if ($mrfItems->count() > 0) {
+                    // Calculate unit price from quotation total
+                    $itemCount = $mrfItems->count();
+                    $unitPrice = $itemCount > 0 ? ($quotation->total_amount / $itemCount) : 0;
+                    
+                    $items = $mrfItems->map(function($item) use ($unitPrice) {
+                        return (object) [
+                            'item_name' => $item->item_name ?? 'Item',
+                            'description' => $item->description ?? '',
+                            'quantity' => $item->quantity ?? 1,
+                            'unit' => $item->unit ?? 'unit',
+                            'unit_price' => $unitPrice,
+                            'total_price' => $unitPrice * ($item->quantity ?? 1),
+                            'specifications' => $item->specifications ?? '',
+                        ];
+                    });
+                }
+            }
+        }
+        
+        // If no items found after all fallbacks
+        if (empty($items) || (is_countable($items) && count($items) === 0)) {
+            return [
+                'success' => false,
+                'error' => 'No items found in quotation, RFQ, or MRF. Please ensure items are added.',
+                'code' => 'ITEMS_MISSING',
+                'status' => 400
+            ];
+        }
+        
+        // Convert items to collection if needed
+        if (!($items instanceof \Illuminate\Support\Collection)) {
+            $items = collect($items);
         }
         
         // Get company information from config
@@ -2239,6 +2250,20 @@ class MRFWorkflowController extends Controller
         $companyPhone = env('COMPANY_PHONE', '');
         $companyEmail = env('COMPANY_EMAIL', config('mail.from.address', ''));
         $companyTaxId = env('COMPANY_TAX_ID', '');
+        
+        // Format items for PO template
+        $formattedItems = $items->map(function($item) {
+            return [
+                'name' => $item->item_name ?? 'Item',
+                'item_name' => $item->item_name ?? 'Item',
+                'description' => $item->description ?? '',
+                'quantity' => $item->quantity ?? 1,
+                'unit' => $item->unit ?? 'unit',
+                'unit_price' => (float) ($item->unit_price ?? 0),
+                'total_price' => (float) ($item->total_price ?? 0),
+                'specifications' => $item->specifications ?? '',
+            ];
+        });
         
         return [
             'success' => true,
@@ -2276,17 +2301,7 @@ class MRFWorkflowController extends Controller
                     'address' => $vendor->address,
                     'tax_id' => $vendor->tax_id,
                 ],
-                'items' => $quotationItems->map(function($item) {
-                    return [
-                        'name' => $item->item_name,
-                        'description' => $item->description,
-                        'quantity' => $item->quantity,
-                        'unit' => $item->unit,
-                        'unit_price' => $item->unit_price,
-                        'total_price' => $item->total_price,
-                        'specifications' => $item->specifications,
-                    ];
-                })->toArray(),
+                'items' => $formattedItems->toArray(),
                 'company' => [
                     'name' => $companyName,
                     'address' => $companyAddress,
