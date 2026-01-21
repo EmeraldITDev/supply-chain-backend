@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Activity;
 use App\Models\Quotation;
+use App\Models\QuotationItem;
 use App\Models\RFQ;
 use App\Models\Vendor;
 use Illuminate\Http\Request;
@@ -73,6 +74,16 @@ class QuotationController extends Controller
             'price' => 'required|numeric|min:0',
             'deliveryDate' => 'required|date',
             'notes' => 'nullable|string',
+            'items' => 'nullable|array',
+            'items.*.rfqItemId' => 'nullable|exists:rfq_items,id',
+            'items.*.itemName' => 'nullable|string|max:255',
+            'items.*.name' => 'nullable|string|max:255',
+            'items.*.description' => 'nullable|string',
+            'items.*.quantity' => 'nullable|integer|min:1',
+            'items.*.unit' => 'nullable|string|max:50',
+            'items.*.unitPrice' => 'nullable|numeric|min:0',
+            'items.*.totalPrice' => 'nullable|numeric|min:0',
+            'items.*.specifications' => 'nullable|string',
         ]);
 
         if ($validator->fails()) {
@@ -113,6 +124,21 @@ class QuotationController extends Controller
             ], 403);
         }
 
+        // Calculate total amount from items if provided
+        $calculatedTotal = $request->price;
+        if ($request->has('items') && is_array($request->items) && count($request->items) > 0) {
+            $itemsTotal = 0;
+            foreach ($request->items as $item) {
+                $unitPrice = $item['unitPrice'] ?? $item['unit_price'] ?? 0;
+                $quantity = $item['quantity'] ?? 1;
+                $itemTotal = $item['totalPrice'] ?? $item['total_price'] ?? ($unitPrice * $quantity);
+                $itemsTotal += $itemTotal;
+            }
+            if ($itemsTotal > 0) {
+                $calculatedTotal = $itemsTotal;
+            }
+        }
+
         // Check if quotation already exists
         $existing = Quotation::where('rfq_id', $rfq->id)
             ->where('vendor_id', $vendor->id)
@@ -125,6 +151,7 @@ class QuotationController extends Controller
                 $existing->update([
                     'vendor_name' => $request->vendorName,
                     'price' => $request->price,
+                    'total_amount' => $calculatedTotal,
                     'delivery_date' => $request->deliveryDate,
                     'notes' => $request->notes,
                     'status' => 'Pending',
@@ -133,6 +160,9 @@ class QuotationController extends Controller
                     'submitted_at' => now(),
                 ]);
                 $quotation = $existing;
+                
+                // Delete existing quotation items before creating new ones
+                QuotationItem::where('quotation_id', $quotation->id)->delete();
             } else {
             return response()->json([
                 'success' => false,
@@ -147,7 +177,7 @@ class QuotationController extends Controller
             'vendor_id' => $vendor->id,
             'vendor_name' => $request->vendorName,
             'price' => $request->price,
-            'total_amount' => $request->price, // Set total_amount same as price if not provided
+            'total_amount' => $calculatedTotal,
             'currency' => 'NGN', // Default currency
             'delivery_date' => $request->deliveryDate,
             'validity_days' => 30, // Default validity period
@@ -158,15 +188,66 @@ class QuotationController extends Controller
         ]);
         }
 
+        // Handle quotation items if provided
+        if ($request->has('items') && is_array($request->items) && count($request->items) > 0) {
+            foreach ($request->items as $itemData) {
+                $itemName = $itemData['itemName'] ?? $itemData['name'] ?? 'Item';
+                $description = $itemData['description'] ?? '';
+                $quantity = $itemData['quantity'] ?? 1;
+                $unit = $itemData['unit'] ?? 'unit';
+                $unitPrice = $itemData['unitPrice'] ?? $itemData['unit_price'] ?? 0;
+                $totalPrice = $itemData['totalPrice'] ?? $itemData['total_price'] ?? ($unitPrice * $quantity);
+                $rfqItemId = $itemData['rfqItemId'] ?? $itemData['rfq_item_id'] ?? null;
+                $specifications = $itemData['specifications'] ?? '';
+
+                QuotationItem::create([
+                    'quotation_id' => $quotation->id,
+                    'rfq_item_id' => $rfqItemId,
+                    'item_name' => $itemName,
+                    'description' => $description,
+                    'quantity' => $quantity,
+                    'unit' => $unit,
+                    'unit_price' => $unitPrice,
+                    'total_price' => $totalPrice,
+                    'specifications' => $specifications,
+                ]);
+            }
+            
+            // Recalculate total from items and update quotation
+            $itemsTotal = QuotationItem::where('quotation_id', $quotation->id)->sum('total_price');
+            if ($itemsTotal > 0) {
+                $quotation->update([
+                    'total_amount' => $itemsTotal,
+                    'price' => $itemsTotal, // Also update price field for backward compatibility
+                ]);
+            }
+        }
+
+        // Load items for response
+        $quotation->load('items');
+
         return response()->json([
             'id' => $quotation->quotation_id,
             'rfqId' => $rfq->rfq_id,
             'vendorId' => $vendor->vendor_id,
             'vendorName' => $quotation->vendor_name,
             'price' => (float) $quotation->price,
+            'totalAmount' => (float) $quotation->total_amount,
             'deliveryDate' => $quotation->delivery_date->format('Y-m-d'),
             'notes' => $quotation->notes,
             'status' => $quotation->status,
+            'items' => $quotation->items->map(function($item) {
+                return [
+                    'id' => $item->id,
+                    'itemName' => $item->item_name,
+                    'description' => $item->description,
+                    'quantity' => $item->quantity,
+                    'unit' => $item->unit,
+                    'unitPrice' => (float) $item->unit_price,
+                    'totalPrice' => (float) $item->total_price,
+                    'specifications' => $item->specifications,
+                ];
+            }),
         ], 201);
     }
 

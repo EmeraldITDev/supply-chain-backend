@@ -2042,13 +2042,59 @@ class MRFWorkflowController extends Controller
         
         // Get quotation items
         $quotationItems = $quotation->items;
+        
+        // If quotation items don't exist, fallback to RFQ items
         if ($quotationItems->isEmpty()) {
-            return [
-                'success' => false,
-                'error' => 'Quotation items are missing',
-                'code' => 'QUOTATION_ITEMS_MISSING',
-                'status' => 400
-            ];
+            // Load RFQ items as fallback
+            $rfq->load('items');
+            $rfqItems = $rfq->items;
+            
+            if ($rfqItems->isEmpty()) {
+                // Try MRF items as last resort
+                $mrf->load('items');
+                $mrfItems = $mrf->items;
+                
+                if ($mrfItems->isEmpty()) {
+                    return [
+                        'success' => false,
+                        'error' => 'No items found in quotation, RFQ, or MRF. Please ensure items are added.',
+                        'code' => 'ITEMS_MISSING',
+                        'status' => 400
+                    ];
+                }
+                
+                // Use MRF items - calculate unit price from total
+                $itemCount = $mrfItems->count();
+                $unitPrice = $itemCount > 0 ? ($quotation->total_amount / $itemCount) : 0;
+                
+                $quotationItems = $mrfItems->map(function($item) use ($unitPrice, $quotation) {
+                    return (object) [
+                        'item_name' => $item->item_name ?? 'Item',
+                        'description' => $item->description ?? '',
+                        'quantity' => $item->quantity ?? 1,
+                        'unit' => $item->unit ?? 'unit',
+                        'unit_price' => $unitPrice,
+                        'total_price' => $unitPrice * ($item->quantity ?? 1),
+                        'specifications' => $item->specifications ?? '',
+                    ];
+                });
+            } else {
+                // Use RFQ items - calculate unit price from total
+                $itemCount = $rfqItems->count();
+                $unitPrice = $itemCount > 0 ? ($quotation->total_amount / $itemCount) : 0;
+                
+                $quotationItems = $rfqItems->map(function($item) use ($unitPrice, $quotation) {
+                    return (object) [
+                        'item_name' => $item->item_name ?? 'Item',
+                        'description' => $item->description ?? '',
+                        'quantity' => $item->quantity ?? 1,
+                        'unit' => $item->unit ?? 'unit',
+                        'unit_price' => $unitPrice,
+                        'total_price' => $unitPrice * ($item->quantity ?? 1),
+                        'specifications' => $item->specifications ?? '',
+                    ];
+                });
+            }
         }
         
         // Get company information from config
