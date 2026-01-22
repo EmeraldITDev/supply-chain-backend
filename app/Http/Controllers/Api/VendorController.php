@@ -260,7 +260,7 @@ class VendorController extends Controller
                         $fileUrl = url("/api/vendors/registrations/{$reg->id}/documents/{$doc['id']}/download");
                     }
                 } else if ($fileShareUrl) {
-                    // If we have a OneDrive share URL, use it as the file URL
+                    // If we have a share URL (S3 or other storage), use it as the file URL
                     $fileUrl = $fileShareUrl;
                 }
                 
@@ -853,19 +853,19 @@ class VendorController extends Controller
             ], 404);
         }
 
-        // Check if document is in OneDrive (has share URL)
+        // Check if document has a share URL (S3 temporary URL or other)
         if ($document->file_share_url) {
-            // Redirect to OneDrive share URL for download
+            // Redirect to share URL for download
             return redirect($document->file_share_url);
         }
         
-        // Get document content from local/S3 storage
+        // Get document content from S3/local storage
         $content = $documentService->getDocumentContent($document);
 
         if ($content === false) {
             return response()->json([
                 'success' => false,
-                'error' => 'Document file not found in storage. If this is a OneDrive file, please use the share URL.',
+                'error' => 'Document file not found in storage.',
                 'code' => 'FILE_NOT_FOUND',
                 'has_share_url' => !empty($document->file_share_url),
                 'share_url' => $document->file_share_url

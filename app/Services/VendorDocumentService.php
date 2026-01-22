@@ -11,24 +11,6 @@ use Illuminate\Support\Str;
 
 class VendorDocumentService
 {
-    protected ?OneDriveService $oneDriveService;
-
-    public function __construct()
-    {
-        // Initialize OneDriveService if credentials are configured
-        try {
-            if (config('filesystems.disks.onedrive.client_id') && 
-                config('filesystems.disks.onedrive.client_secret') &&
-                config('filesystems.disks.onedrive.tenant_id')) {
-                $this->oneDriveService = app(OneDriveService::class);
-            } else {
-                $this->oneDriveService = null;
-            }
-        } catch (\Exception $e) {
-            Log::warning('OneDriveService initialization failed in VendorDocumentService', ['error' => $e->getMessage()]);
-            $this->oneDriveService = null;
-        }
-    }
 
     /**
      * Get the storage disk for vendor documents
@@ -60,7 +42,7 @@ class VendorDocumentService
         \Log::info("Storing documents for vendor registration", [
             'registration_id' => $registration->id,
             'document_count' => count($documents),
-            'using_onedrive' => $this->oneDriveService !== null
+            'disk' => $disk
         ]);
 
         // Sanitize company name for folder structure
@@ -77,56 +59,15 @@ class VendorDocumentService
                 $originalName = $document->getClientOriginalName();
                 $extension = $document->getClientOriginalExtension();
                 $fileName = Str::slug(pathinfo($originalName, PATHINFO_FILENAME)) . '_' . time() . '.' . $extension;
-                
+
                 $filePath = null;
                 $fileUrl = null;
                 $fileShareUrl = null;
-                $useOneDrive = $this->oneDriveService !== null;
-                
-                // Use OneDrive if configured
-                if ($useOneDrive) {
-                    try {
-                        // Upload to OneDrive in VendorDocuments folder (organized by year/company)
-                        $folder = "VendorDocuments/{$year}/{$companyName}";
-                        
-                        $oneDriveResult = $this->oneDriveService->uploadFile($document, $folder, $fileName);
-                        $filePath = $oneDriveResult['path']; // Store OneDrive path
-                        $fileUrl = $oneDriveResult['webUrl'];
-                        
-                        // Create view-only sharing link
-                        try {
-                            $fileShareUrl = $this->oneDriveService->createSharingLink($oneDriveResult['path'], 'view');
-                        } catch (\Exception $e) {
-                            Log::warning('Failed to create sharing link for vendor document', [
-                                'error' => $e->getMessage(),
-                                'file' => $fileName
-                            ]);
-                            // Continue without sharing link
-                        }
-                        
-                        \Log::info("Vendor document uploaded to OneDrive", [
-                            'registration_id' => $registration->id,
-                            'file_name' => $fileName,
-                            'onedrive_path' => $filePath,
-                            'web_url' => $fileUrl,
-                            'share_url' => $fileShareUrl,
-                        ]);
-                    } catch (\Exception $e) {
-                        Log::error('OneDrive upload failed for vendor document, falling back to local storage', [
-                            'error' => $e->getMessage(),
-                            'file' => $fileName,
-                            'registration_id' => $registration->id
-                        ]);
-                        $useOneDrive = false;
-                    }
-                }
-                
-                // Fallback to local/S3 storage if OneDrive is not configured or failed
-                if (!$useOneDrive) {
+
+                // Upload to S3 storage
                     $disk = $this->getStorageDisk();
-                    $basePath = "vendor_documents/{$registration->id}";
+                $basePath = "vendor_documents/{$year}/{$companyName}";
                 $filePath = $document->storeAs($basePath, $fileName, $disk);
-                    $fileUrl = Storage::disk($disk)->url($filePath);
 
                 if (!$filePath) {
                     \Log::error("Failed to store document", [
@@ -136,7 +77,7 @@ class VendorDocumentService
                     continue;
                 }
 
-                    // Verify file was actually stored (only for local/S3)
+                // Verify file was actually stored
                 if (!Storage::disk($disk)->exists($filePath)) {
                     \Log::error("File stored but doesn't exist in storage", [
                         'file_path' => $filePath,
@@ -144,14 +85,35 @@ class VendorDocumentService
                     ]);
                     continue;
                     }
+
+                // Get URL (temporary signed URL for S3, public URL for local)
+                if ($disk === 's3') {
+                    try {
+                        $fileUrl = Storage::disk($disk)->temporaryUrl($filePath, now()->addHours(24));
+                        $fileShareUrl = $fileUrl;
+                    } catch (\Exception $e) {
+                        \Log::warning('S3 temporary URL generation failed, using regular URL', [
+                            'error' => $e->getMessage(),
+                            'path' => $filePath
+                        ]);
+                        $fileUrl = Storage::disk($disk)->url($filePath);
+                        $fileShareUrl = $fileUrl;
+                    }
+                } else {
+                    $fileUrl = Storage::disk($disk)->url($filePath);
+                    if (!filter_var($fileUrl, FILTER_VALIDATE_URL)) {
+                        $baseUrl = config('app.url');
+                        $fileUrl = rtrim($baseUrl, '/') . '/' . ltrim($fileUrl, '/');
+                    }
+                    $fileShareUrl = $fileUrl;
                 }
-                
+
                 // Ensure we have valid filePath and fileUrl before proceeding
                 if (!$filePath || !$fileUrl) {
                     \Log::error("Failed to store document - missing path or URL", [
                         'file_name' => $originalName,
                         'registration_id' => $registration->id,
-                        'use_onedrive' => $useOneDrive
+                        'disk' => $disk
                     ]);
                     continue;
                 }
@@ -163,7 +125,7 @@ class VendorDocumentService
                 \Log::info("Document stored successfully", [
                     'file_path' => $filePath,
                     'file_size' => $fileSize,
-                    'storage' => $useOneDrive ? 'onedrive' : $disk,
+                    'storage' => $disk,
                     'web_url' => $fileUrl,
                     'share_url' => $fileShareUrl,
                 ]);
@@ -207,7 +169,7 @@ class VendorDocumentService
             $registration->update([
                 'documents' => $documentMetadata,
             ]);
-            
+
             \Log::info("Updated registration with document metadata", [
                 'registration_id' => $registration->id,
                 'documents_stored' => count($documentMetadata)
@@ -232,7 +194,7 @@ class VendorDocumentService
     public function getDocumentUrl(string $filePath, $documentId = null, $registrationId = null): string
     {
         $disk = $this->getStorageDisk();
-        
+
         // For S3, generate temporary signed URL (valid for 1 hour)
         if ($disk === 's3') {
             try {
@@ -249,7 +211,7 @@ class VendorDocumentService
                 throw $e;
             }
         }
-        
+
         // For local/public disk, check if file exists
         if (!Storage::disk($disk)->exists($filePath)) {
             // If file doesn't exist, use API download endpoint as fallback
@@ -270,7 +232,7 @@ class VendorDocumentService
             }
             throw new \Exception("File not found: {$filePath}");
         }
-        
+
         // Return public URL for local storage
         return Storage::disk($disk)->url($filePath);
     }
@@ -295,29 +257,13 @@ class VendorDocumentService
      */
     public function getDocumentContent(VendorRegistrationDocument $document)
     {
-        // Check if document is stored in OneDrive
-        if ($document->file_share_url && $this->oneDriveService) {
-            try {
-                // If we have a OneDrive share URL, redirect to it instead of downloading
-                // For OneDrive files, we return a redirect response
-                // The frontend should use the share URL directly
-                return false; // Signal to use share URL instead
-            } catch (\Exception $e) {
-                Log::warning('Failed to access OneDrive document', [
-                    'document_id' => $document->id,
-                    'error' => $e->getMessage()
-                ]);
-            }
-        }
-        
-        // Fallback to local/S3 storage
         $disk = $this->getStorageDisk();
-        
+
         // Check if file exists
         if (!$document->file_path || !Storage::disk($disk)->exists($document->file_path)) {
             return false;
         }
-        
+
         return Storage::disk($disk)->get($document->file_path);
     }
 
@@ -330,7 +276,7 @@ class VendorDocumentService
     public function deleteDocument(VendorRegistrationDocument $document): bool
     {
         $disk = $this->getStorageDisk();
-        
+
         // Delete file from storage
         if (Storage::disk($disk)->exists($document->file_path)) {
             Storage::disk($disk)->delete($document->file_path);

@@ -8,7 +8,6 @@ use App\Models\Activity;
 use App\Services\NotificationService;
 use App\Services\WorkflowStateService;
 use App\Services\PermissionService;
-use App\Services\OneDriveService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
@@ -20,7 +19,6 @@ class MRFController extends Controller
     protected NotificationService $notificationService;
     protected WorkflowStateService $workflowService;
     protected PermissionService $permissionService;
-    protected ?OneDriveService $oneDriveService;
 
     public function __construct(
         NotificationService $notificationService,
@@ -30,20 +28,40 @@ class MRFController extends Controller
         $this->notificationService = $notificationService;
         $this->workflowService = $workflowService;
         $this->permissionService = $permissionService;
-        
-        // Initialize OneDriveService if configured
-        try {
-            if (config('filesystems.disks.onedrive.client_id') && 
-                config('filesystems.disks.onedrive.client_secret') &&
-                config('filesystems.disks.onedrive.tenant_id')) {
-                $this->oneDriveService = app(OneDriveService::class);
-            } else {
-                $this->oneDriveService = null;
-            }
+    }
+    
+    /**
+     * Get the storage disk for documents
+     */
+    protected function getStorageDisk(): string
+    {
+        return config('filesystems.documents_disk', env('DOCUMENTS_DISK', 's3'));
+    }
+    
+    /**
+     * Get file URL - for S3 uses temporary signed URL, for local uses public URL
+     */
+    protected function getFileUrl(string $filePath, string $disk, int $expirationHours = 24): string
+    {
+        if ($disk === 's3') {
+            try {
+                return Storage::disk($disk)->temporaryUrl($filePath, now()->addHours($expirationHours));
         } catch (\Exception $e) {
-            Log::warning('OneDriveService initialization failed in MRFController', ['error' => $e->getMessage()]);
-            $this->oneDriveService = null;
+                Log::warning('S3 temporary URL generation failed, using regular URL', [
+                    'error' => $e->getMessage(),
+                    'path' => $filePath
+                ]);
+                return Storage::disk($disk)->url($filePath);
+            }
         }
+        
+        // For local/public storage
+        $url = Storage::disk($disk)->url($filePath);
+        if (!filter_var($url, FILTER_VALIDATE_URL)) {
+            $baseUrl = config('app.url');
+            return rtrim($baseUrl, '/') . '/' . ltrim($url, '/');
+        }
+        return $url;
     }
     /**
      * Get all MRFs with optional filters
@@ -595,55 +613,22 @@ class MRFController extends Controller
             if ($request->hasFile('pfi')) {
                 $pfiFile = $request->file('pfi');
                 
-                // Upload to OneDrive if configured
-                if ($this->oneDriveService) {
-                    try {
-                        $year = date('Y');
-                        $folder = "MRFs/{$year}/{$mrfId}";
-                        $pfiFileName = "PFI_{$mrfId}." . $pfiFile->getClientOriginalExtension();
-                        
-                        $oneDriveResult = $this->oneDriveService->uploadFile($pfiFile, $folder, $pfiFileName);
-                        $pfiUrl = $oneDriveResult['webUrl'];
-                        
-                        // Create sharing link
-                        try {
-                            $pfiShareUrl = $this->oneDriveService->createSharingLink($oneDriveResult['path'], 'view');
-                        } catch (\Exception $e) {
-                            Log::warning('Failed to create PFI sharing link', [
-                                'error' => $e->getMessage(),
-                                'mrf_id' => $mrfId
-                            ]);
-                        }
-                        
-                        Log::info('PFI uploaded to OneDrive', [
-                            'mrf_id' => $mrfId,
-                            'onedrive_path' => $oneDriveResult['path'],
-                            'web_url' => $pfiUrl,
-                            'share_url' => $pfiShareUrl,
-                        ]);
-                    } catch (\Exception $e) {
-                        Log::error('OneDrive PFI upload failed, falling back to local storage', [
-                            'error' => $e->getMessage(),
-                            'mrf_id' => $mrfId
-                        ]);
-                        // Fallback to local storage
-                        $disk = config('filesystems.documents_disk', 'public');
-                        $pfiFileName = "pfi_{$mrfId}_" . time() . "." . $pfiFile->getClientOriginalExtension();
-                        $pfiPath = "mrfs/{$mrfId}/{$pfiFileName}";
-                        $pfiFile->storeAs(dirname($pfiPath), basename($pfiPath), $disk);
-                        $pfiUrl = Storage::disk($disk)->url($pfiPath);
-                        $pfiShareUrl = $pfiUrl; // Use same URL as share URL for local storage
-                    }
-                } else {
-                    // Local storage fallback
-                    $disk = config('filesystems.documents_disk', 'public');
-                    // Use the already generated $mrfId (don't regenerate)
-                    $pfiFileName = "pfi_{$mrfId}_" . time() . "." . $pfiFile->getClientOriginalExtension();
-                    $pfiPath = "mrfs/{$mrfId}/{$pfiFileName}";
-                    $pfiFile->storeAs(dirname($pfiPath), basename($pfiPath), $disk);
-                    $pfiUrl = Storage::disk($disk)->url($pfiPath);
-                    $pfiShareUrl = $pfiUrl;
+                // Upload to S3 storage
+                $disk = $this->getStorageDisk();
+                $pfiFileName = "pfi_{$mrfId}_" . time() . "." . $pfiFile->getClientOriginalExtension();
+                $pfiPath = "mrfs/" . date('Y/m') . "/{$mrfId}/{$pfiFileName}";
+                
+                // Ensure directory structure exists (for S3, this is just the path)
+                $directory = dirname($pfiPath);
+                if ($disk !== 's3' && !Storage::disk($disk)->exists($directory)) {
+                    Storage::disk($disk)->makeDirectory($directory, 0755, true);
                 }
+                
+                $pfiFile->storeAs($directory, basename($pfiPath), $disk);
+                
+                // Get URL (temporary signed URL for S3, public URL for local)
+                $pfiUrl = $this->getFileUrl($pfiPath, $disk);
+                    $pfiShareUrl = $pfiUrl;
             }
 
             try {
@@ -724,25 +709,25 @@ class MRFController extends Controller
             return response()->json([
                 'success' => true,
                 'data' => [
-                'id' => $mrf->mrf_id,
-                'title' => $mrf->title,
-                'category' => $mrf->category,
+                    'id' => $mrf->mrf_id,
+                    'title' => $mrf->title,
+                    'category' => $mrf->category,
                     'contractType' => $mrf->contract_type,
-                'urgency' => $mrf->urgency,
-                'description' => $mrf->description,
-                'quantity' => $mrf->quantity,
-                'estimatedCost' => (float) $mrf->estimated_cost,
-                'justification' => $mrf->justification,
-                'requester' => $mrf->requester_name,
-                'requesterId' => (string) $mrf->requester_id,
+                    'urgency' => $mrf->urgency,
+                    'description' => $mrf->description,
+                    'quantity' => $mrf->quantity,
+                    'estimatedCost' => (float) $mrf->estimated_cost,
+                    'justification' => $mrf->justification,
+                    'requester' => $mrf->requester_name,
+                    'requesterId' => (string) $mrf->requester_id,
                 'department' => $mrf->department,
-                'date' => $mrf->date->format('Y-m-d'),
-                'status' => $mrf->status,
-                'currentStage' => $mrf->current_stage,
+                    'date' => $mrf->date->format('Y-m-d'),
+                    'status' => $mrf->status,
+                    'currentStage' => $mrf->current_stage,
                     'workflowState' => $mrf->workflow_state,
-                'approvalHistory' => $mrf->approval_history ?? [],
-                'rejectionReason' => $mrf->rejection_reason,
-                'isResubmission' => $mrf->is_resubmission,
+                    'approvalHistory' => $mrf->approval_history ?? [],
+                    'rejectionReason' => $mrf->rejection_reason,
+                    'isResubmission' => $mrf->is_resubmission,
                     'pfiUrl' => $mrf->pfi_url,
                     'pfiShareUrl' => $mrf->pfi_share_url,
                 ]
@@ -1306,8 +1291,8 @@ class MRFController extends Controller
                 $mrf->rfqs()->delete();
                 $mrf->items()->delete();
                 $mrf->approvalHistory()->delete();
-
-        $mrf->delete();
+                
+                $mrf->delete();
                 
                 Log::info('MRF force deleted by admin', [
                     'mrf_id' => $id,
@@ -1400,10 +1385,10 @@ class MRFController extends Controller
                 'status' => $mrf->status
             ]);
 
-        return response()->json([
-            'success' => true,
-            'message' => 'MRF deleted successfully'
-        ]);
+            return response()->json([
+                'success' => true,
+                'message' => 'MRF deleted successfully'
+            ]);
         } catch (\Exception $e) {
             Log::error('MRF deletion failed', [
                 'mrf_id' => $id,

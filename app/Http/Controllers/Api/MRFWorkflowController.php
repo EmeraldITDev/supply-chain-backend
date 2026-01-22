@@ -12,7 +12,6 @@ use App\Models\Vendor;
 use App\Models\QuotationItem;
 use App\Services\NotificationService;
 use App\Services\EmailService;
-use App\Services\OneDriveService;
 use App\Services\WorkflowStateService;
 use App\Services\PermissionService;
 use Illuminate\Http\Request;
@@ -28,7 +27,6 @@ class MRFWorkflowController extends Controller
     protected EmailService $emailService;
     protected WorkflowStateService $workflowService;
     protected PermissionService $permissionService;
-    protected ?OneDriveService $oneDriveService;
 
     public function __construct(
         NotificationService $notificationService, 
@@ -40,20 +38,41 @@ class MRFWorkflowController extends Controller
         $this->emailService = $emailService;
         $this->workflowService = $workflowService;
         $this->permissionService = $permissionService;
-        
-        // Initialize OneDriveService if credentials are configured
-        try {
-            if (config('filesystems.disks.onedrive.client_id') && 
-                config('filesystems.disks.onedrive.client_secret') &&
-                config('filesystems.disks.onedrive.tenant_id')) {
-                $this->oneDriveService = app(OneDriveService::class);
-            } else {
-                $this->oneDriveService = null;
-            }
+    }
+    
+    /**
+     * Get the storage disk for documents
+     * Uses S3 for production, configurable via DOCUMENTS_DISK env variable
+     */
+    protected function getStorageDisk(): string
+    {
+        return config('filesystems.documents_disk', env('DOCUMENTS_DISK', 's3'));
+    }
+    
+    /**
+     * Get file URL - for S3 uses temporary signed URL, for local uses public URL
+     */
+    protected function getFileUrl(string $filePath, string $disk, int $expirationHours = 24): string
+    {
+        if ($disk === 's3') {
+            try {
+                return Storage::disk($disk)->temporaryUrl($filePath, now()->addHours($expirationHours));
         } catch (\Exception $e) {
-            Log::warning('OneDriveService initialization failed', ['error' => $e->getMessage()]);
-            $this->oneDriveService = null;
+                Log::warning('S3 temporary URL generation failed, using regular URL', [
+                    'error' => $e->getMessage(),
+                    'path' => $filePath
+                ]);
+                return Storage::disk($disk)->url($filePath);
+            }
         }
+        
+        // For local/public storage
+        $url = Storage::disk($disk)->url($filePath);
+        if (!filter_var($url, FILTER_VALIDATE_URL)) {
+            $baseUrl = config('app.url');
+            return rtrim($baseUrl, '/') . '/' . ltrim($url, '/');
+        }
+        return $url;
     }
 
     /**
@@ -1033,48 +1052,26 @@ class MRFWorkflowController extends Controller
             ], 422);
         }
 
-            // Upload file to storage
+            // Upload file to storage (S3)
         $poUrl = null;
         $poShareUrl = null;
-        $useOneDrive = $this->oneDriveService !== null;
         
             try {
-                if ($useOneDrive && $this->oneDriveService) {
-                    $folder = 'PurchaseOrders/' . date('Y/m');
-                    $poFileName = "PO_{$poNumber}_{$mrf->mrf_id}." . $file->getClientOriginalExtension();
-                    
-                    $oneDriveResult = $this->oneDriveService->uploadFile($file, $folder, $poFileName);
-                    $poUrl = $oneDriveResult['webUrl'] ?? null;
-                    
-                    try {
-                        $poShareUrl = $this->oneDriveService->createSharingLink($oneDriveResult['path'], 'view');
-                    } catch (\Exception $e) {
-                        Log::warning('Failed to create sharing link for PO', ['error' => $e->getMessage()]);
-                    }
-                } else {
-                    $disk = config('filesystems.documents_disk', env('DOCUMENTS_DISK', 'public'));
-                    $poFileName = "po_{$poNumber}_" . time() . "." . $file->getClientOriginalExtension();
-                    $poPath = "purchase-orders/{$poFileName}";
-                    
-                    $directory = dirname($poPath);
-                    if (!Storage::disk($disk)->exists($directory)) {
-                        Storage::disk($disk)->makeDirectory($directory, 0755, true);
-                    }
-                    
-                    Storage::disk($disk)->putFileAs(dirname($poPath), $file, basename($poPath));
-                    
-                    if ($disk === 'public' || $disk === 'local') {
-                        $poUrl = Storage::disk($disk)->url($poPath);
-                        if (!filter_var($poUrl, FILTER_VALIDATE_URL)) {
-                            $baseUrl = config('app.url');
-                            $poUrl = rtrim($baseUrl, '/') . '/' . ltrim($poUrl, '/');
-                        }
-                    } else {
-                        $poUrl = Storage::disk($disk)->url($poPath);
-                    }
-                    
-                    $poShareUrl = $poUrl;
+                $disk = $this->getStorageDisk();
+                $poFileName = "po_{$poNumber}_" . time() . "." . $file->getClientOriginalExtension();
+                $poPath = "purchase-orders/" . date('Y/m') . "/{$poFileName}";
+                
+                // Ensure directory structure exists (for S3, this is just the path)
+                $directory = dirname($poPath);
+                if ($disk !== 's3' && !Storage::disk($disk)->exists($directory)) {
+                    Storage::disk($disk)->makeDirectory($directory, 0755, true);
                 }
+                
+                Storage::disk($disk)->putFileAs($directory, $file, basename($poPath));
+                
+                // Get URL (temporary signed URL for S3, public URL for local)
+                $poUrl = $this->getFileUrl($poPath, $disk);
+                $poShareUrl = $poUrl;
                 
                 if (empty($poUrl)) {
                     throw new \Exception('Failed to upload PO file');
@@ -1109,128 +1106,73 @@ class MRFWorkflowController extends Controller
             try {
                 $pdfContent = $this->generatePOPDF($poData['data'], $poNumber, $user);
                 
-                // Save PDF to storage
+                // Save PDF to storage (S3)
                 $poUrl = null;
                 $poShareUrl = null;
-                $useOneDrive = $this->oneDriveService !== null;
             
-            // Delete old PO file if regenerating
-                    if ($isRegeneration && $mrf->unsigned_po_url) {
-                try {
-                    if ($useOneDrive && $this->oneDriveService) {
-                        Log::info('Attempting to delete old PO file from OneDrive', [
-                            'po_url' => $mrf->unsigned_po_url
-                        ]);
-                    } else {
-        $disk = config('filesystems.documents_disk', 'public');
-                        $oldPath = str_replace(Storage::disk($disk)->url(''), '', $mrf->unsigned_po_url);
-                        $oldPath = ltrim(str_replace('/storage/', '', $oldPath), '/');
-                        if (Storage::disk($disk)->exists($oldPath)) {
-                            Storage::disk($disk)->delete($oldPath);
-                            Log::info('Deleted old PO file for regeneration', ['old_path' => $oldPath]);
-                        }
-                    }
-                } catch (\Exception $e) {
-                    Log::warning('Failed to delete old PO file', ['error' => $e->getMessage()]);
-                }
-            }
-            
-            // Upload to OneDrive if configured
-            if ($useOneDrive && $this->oneDriveService) {
-                try {
-                    $folder = 'PurchaseOrders/' . date('Y/m');
-                    $poFileName = "PO_{$poNumber}_{$mrf->mrf_id}.pdf";
-                    
-                    // Create temporary file for OneDrive upload
-                    $tempFile = tmpfile();
-                    $tempPath = stream_get_meta_data($tempFile)['uri'];
-                    file_put_contents($tempPath, $pdfContent);
-                    
-                    $uploadedFile = new \Illuminate\Http\File($tempPath);
-                    $oneDriveResult = $this->oneDriveService->uploadFile($uploadedFile, $folder, $poFileName);
-                    
-                    fclose($tempFile); // Clean up temp file
-                    
-                    if (!isset($oneDriveResult['webUrl']) || empty($oneDriveResult['webUrl'])) {
-                        throw new \Exception('OneDrive upload returned no URL');
-                    }
-                    
-                    $poUrl = $oneDriveResult['webUrl'];
-                    
-                    // Create sharing link
+                // Delete old PO file if regenerating
+                if ($isRegeneration && $mrf->unsigned_po_url) {
                     try {
-                        $poShareUrl = $this->oneDriveService->createSharingLink($oneDriveResult['path'], 'view');
-                        Log::info('OneDrive sharing link created for PO', [
-                            'mrf_id' => $id,
-                            'po_number' => $poNumber,
-                            'share_url' => $poShareUrl
-                        ]);
+                    $disk = $this->getStorageDisk();
+                    // Try to extract file path from URL
+                    $urlPath = parse_url($mrf->unsigned_po_url, PHP_URL_PATH);
+                    if ($urlPath) {
+                        // Extract path from S3 URL or local URL
+                        $baseUrl = Storage::disk($disk)->url('');
+                        $oldPath = str_replace($baseUrl, '', $mrf->unsigned_po_url);
+                        $oldPath = ltrim(str_replace('/storage/', '', $oldPath), '/');
+                        
+                        // Try multiple path formats
+                        $possiblePaths = [
+                            $oldPath,
+                            ltrim($urlPath, '/'),
+                            str_replace('/storage/', '', $urlPath),
+                        ];
+                        
+                        foreach ($possiblePaths as $path) {
+                            if (!empty($path) && Storage::disk($disk)->exists($path)) {
+                                Storage::disk($disk)->delete($path);
+                                Log::info('Deleted old PO file for regeneration', ['old_path' => $path]);
+                                break;
+                            }
+                        }
+                        }
                     } catch (\Exception $e) {
-                        Log::warning('Failed to create sharing link for PO', [
-                            'error' => $e->getMessage(),
-                            'mrf_id' => $id
-                        ]);
+                        Log::warning('Failed to delete old PO file', ['error' => $e->getMessage()]);
                     }
-                    
-                    Log::info('PO PDF generated and uploaded to OneDrive', [
-                        'mrf_id' => $id,
-                        'po_number' => $poNumber,
-                        'onedrive_path' => $oneDriveResult['path'],
-                        'web_url' => $poUrl,
-                        'share_url' => $poShareUrl
-                    ]);
-                } catch (\Exception $e) {
-                    Log::error('OneDrive upload failed, falling back to local storage', [
-                        'error' => $e->getMessage(),
-                        'trace' => $e->getTraceAsString(),
-                        'mrf_id' => $id
-                    ]);
-                    $useOneDrive = false;
                 }
-            }
-            
-            // Fallback to local/S3 storage
-            if (!$useOneDrive) {
-                $disk = config('filesystems.documents_disk', env('DOCUMENTS_DISK', 'public'));
+
+            // Upload to S3 storage
+            $disk = $this->getStorageDisk();
                 
                 if (!config("filesystems.disks.{$disk}")) {
-                    throw new \Exception("Storage disk '{$disk}' is not configured.");
+                throw new \Exception("Storage disk '{$disk}' is not configured.");
                 }
                 
-        $poFileName = "po_{$poNumber}_" . time() . ".pdf";
-                $poPath = "purchase-orders/{$poFileName}";
+            $poFileName = "po_{$poNumber}_" . time() . ".pdf";
+            $poPath = "purchase-orders/" . date('Y/m') . "/{$poFileName}";
                 
-                // Ensure directory exists
+            // Ensure directory structure exists (for S3, this is just the path)
                     $directory = dirname($poPath);
-                    if (!Storage::disk($disk)->exists($directory)) {
-                    Storage::disk($disk)->makeDirectory($directory, 0755, true);
-                }
-                
-                // Store PDF
-                Storage::disk($disk)->put($poPath, $pdfContent);
-                
-                // Get URL
-                    if ($disk === 'public' || $disk === 'local') {
-        $poUrl = Storage::disk($disk)->url($poPath);
-                        if (!filter_var($poUrl, FILTER_VALIDATE_URL)) {
-                            $baseUrl = config('app.url');
-                            $poUrl = rtrim($baseUrl, '/') . '/' . ltrim($poUrl, '/');
-                        }
-                    } else {
-                    $poUrl = Storage::disk($disk)->url($poPath);
-                }
-                
-                $poShareUrl = $poUrl; // Use same URL for local storage
-                
-                Log::info('PO PDF generated and stored locally', [
+            if ($disk !== 's3' && !Storage::disk($disk)->exists($directory)) {
+                Storage::disk($disk)->makeDirectory($directory, 0755, true);
+            }
+            
+            // Store PDF
+            Storage::disk($disk)->put($poPath, $pdfContent);
+            
+            // Get URL (temporary signed URL for S3, public URL for local)
+            $poUrl = $this->getFileUrl($poPath, $disk);
+            $poShareUrl = $poUrl;
+            
+            Log::info('PO PDF generated and stored', [
                     'mrf_id' => $id,
                     'po_number' => $poNumber,
                     'file_name' => $poFileName,
-                    'stored_path' => $poPath,
+                'stored_path' => $poPath,
                     'url' => $poUrl,
-                    'disk' => $disk
+                'disk' => $disk
                 ]);
-            }
             
             if (empty($poUrl)) {
                     throw new \Exception('PO PDF generation failed - no URL was generated');
@@ -1421,60 +1363,34 @@ class MRFWorkflowController extends Controller
             ], 422);
         }
 
-        // Upload signed PO - use OneDrive if configured, otherwise use local/S3 storage
+        // Upload signed PO to S3 storage
         $signedPOFile = $request->file('signed_po');
         $signedPOUrl = null;
         $signedPOShareUrl = null;
-        $useOneDrive = $this->oneDriveService !== null;
         
-        if ($useOneDrive) {
-            try {
-                // Upload to OneDrive in PurchaseOrders_Signed folder (organized by year/month)
-                $folder = 'PurchaseOrders_Signed/' . date('Y/m');
-                $signedPOFileName = "PO_Signed_{$mrf->po_number}_{$mrf->mrf_id}.pdf";
-                
-                $oneDriveResult = $this->oneDriveService->uploadFile($signedPOFile, $folder, $signedPOFileName);
-                $signedPOUrl = $oneDriveResult['webUrl'];
-                
-                // Create view-only sharing link for the signed PO
-                try {
-                    $signedPOShareUrl = $this->oneDriveService->createSharingLink($oneDriveResult['path'], 'view');
-                    Log::info('OneDrive sharing link created for signed PO', [
-                        'mrf_id' => $id,
-                        'po_number' => $mrf->po_number,
-                        'share_url' => $signedPOShareUrl
-                    ]);
-                } catch (\Exception $e) {
-                    Log::warning('Failed to create sharing link for signed PO', [
-                        'error' => $e->getMessage(),
-                        'mrf_id' => $id
-                    ]);
-                }
-                
-                Log::info('Signed PO uploaded to OneDrive', [
+        $disk = $this->getStorageDisk();
+        $signedPOFileName = "po_signed_{$mrf->po_number}_" . time() . ".pdf";
+        $signedPOPath = "purchase-orders/signed/" . date('Y/m') . "/{$signedPOFileName}";
+        
+        // Ensure directory structure exists (for S3, this is just the path)
+        $directory = dirname($signedPOPath);
+        if ($disk !== 's3' && !Storage::disk($disk)->exists($directory)) {
+            Storage::disk($disk)->makeDirectory($directory, 0755, true);
+        }
+        
+        Storage::disk($disk)->putFileAs($directory, $signedPOFile, basename($signedPOPath));
+        
+        // Get URL (temporary signed URL for S3, public URL for local)
+        $signedPOUrl = $this->getFileUrl($signedPOPath, $disk);
+        $signedPOShareUrl = $signedPOUrl;
+        
+        Log::info('Signed PO uploaded to storage', [
                     'mrf_id' => $id,
                     'po_number' => $mrf->po_number,
-                    'onedrive_path' => $oneDriveResult['path'],
-                    'web_url' => $signedPOUrl,
-                    'share_url' => $signedPOShareUrl,
-                ]);
-            } catch (\Exception $e) {
-                Log::error('OneDrive upload failed for signed PO, falling back to local storage', [
-                    'error' => $e->getMessage(),
-                    'mrf_id' => $id
-                ]);
-                $useOneDrive = false;
-            }
-        }
-        
-        // Fallback to local/S3 storage if OneDrive is not configured or failed
-        if (!$useOneDrive) {
-            $disk = config('filesystems.documents_disk', 'public');
-        $signedPOFileName = "po_signed_{$mrf->po_number}_" . time() . ".pdf";
-        $signedPOPath = "purchase-orders/signed/{$signedPOFileName}";
-        Storage::disk($disk)->putFileAs('purchase-orders/signed', $signedPOFile, $signedPOFileName);
-        $signedPOUrl = Storage::disk($disk)->url($signedPOPath);
-        }
+            'stored_path' => $signedPOPath,
+            'url' => $signedPOUrl,
+            'disk' => $disk
+        ]);
 
         // Update MRF
         $updateData = [
@@ -1868,27 +1784,8 @@ class MRFWorkflowController extends Controller
 
         // Delete PO files from storage if they exist
         try {
-            // Try to delete from OneDrive if configured
-            if ($this->oneDriveService && $mrf->unsigned_po_url) {
-                try {
-                    // Extract path from URL if possible, or use a pattern
-                    // OneDrive paths are stored in file_path or can be extracted from URL
-                    Log::info('Attempting to delete PO file from OneDrive', [
-                        'mrf_id' => $id,
-                        'po_url' => $mrf->unsigned_po_url
-                    ]);
-                    // Note: OneDrive file deletion would require the file path/ID
-                    // For now, we'll just clear the database references
-                } catch (\Exception $e) {
-                    Log::warning('Failed to delete PO from OneDrive', [
-                        'error' => $e->getMessage(),
-                        'mrf_id' => $id
-                    ]);
-                }
-            }
-
-            // Delete from local/S3 storage if exists
-            if ($mrf->unsigned_po_url && !$this->oneDriveService) {
+            // Delete from S3/local storage if exists
+            if ($mrf->unsigned_po_url) {
                 try {
                     $disk = config('filesystems.documents_disk', 'public');
                     $urlPath = parse_url($mrf->unsigned_po_url, PHP_URL_PATH);
@@ -1946,7 +1843,7 @@ class MRFWorkflowController extends Controller
             }
 
             // Delete signed PO if exists
-            if ($mrf->signed_po_url && !$this->oneDriveService) {
+            if ($mrf->signed_po_url) {
                 try {
                     $disk = config('filesystems.documents_disk', 'public');
                     $urlPath = parse_url($mrf->signed_po_url, PHP_URL_PATH);

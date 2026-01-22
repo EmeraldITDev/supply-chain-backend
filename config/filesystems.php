@@ -73,15 +73,6 @@ return [
             'visibility' => 'private', // Documents should be private by default
         ],
 
-        'onedrive' => [
-            'driver' => 'onedrive',
-            'client_id' => env('MICROSOFT_CLIENT_ID'),
-            'client_secret' => env('MICROSOFT_CLIENT_SECRET'),
-            'tenant_id' => env('MICROSOFT_TENANT_ID'),
-            'user_email' => env('ONEDRIVE_USER_EMAIL', 'procurement@emeraldcfze.com'),
-            'root' => env('ONEDRIVE_ROOT_FOLDER', '/SupplyChainDocs'),
-        ],
-
     ],
 
     /*

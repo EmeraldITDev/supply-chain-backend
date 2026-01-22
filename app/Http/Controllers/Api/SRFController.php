@@ -90,7 +90,6 @@ class SRFController extends Controller
             'estimatedCost' => 'required|numeric|min:0',
             'justification' => 'required|string',
             'invoice' => 'nullable|file|mimes:pdf,doc,docx,xls,xlsx,png,jpg,jpeg|max:10240', // Optional invoice upload (10MB max)
-            'invoice_onedrive_url' => 'nullable|url|max:500', // Optional OneDrive URL
         ]);
 
         if ($validator->fails()) {
@@ -111,52 +110,39 @@ class SRFController extends Controller
         
         if ($request->hasFile('invoice')) {
             $invoiceFile = $request->file('invoice');
-            $oneDriveService = app(\App\Services\OneDriveService::class);
+            $disk = config('filesystems.documents_disk', env('DOCUMENTS_DISK', 's3'));
+            $invoiceFileName = "invoice_{$srfId}_" . time() . "." . $invoiceFile->getClientOriginalExtension();
+            $invoicePath = "srfs/" . date('Y/m') . "/{$srfId}/{$invoiceFileName}";
             
-            if ($oneDriveService) {
+            // Ensure directory structure exists (for S3, this is just the path)
+            $directory = dirname($invoicePath);
+            if ($disk !== 's3' && !\Storage::disk($disk)->exists($directory)) {
+                \Storage::disk($disk)->makeDirectory($directory, 0755, true);
+            }
+            
+            $invoiceFile->storeAs($directory, basename($invoicePath), $disk);
+            
+            // Get URL (temporary signed URL for S3, public URL for local)
+            if ($disk === 's3') {
                 try {
-                    $year = date('Y');
-                    $folder = "SRFs/{$year}/{$srfId}";
-                    $invoiceFileName = "Invoice_{$srfId}." . $invoiceFile->getClientOriginalExtension();
-                    
-                    $oneDriveResult = $oneDriveService->uploadFile($invoiceFile, $folder, $invoiceFileName);
-                    $invoiceUrl = $oneDriveResult['webUrl'];
-                    
-                    // Create sharing link
-                    try {
-                        $invoiceShareUrl = $oneDriveService->createSharingLink($oneDriveResult['path'], 'view');
-                    } catch (\Exception $e) {
-                        \Log::warning('Failed to create invoice sharing link', [
-                            'error' => $e->getMessage(),
-                            'srf_id' => $srfId
-                        ]);
-                    }
+                    $invoiceUrl = \Storage::disk($disk)->temporaryUrl($invoicePath, now()->addHours(24));
+                    $invoiceShareUrl = $invoiceUrl;
                 } catch (\Exception $e) {
-                    \Log::error('OneDrive invoice upload failed, falling back to local storage', [
+                    \Log::warning('S3 temporary URL generation failed, using regular URL', [
                         'error' => $e->getMessage(),
-                        'srf_id' => $srfId
+                        'path' => $invoicePath
                     ]);
-                    // Fallback to local storage
-                    $disk = config('filesystems.documents_disk', 'public');
-                    $invoiceFileName = "invoice_{$srfId}_" . time() . "." . $invoiceFile->getClientOriginalExtension();
-                    $invoicePath = "srfs/{$srfId}/{$invoiceFileName}";
-                    $invoiceFile->storeAs(dirname($invoicePath), basename($invoicePath), $disk);
                     $invoiceUrl = \Storage::disk($disk)->url($invoicePath);
                     $invoiceShareUrl = $invoiceUrl;
                 }
             } else {
-                // No OneDrive, use local storage
-                $disk = config('filesystems.documents_disk', 'public');
-                $invoiceFileName = "invoice_{$srfId}_" . time() . "." . $invoiceFile->getClientOriginalExtension();
-                $invoicePath = "srfs/{$srfId}/{$invoiceFileName}";
-                $invoiceFile->storeAs(dirname($invoicePath), basename($invoicePath), $disk);
                 $invoiceUrl = \Storage::disk($disk)->url($invoicePath);
+                if (!filter_var($invoiceUrl, FILTER_VALIDATE_URL)) {
+                    $baseUrl = config('app.url');
+                    $invoiceUrl = rtrim($baseUrl, '/') . '/' . ltrim($invoiceUrl, '/');
+                }
                 $invoiceShareUrl = $invoiceUrl;
             }
-        } else if ($request->has('invoice_onedrive_url')) {
-            // Use provided OneDrive URL
-            $invoiceUrl = $request->invoice_onedrive_url;
-            $invoiceShareUrl = $request->invoice_onedrive_url;
         }
 
         $srf = SRF::create([

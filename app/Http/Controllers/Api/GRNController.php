@@ -7,7 +7,6 @@ use App\Models\MRF;
 use App\Services\WorkflowStateService;
 use App\Services\PermissionService;
 use App\Services\NotificationService;
-use App\Services\OneDriveService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\Storage;
@@ -18,7 +17,6 @@ class GRNController extends Controller
     protected WorkflowStateService $workflowService;
     protected PermissionService $permissionService;
     protected NotificationService $notificationService;
-    protected ?OneDriveService $oneDriveService;
 
     public function __construct(
         WorkflowStateService $workflowService,
@@ -28,20 +26,40 @@ class GRNController extends Controller
         $this->workflowService = $workflowService;
         $this->permissionService = $permissionService;
         $this->notificationService = $notificationService;
-        
-        // Initialize OneDriveService if configured
-        try {
-            if (config('filesystems.disks.onedrive.client_id') && 
-                config('filesystems.disks.onedrive.client_secret') &&
-                config('filesystems.disks.onedrive.tenant_id')) {
-                $this->oneDriveService = app(OneDriveService::class);
-            } else {
-                $this->oneDriveService = null;
+    }
+    
+    /**
+     * Get the storage disk for documents
+     */
+    protected function getStorageDisk(): string
+    {
+        return config('filesystems.documents_disk', env('DOCUMENTS_DISK', 's3'));
+    }
+    
+    /**
+     * Get file URL - for S3 uses temporary signed URL, for local uses public URL
+     */
+    protected function getFileUrl(string $filePath, string $disk, int $expirationHours = 24): string
+    {
+        if ($disk === 's3') {
+            try {
+                return Storage::disk($disk)->temporaryUrl($filePath, now()->addHours($expirationHours));
+            } catch (\Exception $e) {
+                Log::warning('S3 temporary URL generation failed, using regular URL', [
+                    'error' => $e->getMessage(),
+                    'path' => $filePath
+                ]);
+                return Storage::disk($disk)->url($filePath);
             }
-        } catch (\Exception $e) {
-            Log::warning('OneDriveService initialization failed in GRNController', ['error' => $e->getMessage()]);
-            $this->oneDriveService = null;
         }
+        
+        // For local/public storage
+        $url = Storage::disk($disk)->url($filePath);
+        if (!filter_var($url, FILTER_VALIDATE_URL)) {
+            $baseUrl = config('app.url');
+            return rtrim($baseUrl, '/') . '/' . ltrim($url, '/');
+        }
+        return $url;
     }
 
     /**
@@ -166,56 +184,30 @@ class GRNController extends Controller
         $grnUrl = null;
         $grnShareUrl = null;
 
-        // Upload to OneDrive if configured
-        if ($this->oneDriveService) {
-            try {
-                $year = date('Y');
-                $month = date('m');
-                $folder = "GRNs/{$year}/{$month}";
-                $grnFileName = "GRN_{$mrf->po_number}_{$mrf->mrf_id}." . $grnFile->getClientOriginalExtension();
-                
-                $oneDriveResult = $this->oneDriveService->uploadFile($grnFile, $folder, $grnFileName);
-                $grnUrl = $oneDriveResult['webUrl'];
-                
-                // Create sharing link
-                try {
-                    $grnShareUrl = $this->oneDriveService->createSharingLink($oneDriveResult['path'], 'view');
-                } catch (\Exception $e) {
-                    Log::warning('Failed to create GRN sharing link', [
-                        'error' => $e->getMessage(),
-                        'mrf_id' => $mrf->mrf_id
-                    ]);
-                }
-                
-                Log::info('GRN uploaded to OneDrive', [
+        // Upload to S3 storage
+        $disk = $this->getStorageDisk();
+        $grnFileName = "grn_{$mrf->po_number}_" . time() . "." . $grnFile->getClientOriginalExtension();
+        $grnPath = "grns/" . date('Y/m') . "/{$mrf->mrf_id}/{$grnFileName}";
+        
+        // Ensure directory structure exists (for S3, this is just the path)
+        $directory = dirname($grnPath);
+        if ($disk !== 's3' && !Storage::disk($disk)->exists($directory)) {
+            Storage::disk($disk)->makeDirectory($directory, 0755, true);
+        }
+        
+        $grnFile->storeAs($directory, basename($grnPath), $disk);
+        
+        // Get URL (temporary signed URL for S3, public URL for local)
+        $grnUrl = $this->getFileUrl($grnPath, $disk);
+        $grnShareUrl = $grnUrl;
+        
+        Log::info('GRN uploaded to storage', [
                     'mrf_id' => $mrf->mrf_id,
                     'po_number' => $mrf->po_number,
-                    'onedrive_path' => $oneDriveResult['path'],
-                    'web_url' => $grnUrl,
-                    'share_url' => $grnShareUrl,
-                ]);
-            } catch (\Exception $e) {
-                Log::error('OneDrive GRN upload failed, falling back to local storage', [
-                    'error' => $e->getMessage(),
-                    'mrf_id' => $mrf->mrf_id
-                ]);
-                // Fallback to local storage
-                $disk = config('filesystems.documents_disk', 'public');
-                $grnFileName = "grn_{$mrf->po_number}_" . time() . "." . $grnFile->getClientOriginalExtension();
-                $grnPath = "grns/{$mrf->mrf_id}/{$grnFileName}";
-                $grnFile->storeAs(dirname($grnPath), basename($grnPath), $disk);
-                $grnUrl = Storage::disk($disk)->url($grnPath);
-                $grnShareUrl = $grnUrl;
-            }
-        } else {
-            // Local storage fallback
-            $disk = config('filesystems.documents_disk', 'public');
-            $grnFileName = "grn_{$mrf->po_number}_" . time() . "." . $grnFile->getClientOriginalExtension();
-            $grnPath = "grns/{$mrf->mrf_id}/{$grnFileName}";
-            $grnFile->storeAs(dirname($grnPath), basename($grnPath), $disk);
-            $grnUrl = Storage::disk($disk)->url($grnPath);
-            $grnShareUrl = $grnUrl;
-        }
+            'stored_path' => $grnPath,
+            'url' => $grnUrl,
+            'disk' => $disk
+        ]);
 
         // Update MRF
         $mrf->update([
