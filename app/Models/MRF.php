@@ -58,6 +58,13 @@ class MRF extends Model
         'po_version',
         'po_generated_at',
         'po_signed_at',
+        // PO Details
+        'ship_to_address',
+        'tax_rate',
+        'tax_amount',
+        'po_special_terms',
+        'invoice_submission_email',
+        'invoice_submission_cc',
         // Payment
         'payment_status',
         'payment_processed_at',
@@ -94,6 +101,8 @@ class MRF extends Model
         'rejected_at' => 'datetime',
         'po_generated_at' => 'datetime',
         'po_signed_at' => 'datetime',
+        'tax_rate' => 'decimal:2',
+        'tax_amount' => 'decimal:2',
         'payment_processed_at' => 'datetime',
         'payment_approved_at' => 'datetime',
         'grn_requested' => 'boolean',
