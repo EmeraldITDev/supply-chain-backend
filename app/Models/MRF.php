@@ -101,8 +101,10 @@ class MRF extends Model
         'rejected_at' => 'datetime',
         'po_generated_at' => 'datetime',
         'po_signed_at' => 'datetime',
-        'tax_rate' => 'decimal:2',
-        'tax_amount' => 'decimal:2',
+        // Note: tax_rate and tax_amount casts commented out until migration runs
+        // Uncomment after running: php artisan migrate (migration: 2026_01_24_180004_add_po_details_to_m_r_f_s_table)
+        // 'tax_rate' => 'decimal:2',
+        // 'tax_amount' => 'decimal:2',
         'payment_processed_at' => 'datetime',
         'payment_approved_at' => 'datetime',
         'grn_requested' => 'boolean',

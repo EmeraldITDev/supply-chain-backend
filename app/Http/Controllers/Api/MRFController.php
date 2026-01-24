@@ -156,31 +156,62 @@ class MRFController extends Controller
             }));
         } catch (\Illuminate\Database\QueryException $e) {
             // Handle database errors (e.g., missing columns)
+            $errorMessage = $e->getMessage();
+            $errorCode = $e->getCode();
+            
             Log::error('MRF index query error', [
-                'error' => $e->getMessage(),
-                'code' => $e->getCode(),
+                'error' => $errorMessage,
+                'code' => $errorCode,
+                'sql_state' => $e->errorInfo[0] ?? null,
             ]);
             
-            // Return empty array if it's a column error, otherwise re-throw
-            if (str_contains($e->getMessage(), "Unknown column") || str_contains($e->getMessage(), "doesn't exist")) {
+            // Check for column-related errors (MySQL, PostgreSQL, SQLite variations)
+            $columnErrorPatterns = [
+                "Unknown column",
+                "doesn't exist",
+                "does not exist",
+                "column.*does not exist",
+                "SQLSTATE[42S22]", // MySQL: Column not found
+                "SQLSTATE[42703]", // PostgreSQL: Undefined column
+            ];
+            
+            $isColumnError = false;
+            foreach ($columnErrorPatterns as $pattern) {
+                if (stripos($errorMessage, $pattern) !== false || 
+                    preg_match('/' . $pattern . '/i', $errorMessage)) {
+                    $isColumnError = true;
+                    break;
+                }
+            }
+            
+            // Return empty array if it's a column error (migration not run yet)
+            if ($isColumnError) {
+                Log::warning('MRF index: Missing database columns detected. Migration may need to be run.', [
+                    'error' => $errorMessage,
+                ]);
                 return response()->json([]);
             }
             
+            // For other database errors, return error response
             return response()->json([
                 'success' => false,
                 'error' => 'Database error occurred',
-                'code' => 'DATABASE_ERROR'
+                'code' => 'DATABASE_ERROR',
+                'message' => config('app.debug') ? $errorMessage : 'A database error occurred. Please contact support.'
             ], 500);
         } catch (\Exception $e) {
             Log::error('MRF index error', [
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
             ]);
             
             return response()->json([
                 'success' => false,
                 'error' => 'An error occurred while fetching MRFs',
-                'code' => 'INTERNAL_ERROR'
+                'code' => 'INTERNAL_ERROR',
+                'message' => config('app.debug') ? $e->getMessage() : 'An internal error occurred. Please try again later.'
             ], 500);
         }
     }
