@@ -70,42 +70,43 @@ class MRFController extends Controller
      */
     public function index(Request $request)
     {
-        $query = MRF::with('requester');
+        try {
+            $query = MRF::with('requester');
 
-        // Filter by status
-        if ($request->has('status')) {
-            $query->where('status', $request->status);
-        }
+            // Filter by status
+            if ($request->has('status')) {
+                $query->where('status', $request->status);
+            }
 
-        // Search in title/description
-        if ($request->has('search')) {
-            $search = $request->search;
-            $query->where(function($q) use ($search) {
-                $q->where('title', 'like', "%{$search}%")
-                  ->orWhere('description', 'like', "%{$search}%");
-            });
-        }
+            // Search in title/description
+            if ($request->has('search')) {
+                $search = $request->search;
+                $query->where(function($q) use ($search) {
+                    $q->where('title', 'like', "%{$search}%")
+                      ->orWhere('description', 'like', "%{$search}%");
+                });
+            }
 
-        // Sort
-        $sortBy = $request->get('sortBy', 'date');
-        $sortOrder = $request->get('sortOrder', 'desc');
-        
-        $allowedSortFields = ['date', 'estimated_cost', 'title', 'status', 'created_at'];
-        if (in_array($sortBy, $allowedSortFields)) {
-            $query->orderBy($sortBy, $sortOrder);
-        } else {
-            $query->orderBy('date', 'desc');
-        }
+            // Sort
+            $sortBy = $request->get('sortBy', 'date');
+            $sortOrder = $request->get('sortOrder', 'desc');
+            
+            $allowedSortFields = ['date', 'estimated_cost', 'title', 'status', 'created_at'];
+            if (in_array($sortBy, $allowedSortFields)) {
+                $query->orderBy($sortBy, $sortOrder);
+            } else {
+                $query->orderBy('date', 'desc');
+            }
 
-        // Filter by requester (for employees to see only their own)
-        $user = $request->user();
-        if ($user && in_array($user->role, ['employee', 'general_employee'])) {
-            $query->where('requester_id', $user->id);
-        }
+            // Filter by requester (for employees to see only their own)
+            $user = $request->user();
+            if ($user && in_array($user->role, ['employee', 'general_employee'])) {
+                $query->where('requester_id', $user->id);
+            }
 
-        $mrfs = $query->get();
+            $mrfs = $query->get();
 
-        return response()->json($mrfs->map(function($mrf) {
+            return response()->json($mrfs->map(function($mrf) {
             return [
                 'id' => $mrf->mrf_id,
                 'title' => $mrf->title,
@@ -152,7 +153,36 @@ class MRFController extends Controller
                 'po_generated_at' => $mrf->po_generated_at?->toIso8601String(),
                 'poGeneratedAt' => $mrf->po_generated_at?->toIso8601String(),
             ];
-        }));
+            }));
+        } catch (\Illuminate\Database\QueryException $e) {
+            // Handle database errors (e.g., missing columns)
+            Log::error('MRF index query error', [
+                'error' => $e->getMessage(),
+                'code' => $e->getCode(),
+            ]);
+            
+            // Return empty array if it's a column error, otherwise re-throw
+            if (str_contains($e->getMessage(), "Unknown column") || str_contains($e->getMessage(), "doesn't exist")) {
+                return response()->json([]);
+            }
+            
+            return response()->json([
+                'success' => false,
+                'error' => 'Database error occurred',
+                'code' => 'DATABASE_ERROR'
+            ], 500);
+        } catch (\Exception $e) {
+            Log::error('MRF index error', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+            
+            return response()->json([
+                'success' => false,
+                'error' => 'An error occurred while fetching MRFs',
+                'code' => 'INTERNAL_ERROR'
+            ], 500);
+        }
     }
 
     /**
