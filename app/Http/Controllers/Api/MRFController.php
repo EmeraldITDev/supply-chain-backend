@@ -12,6 +12,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 use Dompdf\Dompdf;
 use Dompdf\Options;
@@ -695,46 +696,84 @@ class MRFController extends Controller
             }
 
             try {
-            $mrf = MRF::create([
-                'mrf_id' => $mrfId,
-                'title' => $request->title,
-                'category' => $request->category,
-                    'contract_type' => $request->contractType,
-                'urgency' => $request->urgency,
-                'description' => $request->description,
-                'quantity' => $request->quantity,
-                'estimated_cost' => $request->estimatedCost,
-                'justification' => $request->justification,
-                'requester_id' => $user->id,
-                'requester_name' => $user->name,
-                'department' => $request->department,
-                'date' => now(),
-                'status' => 'pending',
-                'current_stage' => 'executive_review',
-                    'workflow_state' => WorkflowStateService::STATE_EXECUTIVE_REVIEW, // Immediately move to executive review
-                'approval_history' => [],
-                'is_resubmission' => false,
-                'pfi_url' => $pfiUrl,
-                'pfi_share_url' => $pfiShareUrl,
-            ]);
+                // Build MRF data array, conditionally including contract_type
+                $mrfData = [
+                    'mrf_id' => $mrfId,
+                    'title' => $request->title,
+                    'category' => $request->category,
+                    'urgency' => $request->urgency,
+                    'description' => $request->description,
+                    'quantity' => $request->quantity,
+                    'estimated_cost' => $request->estimatedCost,
+                    'justification' => $request->justification,
+                    'requester_id' => $user->id,
+                    'requester_name' => $user->name,
+                    'department' => $request->department ?? null,
+                    'date' => now(),
+                    'status' => 'pending',
+                    'current_stage' => 'executive_review',
+                    'workflow_state' => WorkflowStateService::STATE_EXECUTIVE_REVIEW,
+                    'approval_history' => [],
+                    'is_resubmission' => false,
+                    'pfi_url' => $pfiUrl,
+                    'pfi_share_url' => $pfiShareUrl,
+                ];
+                
+                // Only include contract_type if the column exists
+                // Check if contract_type column exists in the database
+                try {
+                    DB::select("SELECT contract_type FROM m_r_f_s LIMIT 1");
+                    $mrfData['contract_type'] = $request->contractType;
+                } catch (\Exception $e) {
+                    // Column doesn't exist, skip it
+                    Log::warning('contract_type column not found, skipping', [
+                        'error' => $e->getMessage()
+                    ]);
+                }
+                
+                $mrf = MRF::create($mrfData);
             } catch (\Illuminate\Database\QueryException $e) {
                 // Check if it's a column not found error
                 $errorMessage = $e->getMessage();
-                if (str_contains($errorMessage, 'contract_type') || 
-                    str_contains($errorMessage, 'column') || 
-                    str_contains($errorMessage, 'does not exist') ||
-                    str_contains($errorMessage, 'Unknown column')) {
-                    Log::error('Database column missing - migration may not have been run', [
-                        'error' => $errorMessage,
-                        'mrf_id' => $mrfId
-                    ]);
+                $errorCode = $e->getCode();
+                
+                Log::error('MRF creation database error', [
+                    'error' => $errorMessage,
+                    'code' => $errorCode,
+                    'mrf_id' => $mrfId,
+                    'sql_state' => $e->errorInfo[0] ?? null,
+                ]);
+                
+                // Check for column-related errors (MySQL, PostgreSQL, SQLite variations)
+                $columnErrorPatterns = [
+                    'contract_type',
+                    'Unknown column',
+                    "doesn't exist",
+                    'does not exist',
+                    'column.*does not exist',
+                    'SQLSTATE[42S22]', // MySQL: Column not found
+                    'SQLSTATE[42703]', // PostgreSQL: Undefined column
+                ];
+                
+                $isColumnError = false;
+                foreach ($columnErrorPatterns as $pattern) {
+                    if (stripos($errorMessage, $pattern) !== false || 
+                        preg_match('/' . $pattern . '/i', $errorMessage)) {
+                        $isColumnError = true;
+                        break;
+                    }
+                }
+                
+                if ($isColumnError) {
                     return response()->json([
                         'success' => false,
-                        'error' => 'Database schema is not up to date. Please run migrations: php artisan migrate',
+                        'error' => 'Database schema is not up to date. Please run migrations: php artisan migrate --force',
                         'code' => 'DATABASE_ERROR',
+                        'message' => 'The database is missing required columns. Please contact your administrator to run migrations.',
                         'details' => config('app.debug') ? $errorMessage : null
                     ], 500);
                 }
+                
                 // Re-throw if it's a different error
                 throw $e;
             }
@@ -775,7 +814,7 @@ class MRFController extends Controller
                     'id' => $mrf->mrf_id,
                     'title' => $mrf->title,
                     'category' => $mrf->category,
-                    'contractType' => $mrf->contract_type,
+                    'contractType' => $mrf->contract_type ?? null,
                     'urgency' => $mrf->urgency,
                     'description' => $mrf->description,
                     'quantity' => $mrf->quantity,
@@ -1985,7 +2024,8 @@ class MRFController extends Controller
             <li>Items delivery must be accompanied by Airway Bill, Invoice and Delivery Note all duly signed by Emerald representative at the site.</li>
         </ol>';
         }
-    </div>
+        
+        $html .= '    </div>
 </body>
 </html>';
 
