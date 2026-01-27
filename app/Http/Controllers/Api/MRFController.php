@@ -120,7 +120,7 @@ class MRFController extends Controller
                 'requester' => $mrf->requester_name,
                 'requesterId' => (string) $mrf->requester_id,
                 'department' => $mrf->department,
-                'date' => $mrf->date->format('Y-m-d'),
+                'date' => $mrf->date ? $mrf->date->format('Y-m-d') : null,
                 'status' => $mrf->status,
                 'currentStage' => $mrf->current_stage,
                 'workflowState' => $mrf->workflow_state,
@@ -268,7 +268,7 @@ class MRFController extends Controller
             'requester' => $mrf->requester_name,
             'requesterId' => (string) $mrf->requester_id,
             'department' => $mrf->department,
-            'date' => $mrf->date->format('Y-m-d'),
+            'date' => $mrf->date ? $mrf->date->format('Y-m-d') : null,
             'status' => $mrf->status,
             'currentStage' => $mrf->current_stage,
             'workflowState' => $mrf->workflow_state,
@@ -1985,6 +1985,8 @@ class MRFController extends Controller
             <li>Items delivery must be accompanied by Airway Bill, Invoice and Delivery Note all duly signed by Emerald representative at the site.</li>
         </ol>';
         }
+        
+        $html .= '
     </div>
 </body>
 </html>';
