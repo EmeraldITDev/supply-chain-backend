@@ -22,10 +22,11 @@ return [
     |
     | This disk is specifically used for vendor registration documents.
     | Set to 's3' in production for persistent storage, or 'public' for local development.
+    | Default to 'public' if DOCUMENTS_DISK env var is not set (safer fallback).
     |
     */
 
-    'documents_disk' => env('DOCUMENTS_DISK', 's3'),
+    'documents_disk' => env('DOCUMENTS_DISK', 'public'),
 
     /*
     |--------------------------------------------------------------------------

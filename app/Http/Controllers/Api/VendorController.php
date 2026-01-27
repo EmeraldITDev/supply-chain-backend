@@ -131,93 +131,124 @@ class VendorController extends Controller
      */
     public function register(Request $request, VendorDocumentService $documentService)
     {
-        // Normalize email (trim and lowercase) for consistent checking
-        $email = strtolower(trim($request->email));
-        
-        // Check if registration with this email already exists (case-insensitive)
-        $existingRegistration = VendorRegistration::whereRaw('LOWER(email) = ?', [strtolower($email)])->first();
-        
-        if ($existingRegistration) {
-            // If it's pending, return success (idempotent - same as if they just submitted)
-            if (strtolower($existingRegistration->status) === 'pending') {
-                return response()->json([
-                    'success' => true,
-                    'message' => 'Vendor registration already submitted and pending approval',
-                    'registration' => [
-                        'id' => $existingRegistration->id,
-                        'companyName' => $existingRegistration->company_name,
-                        'status' => $existingRegistration->status,
-                    ]
-                ], 200);
-            }
+        try {
+            // Normalize email (trim and lowercase) for consistent checking
+            $email = strtolower(trim($request->email));
             
-            // If it's approved or rejected, return appropriate message
+            // Check if registration with this email already exists (case-insensitive)
+            $existingRegistration = VendorRegistration::whereRaw('LOWER(email) = ?', [strtolower($email)])->first();
+            
+            if ($existingRegistration) {
+                // If it's pending, return success (idempotent - same as if they just submitted)
+                if (strtolower($existingRegistration->status) === 'pending') {
+                    return response()->json([
+                        'success' => true,
+                        'message' => 'Vendor registration already submitted and pending approval',
+                        'registration' => [
+                            'id' => $existingRegistration->id,
+                            'companyName' => $existingRegistration->company_name,
+                            'status' => $existingRegistration->status,
+                        ]
+                    ], 200);
+                }
+                
+                // If it's approved or rejected, return appropriate message
+                return response()->json([
+                    'success' => false,
+                    'error' => strtolower($existingRegistration->status) === 'approved'
+                        ? 'A vendor registration with this email has already been approved.'
+                        : 'A vendor registration with this email already exists.',
+                    'code' => 'DUPLICATE_EMAIL'
+                ], 422);
+            }
+
+            // Prepare validation data with normalized email
+            $validationData = $request->all();
+            $validationData['email'] = $email;
+
+            // Note: We don't use 'unique' rule here because we check manually above
+            // This prevents false positives from case sensitivity or timing issues
+            $validator = Validator::make($validationData, [
+                'companyName' => 'required|string|max:255',
+                'category' => 'required|string|max:255',
+                'email' => 'required|email', // Removed unique rule - we check manually above
+                'phone' => 'nullable|string|max:20',
+                'address' => 'nullable|string',
+                'taxId' => 'nullable|string|max:255',
+                'contactPerson' => 'nullable|string|max:255',
+                'documents' => 'nullable|array',
+                'documents.*' => 'file|max:10240', // Max 10MB per file
+            ]);
+
+            if ($validator->fails()) {
+                return response()->json([
+                    'success' => false,
+                    'error' => 'Validation failed',
+                    'errors' => $validator->errors(),
+                    'code' => 'VALIDATION_ERROR'
+                ], 422);
+            }
+
+            $registration = VendorRegistration::create([
+                'company_name' => $request->companyName,
+                'category' => $request->category,
+                'email' => $email, // Use normalized email
+                'phone' => $request->phone,
+                'address' => $request->address,
+                'tax_id' => $request->taxId,
+                'contact_person' => $request->contactPerson,
+                'status' => VendorRegistration::STATUS_PENDING,
+            ]);
+
+            // Handle document uploads if provided
+            if ($request->hasFile('documents')) {
+                try {
+                    $documents = $request->file('documents');
+                    $documentService->storeDocuments($registration, $documents);
+                } catch (\Exception $e) {
+                    \Log::error('Error storing vendor documents', [
+                        'registration_id' => $registration->id,
+                        'error' => $e->getMessage(),
+                        'trace' => $e->getTraceAsString()
+                    ]);
+                    // Continue with registration even if documents fail
+                    // Documents can be uploaded later or resubmitted
+                }
+            }
+
+            // Send notification to procurement managers
+            try {
+                $this->notificationService->notifyVendorRegistration($registration);
+            } catch (\Exception $e) {
+                \Log::error('Error sending vendor registration notification', [
+                    'registration_id' => $registration->id,
+                    'error' => $e->getMessage()
+                ]);
+                // Continue - notification failure shouldn't block registration
+            }
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Vendor registration submitted successfully',
+                'registration' => [
+                    'id' => $registration->id,
+                    'companyName' => $registration->company_name,
+                    'status' => $registration->status,
+                ]
+            ], 201);
+        } catch (\Exception $e) {
+            \Log::error('Vendor registration error', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            
             return response()->json([
                 'success' => false,
-                'error' => strtolower($existingRegistration->status) === 'approved'
-                    ? 'A vendor registration with this email has already been approved.'
-                    : 'A vendor registration with this email already exists.',
-                'code' => 'DUPLICATE_EMAIL'
-            ], 422);
+                'error' => 'An error occurred during registration. Please try again.',
+                'code' => 'REGISTRATION_ERROR',
+                'message' => config('app.debug') ? $e->getMessage() : 'Internal server error'
+            ], 500);
         }
-
-        // Prepare validation data with normalized email
-        $validationData = $request->all();
-        $validationData['email'] = $email;
-
-        // Note: We don't use 'unique' rule here because we check manually above
-        // This prevents false positives from case sensitivity or timing issues
-        $validator = Validator::make($validationData, [
-            'companyName' => 'required|string|max:255',
-            'category' => 'required|string|max:255',
-            'email' => 'required|email', // Removed unique rule - we check manually above
-            'phone' => 'nullable|string|max:20',
-            'address' => 'nullable|string',
-            'taxId' => 'nullable|string|max:255',
-            'contactPerson' => 'nullable|string|max:255',
-            'documents' => 'nullable|array',
-            'documents.*' => 'file|max:10240', // Max 10MB per file
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json([
-                'success' => false,
-                'error' => 'Validation failed',
-                'errors' => $validator->errors(),
-                'code' => 'VALIDATION_ERROR'
-            ], 422);
-        }
-
-        $registration = VendorRegistration::create([
-            'company_name' => $request->companyName,
-            'category' => $request->category,
-            'email' => $email, // Use normalized email
-            'phone' => $request->phone,
-            'address' => $request->address,
-            'tax_id' => $request->taxId,
-            'contact_person' => $request->contactPerson,
-            'status' => VendorRegistration::STATUS_PENDING,
-        ]);
-
-        // Handle document uploads if provided
-        if ($request->hasFile('documents')) {
-            $documents = $request->file('documents');
-            $documentService->storeDocuments($registration, $documents);
-        }
-
-        // Send notification to procurement managers
-        $this->notificationService->notifyVendorRegistration($registration);
-
-        return response()->json([
-            'success' => true,
-            'message' => 'Vendor registration submitted successfully',
-            'registration' => [
-                'id' => $registration->id,
-                'companyName' => $registration->company_name,
-                'status' => $registration->status,
-            ]
-        ], 201);
-    }
 
     /**
      * Get all vendor registrations (procurement_manager and supply_chain_director only)
