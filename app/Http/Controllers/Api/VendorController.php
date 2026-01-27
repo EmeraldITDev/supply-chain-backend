@@ -280,6 +280,7 @@ class VendorController extends Controller
                 'message' => config('app.debug') ? $e->getMessage() : 'Internal server error'
             ], 500);
         }
+    }
 
     /**
      * Get all vendor registrations (procurement_manager and supply_chain_director only)

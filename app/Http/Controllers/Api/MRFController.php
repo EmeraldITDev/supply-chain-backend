@@ -71,42 +71,42 @@ class MRFController extends Controller
     public function index(Request $request)
     {
         try {
-            $query = MRF::with('requester');
+        $query = MRF::with('requester');
 
-            // Filter by status
-            if ($request->has('status')) {
-                $query->where('status', $request->status);
-            }
+        // Filter by status
+        if ($request->has('status')) {
+            $query->where('status', $request->status);
+        }
 
-            // Search in title/description
-            if ($request->has('search')) {
-                $search = $request->search;
-                $query->where(function($q) use ($search) {
-                    $q->where('title', 'like', "%{$search}%")
-                      ->orWhere('description', 'like', "%{$search}%");
-                });
-            }
+        // Search in title/description
+        if ($request->has('search')) {
+            $search = $request->search;
+            $query->where(function($q) use ($search) {
+                $q->where('title', 'like', "%{$search}%")
+                  ->orWhere('description', 'like', "%{$search}%");
+            });
+        }
 
-            // Sort
-            $sortBy = $request->get('sortBy', 'date');
-            $sortOrder = $request->get('sortOrder', 'desc');
-            
-            $allowedSortFields = ['date', 'estimated_cost', 'title', 'status', 'created_at'];
-            if (in_array($sortBy, $allowedSortFields)) {
-                $query->orderBy($sortBy, $sortOrder);
-            } else {
-                $query->orderBy('date', 'desc');
-            }
+        // Sort
+        $sortBy = $request->get('sortBy', 'date');
+        $sortOrder = $request->get('sortOrder', 'desc');
+        
+        $allowedSortFields = ['date', 'estimated_cost', 'title', 'status', 'created_at'];
+        if (in_array($sortBy, $allowedSortFields)) {
+            $query->orderBy($sortBy, $sortOrder);
+        } else {
+            $query->orderBy('date', 'desc');
+        }
 
-            // Filter by requester (for employees to see only their own)
-            $user = $request->user();
-            if ($user && in_array($user->role, ['employee', 'general_employee'])) {
-                $query->where('requester_id', $user->id);
-            }
+        // Filter by requester (for employees to see only their own)
+        $user = $request->user();
+        if ($user && in_array($user->role, ['employee', 'general_employee'])) {
+            $query->where('requester_id', $user->id);
+        }
 
-            $mrfs = $query->get();
+        $mrfs = $query->get();
 
-            return response()->json($mrfs->map(function($mrf) {
+        return response()->json($mrfs->map(function($mrf) {
             return [
                 'id' => $mrf->mrf_id,
                 'title' => $mrf->title,
@@ -153,7 +153,7 @@ class MRFController extends Controller
                 'po_generated_at' => $mrf->po_generated_at?->toIso8601String(),
                 'poGeneratedAt' => $mrf->po_generated_at?->toIso8601String(),
             ];
-            }));
+        }));
         } catch (\Illuminate\Database\QueryException $e) {
             // Handle database errors (e.g., missing columns)
             $errorMessage = $e->getMessage();
@@ -772,25 +772,25 @@ class MRFController extends Controller
             return response()->json([
                 'success' => true,
                 'data' => [
-                    'id' => $mrf->mrf_id,
-                    'title' => $mrf->title,
-                    'category' => $mrf->category,
+                'id' => $mrf->mrf_id,
+                'title' => $mrf->title,
+                'category' => $mrf->category,
                     'contractType' => $mrf->contract_type,
-                    'urgency' => $mrf->urgency,
-                    'description' => $mrf->description,
-                    'quantity' => $mrf->quantity,
-                    'estimatedCost' => (float) $mrf->estimated_cost,
-                    'justification' => $mrf->justification,
-                    'requester' => $mrf->requester_name,
-                    'requesterId' => (string) $mrf->requester_id,
+                'urgency' => $mrf->urgency,
+                'description' => $mrf->description,
+                'quantity' => $mrf->quantity,
+                'estimatedCost' => (float) $mrf->estimated_cost,
+                'justification' => $mrf->justification,
+                'requester' => $mrf->requester_name,
+                'requesterId' => (string) $mrf->requester_id,
                 'department' => $mrf->department,
-                    'date' => $mrf->date->format('Y-m-d'),
-                    'status' => $mrf->status,
-                    'currentStage' => $mrf->current_stage,
+                'date' => $mrf->date->format('Y-m-d'),
+                'status' => $mrf->status,
+                'currentStage' => $mrf->current_stage,
                     'workflowState' => $mrf->workflow_state,
-                    'approvalHistory' => $mrf->approval_history ?? [],
-                    'rejectionReason' => $mrf->rejection_reason,
-                    'isResubmission' => $mrf->is_resubmission,
+                'approvalHistory' => $mrf->approval_history ?? [],
+                'rejectionReason' => $mrf->rejection_reason,
+                'isResubmission' => $mrf->is_resubmission,
                     'pfiUrl' => $mrf->pfi_url,
                     'pfiShareUrl' => $mrf->pfi_share_url,
                 ]
@@ -1354,8 +1354,8 @@ class MRFController extends Controller
                 $mrf->rfqs()->delete();
                 $mrf->items()->delete();
                 $mrf->approvalHistory()->delete();
-                
-                $mrf->delete();
+
+        $mrf->delete();
                 
                 Log::info('MRF force deleted by admin', [
                     'mrf_id' => $id,
@@ -1448,10 +1448,10 @@ class MRFController extends Controller
                 'status' => $mrf->status
             ]);
 
-            return response()->json([
-                'success' => true,
-                'message' => 'MRF deleted successfully'
-            ]);
+        return response()->json([
+            'success' => true,
+            'message' => 'MRF deleted successfully'
+        ]);
         } catch (\Exception $e) {
             Log::error('MRF deletion failed', [
                 'mrf_id' => $id,
