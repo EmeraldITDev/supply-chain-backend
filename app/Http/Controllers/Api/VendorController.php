@@ -131,6 +131,12 @@ class VendorController extends Controller
      */
     public function register(Request $request, VendorDocumentService $documentService)
     {
+        \Log::info('Vendor registration attempt', [
+            'email' => $request->email,
+            'company_name' => $request->companyName ?? $request->company_name,
+            'has_documents' => $request->hasFile('documents')
+        ]);
+
         try {
             // Normalize email (trim and lowercase) for consistent checking
             $email = strtolower(trim($request->email));
@@ -189,6 +195,12 @@ class VendorController extends Controller
                 ], 422);
             }
 
+            \Log::info('Validation passed, creating registration', [
+                'company_name' => $request->companyName,
+                'category' => $request->category,
+                'email' => $email
+            ]);
+
             $registration = VendorRegistration::create([
                 'company_name' => $request->companyName,
                 'category' => $request->category,
@@ -198,6 +210,10 @@ class VendorController extends Controller
                 'tax_id' => $request->taxId,
                 'contact_person' => $request->contactPerson,
                 'status' => VendorRegistration::STATUS_PENDING,
+            ]);
+
+            \Log::info('Registration created successfully', [
+                'registration_id' => $registration->id
             ]);
 
             // Handle document uploads if provided
