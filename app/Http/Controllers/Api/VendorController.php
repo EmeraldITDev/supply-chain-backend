@@ -271,6 +271,8 @@ class VendorController extends Controller
                     'name' => $doc['file_name'] ?? 'Unknown',
                     'filePath' => $filePath,
                     'fileUrl' => $fileUrl,
+                    'file_url' => $fileUrl,
+                    'url' => $fileUrl,
                     'file_share_url' => $fileShareUrl,
                     'fileShareUrl' => $fileShareUrl, // Also include camelCase for frontend compatibility
                     'fileSize' => $doc['file_size'] ?? null,
@@ -369,6 +371,8 @@ class VendorController extends Controller
                 'name' => $doc['file_name'] ?? 'Unknown',
                 'filePath' => $filePath,
                 'fileUrl' => $fileUrl,
+                'file_url' => $fileUrl,
+                'url' => $fileUrl,
                 'file_share_url' => $fileShareUrl,
                 'fileShareUrl' => $fileShareUrl, // Also include camelCase for frontend compatibility
                 'fileSize' => $doc['file_size'] ?? null,

@@ -11,35 +11,17 @@ return new class extends Migration
      */
     public function up(): void
     {
-        // Only add column if it doesn't exist (safe for re-running)
-        if (!Schema::hasColumn('m_r_f_s', 'contract_type')) {
-            Schema::table('m_r_f_s', function (Blueprint $table) {
-                if (Schema::hasColumn('m_r_f_s', 'category')) {
-                    $table->string('contract_type', 50)->nullable()->after('category')
-                        ->comment('Contract type: emerald, oando, dangote, heritage');
-                } else {
-                    $table->string('contract_type', 50)->nullable()
-                        ->comment('Contract type: emerald, oando, dangote, heritage');
-                }
-            });
-        }
+        Schema::table('m_r_f_s', function (Blueprint $table) {
+            $table->string('contract_type', 50)->nullable()->after('category')
+                ->comment('Contract type: emerald, oando, dangote, heritage');
+        });
         
-        // Add check constraint for contract_type (drop first if exists)
-        try {
-            \DB::statement("ALTER TABLE m_r_f_s DROP CONSTRAINT IF EXISTS m_r_f_s_contract_type_check;");
-        } catch (\Exception $e) {
-            // Ignore if constraint doesn't exist
-        }
-        
-        try {
-            \DB::statement("
-                ALTER TABLE m_r_f_s
-                ADD CONSTRAINT m_r_f_s_contract_type_check 
-                CHECK (contract_type IS NULL OR contract_type IN ('emerald', 'oando', 'dangote', 'heritage'));
-            ");
-        } catch (\Exception $e) {
-            // Constraint might already exist, ignore
-        }
+        // Add check constraint for contract_type
+        \DB::statement("
+            ALTER TABLE m_r_f_s
+            ADD CONSTRAINT m_r_f_s_contract_type_check 
+            CHECK (contract_type IS NULL OR contract_type IN ('emerald', 'oando', 'dangote', 'heritage'));
+        ");
     }
 
     /**

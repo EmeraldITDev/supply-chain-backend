@@ -13,6 +13,8 @@ class VendorRegistrationDocument extends Model
         'file_name',
         'file_type',
         'file_size',
+        'file_url',
+        'file_share_url',
         'uploaded_at',
     ];
 
