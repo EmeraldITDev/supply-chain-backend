@@ -307,7 +307,7 @@ class VendorController extends Controller
             ], 403);
         }
 
-        $query = VendorRegistration::with(['vendor', 'approver']);
+        $query = VendorRegistration::with(['vendor', 'approver', 'documents']);
 
         // Filter by status
         if ($request->has('status')) {
@@ -318,43 +318,76 @@ class VendorController extends Controller
 
         $mappedRegistrations = $registrations->map(function($reg) {
             // Format documents with download URLs using VendorDocumentService
-            // documents is cast to array in the model, so check if it's an array
+            // Priority: Use documents relationship (table) first, then fallback to JSON column
             $formattedDocuments = [];
-            $documentMetadata = is_array($reg->documents) ? $reg->documents : [];
             $documentService = app(VendorDocumentService::class);
             
-            foreach ($documentMetadata as $doc) {
-                $filePath = $doc['file_path'] ?? null;
+            // First, try to get documents from the relationship (more reliable)
+            $documentRecords = $reg->documents ?? collect([]);
+            
+            // If no documents in relationship, try JSON column
+            if ($documentRecords->isEmpty()) {
+                $documentMetadata = is_array($reg->documents) ? $reg->documents : [];
+                // Convert JSON array to collection-like structure
+                $documentRecords = collect($documentMetadata)->map(function($doc) {
+                    return (object) $doc; // Convert to object for consistency
+                });
+            }
+            
+            foreach ($documentRecords as $doc) {
+                // Handle both Eloquent models and array/object data
+                $docId = is_object($doc) && isset($doc->id) ? $doc->id : (is_array($doc) ? ($doc['id'] ?? null) : null);
+                $filePath = is_object($doc) && isset($doc->file_path) ? $doc->file_path : (is_array($doc) ? ($doc['file_path'] ?? null) : null);
+                $fileName = is_object($doc) && isset($doc->file_name) ? $doc->file_name : (is_array($doc) ? ($doc['file_name'] ?? 'Unknown') : 'Unknown');
+                $fileType = is_object($doc) && isset($doc->file_type) ? $doc->file_type : (is_array($doc) ? ($doc['file_type'] ?? null) : null);
+                $fileSize = is_object($doc) && isset($doc->file_size) ? $doc->file_size : (is_array($doc) ? ($doc['file_size'] ?? null) : null);
+                $fileShareUrl = is_object($doc) && isset($doc->file_share_url) ? $doc->file_share_url : (is_array($doc) ? ($doc['file_share_url'] ?? null) : null);
+                $uploadedAt = is_object($doc) && isset($doc->uploaded_at) ? $doc->uploaded_at : (is_array($doc) ? ($doc['uploaded_at'] ?? now()->toIso8601String()) : now()->toIso8601String());
+                
                 $fileUrl = null;
-                $fileShareUrl = $doc['file_share_url'] ?? null;
                 
                 if ($filePath && !$fileShareUrl) {
                     try {
-                        $fileUrl = $documentService->getDocumentUrl($filePath, $doc['id'] ?? null, $reg->id);
+                        $fileUrl = $documentService->getDocumentUrl($filePath, $docId, $reg->id);
                     } catch (\Exception $e) {
                         \Log::warning("Failed to generate document URL for {$filePath}: " . $e->getMessage());
                         // Fallback to API download endpoint
-                        $fileUrl = url("/api/vendors/registrations/{$reg->id}/documents/{$doc['id']}/download");
+                        if ($docId) {
+                            $fileUrl = url("/api/vendors/registrations/{$reg->id}/documents/{$docId}/download");
+                        }
                     }
                 } else if ($fileShareUrl) {
                     // If we have a share URL (S3 or other storage), use it as the file URL
                     $fileUrl = $fileShareUrl;
+                } else if ($docId) {
+                    // Last resort: use download endpoint
+                    $fileUrl = url("/api/vendors/registrations/{$reg->id}/documents/{$docId}/download");
+                }
+                
+                // Format uploaded_at
+                $uploadedAtFormatted = $uploadedAt;
+                if ($uploadedAt instanceof \Carbon\Carbon || $uploadedAt instanceof \DateTime) {
+                    $uploadedAtFormatted = $uploadedAt->toIso8601String();
+                } elseif (is_string($uploadedAt)) {
+                    // Already a string, keep as is
+                } else {
+                    $uploadedAtFormatted = now()->toIso8601String();
                 }
                 
                 $formattedDocuments[] = [
-                    'id' => (string) ($doc['id'] ?? ''),
-                    'type' => $doc['file_type'] ?? null,
-                    'fileName' => $doc['file_name'] ?? 'Unknown',
-                    'name' => $doc['file_name'] ?? 'Unknown',
+                    'id' => (string) ($docId ?? ''),
+                    'type' => $fileType,
+                    'fileName' => $fileName,
+                    'name' => $fileName,
                     'filePath' => $filePath,
                     'fileUrl' => $fileUrl,
                     'file_url' => $fileUrl,
                     'url' => $fileUrl,
                     'file_share_url' => $fileShareUrl,
                     'fileShareUrl' => $fileShareUrl, // Also include camelCase for frontend compatibility
-                    'fileSize' => $doc['file_size'] ?? null,
+                    'fileSize' => $fileSize,
                     'fileData' => $fileUrl,
-                    'uploadedAt' => $doc['uploaded_at'] ?? now()->toIso8601String(),
+                    'uploadedAt' => $uploadedAtFormatted,
                 ];
             }
 
@@ -407,7 +440,7 @@ class VendorController extends Controller
             ], 403);
         }
 
-        $registration = VendorRegistration::with(['vendor', 'approver'])->find($id);
+        $registration = VendorRegistration::with(['vendor', 'approver', 'documents'])->find($id);
 
         if (!$registration) {
             return response()->json([
@@ -418,43 +451,76 @@ class VendorController extends Controller
         }
 
         // Format documents with download URLs using VendorDocumentService
-        // documents is cast to array in the model, so check if it's an array
+        // Priority: Use documents relationship (table) first, then fallback to JSON column
         $formattedDocuments = [];
-        $documentMetadata = is_array($registration->documents) ? $registration->documents : [];
         $documentService = app(VendorDocumentService::class);
         
-        foreach ($documentMetadata as $doc) {
-            $filePath = $doc['file_path'] ?? null;
+        // First, try to get documents from the relationship (more reliable)
+        $documentRecords = $registration->documents ?? collect([]);
+        
+        // If no documents in relationship, try JSON column
+        if ($documentRecords->isEmpty()) {
+            $documentMetadata = is_array($registration->documents) ? $registration->documents : [];
+            // Convert JSON array to collection-like structure
+            $documentRecords = collect($documentMetadata)->map(function($doc) {
+                return (object) $doc; // Convert to object for consistency
+            });
+        }
+        
+        foreach ($documentRecords as $doc) {
+            // Handle both Eloquent models and array/object data
+            $docId = is_object($doc) && isset($doc->id) ? $doc->id : (is_array($doc) ? ($doc['id'] ?? null) : null);
+            $filePath = is_object($doc) && isset($doc->file_path) ? $doc->file_path : (is_array($doc) ? ($doc['file_path'] ?? null) : null);
+            $fileName = is_object($doc) && isset($doc->file_name) ? $doc->file_name : (is_array($doc) ? ($doc['file_name'] ?? 'Unknown') : 'Unknown');
+            $fileType = is_object($doc) && isset($doc->file_type) ? $doc->file_type : (is_array($doc) ? ($doc['file_type'] ?? null) : null);
+            $fileSize = is_object($doc) && isset($doc->file_size) ? $doc->file_size : (is_array($doc) ? ($doc['file_size'] ?? null) : null);
+            $fileShareUrl = is_object($doc) && isset($doc->file_share_url) ? $doc->file_share_url : (is_array($doc) ? ($doc['file_share_url'] ?? null) : null);
+            $uploadedAt = is_object($doc) && isset($doc->uploaded_at) ? $doc->uploaded_at : (is_array($doc) ? ($doc['uploaded_at'] ?? now()->toIso8601String()) : now()->toIso8601String());
+            
             $fileUrl = null;
-            $fileShareUrl = $doc['file_share_url'] ?? null;
             
             if ($filePath && !$fileShareUrl) {
                 try {
-                    $fileUrl = $documentService->getDocumentUrl($filePath, $doc['id'] ?? null, $registration->id);
+                    $fileUrl = $documentService->getDocumentUrl($filePath, $docId, $registration->id);
                 } catch (\Exception $e) {
                     \Log::warning("Failed to generate document URL for {$filePath}: " . $e->getMessage());
                     // Fallback to API download endpoint
-                    $fileUrl = url("/api/vendors/registrations/{$registration->id}/documents/{$doc['id']}/download");
+                    if ($docId) {
+                        $fileUrl = url("/api/vendors/registrations/{$registration->id}/documents/{$docId}/download");
+                    }
                 }
             } else if ($fileShareUrl) {
-                // If we have a OneDrive share URL, use it as the file URL
+                // If we have a share URL (S3 or other storage), use it as the file URL
                 $fileUrl = $fileShareUrl;
+            } else if ($docId) {
+                // Last resort: use download endpoint
+                $fileUrl = url("/api/vendors/registrations/{$registration->id}/documents/{$docId}/download");
+            }
+            
+            // Format uploaded_at
+            $uploadedAtFormatted = $uploadedAt;
+            if ($uploadedAt instanceof \Carbon\Carbon || $uploadedAt instanceof \DateTime) {
+                $uploadedAtFormatted = $uploadedAt->toIso8601String();
+            } elseif (is_string($uploadedAt)) {
+                // Already a string, keep as is
+            } else {
+                $uploadedAtFormatted = now()->toIso8601String();
             }
             
             $formattedDocuments[] = [
-                'id' => (string) ($doc['id'] ?? ''),
-                'type' => $doc['file_type'] ?? null,
-                'fileName' => $doc['file_name'] ?? 'Unknown',
-                'name' => $doc['file_name'] ?? 'Unknown',
+                'id' => (string) ($docId ?? ''),
+                'type' => $fileType,
+                'fileName' => $fileName,
+                'name' => $fileName,
                 'filePath' => $filePath,
                 'fileUrl' => $fileUrl,
                 'file_url' => $fileUrl,
                 'url' => $fileUrl,
                 'file_share_url' => $fileShareUrl,
                 'fileShareUrl' => $fileShareUrl, // Also include camelCase for frontend compatibility
-                'fileSize' => $doc['file_size'] ?? null,
+                'fileSize' => $fileSize,
                 'fileData' => $fileUrl,
-                'uploadedAt' => $doc['uploaded_at'] ?? now()->toIso8601String(),
+                'uploadedAt' => $uploadedAtFormatted,
             ];
         }
 

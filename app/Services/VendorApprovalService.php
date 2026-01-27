@@ -6,6 +6,7 @@ use App\Mail\VendorApprovalMail;
 use App\Models\User;
 use App\Models\Vendor;
 use App\Models\VendorRegistration;
+use App\Services\VendorDocumentService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Mail;
@@ -250,6 +251,24 @@ class VendorApprovalService
             } catch (\Exception $e) {
                 // Log but don't fail - email is not critical
                 \Log::warning('Failed to send approval email, but vendor was approved: ' . $e->getMessage());
+            }
+
+            // Move documents from registration folder to vendor-specific permanent folder
+            try {
+                $documentService = app(VendorDocumentService::class);
+                $movedDocuments = $documentService->moveDocumentsToVendorFolder($registration, $vendor);
+                \Log::info('Documents moved to vendor folder after approval', [
+                    'registration_id' => $registration->id,
+                    'vendor_id' => $vendor->id,
+                    'moved_count' => count($movedDocuments)
+                ]);
+            } catch (\Exception $e) {
+                // Log but don't fail approval if document migration fails
+                \Log::error('Failed to move documents to vendor folder: ' . $e->getMessage(), [
+                    'registration_id' => $registration->id,
+                    'vendor_id' => $vendor->id,
+                    'trace' => $e->getTraceAsString()
+                ]);
             }
 
             // Send notification to procurement team

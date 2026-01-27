@@ -298,20 +298,55 @@ class VendorDocumentService
 
     /**
      * Get document content for download
+     * Tries the configured disk first, then falls back to checking both S3 and public disks
      *
      * @param VendorRegistrationDocument $document
      * @return string|false
      */
     public function getDocumentContent(VendorRegistrationDocument $document)
     {
-        $disk = $this->getStorageDisk();
-
-        // Check if file exists
-        if (!$document->file_path || !Storage::disk($disk)->exists($document->file_path)) {
+        if (!$document->file_path) {
             return false;
         }
 
-        return Storage::disk($disk)->get($document->file_path);
+        $disk = $this->getStorageDisk();
+
+        // Try configured disk first
+        if (Storage::disk($disk)->exists($document->file_path)) {
+            return Storage::disk($disk)->get($document->file_path);
+        }
+
+        // If not found on configured disk, try both S3 and public as fallback
+        // This handles cases where files were stored on a different disk
+        $disksToTry = ['s3', 'public'];
+        foreach ($disksToTry as $tryDisk) {
+            if ($tryDisk === $disk) {
+                continue; // Already tried
+            }
+            
+            try {
+                if (Storage::disk($tryDisk)->exists($document->file_path)) {
+                    \Log::info("Document found on different disk", [
+                        'document_id' => $document->id,
+                        'expected_disk' => $disk,
+                        'actual_disk' => $tryDisk,
+                        'file_path' => $document->file_path
+                    ]);
+                    return Storage::disk($tryDisk)->get($document->file_path);
+                }
+            } catch (\Exception $e) {
+                // Disk might not be configured, continue to next
+                continue;
+            }
+        }
+
+        \Log::warning("Document file not found on any disk", [
+            'document_id' => $document->id,
+            'file_path' => $document->file_path,
+            'configured_disk' => $disk
+        ]);
+
+        return false;
     }
 
     /**
@@ -331,6 +366,163 @@ class VendorDocumentService
 
         // Delete record from database
         return $document->delete();
+    }
+
+    /**
+     * Move documents from registration folder to vendor-specific permanent folder
+     * Called after vendor approval to organize documents permanently
+     *
+     * @param VendorRegistration $registration
+     * @param Vendor $vendor
+     * @return array Array of moved document paths
+     */
+    public function moveDocumentsToVendorFolder(VendorRegistration $registration, \App\Models\Vendor $vendor): array
+    {
+        $disk = $this->getStorageDisk();
+        $movedDocuments = [];
+        
+        \Log::info("Moving documents to vendor folder", [
+            'registration_id' => $registration->id,
+            'vendor_id' => $vendor->id,
+            'vendor_name' => $vendor->name,
+            'disk' => $disk
+        ]);
+
+        // Get all documents for this registration
+        $documents = VendorRegistrationDocument::where('vendor_registration_id', $registration->id)->get();
+        
+        if ($documents->isEmpty()) {
+            \Log::warning("No documents found to move for registration", [
+                'registration_id' => $registration->id
+            ]);
+            return $movedDocuments;
+        }
+
+        // Create vendor-specific folder path
+        $vendorSlug = \Illuminate\Support\Str::slug($vendor->name ?? 'Vendor-' . $vendor->id);
+        $year = date('Y');
+        $newBasePath = "vendor_documents/{$year}/{$vendorSlug}";
+
+        foreach ($documents as $document) {
+            try {
+                $oldPath = $document->file_path;
+                
+                if (!$oldPath || !Storage::disk($disk)->exists($oldPath)) {
+                    \Log::warning("Document file not found, skipping", [
+                        'document_id' => $document->id,
+                        'file_path' => $oldPath
+                    ]);
+                    continue;
+                }
+
+                // Extract filename from old path
+                $fileName = basename($oldPath);
+                $newPath = $newBasePath . '/' . $fileName;
+
+                // If new path is same as old path, skip (already in correct location)
+                if ($oldPath === $newPath) {
+                    \Log::info("Document already in vendor folder, skipping", [
+                        'document_id' => $document->id,
+                        'path' => $oldPath
+                    ]);
+                    continue;
+                }
+
+                // Copy file to new location
+                $fileContent = Storage::disk($disk)->get($oldPath);
+                Storage::disk($disk)->put($newPath, $fileContent);
+
+                // Verify new file exists
+                if (!Storage::disk($disk)->exists($newPath)) {
+                    \Log::error("Failed to verify moved document", [
+                        'document_id' => $document->id,
+                        'new_path' => $newPath
+                    ]);
+                    continue;
+                }
+
+                // Generate new URL
+                $newFileUrl = null;
+                $newFileShareUrl = null;
+                
+                if ($disk === 's3') {
+                    try {
+                        $newFileUrl = Storage::disk($disk)->temporaryUrl($newPath, now()->addHours(24));
+                        $newFileShareUrl = $newFileUrl;
+                    } catch (\Exception $e) {
+                        \Log::warning('S3 temporary URL generation failed for moved document', [
+                            'error' => $e->getMessage(),
+                            'path' => $newPath
+                        ]);
+                        $newFileUrl = Storage::disk($disk)->url($newPath);
+                        $newFileShareUrl = $newFileUrl;
+                    }
+                } else {
+                    $newFileUrl = Storage::disk($disk)->url($newPath);
+                    if (!filter_var($newFileUrl, FILTER_VALIDATE_URL)) {
+                        $baseUrl = config('app.url');
+                        $newFileUrl = rtrim($baseUrl, '/') . '/' . ltrim($newFileUrl, '/');
+                    }
+                    $newFileShareUrl = $newFileUrl;
+                }
+
+                // Update document record with new path and URL
+                $document->update([
+                    'file_path' => $newPath,
+                    'file_url' => $newFileUrl,
+                    'file_share_url' => $newFileShareUrl,
+                ]);
+
+                // Delete old file (only if it's different from new path)
+                if ($oldPath !== $newPath && Storage::disk($disk)->exists($oldPath)) {
+                    Storage::disk($disk)->delete($oldPath);
+                }
+
+                $movedDocuments[] = [
+                    'document_id' => $document->id,
+                    'old_path' => $oldPath,
+                    'new_path' => $newPath,
+                ];
+
+                \Log::info("Document moved successfully", [
+                    'document_id' => $document->id,
+                    'old_path' => $oldPath,
+                    'new_path' => $newPath
+                ]);
+
+            } catch (\Exception $e) {
+                \Log::error("Error moving document", [
+                    'document_id' => $document->id,
+                    'error' => $e->getMessage(),
+                    'trace' => $e->getTraceAsString()
+                ]);
+            }
+        }
+
+        // Update registration documents JSON column with new paths
+        if (count($movedDocuments) > 0) {
+            $registration->refresh();
+            $documentMetadata = is_array($registration->documents) ? $registration->documents : [];
+            
+            foreach ($documentMetadata as &$doc) {
+                $docRecord = VendorRegistrationDocument::find($doc['id'] ?? null);
+                if ($docRecord) {
+                    $doc['file_path'] = $docRecord->file_path;
+                    $doc['file_url'] = $docRecord->file_url;
+                    $doc['file_share_url'] = $docRecord->file_share_url;
+                }
+            }
+            
+            $registration->update(['documents' => $documentMetadata]);
+        }
+
+        \Log::info("Document migration completed", [
+            'registration_id' => $registration->id,
+            'vendor_id' => $vendor->id,
+            'moved_count' => count($movedDocuments)
+        ]);
+
+        return $movedDocuments;
     }
 }
 
