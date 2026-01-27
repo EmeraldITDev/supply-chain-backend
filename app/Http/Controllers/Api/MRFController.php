@@ -13,6 +13,8 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
+use Dompdf\Dompdf;
+use Dompdf\Options;
 
 class MRFController extends Controller
 {
@@ -68,42 +70,43 @@ class MRFController extends Controller
      */
     public function index(Request $request)
     {
-        $query = MRF::with('requester');
+        try {
+            $query = MRF::with('requester');
 
-        // Filter by status
-        if ($request->has('status')) {
-            $query->where('status', $request->status);
-        }
+            // Filter by status
+            if ($request->has('status')) {
+                $query->where('status', $request->status);
+            }
 
-        // Search in title/description
-        if ($request->has('search')) {
-            $search = $request->search;
-            $query->where(function($q) use ($search) {
-                $q->where('title', 'like', "%{$search}%")
-                  ->orWhere('description', 'like', "%{$search}%");
-            });
-        }
+            // Search in title/description
+            if ($request->has('search')) {
+                $search = $request->search;
+                $query->where(function($q) use ($search) {
+                    $q->where('title', 'like', "%{$search}%")
+                      ->orWhere('description', 'like', "%{$search}%");
+                });
+            }
 
-        // Sort
-        $sortBy = $request->get('sortBy', 'date');
-        $sortOrder = $request->get('sortOrder', 'desc');
-        
-        $allowedSortFields = ['date', 'estimated_cost', 'title', 'status', 'created_at'];
-        if (in_array($sortBy, $allowedSortFields)) {
-            $query->orderBy($sortBy, $sortOrder);
-        } else {
-            $query->orderBy('date', 'desc');
-        }
+            // Sort
+            $sortBy = $request->get('sortBy', 'date');
+            $sortOrder = $request->get('sortOrder', 'desc');
+            
+            $allowedSortFields = ['date', 'estimated_cost', 'title', 'status', 'created_at'];
+            if (in_array($sortBy, $allowedSortFields)) {
+                $query->orderBy($sortBy, $sortOrder);
+            } else {
+                $query->orderBy('date', 'desc');
+            }
 
-        // Filter by requester (for employees to see only their own)
-        $user = $request->user();
-        if ($user && in_array($user->role, ['employee', 'general_employee'])) {
-            $query->where('requester_id', $user->id);
-        }
+            // Filter by requester (for employees to see only their own)
+            $user = $request->user();
+            if ($user && in_array($user->role, ['employee', 'general_employee'])) {
+                $query->where('requester_id', $user->id);
+            }
 
-        $mrfs = $query->get();
+            $mrfs = $query->get();
 
-        return response()->json($mrfs->map(function($mrf) {
+            return response()->json($mrfs->map(function($mrf) {
             return [
                 'id' => $mrf->mrf_id,
                 'title' => $mrf->title,
@@ -150,7 +153,67 @@ class MRFController extends Controller
                 'po_generated_at' => $mrf->po_generated_at?->toIso8601String(),
                 'poGeneratedAt' => $mrf->po_generated_at?->toIso8601String(),
             ];
-        }));
+            }));
+        } catch (\Illuminate\Database\QueryException $e) {
+            // Handle database errors (e.g., missing columns)
+            $errorMessage = $e->getMessage();
+            $errorCode = $e->getCode();
+            
+            Log::error('MRF index query error', [
+                'error' => $errorMessage,
+                'code' => $errorCode,
+                'sql_state' => $e->errorInfo[0] ?? null,
+            ]);
+            
+            // Check for column-related errors (MySQL, PostgreSQL, SQLite variations)
+            $columnErrorPatterns = [
+                "Unknown column",
+                "doesn't exist",
+                "does not exist",
+                "column.*does not exist",
+                "SQLSTATE[42S22]", // MySQL: Column not found
+                "SQLSTATE[42703]", // PostgreSQL: Undefined column
+            ];
+            
+            $isColumnError = false;
+            foreach ($columnErrorPatterns as $pattern) {
+                if (stripos($errorMessage, $pattern) !== false || 
+                    preg_match('/' . $pattern . '/i', $errorMessage)) {
+                    $isColumnError = true;
+                    break;
+                }
+            }
+            
+            // Return empty array if it's a column error (migration not run yet)
+            if ($isColumnError) {
+                Log::warning('MRF index: Missing database columns detected. Migration may need to be run.', [
+                    'error' => $errorMessage,
+                ]);
+                return response()->json([]);
+            }
+            
+            // For other database errors, return error response
+            return response()->json([
+                'success' => false,
+                'error' => 'Database error occurred',
+                'code' => 'DATABASE_ERROR',
+                'message' => config('app.debug') ? $errorMessage : 'A database error occurred. Please contact support.'
+            ], 500);
+        } catch (\Exception $e) {
+            Log::error('MRF index error', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+            ]);
+            
+            return response()->json([
+                'success' => false,
+                'error' => 'An error occurred while fetching MRFs',
+                'code' => 'INTERNAL_ERROR',
+                'message' => config('app.debug') ? $e->getMessage() : 'An internal error occurred. Please try again later.'
+            ], 500);
+        }
     }
 
     /**
@@ -1401,5 +1464,565 @@ class MRFController extends Controller
                 'code' => 'DELETE_FAILED'
             ], 500);
         }
+    }
+
+    /**
+     * Download unsigned PO PDF
+     */
+    public function downloadPO(Request $request, $id)
+    {
+        $mrf = MRF::where('mrf_id', $id)->first();
+
+        if (!$mrf) {
+            return response()->json([
+                'success' => false,
+                'error' => 'MRF not found',
+                'code' => 'NOT_FOUND'
+            ], 404);
+        }
+
+        if (empty($mrf->unsigned_po_url) || empty($mrf->po_number)) {
+            return response()->json([
+                'success' => false,
+                'error' => 'PO not generated yet',
+                'code' => 'NO_PO'
+            ], 404);
+        }
+
+        try {
+            // Generate PDF on-the-fly from MRF data
+            $pdfContent = $this->generatePOPDFFromMRF($mrf);
+            
+            $filename = "PO_{$mrf->po_number}.pdf";
+            
+            return response($pdfContent, 200)
+                ->header('Content-Type', 'application/pdf')
+                ->header('Content-Disposition', 'attachment; filename="' . $filename . '"');
+        } catch (\Exception $e) {
+            Log::error('Failed to download PO', [
+                'mrf_id' => $id,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'error' => 'Failed to generate PO PDF: ' . $e->getMessage(),
+                'code' => 'PDF_GENERATION_FAILED'
+            ], 500);
+        }
+    }
+
+    /**
+     * Download signed PO PDF
+     */
+    public function downloadSignedPO(Request $request, $id)
+    {
+        $mrf = MRF::where('mrf_id', $id)->first();
+
+        if (!$mrf) {
+            return response()->json([
+                'success' => false,
+                'error' => 'MRF not found',
+                'code' => 'NOT_FOUND'
+            ], 404);
+        }
+
+        if (empty($mrf->signed_po_url)) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Signed PO not available',
+                'code' => 'NO_SIGNED_PO'
+            ], 404);
+        }
+
+        try {
+            $disk = $this->getStorageDisk();
+            $urlPath = parse_url($mrf->signed_po_url, PHP_URL_PATH);
+            
+            // Try to extract file path
+            $baseUrl = Storage::disk($disk)->url('');
+            $filePath = str_replace($baseUrl, '', $mrf->signed_po_url);
+            $filePath = ltrim(str_replace('/storage/', '', $filePath), '/');
+            
+            if (empty($filePath) || !Storage::disk($disk)->exists($filePath)) {
+                // Try alternative path extraction
+                $filePath = ltrim($urlPath, '/');
+                if (!Storage::disk($disk)->exists($filePath)) {
+                    throw new \Exception('Signed PO file not found in storage');
+                }
+            }
+
+            $pdfContent = Storage::disk($disk)->get($filePath);
+            $filename = "PO_Signed_{$mrf->po_number}.pdf";
+            
+            return response($pdfContent, 200)
+                ->header('Content-Type', 'application/pdf')
+                ->header('Content-Disposition', 'attachment; filename="' . $filename . '"');
+        } catch (\Exception $e) {
+            Log::error('Failed to download signed PO', [
+                'mrf_id' => $id,
+                'error' => $e->getMessage()
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'error' => 'Failed to download signed PO: ' . $e->getMessage(),
+                'code' => 'DOWNLOAD_FAILED'
+            ], 500);
+        }
+    }
+
+    /**
+     * Generate PO PDF from MRF data (matches example format)
+     */
+    private function generatePOPDFFromMRF(MRF $mrf): string
+    {
+        // Load relationships
+        $mrf->load(['requester', 'items']);
+        
+        // Get RFQ and quotation data
+        $rfq = \App\Models\RFQ::where('mrf_id', $mrf->mrf_id)->first();
+        if (!$rfq) {
+            throw new \Exception('RFQ not found for this MRF');
+        }
+
+        $quotation = null;
+        if ($rfq->selected_quotation_id) {
+            $quotation = \App\Models\Quotation::where('id', $rfq->selected_quotation_id)
+                ->with(['vendor'])
+                ->first();
+        }
+
+        if (!$quotation) {
+            $quotation = \App\Models\Quotation::where('rfq_id', $rfq->id)
+                ->where('status', 'Approved')
+                ->with(['vendor'])
+                ->orderBy('created_at', 'desc')
+                ->first();
+        }
+
+        if (!$quotation || !$quotation->vendor) {
+            throw new \Exception('No approved quotation found for this MRF');
+        }
+
+        $vendor = $quotation->vendor;
+        
+        // Get items from quotation_items, RFQ items, or MRF items
+        $items = \App\Models\QuotationItem::where('quotation_id', $quotation->id)->get();
+        
+        if ($items->isEmpty()) {
+            $rfq->load('items');
+            $items = $rfq->items;
+        }
+        
+        if ($items->isEmpty()) {
+            $items = $mrf->items;
+        }
+
+        if ($items->isEmpty()) {
+            throw new \Exception('No items found for PO generation');
+        }
+
+        // Company information (from config or default)
+        $company = [
+            'name' => config('app.company_name', 'Emerald Industrial Co. FZE'),
+            'address' => config('app.company_address', 'Plot A10, Calabar Free Trade Zone, Calabar, Cross River 540001 NG'),
+            'email' => config('app.company_email', 'temitope.lawal@emeraldcfze.com'),
+            'website' => config('app.company_website', 'https://emeraldcfze.com/'),
+        ];
+
+        // Ship to address (use MRF field or fallback to config)
+        $shipToAddress = $mrf->ship_to_address ?? config('app.ship_to_address', 'Sapetro Towers, Victoria Island, Lagos, Lagos 100001 NGA');
+
+        // Format date
+        $poDate = $mrf->po_generated_at ? \Carbon\Carbon::parse($mrf->po_generated_at)->format('d/m/Y') : now()->format('d/m/Y');
+        
+        // Build vendor address
+        $vendorAddress = '';
+        if (!empty($vendor->address)) {
+            $vendorAddress = $vendor->address;
+        }
+
+        // Calculate totals
+        $subtotal = 0;
+        $currency = $quotation->currency ?? 'NGN';
+
+        foreach ($items as $item) {
+            $unitPrice = $item->unit_price ?? ($item->total_price ?? 0) / ($item->quantity ?? 1);
+            $itemTotal = ($unitPrice * ($item->quantity ?? 1));
+            $subtotal += $itemTotal;
+        }
+
+        // Calculate tax (use MRF tax_amount if set, otherwise calculate from tax_rate)
+        $taxRate = $mrf->tax_rate ?? 0;
+        $tax = $mrf->tax_amount ?? 0;
+        
+        // If tax_amount is not set but tax_rate is, calculate it
+        if ($tax == 0 && $taxRate > 0) {
+            $tax = ($subtotal * $taxRate) / 100;
+        }
+
+        $total = $subtotal + $tax;
+
+        // Build HTML template matching example format
+        $html = $this->buildPOPDFHTML([
+            'po_number' => $mrf->po_number,
+            'po_date' => $poDate,
+            'company' => $company,
+            'vendor' => [
+                'name' => $vendor->vendor_name ?? $vendor->name ?? 'N/A',
+                'address' => $vendorAddress,
+            ],
+            'ship_to' => $shipToAddress,
+            'items' => $items,
+            'subtotal' => $subtotal,
+            'tax' => $tax,
+            'tax_rate' => $taxRate,
+            'total' => $total,
+            'currency' => $currency,
+            'payment_terms' => $quotation->payment_terms ?? '30days after invoice submission.',
+            'invoice_submission_email' => $mrf->invoice_submission_email ?? 'accountpayables@emeraldcfze.com',
+            'invoice_submission_cc' => $mrf->invoice_submission_cc ?? 'douglas.anuforo@emeraldcfze.com',
+            'special_terms' => $mrf->po_special_terms,
+        ]);
+
+        // Generate PDF using dompdf
+        $options = new Options();
+        $options->set('isHtml5ParserEnabled', true);
+        $options->set('isRemoteEnabled', true);
+        $options->set('defaultFont', 'Arial');
+        $options->set('chroot', public_path());
+
+        $dompdf = new Dompdf($options);
+        $dompdf->loadHtml($html);
+        $dompdf->setPaper('A4', 'portrait');
+        $dompdf->render();
+
+        return $dompdf->output();
+    }
+
+    /**
+     * Build PO PDF HTML template matching example format
+     */
+    private function buildPOPDFHTML(array $data): string
+    {
+        $poNumber = $data['po_number'];
+        $poDate = $data['po_date'];
+        $company = $data['company'];
+        $vendor = $data['vendor'];
+        $shipTo = $data['ship_to'];
+        $items = $data['items'];
+        $subtotal = $data['subtotal'];
+        $tax = $data['tax'];
+        $taxRate = $data['tax_rate'] ?? 0;
+        $total = $data['total'];
+        $currency = $data['currency'];
+        $paymentTerms = $data['payment_terms'];
+        $invoiceEmail = $data['invoice_submission_email'] ?? 'accountpayables@emeraldcfze.com';
+        $invoiceCC = $data['invoice_submission_cc'] ?? 'douglas.anuforo@emeraldcfze.com';
+        $specialTerms = $data['special_terms'];
+
+        $html = '<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Purchase Order - ' . htmlspecialchars($poNumber) . '</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+            font-family: Arial, sans-serif; 
+            font-size: 11px; 
+            line-height: 1.4;
+            color: #000;
+            padding: 20px;
+        }
+        .header { 
+            margin-bottom: 20px;
+            border-bottom: 2px solid #000;
+            padding-bottom: 15px;
+        }
+        .company-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 15px;
+        }
+        .company-info {
+            flex: 1;
+        }
+        .company-name {
+            font-size: 16px;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+        .company-details {
+            font-size: 10px;
+            line-height: 1.5;
+        }
+        .logo-container {
+            width: 120px;
+            height: 60px;
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+        }
+        .logo-container img {
+            max-width: 120px;
+            max-height: 60px;
+            object-fit: contain;
+        }
+        .logo-placeholder {
+            width: 120px;
+            height: 60px;
+            border: 1px solid #ccc;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 9px;
+            color: #666;
+        }
+        .po-title {
+            text-align: center;
+            font-size: 24px;
+            font-weight: bold;
+            margin: 20px 0;
+        }
+        .po-details {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 20px;
+        }
+        .po-detail-item {
+            flex: 1;
+        }
+        .po-detail-label {
+            font-weight: bold;
+            margin-bottom: 3px;
+        }
+        .supplier-section, .ship-to-section {
+            margin-bottom: 20px;
+            padding: 10px;
+            border: 1px solid #ddd;
+        }
+        .section-title {
+            font-weight: bold;
+            font-size: 12px;
+            margin-bottom: 8px;
+            border-bottom: 1px solid #000;
+            padding-bottom: 3px;
+        }
+        .items-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+            font-size: 10px;
+        }
+        .items-table th {
+            background-color: #f0f0f0;
+            border: 1px solid #000;
+            padding: 8px 5px;
+            text-align: left;
+            font-weight: bold;
+        }
+        .items-table td {
+            border: 1px solid #000;
+            padding: 8px 5px;
+        }
+        .items-table .text-right {
+            text-align: right;
+        }
+        .items-table .text-center {
+            text-align: center;
+        }
+        .summary-section {
+            margin-top: 20px;
+            margin-left: auto;
+            width: 300px;
+        }
+        .summary-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 5px 0;
+            border-bottom: 1px solid #ddd;
+        }
+        .summary-row.total {
+            font-weight: bold;
+            border-top: 2px solid #000;
+            border-bottom: 2px solid #000;
+            padding: 8px 0;
+            margin-top: 5px;
+        }
+        .terms-section {
+            margin-top: 30px;
+            font-size: 10px;
+        }
+        .terms-title {
+            font-weight: bold;
+            margin-bottom: 10px;
+            font-size: 12px;
+        }
+        .terms-list {
+            margin-left: 20px;
+            margin-top: 10px;
+        }
+        .terms-list li {
+            margin-bottom: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="company-header">
+            <div class="company-info">
+                <div class="company-name">' . htmlspecialchars($company['name']) . '</div>
+                <div class="company-details">
+                    ' . nl2br(htmlspecialchars($company['address'])) . '<br>
+                    Email: ' . htmlspecialchars($company['email']) . '<br>
+                    Website: ' . htmlspecialchars($company['website']) . '
+                </div>
+            </div>
+            ' . $this->getLogoHTML() . '
+        </div>
+    </div>
+
+    <div class="po-title">Purchase Order</div>
+
+    <div class="po-details">
+        <div class="po-detail-item">
+            <div class="po-detail-label">P.O. NO.:</div>
+            <div>' . htmlspecialchars($poNumber) . '</div>
+        </div>
+        <div class="po-detail-item">
+            <div class="po-detail-label">DATE:</div>
+            <div>' . htmlspecialchars($poDate) . '</div>
+        </div>
+    </div>
+
+    <div class="supplier-section">
+        <div class="section-title">SUPPLIER:</div>
+        <div style="font-weight: bold; margin-bottom: 5px;">' . htmlspecialchars($vendor['name']) . '</div>
+        <div>' . nl2br(htmlspecialchars($vendor['address'] ?? '')) . '</div>
+    </div>
+
+    <div class="ship-to-section">
+        <div class="section-title">SHIP TO:</div>
+        <div style="font-weight: bold; margin-bottom: 5px;">' . htmlspecialchars($company['name']) . '</div>
+        <div>' . nl2br(htmlspecialchars($shipTo)) . '</div>
+    </div>
+
+    <table class="items-table">
+        <thead>
+            <tr>
+                <th>DESCRIPTION</th>
+                <th class="text-center">QTY</th>
+                <th class="text-right">RATE</th>
+                <th class="text-center">TAX</th>
+                <th class="text-right">AMOUNT</th>
+            </tr>
+        </thead>
+        <tbody>';
+
+        foreach ($items as $item) {
+            $itemName = $item->item_name ?? $item->name ?? 'Item';
+            $description = $item->description ?? $item->specifications ?? '';
+            $quantity = $item->quantity ?? 1;
+            $unitPrice = $item->unit_price ?? ($item->total_price ?? 0) / $quantity;
+            $itemTotal = $unitPrice * $quantity;
+            
+            // Display tax for item (if tax_rate > 0, show percentage, otherwise "No VAT")
+            $taxDisplay = $taxRate > 0 ? number_format($taxRate, 2) . '%' : 'No VAT';
+
+            $html .= '<tr>
+                <td>
+                    <strong>' . htmlspecialchars($itemName) . '</strong><br>
+                    <div style="font-size: 9px; color: #666;">' . nl2br(htmlspecialchars($description)) . '</div>
+                </td>
+                <td class="text-center">' . $quantity . '</td>
+                <td class="text-right">' . number_format($unitPrice, 2) . '</td>
+                <td class="text-center">' . $taxDisplay . '</td>
+                <td class="text-right">' . number_format($itemTotal, 2) . '</td>
+            </tr>';
+        }
+
+        $html .= '</tbody>
+    </table>
+
+    <div class="summary-section">
+        <div class="summary-row">
+            <span>SUBTOTAL:</span>
+            <span>' . number_format($subtotal, 2) . '</span>
+        </div>
+        <div class="summary-row">
+            <span>TAX:</span>
+            <span>' . number_format($tax, 2) . '</span>
+        </div>
+        <div class="summary-row total">
+            <span>TOTAL:</span>
+            <span>' . $currency . ' ' . number_format($total, 2) . '</span>
+        </div>
+    </div>
+
+    <div class="terms-section">
+        <div class="terms-title">Payment Terms:</div>
+        <div>' . htmlspecialchars($paymentTerms) . '</div>
+
+        <div class="terms-title" style="margin-top: 15px;">Invoice Submission:</div>
+        <div>Please upon delivery, sign off your delivery note with the warehouse, attach you invoice and a copy of your PO and submit all to this email: ' . htmlspecialchars($invoiceEmail) . ($invoiceCC ? ' cc: ' . htmlspecialchars($invoiceCC) : '') . '</div>
+
+        <div class="terms-title" style="margin-top: 15px;">SPECIAL NOTES, TERMS OF SALE:</div>';
+        
+        // Use custom terms if provided, otherwise use default
+        if (!empty($specialTerms)) {
+            $html .= '<div>' . nl2br(htmlspecialchars($specialTerms)) . '</div>';
+        } else {
+            $html .= '<ol class="terms-list">
+            <li>All items must be high quality, brand new and according to the specification. Anything less may trigger rejection.</li>
+            <li>All packages must be clearly marked</li>
+            <li>All content of the packages must be clearly marked with item number, material number, description of the item, Manufacturer\'s part number and quantity.</li>
+            <li>Small items with the same part numbers must be tagged and packed together in a plastic bag or box. The tag shall also be shown on the outside of the bag or box.</li>
+            <li>Items must be packed in a sturdy case to withstand handling.</li>
+            <li>Items delivery must be accompanied by Airway Bill, Invoice and Delivery Note all duly signed by Emerald representative at the site.</li>
+        </ol>';
+        }
+    </div>
+</body>
+</html>';
+
+        return $html;
+    }
+
+    /**
+     * Get the HTML for the company logo in PDF
+     */
+    private function getLogoHTML(): string
+    {
+        // Try multiple possible logo locations
+        $logoPaths = [
+            public_path('images/logo.png'),
+            public_path('images/logo.jpg'),
+            public_path('images/company-logo.png'),
+            public_path('images/company-logo.jpg'),
+            public_path('images/emerald-logo.png'),
+            public_path('images/emerald-logo.jpg'),
+        ];
+
+        foreach ($logoPaths as $logoPath) {
+            if (file_exists($logoPath)) {
+                // Convert to base64 data URI for PDF embedding
+                $imageData = file_get_contents($logoPath);
+                $imageInfo = getimagesize($logoPath);
+                $mimeType = $imageInfo['mime'] ?? 'image/png';
+                $base64 = base64_encode($imageData);
+                $dataUri = 'data:' . $mimeType . ';base64,' . $base64;
+                
+                return '<div class="logo-container">
+                    <img src="' . $dataUri . '" alt="Company Logo" />
+                </div>';
+            }
+        }
+
+        // Fallback: show placeholder
+        return '<div class="logo-placeholder">LOGO</div>';
     }
 }

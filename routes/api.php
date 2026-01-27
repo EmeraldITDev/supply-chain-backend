@@ -82,6 +82,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/mrfs/{id}/approve-vendor-selection', [\App\Http\Controllers\Api\MRFWorkflowController::class, 'approveVendorSelection']);
     Route::post('/mrfs/{id}/reject-vendor-selection', [\App\Http\Controllers\Api\MRFWorkflowController::class, 'rejectVendorSelection']);
     Route::post('/mrfs/{id}/generate-po', [\App\Http\Controllers\Api\MRFWorkflowController::class, 'generatePO']);
+    Route::get('/mrfs/{id}/download-po', [\App\Http\Controllers\Api\MRFController::class, 'downloadPO']); // Download unsigned PO
+    Route::get('/mrfs/{id}/download-signed-po', [\App\Http\Controllers\Api\MRFController::class, 'downloadSignedPO']); // Download signed PO
     Route::delete('/mrfs/{id}/po', [\App\Http\Controllers\Api\MRFWorkflowController::class, 'deletePO']); // Delete/clear PO
     Route::post('/mrfs/{id}/upload-signed-po', [\App\Http\Controllers\Api\MRFWorkflowController::class, 'uploadSignedPO']);
     Route::post('/mrfs/{id}/reject-po', [\App\Http\Controllers\Api\MRFWorkflowController::class, 'rejectPO']);

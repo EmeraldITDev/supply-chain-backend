@@ -1194,6 +1194,26 @@ class MRFWorkflowController extends Controller
             }
         }
 
+        // Calculate tax if tax_rate is provided
+        $taxRate = $request->tax_rate ?? 0;
+        $taxAmount = 0;
+        
+        // Calculate subtotal from items
+        $subtotal = 0;
+        if (isset($poData['data']['items'])) {
+            foreach ($poData['data']['items'] as $item) {
+                $unitPrice = $item['unit_price'] ?? ($item['total_price'] ?? 0) / ($item['quantity'] ?? 1);
+                $subtotal += ($unitPrice * ($item['quantity'] ?? 1));
+            }
+        }
+        
+        // Calculate tax amount if tax_rate is provided
+        if ($taxRate > 0) {
+            $taxAmount = ($subtotal * $taxRate) / 100;
+        } elseif ($request->has('tax_amount')) {
+            $taxAmount = $request->tax_amount;
+        }
+
         // Update MRF - set workflow state to finance after PO generation
         $updateData = [
             'po_number' => $poNumber,
@@ -1203,6 +1223,13 @@ class MRFWorkflowController extends Controller
             'status' => 'finance', // Changed to finance as per requirements
             'current_stage' => 'finance', // Changed to finance as per requirements
             'rejection_reason' => null, // Clear rejection reason if regenerating
+            // PO Details
+            'ship_to_address' => $request->ship_to_address ?? null,
+            'tax_rate' => $taxRate,
+            'tax_amount' => $taxAmount,
+            'po_special_terms' => $request->po_special_terms ?? null,
+            'invoice_submission_email' => $request->invoice_submission_email ?? null,
+            'invoice_submission_cc' => $request->invoice_submission_cc ?? null,
         ];
         
         // Add sharing URL if available (use web URL as fallback)
