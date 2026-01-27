@@ -41,7 +41,6 @@ class DashboardController extends Controller
 
         // Get pending vendor registrations
         $pendingRegistrations = VendorRegistration::where('status', 'Pending')
-            ->with(['documents'])
             ->orderBy('created_at', 'desc')
             ->get()
             ->map(function($reg) {
@@ -178,7 +177,7 @@ class DashboardController extends Controller
         }
 
         // Get all vendor registrations (pending and recent)
-        $recentRegistrations = VendorRegistration::with(['vendor', 'approver', 'documents'])
+        $recentRegistrations = VendorRegistration::with(['vendor', 'approver'])
             ->orderBy('created_at', 'desc')
             ->limit(20)
             ->get()

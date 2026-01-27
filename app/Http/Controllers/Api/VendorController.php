@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Enums\VendorCategory;
 use App\Http\Controllers\Controller;
 use App\Models\User;
 use App\Models\Vendor;
@@ -26,6 +27,19 @@ class VendorController extends Controller
     {
         $this->notificationService = $notificationService;
     }
+
+    /**
+     * Get available vendor categories
+     * Public endpoint - no authentication required
+     */
+    public function categories()
+    {
+        return response()->json([
+            'success' => true,
+            'categories' => VendorCategory::values(),
+        ]);
+    }
+
     /**
      * Find vendor by ID (supports both primary key and vendor_id)
      * 
@@ -1199,6 +1213,7 @@ class VendorController extends Controller
         $validator = Validator::make($request->all(), [
             'email' => 'required|email|max:255',
             'company_name' => 'required|string|max:255',
+            'category' => 'required|string|max:255',
         ]);
 
         if ($validator->fails()) {
@@ -1207,6 +1222,16 @@ class VendorController extends Controller
                 'error' => 'Validation failed',
                 'errors' => $validator->errors(),
                 'code' => 'VALIDATION_ERROR'
+            ], 422);
+        }
+
+        // Validate category is in allowed list
+        if (!VendorCategory::isValid($request->category)) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Invalid vendor category',
+                'code' => 'INVALID_CATEGORY',
+                'valid_categories' => VendorCategory::values()
             ], 422);
         }
 
@@ -1254,6 +1279,7 @@ class VendorController extends Controller
             'data' => [
                 'email' => $request->email,
                 'companyName' => $request->company_name,
+                'category' => $request->category,
                 'sentAt' => now()->toIso8601String(),
                 'sentBy' => [
                     'id' => $user->id,
