@@ -13,9 +13,11 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware): void {
+        // Apply CORS to all requests (global, before other middleware)
+        $middleware->prepend(\Illuminate\Http\Middleware\HandleCors::class);
+        
         $middleware->api(prepend: [
             \Laravel\Sanctum\Http\Middleware\EnsureFrontendRequestsAreStateful::class,
-            \Illuminate\Http\Middleware\HandleCors::class,
         ]);
 
         $middleware->validateCsrfTokens(except: [

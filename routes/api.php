@@ -34,6 +34,14 @@ Route::get('/', function () {
 });
 
 // Public routes
+Route::get('/cors-test', function () {
+    return response()->json([
+        'success' => true,
+        'message' => 'CORS is working correctly',
+        'timestamp' => now()->toIso8601String(),
+    ]);
+});
+
 Route::post('/auth/login', [AuthController::class, 'login']);
 Route::post('/auth/vendor/change-password', [AuthController::class, 'forcePasswordChange']);
 

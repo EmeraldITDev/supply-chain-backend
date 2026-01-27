@@ -25,7 +25,9 @@ return [
             'http://localhost:8081',
             'http://localhost:8080',
             'http://localhost:3000',
+            'http://localhost:5173',
             'https://emerald-supply-chain.vercel.app',
+            'https://*.vercel.app',
         ],
 
     'allowed_origins_patterns' => [
