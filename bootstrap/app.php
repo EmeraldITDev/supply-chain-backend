@@ -24,15 +24,7 @@ return Application::configure(basePath: dirname(__DIR__))
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         // Render JSON responses for API errors
-        $exceptions->render(function (Throwable $e, $request) {
-            if ($request->expectsJson()) {
-                return response()->json([
-                    'success' => false,
-                    'error' => 'An unexpected error occurred',
-                    'code' => 'INTERNAL_ERROR',
-                    'message' => config('app.debug') ? $e->getMessage() : null,
-                    'trace' => config('app.debug') ? $e->getTraceAsString() : null,
-                ], 500);
-            }
+        $exceptions->shouldRenderJsonWhen(function ($request) {
+            return $request->expectsJson() || str_starts_with($request->path(), 'api/');
         });
     })->create();

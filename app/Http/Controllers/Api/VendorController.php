@@ -132,14 +132,22 @@ class VendorController extends Controller
     public function register(Request $request, VendorDocumentService $documentService)
     {
         \Log::info('Vendor registration attempt', [
-            'email' => $request->email,
-            'company_name' => $request->companyName ?? $request->company_name,
+            'all_fields' => array_keys($request->all()),
+            'email' => $request->email ?? $request->get('email'),
             'has_documents' => $request->hasFile('documents')
         ]);
 
         try {
+            // Get form fields - support both camelCase and snake_case
+            $companyName = $request->input('companyName') ?? $request->input('company_name');
+            $category = $request->input('category');
+            $phone = $request->input('phone');
+            $address = $request->input('address');
+            $taxId = $request->input('taxId') ?? $request->input('tax_id');
+            $contactPerson = $request->input('contactPerson') ?? $request->input('contact_person');
+            
             // Normalize email (trim and lowercase) for consistent checking
-            $email = strtolower(trim($request->email));
+            $email = strtolower(trim($request->email ?? $request->get('email')));
             
             // Check if registration with this email already exists (case-insensitive)
             $existingRegistration = VendorRegistration::whereRaw('LOWER(email) = ?', [strtolower($email)])->first();
@@ -169,8 +177,15 @@ class VendorController extends Controller
             }
 
             // Prepare validation data with normalized email
-            $validationData = $request->all();
-            $validationData['email'] = $email;
+            $validationData = [
+                'companyName' => $companyName,
+                'category' => $category,
+                'email' => $email,
+                'phone' => $phone,
+                'address' => $address,
+                'taxId' => $taxId,
+                'contactPerson' => $contactPerson,
+            ];
 
             // Note: We don't use 'unique' rule here because we check manually above
             // This prevents false positives from case sensitivity or timing issues
@@ -196,19 +211,19 @@ class VendorController extends Controller
             }
 
             \Log::info('Validation passed, creating registration', [
-                'company_name' => $request->companyName,
-                'category' => $request->category,
+                'company_name' => $companyName,
+                'category' => $category,
                 'email' => $email
             ]);
 
             $registration = VendorRegistration::create([
-                'company_name' => $request->companyName,
-                'category' => $request->category,
+                'company_name' => $companyName,
+                'category' => $category,
                 'email' => $email, // Use normalized email
-                'phone' => $request->phone,
-                'address' => $request->address,
-                'tax_id' => $request->taxId,
-                'contact_person' => $request->contactPerson,
+                'phone' => $phone,
+                'address' => $address,
+                'tax_id' => $taxId,
+                'contact_person' => $contactPerson,
                 'status' => VendorRegistration::STATUS_PENDING,
             ]);
 
