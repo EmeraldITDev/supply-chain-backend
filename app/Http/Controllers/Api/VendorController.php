@@ -235,7 +235,33 @@ class VendorController extends Controller
             if ($request->hasFile('documents')) {
                 try {
                     $documents = $request->file('documents');
-                    $documentService->storeDocuments($registration, $documents);
+                    
+                    // Normalize to array - file() can return single file or array
+                    if (!is_array($documents)) {
+                        $documents = [$documents];
+                    }
+                    
+                    // Filter out null values
+                    $documents = array_filter($documents, function($doc) {
+                        return $doc !== null;
+                    });
+                    
+                    if (!empty($documents)) {
+                        \Log::info('Processing document uploads', [
+                            'registration_id' => $registration->id,
+                            'document_count' => count($documents)
+                        ]);
+                        
+                        $documentService->storeDocuments($registration, $documents);
+                        
+                        \Log::info('Documents stored successfully', [
+                            'registration_id' => $registration->id
+                        ]);
+                    } else {
+                        \Log::warning('No valid documents found after filtering', [
+                            'registration_id' => $registration->id
+                        ]);
+                    }
                 } catch (\Exception $e) {
                     \Log::error('Error storing vendor documents', [
                         'registration_id' => $registration->id,
@@ -245,6 +271,12 @@ class VendorController extends Controller
                     // Continue with registration even if documents fail
                     // Documents can be uploaded later or resubmitted
                 }
+            } else {
+                \Log::info('No documents provided in registration', [
+                    'registration_id' => $registration->id,
+                    'has_files' => $request->hasFile('documents'),
+                    'all_files' => $request->allFiles()
+                ]);
             }
 
             // Send notification to procurement managers
@@ -258,6 +290,50 @@ class VendorController extends Controller
                 // Continue - notification failure shouldn't block registration
             }
 
+            // Reload registration with documents to include in response
+            $registration->load('documents');
+            $registration->refresh();
+            
+            // Format documents for response
+            $documentService = app(VendorDocumentService::class);
+            $formattedDocuments = [];
+            $documentRecords = $registration->documents ?? collect([]);
+            
+            foreach ($documentRecords as $doc) {
+                $filePath = $doc->file_path ?? null;
+                $fileUrl = $doc->file_share_url ?? $doc->file_url ?? null;
+                
+                if ($filePath && !$fileUrl) {
+                    try {
+                        $fileUrl = $documentService->getDocumentUrl($filePath, $doc->id, $registration->id);
+                    } catch (\Exception $e) {
+                        \Log::warning("Failed to generate document URL", [
+                            'error' => $e->getMessage(),
+                            'document_id' => $doc->id
+                        ]);
+                        if ($doc->id) {
+                            $fileUrl = url("/api/vendors/registrations/{$registration->id}/documents/{$doc->id}/download");
+                        }
+                    }
+                }
+                
+                $formattedDocuments[] = [
+                    'id' => (string) $doc->id,
+                    'fileName' => $doc->file_name,
+                    'name' => $doc->file_name,
+                    'filePath' => $filePath,
+                    'fileUrl' => $fileUrl,
+                    'file_url' => $fileUrl,
+                    'url' => $fileUrl,
+                    'fileSize' => $doc->file_size,
+                    'fileType' => $doc->file_type,
+                    'uploadedAt' => $doc->uploaded_at ? $doc->uploaded_at->toIso8601String() : now()->toIso8601String(),
+                ];
+            }
+            
+            // Get document count for response
+            $documentCount = $registration->documents->count();
+            
             return response()->json([
                 'success' => true,
                 'message' => 'Vendor registration submitted successfully',
@@ -265,6 +341,8 @@ class VendorController extends Controller
                     'id' => $registration->id,
                     'companyName' => $registration->company_name,
                     'status' => $registration->status,
+                    'documentCount' => $documentCount,
+                    'documents' => $formattedDocuments,
                 ]
             ], 201);
         } catch (\Exception $e) {
@@ -456,15 +534,37 @@ class VendorController extends Controller
         $documentService = app(VendorDocumentService::class);
         
         // First, try to get documents from the relationship (more reliable)
-        $documentRecords = $registration->documents ?? collect([]);
+        // Check if documents relationship is loaded (will be a Collection)
+        $documentRecords = null;
+        if ($registration->relationLoaded('documents')) {
+            $documentRecords = $registration->documents;
+        } else {
+            // Try to load the relationship
+            try {
+                $registration->load('documents');
+                $documentRecords = $registration->documents;
+            } catch (\Exception $e) {
+                \Log::warning('Failed to load documents relationship', [
+                    'registration_id' => $registration->id,
+                    'error' => $e->getMessage()
+                ]);
+            }
+        }
         
         // If no documents in relationship, try JSON column
-        if ($documentRecords->isEmpty()) {
-            $documentMetadata = is_array($registration->documents) ? $registration->documents : [];
-            // Convert JSON array to collection-like structure
-            $documentRecords = collect($documentMetadata)->map(function($doc) {
-                return (object) $doc; // Convert to object for consistency
-            });
+        if (!$documentRecords || $documentRecords->isEmpty()) {
+            // Access the JSON column directly (not the relationship)
+            $jsonDocuments = $registration->getAttribute('documents');
+            $documentMetadata = is_array($jsonDocuments) ? $jsonDocuments : [];
+            
+            if (!empty($documentMetadata)) {
+                // Convert JSON array to collection-like structure
+                $documentRecords = collect($documentMetadata)->map(function($doc) {
+                    return (object) $doc; // Convert to object for consistency
+                });
+            } else {
+                $documentRecords = collect([]);
+            }
         }
         
         foreach ($documentRecords as $doc) {

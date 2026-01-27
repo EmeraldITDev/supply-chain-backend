@@ -101,8 +101,23 @@ class VendorDocumentService
                 $disk = $this->getStorageDisk();
                 $basePath = "vendor_documents/{$year}/{$companyName}";
                 
+                // For local/public storage, ensure directory exists
+                if ($disk === 'public' || $disk === 'local') {
+                    $fullPath = storage_path("app/{$disk}/{$basePath}");
+                    if (!file_exists($fullPath)) {
+                        \Log::info("Creating storage directory", ['path' => $fullPath]);
+                        @mkdir($fullPath, 0755, true);
+                    }
+                }
+                
                 try {
                     $filePath = $document->storeAs($basePath, $fileName, $disk);
+                    
+                    \Log::info("File stored successfully", [
+                        'file_path' => $filePath,
+                        'disk' => $disk,
+                        'original_name' => $originalName
+                    ]);
                 } catch (\Exception $e) {
                     // If storage fails (e.g., S3 not available), fallback to public
                     if ($disk === 's3') {
@@ -110,8 +125,19 @@ class VendorDocumentService
                             'error' => $e->getMessage()
                         ]);
                         $disk = 'public';
+                        
+                        // Ensure public directory exists
+                        $fullPath = storage_path("app/public/{$basePath}");
+                        if (!file_exists($fullPath)) {
+                            @mkdir($fullPath, 0755, true);
+                        }
+                        
                         $filePath = $document->storeAs($basePath, $fileName, $disk);
                     } else {
+                        \Log::error("Storage failed for disk: {$disk}", [
+                            'error' => $e->getMessage(),
+                            'base_path' => $basePath
+                        ]);
                         throw $e; // Re-throw if it's not an S3 issue
                     }
                 }
@@ -213,19 +239,38 @@ class VendorDocumentService
 
         // Update registration with document metadata in JSON column
         if (count($documentMetadata) > 0) {
-            $registration->update([
-                'documents' => $documentMetadata,
-            ]);
+            try {
+                $registration->update([
+                    'documents' => $documentMetadata,
+                ]);
 
-            \Log::info("Updated registration with document metadata", [
-                'registration_id' => $registration->id,
-                'documents_stored' => count($documentMetadata)
-            ]);
+                \Log::info("Updated registration with document metadata", [
+                    'registration_id' => $registration->id,
+                    'documents_stored' => count($documentMetadata),
+                    'metadata_count' => count($documentMetadata)
+                ]);
+            } catch (\Exception $e) {
+                \Log::error("Failed to update registration documents JSON column", [
+                    'registration_id' => $registration->id,
+                    'error' => $e->getMessage(),
+                    'trace' => $e->getTraceAsString()
+                ]);
+                // Don't fail the entire operation if JSON update fails
+                // Documents are still in the database table
+            }
         } else {
             \Log::warning("No documents were stored successfully", [
-                'registration_id' => $registration->id
+                'registration_id' => $registration->id,
+                'input_count' => count($documents)
             ]);
         }
+
+        \Log::info("Document storage process completed", [
+            'registration_id' => $registration->id,
+            'documents_processed' => count($documents),
+            'documents_stored' => count($documentMetadata),
+            'database_records' => count($storedDocuments)
+        ]);
 
         return $documentMetadata;
     }
