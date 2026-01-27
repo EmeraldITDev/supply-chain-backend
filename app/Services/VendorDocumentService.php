@@ -15,6 +15,7 @@ class VendorDocumentService
     /**
      * Get the storage disk for vendor documents
      * Uses 'documents' disk from config, which can be configured per environment
+     * Falls back to 'public' if S3 is requested but not available
      *
      * @return string
      */
@@ -22,7 +23,39 @@ class VendorDocumentService
     {
         // Use 'public' for local development, 's3' for production
         // Can be overridden via DOCUMENTS_DISK env variable
-        return config('filesystems.documents_disk', env('DOCUMENTS_DISK', 'public'));
+        $disk = config('filesystems.documents_disk', env('DOCUMENTS_DISK', 'public'));
+        
+        // Safety check: If S3 is requested, verify it's available
+        if ($disk === 's3') {
+            // Check if Flysystem AWS S3 package is installed
+            if (!class_exists(\League\Flysystem\AwsS3V3\AwsS3V3Adapter::class)) {
+                \Log::warning('S3 disk requested but league/flysystem-aws-s3-v3 package not installed. Falling back to public disk. Run: composer require league/flysystem-aws-s3-v3');
+                return 'public';
+            }
+            
+            // Check if AWS credentials are configured
+            $s3Config = config('filesystems.disks.s3');
+            if (empty($s3Config) || empty($s3Config['key']) || empty($s3Config['secret'])) {
+                \Log::warning('S3 disk requested but AWS credentials not configured. Falling back to public disk.');
+                return 'public';
+            }
+            
+            // Try to verify S3 connection is working (without actually connecting)
+            // This will catch configuration errors early
+            try {
+                // Just check if Storage facade can resolve the disk
+                // This will throw if S3 driver is misconfigured
+                $testStorage = Storage::disk('s3');
+                // Don't actually do anything, just verify the disk can be resolved
+            } catch (\Exception $e) {
+                \Log::warning('S3 disk requested but connection failed. Falling back to public disk.', [
+                    'error' => $e->getMessage()
+                ]);
+                return 'public';
+            }
+        }
+        
+        return $disk;
     }
 
     /**
@@ -64,10 +97,24 @@ class VendorDocumentService
                 $fileUrl = null;
                 $fileShareUrl = null;
 
-                // Upload to S3 storage
-                    $disk = $this->getStorageDisk();
+                // Upload to storage (S3 or public)
+                $disk = $this->getStorageDisk();
                 $basePath = "vendor_documents/{$year}/{$companyName}";
-                $filePath = $document->storeAs($basePath, $fileName, $disk);
+                
+                try {
+                    $filePath = $document->storeAs($basePath, $fileName, $disk);
+                } catch (\Exception $e) {
+                    // If storage fails (e.g., S3 not available), fallback to public
+                    if ($disk === 's3') {
+                        \Log::warning('S3 storage failed, falling back to public disk', [
+                            'error' => $e->getMessage()
+                        ]);
+                        $disk = 'public';
+                        $filePath = $document->storeAs($basePath, $fileName, $disk);
+                    } else {
+                        throw $e; // Re-throw if it's not an S3 issue
+                    }
+                }
 
                 if (!$filePath) {
                     \Log::error("Failed to store document", [
