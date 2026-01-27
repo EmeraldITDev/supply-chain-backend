@@ -58,6 +58,36 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/refresh', [AuthController::class, 'refreshToken']); // Alias for frontend compatibility
     Route::put('/auth/profile', [AuthController::class, 'updateProfile']);
     Route::post('/auth/change-password', [AuthController::class, 'changePassword']);
+    
+    // Session management - keep-alive and status check
+    Route::post('/auth/keep-alive', function () {
+        return response()->json([
+            'success' => true,
+            'message' => 'Session active',
+            'user' => [
+                'id' => auth()->id(),
+                'name' => auth()->user()->name,
+                'email' => auth()->user()->email,
+            ],
+            'expires_in_minutes' => 5
+        ]);
+    });
+    
+    Route::get('/auth/session-status', function () {
+        $user = auth()->user();
+        return response()->json([
+            'success' => true,
+            'authenticated' => true,
+            'user' => [
+                'id' => $user->id,
+                'name' => $user->name,
+                'email' => $user->email,
+                'role' => $user->role,
+            ],
+            'session_timeout_minutes' => 5,
+            'message' => 'User is authenticated and session is active'
+        ]);
+    });
 
     // Vendor authentication (protected)
     Route::post('/vendors/auth/logout', [VendorAuthController::class, 'logout']);

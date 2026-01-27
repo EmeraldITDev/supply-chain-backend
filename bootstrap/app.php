@@ -16,6 +16,9 @@ return Application::configure(basePath: dirname(__DIR__))
         // Apply CORS to all requests (global, before other middleware)
         $middleware->prepend(\Illuminate\Http\Middleware\HandleCors::class);
         
+        // Track user activity for automatic logout after 5 minutes of inactivity
+        $middleware->prepend(\App\Http\Middleware\TrackUserActivity::class);
+        
         $middleware->api(prepend: [
             \Laravel\Sanctum\Http\Middleware\EnsureFrontendRequestsAreStateful::class,
         ]);
