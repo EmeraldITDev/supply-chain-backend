@@ -37,17 +37,13 @@ ENV APACHE_DOCUMENT_ROOT=/var/www/html/public
 RUN sed -ri -e 's!/var/www/html!${APACHE_DOCUMENT_ROOT}!g' /etc/apache2/sites-available/000-default.conf \
     && sed -ri -e 's!/var/www/!${APACHE_DOCUMENT_ROOT}!g' /etc/apache2/apache2.conf /etc/apache2/conf-available/*.conf
 
-# Create minimal .env file if .env.example exists (needed for some composer scripts)
-RUN if [ -f .env.example ]; then cp .env.example .env; fi
-
-    # Install PHP dependencies (DO NOT run Laravel scripts during build)
-    # Update composer.lock if needed, then install
-    RUN composer update --lock --no-scripts --no-interaction --ignore-platform-reqs || true && \
-        composer install --no-dev --optimize-autoloader --no-scripts --no-interaction --ignore-platform-reqs
-
 # Fix permissions
 RUN chown -R www-data:www-data /var/www/html \
     && chmod -R 775 storage bootstrap/cache
+
+# Install PHP dependencies (remove composer.lock to allow fresh install of new AWS SDK)
+RUN rm -f composer.lock && \
+    composer install --no-dev --optimize-autoloader --no-scripts --no-interaction --ignore-platform-reqs
 
 EXPOSE 80
 CMD ["apache2-foreground"]
