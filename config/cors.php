@@ -27,6 +27,7 @@ return [
             'http://localhost:3000',
             'http://localhost:5173',
             'https://emerald-supply-chain.vercel.app',
+            'https://scm.emeraldcfze.com/',
             'https://*.vercel.app',
         ],
 
