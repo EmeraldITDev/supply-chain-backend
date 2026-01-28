@@ -15,7 +15,7 @@ return [
     |
     */
 
-    'paths' => ['api/*', 'sanctum/csrf-cookie'],
+    'paths' => ['*'], // Handle all paths since CORS middleware is global
 
     'allowed_methods' => ['*'],
 
@@ -28,19 +28,19 @@ return [
             'http://localhost:5173',
             'https://emerald-supply-chain.vercel.app',
             'https://scm.emeraldcfze.com',
-            'https://*.vercel.app',
         ],
 
     'allowed_origins_patterns' => [
         '#^https://.*\.lovable\.app$#', // Allow all Lovable preview domains
         '#^https://.*\.vercel\.app$#', // Allow all Vercel preview deployments
+        '#^https://.*\.emeraldcfze\.com$#', // Allow all emeraldcfze.com subdomains
     ],
 
     'allowed_headers' => ['*'],
 
     'exposed_headers' => [],
 
-    'max_age' => 0,
+    'max_age' => 86400, // 24 hours - allows browsers to cache preflight requests
 
     'supports_credentials' => true,
 
