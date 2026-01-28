@@ -25,11 +25,12 @@ class DashboardController extends Controller
         // Support both direct role column AND Spatie roles
         $allowedRoles = [
             'procurement_manager',
+            'procurement',           // allow test users with simple 'procurement' role
             'supply_chain_director',
-            'supply_chain', // alias for supply_chain_director
+            'supply_chain',          // alias for supply_chain_director
             'executive',
             'chairman',
-            'admin'
+            'admin',
         ];
         
         $hasAllowedRole =
