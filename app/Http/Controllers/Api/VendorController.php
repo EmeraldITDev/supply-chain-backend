@@ -401,7 +401,7 @@ class VendorController extends Controller
             $documentService = app(VendorDocumentService::class);
             
             // First, try to get documents from the relationship (more reliable)
-            $documentRecords = $reg->documents ?? collect([]);
+            $documentRecords = ($reg->documents instanceof \Illuminate\Support\Collection) ? $reg->documents : collect(is_array($reg->documents) ? $reg->documents : []);
             
             // If no documents in relationship, try JSON column
             if ($documentRecords->isEmpty()) {
@@ -537,12 +537,12 @@ class VendorController extends Controller
         // Check if documents relationship is loaded (will be a Collection)
         $documentRecords = null;
         if ($registration->relationLoaded('documents')) {
-            $documentRecords = $registration->documents;
+            $documentRecords = ($registration->documents instanceof \Illuminate\Support\Collection) ? $registration->documents : collect(is_array($registration->documents) ? $registration->documents : []);
         } else {
             // Try to load the relationship
             try {
                 $registration->load('documents');
-                $documentRecords = $registration->documents;
+                $documentRecords = ($registration->documents instanceof \Illuminate\Support\Collection) ? $registration->documents : collect(is_array($registration->documents) ? $registration->documents : []);
             } catch (\Exception $e) {
                 \Log::warning('Failed to load documents relationship', [
                     'registration_id' => $registration->id,
