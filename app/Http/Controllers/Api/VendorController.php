@@ -671,7 +671,11 @@ class VendorController extends Controller
             'admin'
         ];
         
-        if (!in_array($user->role, $allowedRoles)) {
+        $hasAllowedRole =
+            (isset($user->role) && in_array($user->role, $allowedRoles)) ||
+            (method_exists($user, 'hasAnyRole') && $user->hasAnyRole($allowedRoles));
+
+        if (!$hasAllowedRole) {
             return response()->json([
                 'success' => false,
                 'error' => 'Insufficient permissions',
@@ -806,7 +810,11 @@ class VendorController extends Controller
             'admin'
         ];
         
-        if (!in_array($user->role, $allowedRoles)) {
+        $hasAllowedRole =
+            (isset($user->role) && in_array($user->role, $allowedRoles)) ||
+            (method_exists($user, 'hasAnyRole') && $user->hasAnyRole($allowedRoles));
+
+        if (!$hasAllowedRole) {
             return response()->json([
                 'success' => false,
                 'error' => 'Insufficient permissions',

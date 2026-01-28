@@ -22,6 +22,7 @@ class DashboardController extends Controller
         $user = $request->user();
 
         // Check permission - allow procurement manager and executive-level roles
+        // Support both direct role column AND Spatie roles
         $allowedRoles = [
             'procurement_manager',
             'supply_chain_director',
@@ -31,7 +32,11 @@ class DashboardController extends Controller
             'admin'
         ];
         
-        if (!in_array($user->role, $allowedRoles)) {
+        $hasAllowedRole =
+            (isset($user->role) && in_array($user->role, $allowedRoles)) ||
+            (method_exists($user, 'hasAnyRole') && $user->hasAnyRole($allowedRoles));
+
+        if (!$hasAllowedRole) {
             return response()->json([
                 'success' => false,
                 'error' => 'Insufficient permissions',
@@ -168,7 +173,12 @@ class DashboardController extends Controller
         $user = $request->user();
 
         // Check permission
-        if (!in_array($user->role, ['supply_chain_director', 'admin'])) {
+        $allowedRoles = ['supply_chain_director', 'supply_chain', 'admin'];
+        $hasAllowedRole =
+            (isset($user->role) && in_array($user->role, $allowedRoles)) ||
+            (method_exists($user, 'hasAnyRole') && $user->hasAnyRole($allowedRoles));
+
+        if (!$hasAllowedRole) {
             return response()->json([
                 'success' => false,
                 'error' => 'Insufficient permissions',
@@ -231,7 +241,11 @@ class DashboardController extends Controller
         $user = $request->user();
 
         // Check permission
-        if ($user->role !== 'vendor') {
+        $isVendor =
+            ($user->role === 'vendor') ||
+            (method_exists($user, 'hasRole') && $user->hasRole('vendor'));
+
+        if (!$isVendor) {
             return response()->json([
                 'success' => false,
                 'error' => 'Insufficient permissions',
@@ -351,7 +365,12 @@ class DashboardController extends Controller
         $user = $request->user();
 
         // Check permission - only finance team can access
-        if (!in_array($user->role, ['finance', 'admin'])) {
+        $allowedRoles = ['finance', 'finance_officer', 'admin'];
+        $hasAllowedRole =
+            (isset($user->role) && in_array($user->role, $allowedRoles)) ||
+            (method_exists($user, 'hasAnyRole') && $user->hasAnyRole($allowedRoles));
+
+        if (!$hasAllowedRole) {
             return response()->json([
                 'success' => false,
                 'error' => 'Insufficient permissions',
