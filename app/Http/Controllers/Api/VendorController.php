@@ -147,8 +147,8 @@ class VendorController extends Controller
      */
     public function register(Request $request, VendorDocumentService $documentService)
     {
-        // Log without sensitive fields (account_number, account_balance)
-        $safeKeys = array_diff(array_keys($request->all()), ['account_number', 'account_balance']);
+        // Log without sensitive fields (account_number)
+        $safeKeys = array_diff(array_keys($request->all()), ['account_number']);
         \Log::info('Vendor registration attempt', [
             'all_fields' => array_values($safeKeys),
             'email' => $request->email ?? $request->get('email'),
@@ -195,7 +195,6 @@ class VendorController extends Controller
             }
 
             // Financial and country fields (optional, from FormData snake_case)
-            $accountBalance = $request->input('account_balance');
             $bankName = $request->input('bank_name');
             $accountNumber = $request->input('account_number');
             $accountName = $request->input('account_name');
@@ -211,7 +210,6 @@ class VendorController extends Controller
                 'address' => $address,
                 'taxId' => $taxId,
                 'contactPerson' => $contactPerson,
-                'account_balance' => $accountBalance,
                 'bank_name' => $bankName,
                 'account_number' => $accountNumber,
                 'account_name' => $accountName,
@@ -232,7 +230,6 @@ class VendorController extends Controller
                 'documents' => 'nullable|array',
                 'documents.*' => 'file|max:10240', // Max 10MB per file
                 // Financial and country (all optional)
-                'account_balance' => 'nullable|numeric',
                 'bank_name' => 'nullable|string|max:255',
                 'account_number' => 'nullable|string|max:64',
                 'account_name' => 'nullable|string|max:255',
@@ -253,7 +250,7 @@ class VendorController extends Controller
                 'company_name' => $companyName,
                 'category' => $category,
                 'email' => $email,
-                'has_financial' => !empty($accountBalance) || !empty($bankName) || !empty($accountNumber) || !empty($accountName) || !empty($currency) || !empty($financialCountryCode),
+                'has_financial' => !empty($bankName) || !empty($accountNumber) || !empty($accountName) || !empty($currency) || !empty($financialCountryCode),
             ]);
 
             $registration = VendorRegistration::create([
@@ -263,7 +260,6 @@ class VendorController extends Controller
                 'phone' => $phone,
                 'address' => $address,
                 'country_code' => $financialCountryCode,
-                'account_balance' => $accountBalance,
                 'bank_name' => $bankName,
                 'account_number' => $accountNumber,
                 'account_name' => $accountName,
@@ -532,7 +528,6 @@ class VendorController extends Controller
                 'createdAt' => $reg->created_at->toIso8601String(),
                 // Financial and country (masked account number for display)
                 'countryCode' => $reg->country_code,
-                'accountBalance' => $reg->account_balance !== null ? (float) $reg->account_balance : null,
                 'bankName' => $reg->bank_name,
                 'accountNumber' => $this->maskAccountNumber($reg->account_number),
                 'accountName' => $reg->account_name,
@@ -701,7 +696,6 @@ class VendorController extends Controller
             'updatedAt' => $registration->updated_at->toIso8601String(),
             // Financial and country (masked account number for display)
             'countryCode' => $registration->country_code,
-            'accountBalance' => $registration->account_balance !== null ? (float) $registration->account_balance : null,
             'bankName' => $registration->bank_name,
             'accountNumber' => $this->maskAccountNumber($registration->account_number),
             'accountName' => $registration->account_name,
