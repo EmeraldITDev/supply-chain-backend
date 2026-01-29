@@ -18,10 +18,34 @@ class QuotationController extends Controller
      */
     public function index(Request $request)
     {
+        $user = $request->user();
         $query = Quotation::with(['rfq', 'vendor', 'approver']);
 
-        // Filter by vendor
-        if ($request->has('vendorId')) {
+        // If user is a vendor, only show their quotations
+        $isVendor = false;
+        $vendor = null;
+        if ($user && ($user->role === 'vendor' || (method_exists($user, 'hasRole') && $user->hasRole('vendor')))) {
+            $isVendor = true;
+            // Get vendor from user
+            if ($user->vendor_id) {
+                $vendor = Vendor::find($user->vendor_id);
+            }
+            if (!$vendor) {
+                $vendor = Vendor::where('email', $user->email)->first();
+            }
+            if ($vendor) {
+                $query->where('vendor_id', $vendor->id);
+            } else {
+                // Vendor user but no vendor record - return empty
+                return response()->json([
+                    'success' => true,
+                    'data' => []
+                ]);
+            }
+        }
+
+        // Filter by vendor (for non-vendor users)
+        if (!$isVendor && $request->has('vendorId')) {
             $vendor = Vendor::where('vendor_id', $request->vendorId)->first();
             if ($vendor) {
                 $query->where('vendor_id', $vendor->id);

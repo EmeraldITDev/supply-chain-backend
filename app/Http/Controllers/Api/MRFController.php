@@ -100,6 +100,17 @@ class MRFController extends Controller
 
         // Filter by requester (for employees to see only their own)
         $user = $request->user();
+        
+        // If user is a vendor, they typically don't need direct access to MRFs
+        // But allow access and return empty array or MRFs related to their RFQs
+        $isVendor = false;
+        if ($user && ($user->role === 'vendor' || (method_exists($user, 'hasRole') && $user->hasRole('vendor')))) {
+            $isVendor = true;
+            // Vendors can see MRFs that are linked to RFQs assigned to them
+            // For now, return empty array - vendors should access MRFs through RFQs
+            return response()->json([]);
+        }
+        
         if ($user && in_array($user->role, ['employee', 'general_employee'])) {
             $query->where('requester_id', $user->id);
         }

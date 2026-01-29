@@ -32,6 +32,16 @@ class SRFController extends Controller
 
         // Filter by requester (for employees to see only their own)
         $user = $request->user();
+        
+        // If user is a vendor, they typically don't need direct access to SRFs
+        // Allow access but return empty array
+        $isVendor = false;
+        if ($user && ($user->role === 'vendor' || (method_exists($user, 'hasRole') && $user->hasRole('vendor')))) {
+            $isVendor = true;
+            // Vendors don't typically need SRFs - return empty array
+            return response()->json([]);
+        }
+        
         if ($user && in_array($user->role, ['employee', 'general_employee'])) {
             $query->where('requester_id', $user->id);
         }

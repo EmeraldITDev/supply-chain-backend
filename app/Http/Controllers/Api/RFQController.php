@@ -17,7 +17,31 @@ class RFQController extends Controller
      */
     public function index(Request $request)
     {
+        $user = $request->user();
         $query = RFQ::with(['mrf', 'creator', 'vendors']);
+
+        // If user is a vendor, only show RFQs assigned to them
+        $isVendor = false;
+        $vendor = null;
+        if ($user && ($user->role === 'vendor' || (method_exists($user, 'hasRole') && $user->hasRole('vendor')))) {
+            $isVendor = true;
+            // Get vendor from user
+            if ($user->vendor_id) {
+                $vendor = Vendor::find($user->vendor_id);
+            }
+            if (!$vendor) {
+                $vendor = Vendor::where('email', $user->email)->first();
+            }
+            if ($vendor) {
+                // Filter RFQs where this vendor is in the vendors relationship
+                $query->whereHas('vendors', function($q) use ($vendor) {
+                    $q->where('vendors.id', $vendor->id);
+                });
+            } else {
+                // Vendor user but no vendor record - return empty
+                return response()->json([]);
+            }
+        }
 
         // Filter by status
         if ($request->has('status')) {
