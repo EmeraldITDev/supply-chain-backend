@@ -1349,8 +1349,15 @@ class VendorController extends Controller
     {
         $user = $request->user();
 
-        // Verify user is a vendor
-        if ($user->role !== 'vendor') {
+        // Verify user is a vendor - check both direct role field and Spatie roles
+        $isVendor = false;
+        if ($user->role === 'vendor') {
+            $isVendor = true;
+        } elseif (method_exists($user, 'hasRole') && $user->hasRole('vendor')) {
+            $isVendor = true;
+        }
+
+        if (!$isVendor) {
             return response()->json([
                 'success' => false,
                 'error' => 'Only vendors can access this endpoint',
