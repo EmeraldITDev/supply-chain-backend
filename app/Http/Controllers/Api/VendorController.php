@@ -41,6 +41,22 @@ class VendorController extends Controller
     }
 
     /**
+     * Mask account number for display (show last 4 digits only).
+     * Sensitive data: only authorized roles see full number; UI can show masked.
+     */
+    private function maskAccountNumber(?string $accountNumber): ?string
+    {
+        if ($accountNumber === null || $accountNumber === '') {
+            return null;
+        }
+        $len = strlen($accountNumber);
+        if ($len <= 4) {
+            return str_repeat('*', $len);
+        }
+        return str_repeat('*', $len - 4) . substr($accountNumber, -4);
+    }
+
+    /**
      * Find vendor by ID (supports both primary key and vendor_id)
      * 
      * @param mixed $id - Can be primary key (integer) or vendor_id (string like "V001")
@@ -131,10 +147,12 @@ class VendorController extends Controller
      */
     public function register(Request $request, VendorDocumentService $documentService)
     {
+        // Log without sensitive fields (account_number, account_balance)
+        $safeKeys = array_diff(array_keys($request->all()), ['account_number', 'account_balance']);
         \Log::info('Vendor registration attempt', [
-            'all_fields' => array_keys($request->all()),
+            'all_fields' => array_values($safeKeys),
             'email' => $request->email ?? $request->get('email'),
-            'has_documents' => $request->hasFile('documents')
+            'has_documents' => $request->hasFile('documents'),
         ]);
 
         try {
@@ -176,6 +194,14 @@ class VendorController extends Controller
                 ], 422);
             }
 
+            // Financial and country fields (optional, from FormData snake_case)
+            $accountBalance = $request->input('account_balance');
+            $bankName = $request->input('bank_name');
+            $accountNumber = $request->input('account_number');
+            $accountName = $request->input('account_name');
+            $currency = $request->input('currency');
+            $financialCountryCode = $request->input('financial_country_code');
+
             // Prepare validation data with normalized email
             $validationData = [
                 'companyName' => $companyName,
@@ -185,6 +211,12 @@ class VendorController extends Controller
                 'address' => $address,
                 'taxId' => $taxId,
                 'contactPerson' => $contactPerson,
+                'account_balance' => $accountBalance,
+                'bank_name' => $bankName,
+                'account_number' => $accountNumber,
+                'account_name' => $accountName,
+                'currency' => $currency,
+                'financial_country_code' => $financialCountryCode,
             ];
 
             // Note: We don't use 'unique' rule here because we check manually above
@@ -199,6 +231,13 @@ class VendorController extends Controller
                 'contactPerson' => 'nullable|string|max:255',
                 'documents' => 'nullable|array',
                 'documents.*' => 'file|max:10240', // Max 10MB per file
+                // Financial and country (all optional)
+                'account_balance' => 'nullable|numeric',
+                'bank_name' => 'nullable|string|max:255',
+                'account_number' => 'nullable|string|max:64',
+                'account_name' => 'nullable|string|max:255',
+                'currency' => 'nullable|string|size:3',
+                'financial_country_code' => 'nullable|string|size:2',
             ]);
 
             if ($validator->fails()) {
@@ -213,7 +252,8 @@ class VendorController extends Controller
             \Log::info('Validation passed, creating registration', [
                 'company_name' => $companyName,
                 'category' => $category,
-                'email' => $email
+                'email' => $email,
+                'has_financial' => !empty($accountBalance) || !empty($bankName) || !empty($accountNumber) || !empty($accountName) || !empty($currency) || !empty($financialCountryCode),
             ]);
 
             $registration = VendorRegistration::create([
@@ -222,6 +262,12 @@ class VendorController extends Controller
                 'email' => $email, // Use normalized email
                 'phone' => $phone,
                 'address' => $address,
+                'country_code' => $financialCountryCode,
+                'account_balance' => $accountBalance,
+                'bank_name' => $bankName,
+                'account_number' => $accountNumber,
+                'account_name' => $accountName,
+                'currency' => $currency,
                 'tax_id' => $taxId,
                 'contact_person' => $contactPerson,
                 'status' => VendorRegistration::STATUS_PENDING,
@@ -484,6 +530,13 @@ class VendorController extends Controller
                 'vendorId' => $reg->vendor ? $reg->vendor->vendor_id : null,
                 'documents' => $formattedDocuments,
                 'createdAt' => $reg->created_at->toIso8601String(),
+                // Financial and country (masked account number for display)
+                'countryCode' => $reg->country_code,
+                'accountBalance' => $reg->account_balance !== null ? (float) $reg->account_balance : null,
+                'bankName' => $reg->bank_name,
+                'accountNumber' => $this->maskAccountNumber($reg->account_number),
+                'accountName' => $reg->account_name,
+                'currency' => $reg->currency,
             ];
         });
 
@@ -646,6 +699,13 @@ class VendorController extends Controller
             'approvedAt' => $registration->approved_at ? $registration->approved_at->toIso8601String() : null,
             'createdAt' => $registration->created_at->toIso8601String(),
             'updatedAt' => $registration->updated_at->toIso8601String(),
+            // Financial and country (masked account number for display)
+            'countryCode' => $registration->country_code,
+            'accountBalance' => $registration->account_balance !== null ? (float) $registration->account_balance : null,
+            'bankName' => $registration->bank_name,
+            'accountNumber' => $this->maskAccountNumber($registration->account_number),
+            'accountName' => $registration->account_name,
+            'currency' => $registration->currency,
         ];
 
         return response()->json([

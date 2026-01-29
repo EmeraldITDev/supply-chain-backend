@@ -21,6 +21,12 @@ class VendorRegistration extends Model
         'email',
         'phone',
         'address',
+        'country_code',
+        'account_balance',
+        'bank_name',
+        'account_number',
+        'account_name',
+        'currency',
         'tax_id',
         'contact_person',
         'status',
@@ -38,6 +44,7 @@ class VendorRegistration extends Model
         'approved_at' => 'datetime',
         'password_changed_at' => 'datetime',
         'documents' => 'array',
+        'account_balance' => 'decimal:2',
     ];
 
     /**
