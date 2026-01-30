@@ -60,8 +60,13 @@ class DashboardController extends Controller
                 ];
             });
 
-        // Get pending MRFs
-        $pendingMRFs = MRF::where('status', 'Pending')
+        // Get pending MRFs - include both newly created (Pending) and executive-approved (procurement_review)
+        $pendingMRFs = MRF::where(function($query) {
+                $query->where('status', 'Pending')
+                    ->orWhere('status', 'procurement_review')
+                    ->orWhere('current_stage', 'procurement')
+                    ->orWhere('workflow_state', 'like', '%procurement_review%');
+            })
             ->with(['requester'])
             ->orderBy('created_at', 'desc')
             ->get()
@@ -74,6 +79,10 @@ class DashboardController extends Controller
                     'urgency' => $mrf->urgency,
                     'requesterName' => $mrf->requester_name,
                     'estimatedCost' => $mrf->estimated_cost,
+                    'status' => $mrf->status,
+                    'currentStage' => $mrf->current_stage,
+                    'workflowState' => $mrf->workflow_state,
+                    'executiveApproved' => (bool) $mrf->executive_approved,
                     'createdAt' => $mrf->created_at->toIso8601String(),
                 ];
             });
@@ -144,9 +153,17 @@ class DashboardController extends Controller
             ? round(($onTimeCount / $totalDeliveries) * 100, 1) 
             : 0;
 
+        // Count MRFs in procurement stage (pending + executive-approved)
+        $procurementMRFsCount = MRF::where(function($query) {
+                $query->where('status', 'Pending')
+                    ->orWhere('status', 'procurement_review')
+                    ->orWhere('current_stage', 'procurement')
+                    ->orWhere('workflow_state', 'like', '%procurement_review%');
+            })->count();
+        
         $stats = [
             'pendingRegistrations' => $pendingRegistrationsCount,
-            'pendingMRFs' => MRF::where('status', 'Pending')->count(),
+            'pendingMRFs' => $procurementMRFsCount, // Include both pending and procurement_review MRFs
             'pendingSRFs' => SRF::where('status', 'Pending')->count(),
             'pendingQuotations' => Quotation::where('status', 'Pending')->count(),
             'totalVendors' => $activeVendors->count(),
