@@ -119,29 +119,34 @@ class DashboardController extends Controller
                 ];
             });
 
-        // Statistics
+        // Statistics - All pulled live from database
+        
+        // Pending KYC / Awaiting Review: Count pending vendor registrations
         $pendingRegistrationsCount = VendorRegistration::where('status', 'Pending')->count();
-        $activeVendors = Vendor::where('status', 'Active')->get();
         
-        // Calculate average rating from active vendors (only those with ratings)
-        $vendorsWithRatings = $activeVendors->filter(function($vendor) {
-            return $vendor->rating !== null && $vendor->rating > 0;
-        });
-        $avgRating = $vendorsWithRatings->count() > 0 
-            ? $vendorsWithRatings->avg('rating') 
-            : 0;
+        // Total Vendors: Count active vendors directly from database
+        $totalVendorsCount = Vendor::where('status', 'Active')->count();
         
-        // Calculate on-time delivery percentage
-        // Compare delivery_date with RFQ deadline for approved quotations
+        // Average Rating: Calculate from active vendors with ratings (database query)
+        $avgRating = Vendor::where('status', 'Active')
+            ->whereNotNull('rating')
+            ->where('rating', '>', 0)
+            ->avg('rating') ?? 0;
+        $avgRating = round((float) $avgRating, 2);
+        
+        // On-Time Delivery: Calculate percentage from approved quotations (database query)
+        // Get all approved quotations with delivery dates and their RFQs
         $approvedQuotations = Quotation::where('status', 'Approved')
+            ->whereNotNull('delivery_date')
             ->with('rfq')
             ->get();
         
         $onTimeCount = 0;
-        $totalDeliveries = $approvedQuotations->count();
+        $totalDeliveries = 0;
         
         foreach ($approvedQuotations as $quote) {
-            if ($quote->rfq && $quote->delivery_date && $quote->rfq->deadline) {
+            if ($quote->rfq && $quote->rfq->deadline) {
+                $totalDeliveries++;
                 // If delivery_date is on or before deadline, it's on-time
                 if ($quote->delivery_date <= $quote->rfq->deadline) {
                     $onTimeCount++;
@@ -166,11 +171,11 @@ class DashboardController extends Controller
             'pendingMRFs' => $procurementMRFsCount, // Include both pending and procurement_review MRFs
             'pendingSRFs' => SRF::where('status', 'Pending')->count(),
             'pendingQuotations' => Quotation::where('status', 'Pending')->count(),
-            'totalVendors' => $activeVendors->count(),
-            'pendingKYC' => $pendingRegistrationsCount, // Same as pending registrations
-            'awaitingReview' => $pendingRegistrationsCount, // Same as pending registrations
-            'avgRating' => round((float) $avgRating, 2),
-            'onTimeDelivery' => $onTimeDeliveryPercentage,
+            'totalVendors' => $totalVendorsCount, // Live count from database
+            'pendingKYC' => $pendingRegistrationsCount, // Live count from database
+            'awaitingReview' => $pendingRegistrationsCount, // Live count from database
+            'avgRating' => $avgRating, // Live calculation from database
+            'onTimeDelivery' => $onTimeDeliveryPercentage, // Live calculation from database
         ];
 
         return response()->json([
