@@ -11,6 +11,16 @@ use App\Http\Controllers\Api\RFQController;
 use App\Http\Controllers\Api\QuotationController;
 use App\Http\Controllers\Api\VendorController;
 use App\Http\Controllers\Api\NotificationController;
+use App\Http\Controllers\Api\V1\Logistics\AuthController as LogisticsAuthController;
+use App\Http\Controllers\Api\V1\Logistics\VendorController as LogisticsVendorController;
+use App\Http\Controllers\Api\V1\Logistics\TripController as LogisticsTripController;
+use App\Http\Controllers\Api\V1\Logistics\JourneyController as LogisticsJourneyController;
+use App\Http\Controllers\Api\V1\Logistics\MaterialController as LogisticsMaterialController;
+use App\Http\Controllers\Api\V1\Logistics\FleetController as LogisticsFleetController;
+use App\Http\Controllers\Api\V1\Logistics\DocumentController as LogisticsDocumentController;
+use App\Http\Controllers\Api\V1\Logistics\NotificationController as LogisticsNotificationController;
+use App\Http\Controllers\Api\V1\Logistics\ReportController as LogisticsReportController;
+use App\Http\Controllers\Api\V1\Logistics\UploadController as LogisticsUploadController;
 
 // API health check/test route
 Route::get('/', function () {
@@ -205,3 +215,70 @@ Route::middleware('auth:sanctum')->group(function () {
 // Public vendor registration
 Route::get('/vendors/categories', [VendorController::class, 'categories']);
 Route::post('/vendors/register', [VendorController::class, 'register']);
+
+// ===============================
+// Logistics Module v1 (versioned)
+// ===============================
+Route::prefix('v1/logistics')->group(function () {
+    $logisticsInternalRoles = 'role:procurement_manager,logistics_manager,supply_chain_director,admin,executive,chairman,finance';
+    // Public auth endpoints
+    Route::post('/auth/login', [LogisticsAuthController::class, 'login']);
+    Route::post('/auth/vendor-accept', [LogisticsAuthController::class, 'vendorAccept']);
+
+    Route::middleware('auth:sanctum')->group(function () {
+        Route::get('/auth/me', [LogisticsAuthController::class, 'me']);
+        Route::post('/auth/vendor-invite', [LogisticsAuthController::class, 'vendorInvite'])->middleware($logisticsInternalRoles);
+
+        // Vendor Management
+        Route::post('/vendors', [LogisticsVendorController::class, 'store'])->middleware($logisticsInternalRoles);
+        Route::get('/vendors', [LogisticsVendorController::class, 'index'])->middleware($logisticsInternalRoles);
+        Route::get('/vendors/{id}', [LogisticsVendorController::class, 'show'])->middleware($logisticsInternalRoles);
+        Route::put('/vendors/{id}', [LogisticsVendorController::class, 'update'])->middleware($logisticsInternalRoles);
+        Route::post('/vendors/{id}/invite', [LogisticsVendorController::class, 'invite'])->middleware($logisticsInternalRoles);
+
+        // Trip Management
+        Route::post('/trips', [LogisticsTripController::class, 'store'])->middleware($logisticsInternalRoles);
+        Route::get('/trips', [LogisticsTripController::class, 'index'])->middleware($logisticsInternalRoles);
+        Route::get('/trips/{id}', [LogisticsTripController::class, 'show'])->middleware($logisticsInternalRoles);
+        Route::put('/trips/{id}', [LogisticsTripController::class, 'update'])->middleware($logisticsInternalRoles);
+        Route::post('/trips/{id}/assign-vendor', [LogisticsTripController::class, 'assignVendor'])->middleware($logisticsInternalRoles);
+        Route::post('/trips/bulk-upload', [LogisticsTripController::class, 'bulkUpload'])->middleware($logisticsInternalRoles);
+
+        // Journey Management
+        Route::post('/journeys', [LogisticsJourneyController::class, 'store'])->middleware($logisticsInternalRoles);
+        Route::get('/journeys/{trip_id}', [LogisticsJourneyController::class, 'listByTrip'])->middleware($logisticsInternalRoles);
+        Route::put('/journeys/{id}', [LogisticsJourneyController::class, 'update'])->middleware($logisticsInternalRoles);
+        Route::post('/journeys/{id}/update-status', [LogisticsJourneyController::class, 'updateStatus'])->middleware('role:vendor,logistics_manager,procurement_manager,supply_chain_director,admin');
+
+        // Materials Management
+        Route::post('/materials', [LogisticsMaterialController::class, 'store'])->middleware($logisticsInternalRoles);
+        Route::get('/materials', [LogisticsMaterialController::class, 'index'])->middleware($logisticsInternalRoles);
+        Route::get('/materials/{id}', [LogisticsMaterialController::class, 'show'])->middleware($logisticsInternalRoles);
+        Route::post('/materials/bulk-upload', [LogisticsMaterialController::class, 'bulkUpload'])->middleware($logisticsInternalRoles);
+        Route::get('/trips/{id}/materials', [LogisticsMaterialController::class, 'listByTrip'])->middleware($logisticsInternalRoles);
+
+        // Fleet Management
+        Route::post('/fleet/vehicles', [LogisticsFleetController::class, 'store'])->middleware($logisticsInternalRoles);
+        Route::get('/fleet/vehicles', [LogisticsFleetController::class, 'index'])->middleware($logisticsInternalRoles);
+        Route::get('/fleet/vehicles/{id}', [LogisticsFleetController::class, 'show'])->middleware($logisticsInternalRoles);
+        Route::put('/fleet/vehicles/{id}', [LogisticsFleetController::class, 'update'])->middleware($logisticsInternalRoles);
+        Route::post('/fleet/vehicles/{id}/maintenance', [LogisticsFleetController::class, 'storeMaintenance'])->middleware($logisticsInternalRoles);
+
+        // Document Management
+        Route::post('/documents', [LogisticsDocumentController::class, 'store'])->middleware($logisticsInternalRoles);
+        Route::get('/documents/{entity_type}/{entity_id}', [LogisticsDocumentController::class, 'list'])->middleware($logisticsInternalRoles);
+        Route::delete('/documents/{id}', [LogisticsDocumentController::class, 'destroy'])->middleware($logisticsInternalRoles);
+
+        // Notifications
+        Route::post('/notifications/send', [LogisticsNotificationController::class, 'send'])->middleware($logisticsInternalRoles);
+        Route::get('/notifications', [LogisticsNotificationController::class, 'index'])->middleware($logisticsInternalRoles);
+
+        // Reports
+        Route::post('/reports', [LogisticsReportController::class, 'store'])->middleware($logisticsInternalRoles);
+        Route::get('/reports', [LogisticsReportController::class, 'index'])->middleware($logisticsInternalRoles);
+        Route::get('/reports/pending', [LogisticsReportController::class, 'pending'])->middleware($logisticsInternalRoles);
+
+        // Bulk Upload Templates
+        Route::get('/uploads/templates', [LogisticsUploadController::class, 'templates'])->middleware($logisticsInternalRoles);
+    });
+});

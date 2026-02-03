@@ -18,6 +18,11 @@ return Application::configure(basePath: dirname(__DIR__))
         
         // Track user activity for automatic logout after 5 minutes of inactivity
         $middleware->prepend(\App\Http\Middleware\TrackUserActivity::class);
+
+        $middleware->alias([
+            'role' => \App\Http\Middleware\EnsureRole::class,
+            'permission' => \App\Http\Middleware\EnsurePermission::class,
+        ]);
         
         $middleware->api(prepend: [
             \Laravel\Sanctum\Http\Middleware\EnsureFrontendRequestsAreStateful::class,

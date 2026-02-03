@@ -1,0 +1,683 @@
+openapi: 3.0.3
+info:
+  title: Supply Chain Logistics API
+  version: 1.0.0
+  description: Versioned logistics module API
+servers:
+  - url: /api/v1/logistics
+paths:
+  /auth/login:
+    post:
+      summary: Login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: OK
+  /auth/vendor-invite:
+    post:
+      summary: Invite vendor
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VendorInviteRequest'
+      responses:
+        '201':
+          description: Created
+  /auth/vendor-accept:
+    post:
+      summary: Accept vendor invite
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VendorAcceptRequest'
+      responses:
+        '201':
+          description: Created
+  /auth/me:
+    get:
+      summary: Current user
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: OK
+  /vendors:
+    post:
+      summary: Create vendor
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VendorCreateRequest'
+      responses:
+        '201':
+          description: Created
+    get:
+      summary: List vendors
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: OK
+  /vendors/{id}:
+    get:
+      summary: Get vendor
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: OK
+    put:
+      summary: Update vendor
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VendorUpdateRequest'
+      responses:
+        '200':
+          description: OK
+  /trips:
+    post:
+      summary: Create trip
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TripCreateRequest'
+      responses:
+        '201':
+          description: Created
+    get:
+      summary: List trips
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: OK
+  /trips/{id}:
+    get:
+      summary: Get trip
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: OK
+    put:
+      summary: Update trip
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TripUpdateRequest'
+      responses:
+        '200':
+          description: OK
+  /trips/{id}/assign-vendor:
+    post:
+      summary: Assign vendor to trip
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AssignVendorRequest'
+      responses:
+        '200':
+          description: OK
+  /trips/bulk-upload:
+    post:
+      summary: Bulk upload trips
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BulkUploadTripsRequest'
+      responses:
+        '201':
+          description: Created
+  /journeys:
+    post:
+      summary: Create journey
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/JourneyCreateRequest'
+      responses:
+        '201':
+          description: Created
+  /journeys/{trip_id}:
+    get:
+      summary: List journeys by trip
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: trip_id
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: OK
+  /journeys/{id}:
+    put:
+      summary: Update journey
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/JourneyUpdateRequest'
+      responses:
+        '200':
+          description: OK
+  /journeys/{id}/update-status:
+    post:
+      summary: Update journey status
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/JourneyStatusUpdateRequest'
+      responses:
+        '200':
+          description: OK
+  /materials:
+    post:
+      summary: Create material
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MaterialCreateRequest'
+      responses:
+        '201':
+          description: Created
+    get:
+      summary: List materials
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: OK
+  /materials/{id}:
+    get:
+      summary: Get material
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: OK
+  /materials/bulk-upload:
+    post:
+      summary: Bulk upload materials
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BulkUploadMaterialsRequest'
+      responses:
+        '201':
+          description: Created
+  /trips/{id}/materials:
+    get:
+      summary: List materials by trip
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: OK
+  /fleet/vehicles:
+    post:
+      summary: Create vehicle
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VehicleCreateRequest'
+      responses:
+        '201':
+          description: Created
+    get:
+      summary: List vehicles
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: OK
+  /fleet/vehicles/{id}:
+    get:
+      summary: Get vehicle
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: OK
+    put:
+      summary: Update vehicle
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VehicleUpdateRequest'
+      responses:
+        '200':
+          description: OK
+  /fleet/vehicles/{id}/maintenance:
+    post:
+      summary: Create vehicle maintenance
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VehicleMaintenanceRequest'
+      responses:
+        '201':
+          description: Created
+  /documents:
+    post:
+      summary: Upload document
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/DocumentUploadRequest'
+      responses:
+        '201':
+          description: Created
+  /documents/{entity_type}/{entity_id}:
+    get:
+      summary: List documents by entity
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: entity_type
+          required: true
+          schema:
+            type: string
+        - in: path
+          name: entity_id
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: OK
+  /documents/{id}:
+    delete:
+      summary: Delete document
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: OK
+  /notifications/send:
+    post:
+      summary: Send notification
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SendNotificationRequest'
+      responses:
+        '201':
+          description: Created
+  /notifications:
+    get:
+      summary: List notification events
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: OK
+  /reports:
+    post:
+      summary: Submit report
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReportCreateRequest'
+      responses:
+        '201':
+          description: Created
+    get:
+      summary: List reports
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: OK
+  /reports/pending:
+    get:
+      summary: List pending reports
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: OK
+  /uploads/templates:
+    get:
+      summary: Get upload templates
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: OK
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+  schemas:
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string }
+    VendorInviteRequest:
+      type: object
+      required: [email]
+      properties:
+        email: { type: string, format: email }
+        vendor_name: { type: string }
+        expires_in_days: { type: integer }
+    VendorAcceptRequest:
+      type: object
+      required: [email, token, vendor_name]
+      properties:
+        email: { type: string, format: email }
+        token: { type: string }
+        vendor_name: { type: string }
+        phone: { type: string }
+        address: { type: string }
+        contact_person: { type: string }
+    VendorCreateRequest:
+      type: object
+      required: [name, email]
+      properties:
+        name: { type: string }
+        email: { type: string, format: email }
+        category: { type: string }
+        phone: { type: string }
+        address: { type: string }
+        contact_person: { type: string }
+        notes: { type: string }
+    VendorUpdateRequest:
+      type: object
+      properties:
+        name: { type: string }
+        category: { type: string }
+        phone: { type: string }
+        address: { type: string }
+        contact_person: { type: string }
+        notes: { type: string }
+        status: { type: string }
+    TripCreateRequest:
+      type: object
+      required: [title, origin, destination]
+      properties:
+        title: { type: string }
+        description: { type: string }
+        origin: { type: string }
+        destination: { type: string }
+        scheduled_departure_at: { type: string, format: date-time }
+        scheduled_arrival_at: { type: string, format: date-time }
+        vendor_id: { type: integer }
+    TripUpdateRequest:
+      type: object
+      properties:
+        title: { type: string }
+        description: { type: string }
+        status: { type: string }
+        origin: { type: string }
+        destination: { type: string }
+        scheduled_departure_at: { type: string, format: date-time }
+        scheduled_arrival_at: { type: string, format: date-time }
+        actual_departure_at: { type: string, format: date-time }
+        actual_arrival_at: { type: string, format: date-time }
+        vendor_id: { type: integer }
+    AssignVendorRequest:
+      type: object
+      required: [vendor_id]
+      properties:
+        vendor_id: { type: integer }
+    BulkUploadTripsRequest:
+      type: object
+      required: [rows]
+      properties:
+        rows:
+          type: array
+          items:
+            type: object
+    JourneyCreateRequest:
+      type: object
+      required: [trip_id]
+      properties:
+        trip_id: { type: integer }
+        status: { type: string }
+    JourneyUpdateRequest:
+      type: object
+      properties:
+        status: { type: string }
+        departed_at: { type: string, format: date-time }
+        arrived_at: { type: string, format: date-time }
+    JourneyStatusUpdateRequest:
+      type: object
+      required: [status]
+      properties:
+        status: { type: string }
+        timestamp: { type: string, format: date-time }
+        location: { type: string }
+    MaterialCreateRequest:
+      type: object
+      required: [material_code, name, quantity]
+      properties:
+        material_code: { type: string }
+        name: { type: string }
+        quantity: { type: number }
+        trip_id: { type: integer }
+    BulkUploadMaterialsRequest:
+      type: object
+      required: [rows]
+      properties:
+        rows:
+          type: array
+          items:
+            type: object
+    VehicleCreateRequest:
+      type: object
+      required: [vehicle_code, plate_number]
+      properties:
+        vehicle_code: { type: string }
+        plate_number: { type: string }
+        type: { type: string }
+        capacity: { type: number }
+        vendor_id: { type: integer }
+    VehicleUpdateRequest:
+      type: object
+      properties:
+        plate_number: { type: string }
+        type: { type: string }
+        capacity: { type: number }
+        vendor_id: { type: integer }
+        status: { type: string }
+    VehicleMaintenanceRequest:
+      type: object
+      required: [maintenance_type]
+      properties:
+        maintenance_type: { type: string }
+        description: { type: string }
+        performed_at: { type: string, format: date-time }
+        next_due_at: { type: string, format: date-time }
+        cost: { type: number }
+    DocumentUploadRequest:
+      type: object
+      required: [entity_type, entity_id, document_type, file]
+      properties:
+        entity_type: { type: string }
+        entity_id: { type: integer }
+        document_type: { type: string }
+        file: { type: string, format: binary }
+        expires_at: { type: string, format: date-time }
+        issued_at: { type: string, format: date-time }
+    SendNotificationRequest:
+      type: object
+      required: [event_key, type, payload, roles]
+      properties:
+        event_key: { type: string }
+        type: { type: string }
+        payload: { type: object }
+        roles:
+          type: array
+          items: { type: string }
+    ReportCreateRequest:
+      type: object
+      required: [report_type]
+      properties:
+        trip_id: { type: integer }
+        journey_id: { type: integer }
+        report_type: { type: string }
+        payload: { type: object }
