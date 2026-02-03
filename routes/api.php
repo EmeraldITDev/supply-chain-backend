@@ -285,3 +285,72 @@ Route::prefix('v1/logistics')->group(function () {
         Route::get('/uploads/templates', [LogisticsUploadController::class, 'templates'])->middleware($logisticsInternalRoles);
     });
 });
+
+// Logistics Module (compatibility aliases for existing frontend)
+Route::prefix('logistics')->group(function () {
+    $logisticsInternalRoles = 'role:procurement_manager,logistics_manager,supply_chain_director,admin,executive,chairman,finance';
+
+    Route::post('/auth/login', [LogisticsAuthController::class, 'login']);
+    Route::post('/auth/vendor-accept', [LogisticsAuthController::class, 'vendorAccept']);
+    Route::get('/docs', [LogisticsDocsController::class, 'ui']);
+    Route::get('/openapi.yaml', [LogisticsDocsController::class, 'spec']);
+
+    Route::middleware('auth:sanctum')->group(function () use ($logisticsInternalRoles) {
+        Route::get('/auth/me', [LogisticsAuthController::class, 'me']);
+        Route::post('/auth/vendor-invite', [LogisticsAuthController::class, 'vendorInvite'])->middleware($logisticsInternalRoles);
+
+        Route::post('/vendors', [LogisticsVendorController::class, 'store'])->middleware($logisticsInternalRoles);
+        Route::get('/vendors', [LogisticsVendorController::class, 'index'])->middleware($logisticsInternalRoles);
+        Route::get('/vendors/{id}', [LogisticsVendorController::class, 'show'])->middleware($logisticsInternalRoles);
+        Route::put('/vendors/{id}', [LogisticsVendorController::class, 'update'])->middleware($logisticsInternalRoles);
+        Route::post('/vendors/{id}/invite', [LogisticsVendorController::class, 'invite'])->middleware($logisticsInternalRoles);
+
+        Route::post('/trips', [LogisticsTripController::class, 'store'])->middleware($logisticsInternalRoles);
+        Route::get('/trips', [LogisticsTripController::class, 'index'])->middleware($logisticsInternalRoles);
+        Route::get('/trips/{id}', [LogisticsTripController::class, 'show'])->middleware($logisticsInternalRoles);
+        Route::put('/trips/{id}', [LogisticsTripController::class, 'update'])->middleware($logisticsInternalRoles);
+        Route::patch('/trips/{id}', [LogisticsTripController::class, 'update'])->middleware($logisticsInternalRoles);
+        Route::post('/trips/{id}/assign-vendor', [LogisticsTripController::class, 'assignVendor'])->middleware($logisticsInternalRoles);
+        Route::put('/trips/{id}/assign-vendor', [LogisticsTripController::class, 'assignVendor'])->middleware($logisticsInternalRoles);
+        Route::post('/trips/bulk-upload', [LogisticsTripController::class, 'bulkUpload'])->middleware($logisticsInternalRoles);
+
+        Route::post('/journeys', [LogisticsJourneyController::class, 'store'])->middleware($logisticsInternalRoles);
+        Route::get('/journeys/{trip_id}', [LogisticsJourneyController::class, 'listByTrip'])->middleware($logisticsInternalRoles);
+        Route::put('/journeys/{id}', [LogisticsJourneyController::class, 'update'])->middleware($logisticsInternalRoles);
+        Route::post('/journeys/{id}/update-status', [LogisticsJourneyController::class, 'updateStatus'])->middleware('role:vendor,logistics_manager,procurement_manager,supply_chain_director,admin');
+
+        Route::post('/materials', [LogisticsMaterialController::class, 'store'])->middleware($logisticsInternalRoles);
+        Route::get('/materials', [LogisticsMaterialController::class, 'index'])->middleware($logisticsInternalRoles);
+        Route::get('/materials/{id}', [LogisticsMaterialController::class, 'show'])->middleware($logisticsInternalRoles);
+        Route::post('/materials/bulk-upload', [LogisticsMaterialController::class, 'bulkUpload'])->middleware($logisticsInternalRoles);
+        Route::get('/trips/{id}/materials', [LogisticsMaterialController::class, 'listByTrip'])->middleware($logisticsInternalRoles);
+
+        Route::post('/fleet/vehicles', [LogisticsFleetController::class, 'store'])->middleware($logisticsInternalRoles);
+        Route::get('/fleet/vehicles', [LogisticsFleetController::class, 'index'])->middleware($logisticsInternalRoles);
+        Route::get('/fleet/vehicles/{id}', [LogisticsFleetController::class, 'show'])->middleware($logisticsInternalRoles);
+        Route::put('/fleet/vehicles/{id}', [LogisticsFleetController::class, 'update'])->middleware($logisticsInternalRoles);
+        Route::post('/fleet/vehicles/{id}/maintenance', [LogisticsFleetController::class, 'storeMaintenance'])->middleware($logisticsInternalRoles);
+
+        Route::post('/documents', [LogisticsDocumentController::class, 'store'])->middleware($logisticsInternalRoles);
+        Route::get('/documents/{entity_type}/{entity_id}', [LogisticsDocumentController::class, 'list'])->middleware($logisticsInternalRoles);
+        Route::delete('/documents/{id}', [LogisticsDocumentController::class, 'destroy'])->middleware($logisticsInternalRoles);
+
+        Route::post('/notifications/send', [LogisticsNotificationController::class, 'send'])->middleware($logisticsInternalRoles);
+        Route::get('/notifications', [LogisticsNotificationController::class, 'index'])->middleware($logisticsInternalRoles);
+
+        Route::post('/reports', [LogisticsReportController::class, 'store'])->middleware($logisticsInternalRoles);
+        Route::get('/reports', [LogisticsReportController::class, 'index'])->middleware($logisticsInternalRoles);
+        Route::get('/reports/pending', [LogisticsReportController::class, 'pending'])->middleware($logisticsInternalRoles);
+
+        Route::get('/uploads/templates', [LogisticsUploadController::class, 'templates'])->middleware($logisticsInternalRoles);
+    });
+});
+
+// Minimal backward-compatibility trip endpoints
+Route::middleware('auth:sanctum')->group(function () {
+    $logisticsInternalRoles = 'role:procurement_manager,logistics_manager,supply_chain_director,admin,executive,chairman,finance';
+    Route::put('/trips/{id}', [LogisticsTripController::class, 'update'])->middleware($logisticsInternalRoles);
+    Route::patch('/trips/{id}', [LogisticsTripController::class, 'update'])->middleware($logisticsInternalRoles);
+    Route::post('/trips/{id}/assign-vendor', [LogisticsTripController::class, 'assignVendor'])->middleware($logisticsInternalRoles);
+    Route::put('/trips/{id}/assign-vendor', [LogisticsTripController::class, 'assignVendor'])->middleware($logisticsInternalRoles);
+});
