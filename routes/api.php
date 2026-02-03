@@ -27,7 +27,7 @@ use App\Http\Controllers\Api\V1\Logistics\DocsController as LogisticsDocsControl
 Route::get('/', function () {
     return response()->json([
         'message' => 'Supply Chain API is running',
-        'version' => '1.0',
+        'version' => '1.0.1',
         'status' => 'ok',
         'endpoints' => [
             'auth' => [
