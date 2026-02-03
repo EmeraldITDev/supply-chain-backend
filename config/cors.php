@@ -19,9 +19,8 @@ return [
 
     'allowed_methods' => ['*'],
 
-    'allowed_origins' => env('CORS_ALLOWED_ORIGINS') 
-        ? explode(',', env('CORS_ALLOWED_ORIGINS'))
-        : [
+    'allowed_origins' => array_values(array_unique(array_filter(array_map('trim', array_merge(
+        [
             'http://localhost:8081',
             'http://localhost:8080',
             'http://localhost:3000',
@@ -29,6 +28,8 @@ return [
             'https://emerald-supply-chain.vercel.app',
             'https://scm.emeraldcfze.com',
         ],
+        env('CORS_ALLOWED_ORIGINS') ? explode(',', env('CORS_ALLOWED_ORIGINS')) : []
+    ))))),
 
     'allowed_origins_patterns' => [
         '#^https://.*\.lovable\.app$#', // Allow all Lovable preview domains
