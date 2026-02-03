@@ -505,6 +505,18 @@ paths:
       responses:
         '200':
           description: OK
+  /docs:
+    get:
+      summary: Swagger UI
+      responses:
+        '200':
+          description: OK
+  /openapi.yaml:
+    get:
+      summary: OpenAPI spec
+      responses:
+        '200':
+          description: OK
 components:
   securitySchemes:
     bearerAuth:

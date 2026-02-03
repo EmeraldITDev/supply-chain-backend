@@ -21,6 +21,7 @@ use App\Http\Controllers\Api\V1\Logistics\DocumentController as LogisticsDocumen
 use App\Http\Controllers\Api\V1\Logistics\NotificationController as LogisticsNotificationController;
 use App\Http\Controllers\Api\V1\Logistics\ReportController as LogisticsReportController;
 use App\Http\Controllers\Api\V1\Logistics\UploadController as LogisticsUploadController;
+use App\Http\Controllers\Api\V1\Logistics\DocsController as LogisticsDocsController;
 
 // API health check/test route
 Route::get('/', function () {
@@ -224,6 +225,8 @@ Route::prefix('v1/logistics')->group(function () {
     // Public auth endpoints
     Route::post('/auth/login', [LogisticsAuthController::class, 'login']);
     Route::post('/auth/vendor-accept', [LogisticsAuthController::class, 'vendorAccept']);
+    Route::get('/docs', [LogisticsDocsController::class, 'ui']);
+    Route::get('/openapi.yaml', [LogisticsDocsController::class, 'spec']);
 
     Route::middleware('auth:sanctum')->group(function () {
         Route::get('/auth/me', [LogisticsAuthController::class, 'me']);

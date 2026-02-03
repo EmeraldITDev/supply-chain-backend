@@ -4,27 +4,23 @@ namespace App\Services\Logistics;
 
 use App\Models\Logistics\NotificationEvent;
 use App\Models\User;
-use App\Notifications\LogisticsEventNotification;
-use Illuminate\Support\Facades\Notification;
+use App\Jobs\SendLogisticsNotification;
 
 class NotificationService
 {
-    public function recordAndDispatch(string $eventKey, string $type, array $payload, array $recipients): NotificationEvent
+    public function recordAndDispatch(string $eventKey, string $type, array $payload, array $roles = []): NotificationEvent
     {
         $event = NotificationEvent::firstOrCreate([
             'event_key' => $eventKey,
         ], [
             'type' => $type,
-            'payload' => $payload,
+            'payload' => array_merge($payload, ['roles' => $roles]),
             'status' => 'pending',
             'attempts' => 0,
         ]);
 
         if ($event->wasRecentlyCreated) {
-            Notification::send($recipients, new LogisticsEventNotification($type, $payload));
-            $event->status = 'sent';
-            $event->attempts = 1;
-            $event->save();
+            SendLogisticsNotification::dispatch($event->id);
         }
 
         return $event;

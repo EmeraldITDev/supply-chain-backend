@@ -84,6 +84,10 @@ Base path: /api/v1/logistics
 ### Upload Templates
 - GET /uploads/templates
 
+### API Docs
+- GET /docs
+- GET /openapi.yaml
+
 ## Example Requests/Responses
 ### Create Trip
 Request:
@@ -133,6 +137,10 @@ All critical operations write to audit_logs using App\Services\Logistics\AuditLo
 
 ## Idempotency
 POST /trips supports Idempotency-Key header. Repeated requests return cached response.
+
+## Notifications (Queue-backed)
+Notification events are enqueued via the queue worker using App\Jobs\SendLogisticsNotification.
+Events are idempotent by event_key and stored in logistics_notification_events.
 
 ## Error Handling
 Standard error format:

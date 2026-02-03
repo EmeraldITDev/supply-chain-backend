@@ -14,13 +14,11 @@ class NotificationController extends ApiController
 
     public function send(SendNotificationRequest $request)
     {
-        $recipients = $this->notificationService->resolveRecipientsByRoles($request->roles);
-
         $event = $this->notificationService->recordAndDispatch(
             $request->event_key,
             $request->type,
             $request->payload,
-            $recipients
+            $request->roles
         );
 
         return $this->success([
