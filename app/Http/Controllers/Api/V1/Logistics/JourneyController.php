@@ -7,6 +7,7 @@ use App\Http\Requests\Logistics\UpdateJourneyRequest;
 use App\Http\Requests\Logistics\UpdateJourneyStatusRequest;
 use App\Models\Logistics\Journey;
 use App\Models\Logistics\Trip;
+use App\Notifications\JourneyStatusUpdatedNotification;
 use App\Services\Logistics\AuditLogger;
 use App\Services\Logistics\JourneyService;
 use Illuminate\Http\Request;
@@ -73,6 +74,7 @@ class JourneyController extends ApiController
             return $this->error('Journey not found', 'NOT_FOUND', 404);
         }
 
+        $previousStatus = $journey->status;
         $status = $request->status;
 
         if (!$this->journeyService->canTransition($journey->status, $status)) {
@@ -93,6 +95,21 @@ class JourneyController extends ApiController
             $journey->last_checkpoint_location = $request->input('location');
         }
         $journey->save();
+
+        // Send notification for status change
+        try {
+            $trip = $journey->trip;
+            if ($trip && $trip->vendor && $trip->vendor->email) {
+                $trip->vendor->notify(new JourneyStatusUpdatedNotification($journey, $previousStatus, $status));
+            }
+        } catch (\Exception $e) {
+            // Log but don't fail the request if notification fails
+            \Log::warning('Failed to send journey status notification', [
+                'journey_id' => $journey->id,
+                'status' => $status,
+                'error' => $e->getMessage()
+            ]);
+        }
 
         $this->auditLogger->log('journey_status_updated', $request->user(), 'journey', (string) $journey->id, ['status' => $status], $request);
 

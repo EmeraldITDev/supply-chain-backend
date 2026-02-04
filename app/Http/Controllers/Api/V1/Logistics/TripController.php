@@ -7,6 +7,8 @@ use App\Http\Requests\Logistics\BulkUploadTripsRequest;
 use App\Http\Requests\Logistics\StoreTripRequest;
 use App\Http\Requests\Logistics\UpdateTripRequest;
 use App\Models\Logistics\Trip;
+use App\Models\Vendor;
+use App\Notifications\VendorAssignedToTripNotification;
 use App\Services\Logistics\AuditLogger;
 use App\Services\Logistics\IdempotencyService;
 use App\Services\Logistics\TripService;
@@ -114,9 +116,28 @@ class TripController extends ApiController
             return $this->error('Invalid status transition', 'INVALID_TRANSITION', 422);
         }
 
+        $vendor = Vendor::find($request->vendor_id);
+        if (!$vendor) {
+            return $this->error('Vendor not found', 'NOT_FOUND', 404);
+        }
+
         $trip->vendor_id = $request->vendor_id;
         $trip->status = Trip::STATUS_VENDOR_ASSIGNED;
         $trip->save();
+
+        // Send notification to vendor
+        try {
+            if ($vendor->email) {
+                $vendor->notify(new VendorAssignedToTripNotification($trip, $vendor));
+            }
+        } catch (\Exception $e) {
+            // Log but don't fail the request if notification fails
+            \Log::warning('Failed to send vendor assignment notification', [
+                'vendor_id' => $vendor->id,
+                'trip_id' => $trip->id,
+                'error' => $e->getMessage()
+            ]);
+        }
 
         $this->auditLogger->log('trip_vendor_assigned', $request->user(), 'trip', (string) $trip->id, ['vendor_id' => $trip->vendor_id], $request);
 

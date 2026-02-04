@@ -266,6 +266,7 @@ Route::prefix('v1/logistics')->group(function () {
         Route::get('/fleet/vehicles/{id}', [LogisticsFleetController::class, 'show'])->middleware($logisticsInternalRoles);
         Route::put('/fleet/vehicles/{id}', [LogisticsFleetController::class, 'update'])->middleware($logisticsInternalRoles);
         Route::post('/fleet/vehicles/{id}/maintenance', [LogisticsFleetController::class, 'storeMaintenance'])->middleware($logisticsInternalRoles);
+        Route::get('/fleet/alerts', [LogisticsFleetController::class, 'getAlerts'])->middleware('auth:sanctum');
 
         // Document Management
         Route::post('/documents', [LogisticsDocumentController::class, 'store'])->middleware($logisticsInternalRoles);
@@ -330,6 +331,7 @@ Route::prefix('logistics')->group(function () {
         Route::get('/fleet/vehicles/{id}', [LogisticsFleetController::class, 'show'])->middleware($logisticsInternalRoles);
         Route::put('/fleet/vehicles/{id}', [LogisticsFleetController::class, 'update'])->middleware($logisticsInternalRoles);
         Route::post('/fleet/vehicles/{id}/maintenance', [LogisticsFleetController::class, 'storeMaintenance'])->middleware($logisticsInternalRoles);
+        Route::get('/fleet/alerts', [LogisticsFleetController::class, 'getAlerts'])->middleware('auth:sanctum');
 
         Route::post('/documents', [LogisticsDocumentController::class, 'store'])->middleware($logisticsInternalRoles);
         Route::get('/documents/{entity_type}/{entity_id}', [LogisticsDocumentController::class, 'list'])->middleware($logisticsInternalRoles);
