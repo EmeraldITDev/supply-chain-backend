@@ -276,7 +276,7 @@ Route::prefix('v1/logistics')->group(function () {
     Route::get('/docs', [LogisticsDocsController::class, 'ui']);
     Route::get('/openapi.yaml', [LogisticsDocsController::class, 'spec']);
 
-    Route::middleware('auth:sanctum')->group(function () {
+    Route::middleware('auth:sanctum')->group(function () use ($logisticsInternalRoles) {
         Route::get('/auth/me', [LogisticsAuthController::class, 'me']);
         Route::post('/auth/vendor-invite', [LogisticsAuthController::class, 'vendorInvite'])->middleware($logisticsInternalRoles);
 

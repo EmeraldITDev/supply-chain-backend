@@ -19,21 +19,59 @@ return new class extends Migration
      */
     public function up(): void
     {
-        Schema::table('quotations', function (Blueprint $table) {
+        // Check if foreign keys already exist before adding them (idempotent migration)
+        $quotationsForeignKeys = \DB::select("
+            SELECT CONSTRAINT_NAME 
+            FROM information_schema.KEY_COLUMN_USAGE 
+            WHERE TABLE_SCHEMA = DATABASE() 
+            AND TABLE_NAME = 'quotations' 
+            AND REFERENCED_TABLE_NAME IS NOT NULL
+        ");
+        $existingQuotationsKeys = array_column($quotationsForeignKeys, 'CONSTRAINT_NAME');
+
+        Schema::table('quotations', function (Blueprint $table) use ($existingQuotationsKeys) {
             // Add foreign key constraints after r_f_q_s and vendors tables are created
-            $table->foreign('rfq_id')->references('id')->on('r_f_q_s')->onDelete('cascade');
-            $table->foreign('vendor_id')->references('id')->on('vendors')->onDelete('cascade');
+            if (!in_array('quotations_rfq_id_foreign', $existingQuotationsKeys)) {
+                $table->foreign('rfq_id')->references('id')->on('r_f_q_s')->onDelete('cascade');
+            }
+            if (!in_array('quotations_vendor_id_foreign', $existingQuotationsKeys)) {
+                $table->foreign('vendor_id')->references('id')->on('vendors')->onDelete('cascade');
+            }
         });
 
-        Schema::table('vendor_registrations', function (Blueprint $table) {
+        $vendorRegistrationsForeignKeys = \DB::select("
+            SELECT CONSTRAINT_NAME 
+            FROM information_schema.KEY_COLUMN_USAGE 
+            WHERE TABLE_SCHEMA = DATABASE() 
+            AND TABLE_NAME = 'vendor_registrations' 
+            AND REFERENCED_TABLE_NAME IS NOT NULL
+        ");
+        $existingVendorRegKeys = array_column($vendorRegistrationsForeignKeys, 'CONSTRAINT_NAME');
+
+        Schema::table('vendor_registrations', function (Blueprint $table) use ($existingVendorRegKeys) {
             // Add foreign key constraint after vendors table is created
-            $table->foreign('vendor_id')->references('id')->on('vendors')->onDelete('set null');
+            if (!in_array('vendor_registrations_vendor_id_foreign', $existingVendorRegKeys)) {
+                $table->foreign('vendor_id')->references('id')->on('vendors')->onDelete('set null');
+            }
         });
 
-        Schema::table('rfq_vendors', function (Blueprint $table) {
+        $rfqVendorsForeignKeys = \DB::select("
+            SELECT CONSTRAINT_NAME 
+            FROM information_schema.KEY_COLUMN_USAGE 
+            WHERE TABLE_SCHEMA = DATABASE() 
+            AND TABLE_NAME = 'rfq_vendors' 
+            AND REFERENCED_TABLE_NAME IS NOT NULL
+        ");
+        $existingRfqVendorKeys = array_column($rfqVendorsForeignKeys, 'CONSTRAINT_NAME');
+
+        Schema::table('rfq_vendors', function (Blueprint $table) use ($existingRfqVendorKeys) {
             // Add foreign key constraints after r_f_q_s and vendors tables are created
-            $table->foreign('rfq_id')->references('id')->on('r_f_q_s')->onDelete('cascade');
-            $table->foreign('vendor_id')->references('id')->on('vendors')->onDelete('cascade');
+            if (!in_array('rfq_vendors_rfq_id_foreign', $existingRfqVendorKeys)) {
+                $table->foreign('rfq_id')->references('id')->on('r_f_q_s')->onDelete('cascade');
+            }
+            if (!in_array('rfq_vendors_vendor_id_foreign', $existingRfqVendorKeys)) {
+                $table->foreign('vendor_id')->references('id')->on('vendors')->onDelete('cascade');
+            }
         });
     }
 
