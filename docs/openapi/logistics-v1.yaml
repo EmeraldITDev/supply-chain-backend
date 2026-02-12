@@ -572,6 +572,7 @@ components:
       required: [title, origin, destination]
       properties:
         title: { type: string }
+        purpose: { type: string, description: "Alias for title." }
         description: { type: string }
         origin: { type: string }
         destination: { type: string }
@@ -582,6 +583,7 @@ components:
       type: object
       properties:
         title: { type: string }
+        purpose: { type: string, description: "Alias for title." }
         description: { type: string }
         status: { type: string }
         origin: { type: string }

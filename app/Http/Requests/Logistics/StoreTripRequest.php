@@ -11,6 +11,13 @@ class StoreTripRequest extends FormRequest
         return true;
     }
 
+    protected function prepareForValidation(): void
+    {
+        if (!$this->has('title') && $this->filled('purpose')) {
+            $this->merge(['title' => $this->input('purpose')]);
+        }
+    }
+
     public function rules(): array
     {
         return [
