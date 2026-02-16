@@ -72,12 +72,15 @@ Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGc...
 POST /api/v1/logistics/trips
 {
   "title": "Delivery to Warehouse A",
+  "purpose": "Board meeting at Warehouse A",
   "origin": "Supplier Factory, City A",
   "destination": "Warehouse A, City B",
   "scheduled_departure_at": "2026-02-10 08:00:00",
   "scheduled_arrival_at": "2026-02-10 16:00:00"
 }
 ```
+
+Notes: `title` is optional when `purpose` is provided. If both are omitted, the API derives a title from `origin` and `destination`.
 
 #### List Trips
 ```bash
@@ -429,11 +432,13 @@ REJECTED                 - Requires revision
   "error_code": "VALIDATION_ERROR",
   "status_code": 422,
   "errors": {
-    "title": ["The title field is required"],
+    "origin": ["The origin field is required"],
     "destination": ["The destination must be a string"]
   }
 }
 ```
+
+Note: If `title` is sent as an empty string, validation fails. Otherwise the API derives a title when missing.
 
 ---
 

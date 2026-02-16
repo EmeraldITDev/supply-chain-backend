@@ -94,10 +94,13 @@ Request:
 POST /api/v1/logistics/trips
 {
   "title": "Trip to Port",
+  "purpose": "Equipment delivery",
   "origin": "Warehouse A",
   "destination": "Port B",
   "scheduled_departure_at": "2026-02-05T10:00:00Z"
 }
+
+Notes: `title` is optional when `purpose` is provided. If both are omitted, the API derives a title from `origin` and `destination`.
 
 Response:
 {
