@@ -63,6 +63,72 @@ Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGc...
 
 ---
 
+## ⚠️ CRITICAL: Response Structure & Data Extraction
+
+### Backend Response Format
+All endpoints return data wrapped in this structure:
+```json
+{
+  "success": true,
+  "data": {
+    "trips": { ...pagination object... }
+    // or "trip": { ...single object... }
+  }
+}
+```
+
+### Pagination Object (for list endpoints)
+```json
+{
+  "current_page": 1,
+  "data": [ /* ACTUAL ARRAY HERE */ ],
+  "per_page": 20,
+  "total": 100
+}
+```
+
+### ❌ COMMON MISTAKE - This Will Fail
+```javascript
+const trips = response.data.data.trips;
+trips.map(...) // ❌ ERROR: trips is an object, not an array
+```
+
+### ✅ CORRECT - Extract the Array
+```javascript
+// For LIST endpoints (GET /trips, /vehicles, /materials)
+const trips = response.data.data.trips.data; // ✅ Array
+
+// For SINGLE entity endpoints (GET /trips/{id})
+const trip = response.data.data.trip; // ✅ Object
+
+// For CREATE endpoints (POST /trips)
+const newTrip = response.data.data.trip; // ✅ Created object
+```
+
+### Recommended Helper Function
+```javascript
+// Extract paginated list
+const extractList = (response, key) => {
+  const paginationObj = response.data.data[key];
+  return {
+    data: paginationObj.data || [],
+    pagination: {
+      currentPage: paginationObj.current_page,
+      total: paginationObj.total,
+      perPage: paginationObj.per_page
+    }
+  };
+};
+
+// Usage
+const result = extractList(response, 'trips');
+const trips = result.data; // Now you have the array
+```
+
+💡 **See BACKEND_RESPONSE_STRUCTURE.md for complete examples and helper utilities**
+
+---
+
 ## Core Endpoints by Feature
 
 ### 1️⃣ TRIP MANAGEMENT
@@ -481,37 +547,65 @@ GET /api/notifications  # General system notifications
 
 ## Response Examples
 
-### Success Response (List)
+### Success Response (List with Pagination)
+**Actual backend response:**
 ```json
 {
   "success": true,
   "data": {
-    "trips": [
-      {
-        "id": 123,
-        "trip_code": "TRIP-20260204-ABC123",
-        "title": "Delivery to Warehouse A",
-        "origin": "Supplier Factory",
-        "destination": "Warehouse A",
-        "status": "SCHEDULED",
-        "vendor_id": 5,
-        "scheduled_departure_at": "2026-02-10 08:00:00",
-        "scheduled_arrival_at": "2026-02-10 16:00:00",
-        "created_at": "2026-02-04 10:30:00",
-        "updated_at": "2026-02-04 10:30:00"
-      }
-    ],
-    "pagination": {
+    "trips": {
       "current_page": 1,
+      "data": [
+        {
+          "id": 123,
+          "trip_code": "TRIP-20260204-ABC123",
+          "title": "Delivery to Warehouse A",
+          "origin": "Supplier Factory",
+          "destination": "Warehouse A",
+          "status": "SCHEDULED",
+          "vendor_id": 5,
+          "scheduled_departure_at": "2026-02-10 08:00:00",
+          "scheduled_arrival_at": "2026-02-10 16:00:00",
+          "created_at": "2026-02-04 10:30:00",
+          "updated_at": "2026-02-04 10:30:00"
+        }
+      ],
+      "first_page_url": "https://api.../trips?page=1",
+      "from": 1,
+      "last_page": 3,
+      "last_page_url": "https://api.../trips?page=3",
+      "next_page_url": "https://api.../trips?page=2",
+      "path": "https://api.../trips",
       "per_page": 20,
-      "total": 45,
-      "last_page": 3
+      "prev_page_url": null,
+      "to": 20,
+      "total": 45
     }
   }
 }
 ```
 
-### Success Response (Single)
+**Frontend extraction:**
+```javascript
+const response = await axios.get('/api/v1/logistics/trips');
+
+// Extract the array of trips
+const trips = response.data.data.trips.data;
+
+// Extract pagination info
+const pagination = {
+  currentPage: response.data.data.trips.current_page,
+  lastPage: response.data.data.trips.last_page,
+  perPage: response.data.data.trips.per_page,
+  total: response.data.data.trips.total
+};
+
+// Now you can use trips array
+trips.forEach(trip => console.log(trip.title));
+```
+
+### Success Response (Single Entity)
+**Actual backend response:**
 ```json
 {
   "success": true,
@@ -547,6 +641,19 @@ GET /api/notifications  # General system notifications
     }
   }
 }
+```
+
+**Frontend extraction:**
+```javascript
+const response = await axios.get('/api/v1/logistics/trips/123');
+
+// Extract the single trip object
+const trip = response.data.data.trip;
+
+// Access properties directly
+console.log(trip.title); // "Delivery to Warehouse A"
+console.log(trip.vendor.name); // "FastShip Logistics"
+console.log(trip.journeys.length); // 1
 ```
 
 ---
@@ -654,6 +761,127 @@ Production deployment may add rate limits:
 **Issue:** Fleet alerts showing no data
 - Solution: Vehicles must have documents with expires_at field
 - Check: Database has logistics_documents with records
+
+---
+
+## 📋 Quick Reference: Data Extraction Patterns
+
+### List Endpoints (Paginated)
+```javascript
+// Pattern: response.data.data[KEY].data
+const response = await axios.get(endpoint);
+const items = response.data.data[KEY].data; // ✅ Array
+
+// Trips
+GET /api/v1/logistics/trips
+→ const trips = response.data.data.trips.data;
+
+// Vehicles
+GET /api/v1/logistics/fleet/vehicles
+→ const vehicles = response.data.data.vehicles.data;
+
+// Materials
+GET /api/v1/logistics/materials
+→ const materials = response.data.data.materials.data;
+
+// Reports
+GET /api/v1/logistics/reports
+→ const reports = response.data.data.reports.data;
+
+// Journeys (all)
+GET /api/v1/logistics/journeys
+→ const journeys = response.data.data.journeys.data;
+```
+
+### Single Entity Endpoints
+```javascript
+// Pattern: response.data.data[KEY]
+const response = await axios.get(endpoint);
+const item = response.data.data[KEY]; // ✅ Object
+
+// Single Trip
+GET /api/v1/logistics/trips/{id}
+→ const trip = response.data.data.trip;
+
+// Single Vehicle
+GET /api/v1/logistics/fleet/vehicles/{id}
+→ const vehicle = response.data.data.vehicle;
+
+// Single Material
+GET /api/v1/logistics/materials/{id}
+→ const material = response.data.data.material;
+
+// Journey by Trip ID
+GET /api/v1/logistics/journeys/{trip_id}
+→ const journey = response.data.data.journey;
+```
+
+### Create Endpoints (POST)
+```javascript
+// Pattern: response.data.data[KEY]
+const response = await axios.post(endpoint, data);
+const created = response.data.data[KEY]; // ✅ Created object
+
+// Create Trip
+POST /api/v1/logistics/trips
+→ const newTrip = response.data.data.trip;
+
+// Create Vehicle
+POST /api/v1/logistics/fleet/vehicles
+→ const newVehicle = response.data.data.vehicle;
+
+// Create Material
+POST /api/v1/logistics/materials
+→ const newMaterial = response.data.data.material;
+```
+
+### Special Endpoints
+```javascript
+// Fleet Alerts (custom structure)
+GET /api/v1/logistics/fleet/alerts
+→ const alerts = response.data.data.alerts;
+→ const expiringDocs = alerts.expiring_documents; // Array
+→ const overdueMaintenance = alerts.overdue_maintenance; // Array
+
+// Trip Materials (paginated)
+GET /api/v1/logistics/trips/{id}/materials
+→ const materials = response.data.data.materials.data;
+```
+
+### Pagination Data Extraction
+```javascript
+const response = await axios.get('/api/v1/logistics/trips');
+const paginationObj = response.data.data.trips;
+
+// Extract all pagination info
+const pagination = {
+  data: paginationObj.data,              // Array of items
+  currentPage: paginationObj.current_page,
+  lastPage: paginationObj.last_page,
+  perPage: paginationObj.per_page,
+  total: paginationObj.total,
+  from: paginationObj.from,
+  to: paginationObj.to,
+  nextPageUrl: paginationObj.next_page_url,
+  prevPageUrl: paginationObj.prev_page_url
+};
+```
+
+### Error Handling
+```javascript
+try {
+  const response = await axios.get('/api/v1/logistics/trips');
+  const trips = response.data.data.trips.data;
+} catch (error) {
+  if (error.response) {
+    // Backend returned error response
+    const errorData = error.response.data;
+    console.log(errorData.error);      // Error message
+    console.log(errorData.code);       // Error code
+    console.log(errorData.errors);     // Validation errors (if any)
+  }
+}
+```
 
 ---
 
