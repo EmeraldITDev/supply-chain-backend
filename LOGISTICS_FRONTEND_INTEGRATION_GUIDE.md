@@ -177,14 +177,20 @@ GET /api/v1/logistics/fleet/vehicles?status=ACTIVE&page=1
 ```bash
 POST /api/v1/logistics/fleet/vehicles
 {
-  "vehicle_code": "VH-001",
+  "model": "Hilux",
+  "year": 2024,
+  "cargo_capacity": 1200,
+  "fuel_type": "Diesel",
   "plate_number": "ABC-1234",
-  "type": "TRUCK",
-  "capacity": 5000,
   "vendor_id": 5,
   "status": "ACTIVE"
 }
 ```
+
+Notes: 
+- `vehicle_code` is optional and will be auto-generated (e.g., VEH-20260216-ABC123) if not provided.
+- `plate_number` is optional and will be auto-generated as a temporary placeholder if not provided.
+- Frontend fields `model`, `year`, `cargo_capacity`, `fuel_type` are automatically mapped to backend fields.
 
 #### Get Vehicle with Maintenance
 ```bash
@@ -260,7 +266,6 @@ Form-Data:
 ```bash
 POST /api/v1/logistics/materials
 {
-  "material_code": "MAT-001",
   "name": "Industrial Parts Set",
   "quantity": 50,
   "unit": "boxes",
@@ -268,6 +273,8 @@ POST /api/v1/logistics/materials
   "status": "AVAILABLE"
 }
 ```
+
+Notes: `material_code` is optional and will be auto-generated (e.g., MAT-20260216-XYZ789) if not provided.
 
 #### List Materials
 ```bash
