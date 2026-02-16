@@ -8,6 +8,11 @@ return new class extends Migration
 {
     public function up(): void
     {
+        // Skip if table already exists (shared database with HRIS)
+        if (Schema::hasTable('audit_logs')) {
+            return;
+        }
+
         Schema::create('audit_logs', function (Blueprint $table) {
             $table->id();
             $table->string('action', 100)->index();
@@ -24,6 +29,7 @@ return new class extends Migration
 
     public function down(): void
     {
-        Schema::dropIfExists('audit_logs');
+        // Do not drop if shared with HRIS
+        // Schema::dropIfExists('audit_logs');
     }
 };
