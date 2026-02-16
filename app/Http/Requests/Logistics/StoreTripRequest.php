@@ -13,8 +13,20 @@ class StoreTripRequest extends FormRequest
 
     protected function prepareForValidation(): void
     {
-        if (!$this->has('title') && $this->filled('purpose')) {
+        if ($this->has('title')) {
+            return;
+        }
+
+        if ($this->filled('purpose')) {
             $this->merge(['title' => $this->input('purpose')]);
+
+            return;
+        }
+
+        if ($this->filled('origin') && $this->filled('destination')) {
+            $this->merge([
+                'title' => sprintf('Trip from %s to %s', $this->input('origin'), $this->input('destination')),
+            ]);
         }
     }
 
