@@ -38,14 +38,16 @@ class TripController extends ApiController
         $data['created_by'] = $request->user()?->id;
 
         $trip = Trip::create($data);
+        // Use the 'purpose' from the request, fallback to a generated string
+        $logDescription = $request->input('purpose') 
+        ?? "Trip created from {$trip->origin} to {$trip->destination}";
 
         $this->auditLogger->log(
             'trip_created',
             $request->user(),
             'trip',
             (string) $trip->id,
-            // Add a fallback in case origin/destination are missing from the $trip object
-            "Trip created from " . ($trip->origin ?? 'Unknown') . " to " . ($trip->destination ?? 'Unknown'),
+            $logDescription, // Pass the explicit description here
             $trip->toArray(),
             $request
         );

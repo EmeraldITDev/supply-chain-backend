@@ -34,6 +34,7 @@ class StoreTripRequest extends FormRequest
     {
         return [
             'title' => 'required|string|max:255',
+            'purpose' => 'nullable|string|max:255',
             'description' => 'nullable|string',
             'status' => 'nullable|in:draft,scheduled,vendor_assigned,in_progress,completed,closed',
             'scheduled_departure_at' => 'nullable|date',
