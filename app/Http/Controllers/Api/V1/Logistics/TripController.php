@@ -44,11 +44,12 @@ class TripController extends ApiController
             $request->user(),
             'trip',
             (string) $trip->id,
-            "Trip created from {$trip->origin} to {$trip->destination}",
+            // Add a fallback in case origin/destination are missing from the $trip object
+            "Trip created from " . ($trip->origin ?? 'Unknown') . " to " . ($trip->destination ?? 'Unknown'),
             $trip->toArray(),
             $request
         );
-
+        
         $response = [
             'trip' => $trip,
         ];

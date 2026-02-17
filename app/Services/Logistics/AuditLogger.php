@@ -13,14 +13,14 @@ class AuditLogger
         ?User $actor,
         ?string $entityType,
         ?string $entityId,
-        ?string $description,
+        ?string $description, // Added ? to allow null coming in from Controller
         array $payload = [],
         ?Request $request = null
     ): void {
         AuditLog::create([
             'action' => $action,
-            // 2. Use the null coalescing operator to provide a fallback string
-            'description' => $description ?? "Action: {$action} performed", 
+            // If $description is null/empty, use the action name as a fallback
+            'description' => $description ?: "Activity logged: " . $action, 
             'actor_id' => $actor?->id,
             'actor_type' => $actor ? $actor::class : null,
             'entity_type' => $entityType,
