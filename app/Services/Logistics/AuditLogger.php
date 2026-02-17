@@ -13,13 +13,14 @@ class AuditLogger
         ?User $actor,
         ?string $entityType,
         ?string $entityId,
-        string $description,
+        ?string $description,
         array $payload = [],
         ?Request $request = null
     ): void {
         AuditLog::create([
             'action' => $action,
-            'description' => $description,
+            // 2. Use the null coalescing operator to provide a fallback string
+            'description' => $description ?? "Action: {$action} performed", 
             'actor_id' => $actor?->id,
             'actor_type' => $actor ? $actor::class : null,
             'entity_type' => $entityType,
@@ -29,5 +30,4 @@ class AuditLogger
             'user_agent' => $request?->userAgent(),
         ]);
     }
-    
 }
