@@ -39,7 +39,15 @@ class TripController extends ApiController
 
         $trip = Trip::create($data);
 
-        $this->auditLogger->log('trip_created', $request->user(), 'trip', (string) $trip->id, $trip->toArray(), $request);
+        $this->auditLogger->log(
+            'trip_created',
+            $request->user(),
+            'trip',
+            (string) $trip->id,
+            "Trip created from {$trip->origin} to {$trip->destination}",
+            $trip->toArray(),
+            $request
+        );
 
         $response = [
             'trip' => $trip,

@@ -8,10 +8,18 @@ use Illuminate\Http\Request;
 
 class AuditLogger
 {
-    public function log(string $action, ?User $actor, ?string $entityType, ?string $entityId, array $payload = [], ?Request $request = null): void
-    {
+    public function log(
+        string $action,
+        ?User $actor,
+        ?string $entityType,
+        ?string $entityId,
+        string $description,
+        array $payload = [],
+        ?Request $request = null
+    ): void {
         AuditLog::create([
             'action' => $action,
+            'description' => $description,
             'actor_id' => $actor?->id,
             'actor_type' => $actor ? $actor::class : null,
             'entity_type' => $entityType,
@@ -21,4 +29,5 @@ class AuditLogger
             'user_agent' => $request?->userAgent(),
         ]);
     }
+    
 }
