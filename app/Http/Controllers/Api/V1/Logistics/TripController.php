@@ -180,4 +180,47 @@ class TripController extends ApiController
             'errors' => $errors,
         ], count($errors) > 0 ? 207 : 201);
     }
+
+    public function cancel(int $id, Request $request)
+    {
+        $trip = Trip::find($id);
+
+        if (!$trip) {
+            return $this->error('Trip not found', 'NOT_FOUND', 404);
+        }
+
+        // Check if trip can be cancelled (not already completed, closed, or cancelled)
+        if (in_array($trip->status, [Trip::STATUS_COMPLETED, Trip::STATUS_CLOSED, Trip::STATUS_CANCELLED])) {
+            return $this->error(
+                'Cannot cancel a trip with status: ' . $trip->status,
+                'INVALID_STATUS',
+                422
+            );
+        }
+
+        $trip->status = Trip::STATUS_CANCELLED;
+        $trip->cancelled_at = now();
+        $trip->cancelled_by = $request->user()?->id;
+        $trip->save();
+
+        $this->auditLogger->log(
+            'trip_cancelled',
+            $request->user(),
+            'trip',
+            (string) $trip->id,
+            'Trip cancelled',
+            [
+                'previous_status' => $trip->getOriginal('status'),
+                'new_status' => $trip->status,
+                'cancelled_by' => $trip->cancelled_by,
+                'cancelled_at' => $trip->cancelled_at,
+            ],
+            $request
+        );
+
+        return $this->success([
+            'trip' => $trip,
+            'message' => 'Trip cancelled successfully',
+        ]);
+    }
 }

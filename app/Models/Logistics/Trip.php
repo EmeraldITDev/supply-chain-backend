@@ -21,11 +21,24 @@ class Trip extends Model
     public const STATUS_IN_PROGRESS = 'in_progress';
     public const STATUS_COMPLETED = 'completed';
     public const STATUS_CLOSED = 'closed';
+    public const STATUS_CANCELLED = 'cancelled';
+
+    public const TYPE_PERSONNEL = 'personnel';
+    public const TYPE_MATERIAL = 'material';
+    public const TYPE_MIXED = 'mixed';
+
+    public const PRIORITY_LOW = 'low';
+    public const PRIORITY_NORMAL = 'normal';
+    public const PRIORITY_HIGH = 'high';
+    public const PRIORITY_URGENT = 'urgent';
 
     protected $fillable = [
         'trip_code',
         'title',
         'description',
+        'purpose',
+        'trip_type',
+        'priority',
         'status',
         'scheduled_departure_at',
         'scheduled_arrival_at',
@@ -36,6 +49,8 @@ class Trip extends Model
         'vendor_id',
         'created_by',
         'updated_by',
+        'cancelled_by',
+        'cancelled_at',
         'notes',
         'metadata',
     ];
@@ -45,6 +60,7 @@ class Trip extends Model
         'scheduled_arrival_at' => 'datetime',
         'actual_departure_at' => 'datetime',
         'actual_arrival_at' => 'datetime',
+        'cancelled_at' => 'datetime',
         'metadata' => 'array',
     ];
 

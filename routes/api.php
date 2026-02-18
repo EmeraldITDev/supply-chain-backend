@@ -75,6 +75,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::patch('/trips/{id}', [LogisticsTripController::class, 'update'])->middleware($logisticsInternalRoles);
     Route::post('/trips/{id}/assign-vendor', [LogisticsTripController::class, 'assignVendor'])->middleware($logisticsInternalRoles);
     Route::put('/trips/{id}/assign-vendor', [LogisticsTripController::class, 'assignVendor'])->middleware($logisticsInternalRoles);
+    Route::post('/trips/{id}/cancel', [LogisticsTripController::class, 'cancel'])->middleware($logisticsInternalRoles);
     Route::post('/trips/bulk-upload', [LogisticsTripController::class, 'bulkUpload'])->middleware($logisticsInternalRoles);
     
     // Journey routes - forward to logistics controllers
@@ -300,6 +301,7 @@ Route::prefix('v1/logistics')->group(function () {
         Route::get('/trips/{id}', [LogisticsTripController::class, 'show'])->middleware($logisticsInternalRoles);
         Route::put('/trips/{id}', [LogisticsTripController::class, 'update'])->middleware($logisticsInternalRoles);
         Route::post('/trips/{id}/assign-vendor', [LogisticsTripController::class, 'assignVendor'])->middleware($logisticsInternalRoles);
+        Route::post('/trips/{id}/cancel', [LogisticsTripController::class, 'cancel'])->middleware($logisticsInternalRoles);
         Route::post('/trips/bulk-upload', [LogisticsTripController::class, 'bulkUpload'])->middleware($logisticsInternalRoles);
 
         // Journey Management
@@ -382,6 +384,7 @@ Route::prefix('logistics')->group(function () {
         Route::patch('/trips/{id}', [LogisticsTripController::class, 'update'])->middleware($logisticsInternalRoles);
         Route::post('/trips/{id}/assign-vendor', [LogisticsTripController::class, 'assignVendor'])->middleware($logisticsInternalRoles);
         Route::put('/trips/{id}/assign-vendor', [LogisticsTripController::class, 'assignVendor'])->middleware($logisticsInternalRoles);
+        Route::post('/trips/{id}/cancel', [LogisticsTripController::class, 'cancel'])->middleware($logisticsInternalRoles);
         Route::post('/trips/bulk-upload', [LogisticsTripController::class, 'bulkUpload'])->middleware($logisticsInternalRoles);
 
         Route::post('/journeys', [LogisticsJourneyController::class, 'store'])->middleware($logisticsInternalRoles);

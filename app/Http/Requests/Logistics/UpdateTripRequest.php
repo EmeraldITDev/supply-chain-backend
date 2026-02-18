@@ -23,7 +23,10 @@ class UpdateTripRequest extends FormRequest
         return [
             'title' => 'sometimes|string|max:255',
             'description' => 'nullable|string',
-            'status' => 'sometimes|in:draft,scheduled,vendor_assigned,in_progress,completed,closed',
+            'purpose' => 'nullable|string|max:255',
+            'trip_type' => 'nullable|in:personnel,material,mixed',
+            'priority' => 'nullable|in:low,normal,high,urgent',
+            'status' => 'sometimes|in:draft,scheduled,vendor_assigned,in_progress,completed,closed,cancelled',
             'scheduled_departure_at' => 'nullable|date',
             'scheduled_arrival_at' => 'nullable|date|after_or_equal:scheduled_departure_at',
             'actual_departure_at' => 'nullable|date',
