@@ -12,13 +12,13 @@ return new class extends Migration
     public function up(): void
     {
        // We use DB::table instead of the Trip model to avoid "Class not found"
-       DB::table('logistics_trips')->whereIn('trip_code', [
+       DB::table('trips')->whereIn('trip_code', [
         'TRIP-20260217-YZ7RGJ', 
         'TRIP-20260216-YJ2FSU', 
         'TRIP-20260218-7KZIR2'
         ])->delete();
 
-        DB::table('logistics_trips')
+        DB::table('trips')
             ->where('status', 'cancelled')
             ->whereNull('scheduled_departure')
             ->delete();
