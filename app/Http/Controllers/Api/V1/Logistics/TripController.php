@@ -110,7 +110,15 @@ class TripController extends ApiController
         $data['updated_by'] = $request->user()?->id;
         $trip->fill($data)->save();
 
-        $this->auditLogger->log('trip_updated', $request->user(), 'trip', (string) $trip->id, $data, $request);
+        $this->auditLogger->log(
+            'trip_updated',
+            $request->user(),
+            'trip',
+            (string) $trip->id,
+            $request->input('purpose') ?? "Updated trip details for {$trip->trip_code}", // Use a string!
+            $request->validated(), // Move the data array to the 6th argument (payload)
+            $request
+        );
 
         return $this->success([
             'trip' => $trip,
