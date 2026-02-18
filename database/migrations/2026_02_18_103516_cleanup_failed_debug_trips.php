@@ -17,10 +17,7 @@ return new class extends Migration
             'TRIP-20260216-YJ2FSU',
             'TRIP-20260218-7KZIR2'
         ];
-        // Delete trips with these trip numbers
-        DB::table('trips')
-            ->whereIn('trip_number', $tripNumbers)
-            ->delete();
+        Trip::whereIn('trip_number', $tripNumbers)->delete();
     }
 
     /**
