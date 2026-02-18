@@ -13,10 +13,17 @@ class AuditLogger
         ?User $actor,
         ?string $entityType,
         ?string $entityId,
-        ?string $description, // Added ? to allow null coming in from Controller
+        mixed $description, // Changed from ?string to mixed
         array $payload = [],
         ?Request $request = null
     ): void {
+        // If an array or object is passed as description, convert it to a string
+        $finalDescription = is_array($description) 
+            ? json_encode($description) 
+            : (string) $description;
+            
+        // If $description is null/empty, use the action name as a fallback
+
         AuditLog::create([
             'action' => $action,
             // If $description is null/empty, use the action name as a fallback

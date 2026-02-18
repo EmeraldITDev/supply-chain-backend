@@ -20,7 +20,15 @@ class FleetController extends ApiController
     {
         $vehicle = Vehicle::create($request->validated());
 
-        $this->auditLogger->log('vehicle_created', $request->user(), 'vehicle', (string) $vehicle->id, $vehicle->toArray(), $request);
+        $this->auditLogger->log(
+            'vehicle_created', 
+            $request->user(), 
+            'vehicle', 
+            (string) $vehicle->id, 
+            "Added a new vehicle: {$vehicle->make} {$vehicle->model}", // String for description
+            $vehicle->toArray(),                                       // Array for payload
+            $request
+        );
 
         return $this->success([
             'vehicle' => $vehicle,
