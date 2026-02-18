@@ -125,6 +125,7 @@ The "Invalid Date" issue might also be a **frontend data formatting problem**. C
 # Test the API directly
 curl "https://supply-chain-backend-hwh6.onrender.com/api/v1/logistics/trips/1" \
   -H "Authorization: Bearer YOUR_TOKEN"
+  
 ```
 
 Look for these fields in the response:

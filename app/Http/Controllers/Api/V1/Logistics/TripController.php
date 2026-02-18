@@ -186,43 +186,43 @@ class TripController extends ApiController
     public function cancel(int $id, Request $request)
     {
         $trip = Trip::find($id);
-
+    
         if (!$trip) {
             return $this->error('Trip not found', 'NOT_FOUND', 404);
         }
-
-        // Check if trip can be cancelled (not already completed, closed, or cancelled)
-        if (in_array($trip->status, [Trip::STATUS_COMPLETED, Trip::STATUS_CLOSED, Trip::STATUS_CANCELLED])) {
+    
+        // Check if trip can be cancelled/deleted (not already completed, closed, or cancelled)
+        if (in_array($trip->status, [Trip::STATUS_COMPLETED, Trip::STATUS_CLOSED])) {
             return $this->error(
-                'Cannot cancel a trip with status: ' . $trip->status,
+                'Cannot delete a trip with status: ' . $trip->status,
                 'INVALID_STATUS',
                 422
             );
         }
-
-        $trip->status = Trip::STATUS_CANCELLED;
-        $trip->cancelled_at = now();
-        $trip->cancelled_by = $request->user()?->id;
-        $trip->save();
-
+    
+        // Capture data for audit before deletion
+        $tripData = $trip->toArray();
+    
+        // Delete the trip
+        $trip->delete();
+    
         $this->auditLogger->log(
-            'trip_cancelled',
+            'trip_deleted',
             $request->user(),
             'trip',
-            (string) $trip->id,
-            'Trip cancelled',
+            (string) $id,
+            'Trip deleted from system',
             [
-                'previous_status' => $trip->getOriginal('status'),
-                'new_status' => $trip->status,
-                'cancelled_by' => $trip->cancelled_by,
-                'cancelled_at' => $trip->cancelled_at,
+                'deleted_by' => $request->user()?->id,
+                'deleted_at' => now(),
+                'trip_data' => $tripData,
             ],
             $request
         );
-
+    
         return $this->success([
-            'trip' => $trip,
-            'message' => 'Trip cancelled successfully',
+            'message' => 'Trip deleted successfully',
         ]);
     }
+    
 }
