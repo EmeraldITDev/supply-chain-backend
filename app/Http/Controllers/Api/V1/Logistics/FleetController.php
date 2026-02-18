@@ -24,10 +24,10 @@ class FleetController extends ApiController
             'vehicle_created', 
             $request->user(), 
             'vehicle', 
-            (string)$vehicle->id, 
-            "Added vehicle {$vehicle->plate_number}", // 5th: String Description
-            $vehicle->toArray(),                       // 6th: Array Payload
-            $request                                   // 7th: Request
+            (string) $vehicle->id, 
+            "Created vehicle: " . $vehicle->plate_number, // Description (String)
+            $vehicle->toArray(),                           // Payload (Array)
+            $request                                       // Request object
         );
 
         return $this->success([
