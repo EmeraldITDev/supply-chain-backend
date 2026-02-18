@@ -35,6 +35,8 @@ class TripController extends ApiController
         $data = $request->validated();
         $data['trip_code'] = $data['trip_code'] ?? 'TRIP-' . now()->format('Ymd') . '-' . Str::upper(Str::random(6));
         $data['status'] = $data['status'] ?? Trip::STATUS_DRAFT;
+        $data['trip_type'] = $data['trip_type'] ?? Trip::TYPE_PERSONNEL;
+        $data['priority'] = $data['priority'] ?? Trip::PRIORITY_NORMAL;
         $data['created_by'] = $request->user()?->id;
 
         $trip = Trip::create($data);
