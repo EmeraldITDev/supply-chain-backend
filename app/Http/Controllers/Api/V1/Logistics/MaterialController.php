@@ -81,4 +81,22 @@ class MaterialController extends ApiController
             'errors' => $errors,
         ], count($errors) > 0 ? 207 : 201);
     }
+
+    public function destroy(int $id, Request $request)
+    {
+        $material = Material::find($id);
+
+        if (!$material) {
+            return $this->error('Material not found', 'NOT_FOUND', 404);
+        }
+
+        $this->auditLogger->log('material_deleted', $request->user(), 'material', (string) $material->id, $material->toArray(), $request);
+        
+        $material->delete();
+
+        return $this->success([
+            'message' => 'Material deleted successfully',
+            'material_id' => $id,
+        ]);
+    }
 }

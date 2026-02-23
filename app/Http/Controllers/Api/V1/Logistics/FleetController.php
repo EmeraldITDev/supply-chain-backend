@@ -225,4 +225,22 @@ class FleetController extends ApiController
             ]
         ]);
     }
+
+    public function destroy(int $id, Request $request)
+    {
+        $vehicle = Vehicle::find($id);
+
+        if (!$vehicle) {
+            return $this->error('Vehicle not found', 'NOT_FOUND', 404);
+        }
+
+        $this->auditLogger->log('vehicle_deleted', $request->user(), 'vehicle', (string) $vehicle->id, $vehicle->toArray(), $request);
+        
+        $vehicle->delete();
+
+        return $this->success([
+            'message' => 'Vehicle deleted successfully',
+            'vehicle_id' => $id,
+        ]);
+    }
 }
