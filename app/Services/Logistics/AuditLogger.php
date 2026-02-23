@@ -14,9 +14,13 @@ class AuditLogger
         ?string $entityType,
         ?string $entityId,
         mixed $description, // Changed from ?string to mixed
-        array $payload = [],
+        mixed $payload = [],
         ?Request $request = null
     ): void {
+
+        // Safety check: if payload is actually the Request object (by mistake), 
+        // swap it or set to empty array to prevent crash.
+        $finalPayload = is_array($payload) ? $payload : [];
         // If an array or object is passed as description, convert it to a string
         $finalDescription = is_array($description) 
             ? json_encode($description) 
@@ -32,9 +36,9 @@ class AuditLogger
             'actor_type' => $actor ? $actor::class : null,
             'entity_type' => $entityType,
             'entity_id' => $entityId,
-            'payload' => $payload,
-            'ip_address' => $request?->ip(),
-            'user_agent' => $request?->userAgent(),
+            'payload' => $finalPayload,
+            'ip_address' => $request?->ip() ?? request()->ip(), // Use request() if $request is null
+            'user_agent' => $request?->userAgent() ?? request()->userAgent(), // Use request() if $request is null
         ]);
     }
 }
