@@ -13,28 +13,35 @@ class AuditLogger
         ?User $actor,
         ?string $entityType,
         ?string $entityId,
-        mixed $description, // Changed from ?string to mixed
-        array $payload = [],
+        mixed $description,
+        mixed $payloadOrRequest = [],
         ?Request $request = null
     ): void {
-        // If an array or object is passed as description, convert it to a string
+        // Handle the case where payload or request is passed in position 6
+        $payload = [];
+        $finalRequest = $request;
+        
+        if ($payloadOrRequest instanceof Request) {
+            $finalRequest = $payloadOrRequest;
+        } elseif (is_array($payloadOrRequest)) {
+            $payload = $payloadOrRequest;
+        }
+        
+        // If description is an array, convert to string for storage
         $finalDescription = is_array($description) 
             ? json_encode($description) 
             : (string) $description;
-            
-        // If $description is null/empty, use the action name as a fallback
 
         AuditLog::create([
             'action' => $action,
-            // If $description is null/empty, use the action name as a fallback
-            'description' => $description ?: "Activity logged: " . $action, 
+            'description' => $finalDescription ?: "Activity logged: " . $action, 
             'actor_id' => $actor?->id,
             'actor_type' => $actor ? $actor::class : null,
             'entity_type' => $entityType,
             'entity_id' => $entityId,
             'payload' => $payload,
-            'ip_address' => $request?->ip(),
-            'user_agent' => $request?->userAgent(),
+            'ip_address' => $finalRequest?->ip(),
+            'user_agent' => $finalRequest?->userAgent(),
         ]);
     }
 }

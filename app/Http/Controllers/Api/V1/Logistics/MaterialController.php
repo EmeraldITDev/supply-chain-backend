@@ -90,7 +90,7 @@ class MaterialController extends ApiController
             return $this->error('Material not found', 'NOT_FOUND', 404);
         }
 
-        $this->auditLogger->log('material_deleted', $request->user(), 'material', (string) $material->id, $material->toArray(), $request);
+        $this->auditLogger->log('material_deleted', $request->user(), 'material', (string) $material->id, 'Material deleted', $material->toArray(), $request);
         
         $material->delete();
 
