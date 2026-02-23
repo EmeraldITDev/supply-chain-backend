@@ -13,21 +13,11 @@ class AuditLogger
         ?User $actor,
         ?string $entityType,
         ?string $entityId,
-        mixed $description,
-        mixed $payloadOrRequest = [],
+        mixed $description, // Changed from ?string to mixed
+        array $payload = [],
         ?Request $request = null
     ): void {
-        // Handle the case where payload or request is passed in position 6
-        $payload = [];
-        $finalRequest = $request;
-        
-        if ($payloadOrRequest instanceof Request) {
-            $finalRequest = $payloadOrRequest;
-        } elseif (is_array($payloadOrRequest)) {
-            $payload = $payloadOrRequest;
-        }
-        
-        // If description is an array, convert to string for storage
+        // If an array or object is passed as description, convert it to a string
         $finalDescription = is_array($description) 
             ? json_encode($description) 
             : (string) $description;
@@ -40,8 +30,8 @@ class AuditLogger
             'entity_type' => $entityType,
             'entity_id' => $entityId,
             'payload' => $payload,
-            'ip_address' => $finalRequest?->ip(),
-            'user_agent' => $finalRequest?->userAgent(),
+            'ip_address' => $request?->ip(),
+            'user_agent' => $request?->userAgent(),
         ]);
     }
 }

@@ -234,7 +234,7 @@ class FleetController extends ApiController
             return $this->error('Vehicle not found', 'NOT_FOUND', 404);
         }
 
-        $this->auditLogger->log('vehicle_deleted', $request->user(), 'vehicle', (string) $vehicle->id, 'Vehicle deleted', $vehicle->toArray(), $request);
+        $this->auditLogger->log('vehicle_deleted', $request->user(), 'vehicle', (string) $vehicle->id, $vehicle->toArray(), $request);
         
         $vehicle->delete();
 
