@@ -28,27 +28,19 @@ class StoreVehicleRequest extends FormRequest
         }
 
         // Map common frontend field names to backend field names
-        $metadata = $this->input('metadata', []);
+        $mergeData = [];
         
         if ($this->has('model')) {
-            $this->merge(['type' => $this->input('model')]);
-            $metadata['model'] = $this->input('model');
-        }
-        
-        if ($this->has('year')) {
-            $metadata['year'] = $this->input('year');
+            $mergeData['make_model'] = $this->input('model');
+            $mergeData['type'] = $this->input('model');
         }
         
         if ($this->has('cargo_capacity')) {
-            $this->merge(['capacity' => $this->input('cargo_capacity')]);
-        }
-        
-        if ($this->has('fuel_type')) {
-            $metadata['fuel_type'] = $this->input('fuel_type');
+            $mergeData['capacity'] = $this->input('cargo_capacity');
         }
 
-        if (!empty($metadata)) {
-            $this->merge(['metadata' => $metadata]);
+        if (!empty($mergeData)) {
+            $this->merge($mergeData);
         }
     }
 
@@ -56,8 +48,13 @@ class StoreVehicleRequest extends FormRequest
     {
         return [
             'vehicle_code' => 'required|string|max:100',
+            'name' => 'nullable|string|max:255',
             'plate_number' => 'required|string|max:50',
             'type' => 'nullable|string|max:100',
+            'make_model' => 'nullable|string|max:255',
+            'year' => 'nullable|integer|min:1900|max:2100',
+            'color' => 'nullable|string|max:50',
+            'fuel_type' => 'nullable|string|max:50',
             'capacity' => 'nullable|numeric|min:0',
             'status' => 'nullable|string|max:50',
             'vendor_id' => 'nullable|exists:vendors,id',
@@ -66,9 +63,7 @@ class StoreVehicleRequest extends FormRequest
             'metadata' => 'nullable|array',
             // Frontend field aliases
             'model' => 'nullable|string|max:100',
-            'year' => 'nullable|integer|min:1900|max:2100',
             'cargo_capacity' => 'nullable|numeric|min:0',
-            'fuel_type' => 'nullable|string|max:50',
         ];
     }
 }
