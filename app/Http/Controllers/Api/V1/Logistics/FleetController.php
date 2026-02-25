@@ -37,14 +37,16 @@ class FleetController extends ApiController
 
     public function index(Request $request)
     {
-        $query = Vehicle::query();
+        $query = Vehicle::with(['vendor']);
 
         if ($request->filled('status')) {
             $query->where('status', $request->status);
         }
 
+        $vehicles = $query->paginate(20);
+
         return $this->success([
-            'vehicles' => $query->paginate(20),
+            'vehicles' => $vehicles,
         ]);
     }
 

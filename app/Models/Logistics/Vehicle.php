@@ -36,11 +36,22 @@ class Vehicle extends Model
         'capacity' => 'decimal:2',
         'last_service_at' => 'datetime',
         'metadata' => 'array',
+        'year' => 'integer',
     ];
+
+    protected $appends = ['ownership_type'];
 
     public function vendor(): BelongsTo
     {
         return $this->belongsTo(Vendor::class, 'vendor_id');
+    }
+
+    /**
+     * Get the ownership type (Owned or Vendor)
+     */
+    public function getOwnershipTypeAttribute(): string
+    {
+        return $this->vendor_id ? 'Vendor' : 'Owned';
     }
 
     public function maintenances(): HasMany
