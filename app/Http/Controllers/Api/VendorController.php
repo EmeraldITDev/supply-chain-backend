@@ -1162,6 +1162,26 @@ class VendorController extends Controller
             ], 404);
         }
 
+        // Check if document has expired
+        if ($document->expiryDate && \Carbon\Carbon::parse($document->expiryDate)->isPast()) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Document has expired and cannot be downloaded',
+                'code' => 'DOCUMENT_EXPIRED',
+                'expiry_date' => $document->expiryDate
+            ], 410); // 410 Gone status
+        }
+
+        // Check if document status is marked as Expired
+        if ($document->status === 'Expired') {
+            return response()->json([
+                'success' => false,
+                'error' => 'Document is no longer available',
+                'code' => 'DOCUMENT_EXPIRED',
+                'expiry_date' => $document->expiryDate
+            ], 410); // 410 Gone status
+        }
+
         // Check if document has a share URL (S3 temporary URL or other)
         if ($document->file_share_url) {
             // Redirect to share URL for download
@@ -1588,6 +1608,75 @@ class VendorController extends Controller
                     'name' => $user->name,
                     'email' => $user->email,
                 ],
+            ]
+        ], 200);
+    }
+
+    /**
+     * Get vendor registration documents expiring within N days
+     * Query parameters: days (default 30)
+     */
+    public function getExpiringDocuments(Request $request)
+    {
+        $validator = Validator::make($request->all(), [
+            'days' => 'nullable|integer|min:1|max:365',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Validation failed',
+                'errors' => $validator->errors(),
+                'code' => 'VALIDATION_ERROR'
+            ], 422);
+        }
+
+        $user = $request->user();
+        $daysToCheck = $request->input('days', 30);
+        $now = \Carbon\Carbon::now();
+        $expiryThreshold = $now->copy()->addDays($daysToCheck);
+
+        // Get expiring documents (expiring within N days but not yet expired)
+        $expiringDocuments = VendorRegistrationDocument::whereNotNull('expiryDate')
+            ->where('expiryDate', '>', $now)
+            ->where('expiryDate', '<=', $expiryThreshold)
+            ->where('status', '!=', 'Expired')
+            ->with(['vendorRegistration' => function ($query) {
+                $query->with(['vendor', 'applicant']);
+            }])
+            ->orderBy('expiryDate', 'asc')
+            ->get()
+            ->map(function ($document) use ($now) {
+                $expiryDate = \Carbon\Carbon::parse($document->expiryDate);
+                $daysUntilExpiry = $now->diffInDays($expiryDate);
+                
+                return [
+                    'id' => $document->id,
+                    'file_name' => $document->file_name,
+                    'file_type' => $document->file_type,
+                    'expiry_date' => $document->expiryDate,
+                    'days_until_expiry' => $daysUntilExpiry,
+                    'is_required' => $document->is_required ?? false,
+                    'status' => $document->status,
+                    'uploaded_at' => $document->uploaded_at,
+                    'vendor_registration' => [
+                        'id' => $document->vendorRegistration->id,
+                        'vendor_name' => $document->vendorRegistration->vendor->name ?? $document->vendorRegistration->applicant->name ?? 'Unknown',
+                        'category' => $document->vendorRegistration->vendor?->category,
+                        'status' => $document->vendorRegistration->status,
+                    ]
+                ];
+            });
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Documents expiring within ' . $daysToCheck . ' days',
+            'data' => [
+                'count' => $expiringDocuments->count(),
+                'days_to_check' => $daysToCheck,
+                'current_date' => $now->toIso8601String(),
+                'expiry_threshold' => $expiryThreshold->toIso8601String(),
+                'documents' => $expiringDocuments,
             ]
         ], 200);
     }

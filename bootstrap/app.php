@@ -32,6 +32,12 @@ return Application::configure(basePath: dirname(__DIR__))
             'api/*',
         ]);
     })
+    ->withSchedule(function ($schedule) {
+        // Run document expiry check daily at midnight
+        $schedule->command('documents:mark-expired')->dailyAt('00:00')
+            ->name('Update Expired Vendor Documents')
+            ->description('Mark vendor registration documents as expired');
+    })
     ->withExceptions(function (Exceptions $exceptions): void {
         // Render JSON responses for API errors
         $exceptions->shouldRenderJsonWhen(function ($request) {
