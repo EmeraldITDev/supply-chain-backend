@@ -76,18 +76,22 @@ class MRFWorkflowController extends Controller
     }
 
     /**
-     * Procurement Manager approves MRF and forwards to Executive
+     * NEW WORKFLOW: Supply Chain Director approves/rejects MRF
+     * First step in the simplified workflow
+     * 
+     * After Supply Chain Director approval → Procurement Manager review
      */
-    public function procurementApprove(Request $request, $id)
+    public function supplyChainDirectorApprove(Request $request, $id)
     {
         $user = $request->user();
 
-        // Check role
-        if (!in_array($user->role, ['procurement_manager', 'procurement', 'admin'])) {
+        // Check role - only supply chain directors can approve
+        if (!in_array($user->role, ['supply_chain_director', 'director', 'admin'])) {
             return response()->json([
                 'success' => false,
-                'error' => 'Only procurement managers can approve at this stage',
-                'code' => 'FORBIDDEN'
+                'error' => 'Only Supply Chain Directors can approve at this stage',
+                'code' => 'FORBIDDEN',
+                'requiredRole' => 'supply_chain_director'
             ], 403);
         }
 
@@ -101,18 +105,20 @@ class MRFWorkflowController extends Controller
             ], 404);
         }
 
-        // Check if MRF is in Pending status
-        if (strtolower($mrf->status) !== 'pending') {
+        // Check if MRF is in pending supply chain director review
+        if ($mrf->workflow_state !== 'supply_chain_director_review') {
             return response()->json([
                 'success' => false,
-                'error' => 'MRF is not in Pending status',
-                'code' => 'INVALID_STATUS',
-                'current_status' => $mrf->status
+                'error' => 'MRF is not awaiting Supply Chain Director review',
+                'code' => 'INVALID_WORKFLOW_STATE',
+                'currentWorkflowState' => $mrf->workflow_state,
+                'expectedState' => 'supply_chain_director_review'
             ], 422);
         }
 
         $validator = Validator::make($request->all(), [
-            'remarks' => 'nullable|string',
+            'action' => 'required|in:approve,reject',
+            'remarks' => 'nullable|string|max:1000',
         ]);
 
         if ($validator->fails()) {
@@ -124,19 +130,24 @@ class MRFWorkflowController extends Controller
             ], 422);
         }
 
-        // Update MRF - forward to Executive
+        $isApproved = $request->action === 'approve';
+
+        // Update MRF
         $mrf->update([
-            'status' => 'Executive Approval',
-            'current_stage' => 'executive',
+            'status' => $isApproved ? 'pending' : 'rejected',
+            'current_stage' => $isApproved ? 'procurement_review' : 'rejected',
+            'workflow_state' => $isApproved ? 'supply_chain_director_approved' : 'supply_chain_director_rejected',
+            'remarks' => $request->remarks,
         ]);
 
         // Record approval history
-        MRFApprovalHistory::create([
+        $approvalRecord = MRFApprovalHistory::create([
             'mrf_id' => $mrf->id,
-            'stage' => 'procurement',
-            'action' => 'approved',
+            'stage' => 'supply_chain_director',
+            'action' => $isApproved ? 'approved' : 'rejected',
             'approver_id' => $user->id,
             'approver_name' => $user->name,
+            'approver_email' => $user->email,
             'remarks' => $request->remarks,
         ]);
 
@@ -144,28 +155,150 @@ class MRFWorkflowController extends Controller
         try {
             Activity::create([
                 'type' => 'mrf_approved',
-                'title' => 'MRF Approved by Procurement',
-                'description' => "MRF {$mrf->mrf_id} was approved by {$user->name} and forwarded to Executive",
+                'title' => $isApproved ? 'MRF Approved by Supply Chain Director' : 'MRF Rejected by Supply Chain Director',
+                'description' => $isApproved ? 
+                    "MRF {$mrf->mrf_id} was approved by Supply Chain Director {$user->name} and forwarded to Procurement Manager review" :
+                    "MRF {$mrf->mrf_id} was rejected by Supply Chain Director {$user->name}",
                 'user_id' => $user->id,
                 'user_name' => $user->name,
-                'entity_type' => 'mrf',
-                'entity_id' => $mrf->mrf_id,
-                'status' => 'approved',
+                'reference_type' => 'mrf',
+                'reference_id' => $mrf->mrf_id,
             ]);
         } catch (\Exception $e) {
-            Log::warning('Failed to log MRF procurement approval activity', ['error' => $e->getMessage()]);
+            Log::warning('Failed to log activity', ['error' => $e->getMessage()]);
         }
-
-        // Notify executives
-        $this->notificationService->notifyMRFForwardedToExecutive($mrf, $user);
 
         return response()->json([
             'success' => true,
-            'message' => 'MRF approved and forwarded to Executive for approval',
+            'message' => $isApproved ? 
+                'MRF approved and forwarded to Procurement Manager' : 
+                'MRF rejected',
             'data' => [
-                'mrf_id' => $mrf->mrf_id,
+                'mrfId' => $mrf->mrf_id,
                 'status' => $mrf->status,
-                'current_stage' => $mrf->current_stage,
+                'workflowState' => $mrf->workflow_state,
+                'currentStage' => $mrf->current_stage,
+                'approvalRecord' => $approvalRecord,
+            ]
+        ]);
+    }
+
+    /**
+     * Procurement Manager approves MRF after Supply Chain Director approval
+     * Issues RFQs to identified vendors
+     * 
+     * Updated for new simplified workflow
+     */
+    public function procurementApprove(Request $request, $id)
+    {
+        $user = $request->user();
+
+        // Check role - only procurement managers/team can approve
+        if (!in_array($user->role, ['procurement_manager', 'procurement', 'admin'])) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Only procurement managers can approve at this stage',
+                'code' => 'FORBIDDEN',
+                'requiredRole' => 'procurement_manager'
+            ], 403);
+        }
+
+        $mrf = MRF::where('mrf_id', $id)->first();
+
+        if (!$mrf) {
+            return response()->json([
+                'success' => false,
+                'error' => 'MRF not found',
+                'code' => 'NOT_FOUND'
+            ], 404);
+        }
+
+        // Check if MRF is in supply chain director approved status (new workflow)
+        // or in pending status (for backward compatibility)
+        $validStates = ['supply_chain_director_approved', 'pending', 'procurement_review'];
+        if (!in_array($mrf->workflow_state, $validStates)) {
+            return response()->json([
+                'success' => false,
+                'error' => 'MRF is not ready for Procurement Manager review',
+                'code' => 'INVALID_WORKFLOW_STATE',
+                'currentWorkflowState' => $mrf->workflow_state,
+                'expectedStates' => $validStates
+            ], 422);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'action' => 'required|in:approve,reject',
+            'remarks' => 'nullable|string|max:1000',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Validation failed',
+                'errors' => $validator->errors(),
+                'code' => 'VALIDATION_ERROR'
+            ], 422);
+        }
+
+        $isApproved = $request->action === 'approve';
+
+        // Update MRF
+        $mrf->update([
+            'status' => $isApproved ? 'approved_for_rfq' : 'rejected',
+            'current_stage' => $isApproved ? 'rfq_issuance' : 'rejected',
+            'workflow_state' => $isApproved ? 'procurement_approved' : 'supply_chain_director_rejected',
+            'remarks' => $request->remarks,
+        ]);
+
+        // Record approval history
+        $approvalRecord = MRFApprovalHistory::create([
+            'mrf_id' => $mrf->id,
+            'stage' => 'procurement',
+            'action' => $isApproved ? 'approved' : 'rejected',
+            'approver_id' => $user->id,
+            'approver_name' => $user->name,
+            'approver_email' => $user->email,
+            'remarks' => $request->remarks,
+        ]);
+
+        // Log activity
+        try {
+            Activity::create([
+                'type' => 'mrf_approved',
+                'title' => $isApproved ? 'MRF Approved by Procurement Manager' : 'MRF Rejected by Procurement Manager',
+                'description' => $isApproved ? 
+                    "MRF {$mrf->mrf_id} approved by Procurement Manager {$user->name}. Ready for RFQ issuance." :
+                    "MRF {$mrf->mrf_id} rejected by Procurement Manager {$user->name}",
+                'user_id' => $user->id,
+                'user_name' => $user->name,
+                'reference_type' => 'mrf',
+                'reference_id' => $mrf->mrf_id,
+            ]);
+        } catch (\Exception $e) {
+            Log::warning('Failed to log activity', ['error' => $e->getMessage()]);
+        }
+
+        // Send notification to procurement team if approved
+        if ($isApproved) {
+            try {
+                $this->notificationService->notifyMRFApprovedForRFQ($mrf, $user);
+            } catch (\Exception $e) {
+                Log::warning('Failed to send approval notification', ['error' => $e->getMessage()]);
+            }
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => $isApproved ? 
+                'MRF approved. Proceed to issue RFQs to vendors.' : 
+                'MRF rejected',
+            'data' => [
+                'mrfId' => $mrf->mrf_id,
+                'status' => $mrf->status,
+                'workflowState' => $mrf->workflow_state,
+                'currentStage' => $mrf->current_stage,
+                'approvalRecord' => $approvalRecord,
+                'nextStep' => $isApproved ? 'Issue RFQs to vendors' : null,
             ]
         ]);
     }

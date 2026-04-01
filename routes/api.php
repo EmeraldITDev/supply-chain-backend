@@ -180,8 +180,14 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/mrfs/{id}/reject', [MRFController::class, 'reject']); // Legacy
     Route::delete('/mrfs/{id}', [MRFController::class, 'destroy']);
     
-    // MRF Workflow routes (new multi-stage approval)
+    // MRF Workflow routes (new simplified workflow)
+    // NEW: Supply Chain Director is first approver
+    Route::post('/mrfs/{id}/supply-chain-director-approve', [\App\Http\Controllers\Api\MRFWorkflowController::class, 'supplyChainDirectorApprove']);
+    
+    // Procurement Manager approval (after Supply Chain Director)
     Route::post('/mrfs/{id}/procurement-approve', [\App\Http\Controllers\Api\MRFWorkflowController::class, 'procurementApprove']);
+    
+    // Legacy routes (for backward compatible with existing MRFs)
     Route::post('/mrfs/{id}/executive-approve', [\App\Http\Controllers\Api\MRFWorkflowController::class, 'executiveApprove']);
     Route::post('/mrfs/{id}/chairman-approve', [\App\Http\Controllers\Api\MRFWorkflowController::class, 'chairmanApprove']);
 

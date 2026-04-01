@@ -9,65 +9,116 @@ class WorkflowStateService
 {
     /**
      * Valid workflow states
+     * 
+     * New simplified workflow:
+     * Employee → Supply Chain Director → Procurement Manager → RFQ/Vendor Selection → 
+     * Quotations → PO Creation (ends here)
      */
     const STATE_MRF_CREATED = 'mrf_created';
+    const STATE_SUPPLY_CHAIN_DIRECTOR_REVIEW = 'supply_chain_director_review';
+    const STATE_SUPPLY_CHAIN_DIRECTOR_APPROVED = 'supply_chain_director_approved';
+    const STATE_SUPPLY_CHAIN_DIRECTOR_REJECTED = 'supply_chain_director_rejected';
+    const STATE_PROCUREMENT_REVIEW = 'procurement_review';
+    const STATE_PROCUREMENT_APPROVED = 'procurement_approved';
+    const STATE_RFQ_ISSUED = 'rfq_issued';
+    const STATE_QUOTATIONS_RECEIVED = 'quotations_received';
+    const STATE_QUOTATIONS_EVALUATED = 'quotations_evaluated';
+    const STATE_PO_GENERATED = 'po_generated';
+    const STATE_PO_SIGNED = 'po_signed';
+    const STATE_CLOSED = 'closed';
+    
+    // Legacy states (kept for backward compatibility)
     const STATE_EXECUTIVE_REVIEW = 'executive_review';
     const STATE_EXECUTIVE_APPROVED = 'executive_approved';
     const STATE_EXECUTIVE_REJECTED = 'executive_rejected';
-    const STATE_PROCUREMENT_REVIEW = 'procurement_review';
     const STATE_VENDOR_SELECTED = 'vendor_selected';
     const STATE_INVOICE_RECEIVED = 'invoice_received';
     const STATE_INVOICE_APPROVED = 'invoice_approved';
-    const STATE_PO_GENERATED = 'po_generated';
-    const STATE_PO_SIGNED = 'po_signed';
     const STATE_PAYMENT_PROCESSED = 'payment_processed';
     const STATE_GRN_REQUESTED = 'grn_requested';
     const STATE_GRN_COMPLETED = 'grn_completed';
-    const STATE_CLOSED = 'closed';
 
     /**
      * Valid state transitions
+     * 
+     * New workflow path:
+     * MRF_CREATED → SUPPLY_CHAIN_DIRECTOR_REVIEW → (APPROVED/REJECTED)
+     * SUPPLY_CHAIN_DIRECTOR_APPROVED → PROCUREMENT_REVIEW → (APPROVED)
+     * PROCUREMENT_APPROVED → RFQ_ISSUED → QUOTATIONS_RECEIVED → QUOTATIONS_EVALUATED →
+     * PO_GENERATED → PO_SIGNED → CLOSED
      */
     private array $validTransitions = [
-        self::STATE_MRF_CREATED => [self::STATE_EXECUTIVE_REVIEW],
+        // New simplified workflow
+        self::STATE_MRF_CREATED => [self::STATE_SUPPLY_CHAIN_DIRECTOR_REVIEW],
+        self::STATE_SUPPLY_CHAIN_DIRECTOR_REVIEW => [self::STATE_SUPPLY_CHAIN_DIRECTOR_APPROVED, self::STATE_SUPPLY_CHAIN_DIRECTOR_REJECTED],
+        self::STATE_SUPPLY_CHAIN_DIRECTOR_APPROVED => [self::STATE_PROCUREMENT_REVIEW],
+        self::STATE_SUPPLY_CHAIN_DIRECTOR_REJECTED => [], // Terminal state (can resubmit by creating new MRF)
+        self::STATE_PROCUREMENT_REVIEW => [self::STATE_PROCUREMENT_APPROVED],
+        self::STATE_PROCUREMENT_APPROVED => [self::STATE_RFQ_ISSUED],
+        self::STATE_RFQ_ISSUED => [self::STATE_QUOTATIONS_RECEIVED],
+        self::STATE_QUOTATIONS_RECEIVED => [self::STATE_QUOTATIONS_EVALUATED],
+        self::STATE_QUOTATIONS_EVALUATED => [self::STATE_PO_GENERATED],
+        self::STATE_PO_GENERATED => [self::STATE_PO_SIGNED],
+        self::STATE_PO_SIGNED => [self::STATE_CLOSED],
+        self::STATE_CLOSED => [], // Terminal state
+        
+        // Legacy transitions (for backward compatibility with existing MRFs)
         self::STATE_EXECUTIVE_REVIEW => [self::STATE_EXECUTIVE_APPROVED, self::STATE_EXECUTIVE_REJECTED],
-        self::STATE_EXECUTIVE_APPROVED => [self::STATE_PROCUREMENT_REVIEW],
-        self::STATE_EXECUTIVE_REJECTED => [], // Terminal state (can resubmit by creating new MRF)
-        self::STATE_PROCUREMENT_REVIEW => [self::STATE_VENDOR_SELECTED],
+        self::STATE_EXECUTIVE_APPROVED => [self::STATE_PROCUREMENT_REVIEW, self::STATE_VENDOR_SELECTED],
+        self::STATE_EXECUTIVE_REJECTED => [],
         self::STATE_VENDOR_SELECTED => [self::STATE_INVOICE_RECEIVED],
         self::STATE_INVOICE_RECEIVED => [self::STATE_INVOICE_APPROVED],
         self::STATE_INVOICE_APPROVED => [self::STATE_PO_GENERATED],
-        self::STATE_PO_GENERATED => [self::STATE_PO_SIGNED],
-        self::STATE_PO_SIGNED => [self::STATE_PAYMENT_PROCESSED],
         self::STATE_PAYMENT_PROCESSED => [self::STATE_GRN_REQUESTED],
         self::STATE_GRN_REQUESTED => [self::STATE_GRN_COMPLETED],
         self::STATE_GRN_COMPLETED => [self::STATE_CLOSED],
-        self::STATE_CLOSED => [], // Terminal state
     ];
 
     /**
      * Role permissions for state transitions
+     * 
+     * New workflow roles:
+     * - employee/staff: Creates MRF
+     * - supply_chain_director: Approves/rejects MRF
+     * - procurement_manager: Reviews MRF and issues RFQs
+     * - procurement: Evaluates quotations and generates PO
+     * - vendor: Submits quotations
      */
     private array $rolePermissions = [
+        'employee' => [
+            self::STATE_MRF_CREATED => ['create'],
+        ],
         'staff' => [
             self::STATE_MRF_CREATED => ['create'],
         ],
-        'executive' => [
-            self::STATE_EXECUTIVE_REVIEW => ['approve', 'reject'],
+        'supply_chain_director' => [
+            self::STATE_SUPPLY_CHAIN_DIRECTOR_REVIEW => ['approve', 'reject'],
+        ],
+        'procurement_manager' => [
+            self::STATE_SUPPLY_CHAIN_DIRECTOR_APPROVED => ['review'],
+            self::STATE_PROCUREMENT_REVIEW => ['approve', 'issue_rfqs'],
         ],
         'procurement' => [
-            self::STATE_EXECUTIVE_APPROVED => ['select_vendors'],
-            self::STATE_INVOICE_RECEIVED => ['approve_invoice'],
-            self::STATE_INVOICE_APPROVED => ['generate_po'],
-            self::STATE_GRN_REQUESTED => ['upload_grn'],
+            self::STATE_PROCUREMENT_APPROVED => ['issue_rfqs'],
+            self::STATE_QUOTATIONS_RECEIVED => ['evaluate_quotations'],
+            self::STATE_QUOTATIONS_EVALUATED => ['generate_po'],
+            self::STATE_PO_GENERATED => ['generate_po'],
         ],
-        'supply_chain_director' => [
-            self::STATE_VENDOR_SELECTED => ['approve_vendor'],
+        'vendor' => [
+            self::STATE_RFQ_ISSUED => ['submit_quotation'],
         ],
-        'finance' => [
-            self::STATE_PO_SIGNED => ['process_payment'],
-            self::STATE_PAYMENT_PROCESSED => ['request_grn'],
-            self::STATE_GRN_COMPLETED => ['review_grn'],
+        'admin' => [
+            // Admin can perform any action
+            self::STATE_MRF_CREATED => ['create', 'approve', 'reject'],
+            self::STATE_SUPPLY_CHAIN_DIRECTOR_REVIEW => ['approve', 'reject'],
+            self::STATE_PROCUREMENT_REVIEW => ['approve', 'reject'],
+            self::STATE_RFQ_ISSUED => ['submit_quotation'],
+            self::STATE_QUOTATIONS_RECEIVED => ['evaluate_quotations'],
+            self::STATE_QUOTATIONS_EVALUATED => ['generate_po'],
+        ],
+        // Legacy roles (for backward compatibility)
+        'executive' => [
+            self::STATE_EXECUTIVE_REVIEW => ['approve', 'reject'],
         ],
     ];
 

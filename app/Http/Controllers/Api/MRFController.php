@@ -538,7 +538,7 @@ class MRFController extends Controller
     public function getProgressTracker(Request $request, $id)
     {
         $mrf = MRF::where('mrf_id', $id)
-            ->with(['requester', 'executiveApprover', 'selectedVendor'])
+            ->with(['requester', 'selectedVendor', 'rfqs'])
             ->first();
 
         if (!$mrf) {
@@ -549,64 +549,66 @@ class MRFController extends Controller
             ], 404);
         }
 
+        // Determine step statuses based on workflow state
         $steps = [
             [
                 'step' => 1,
-                'name' => 'MRF Created',
+                'name' => 'MRF Created by Employee',
                 'status' => 'completed',
                 'completedAt' => $mrf->created_at ? $mrf->created_at->toIso8601String() : null,
                 'completedBy' => $mrf->requester ? [
                     'id' => $mrf->requester->id,
                     'name' => $mrf->requester->name,
                 ] : null,
+                'description' => 'General employee submitted Material Request Form',
             ],
             [
                 'step' => 2,
-                'name' => 'Executive Approval',
-                'status' => $mrf->executive_approved ? 'completed' : ($mrf->workflow_state === 'executive_review' ? 'pending' : 'not_started'),
-                'completedAt' => $mrf->executive_approved_at ? $mrf->executive_approved_at->toIso8601String() : null,
-                'completedBy' => $mrf->executiveApprover ? [
-                    'id' => $mrf->executiveApprover->id,
-                    'name' => $mrf->executiveApprover->name,
-                ] : null,
-                'remarks' => $mrf->executive_remarks,
+                'name' => 'Supply Chain Director Review',
+                'status' => $mrf->workflow_state === 'supply_chain_director_review' ? 'pending' : 
+                           (in_array($mrf->workflow_state, ['supply_chain_director_approved', 'procurement_review', 'procurement_approved', 'rfq_issued', 'quotations_received', 'quotations_evaluated', 'po_generated', 'po_signed', 'closed']) ? 'completed' : 'not_started'),
+                'completedAt' => in_array($mrf->workflow_state, ['supply_chain_director_approved', 'procurement_review', 'procurement_approved', 'rfq_issued', 'quotations_received', 'quotations_evaluated', 'po_generated', 'po_signed', 'closed']) ? now()->toIso8601String() : null,
+                'description' => 'Director approves MRF and budget allocation',
             ],
             [
                 'step' => 3,
-                'name' => 'RFQ Issued',
-                'status' => $mrf->rfqs()->exists() ? 'completed' : 'not_started',
-                'completedAt' => $mrf->rfqs()->exists() ? $mrf->rfqs()->first()->created_at->toIso8601String() : null,
+                'name' => 'Procurement Manager Review',
+                'status' => $mrf->workflow_state === 'procurement_review' ? 'pending' : 
+                           (in_array($mrf->workflow_state, ['procurement_approved', 'rfq_issued', 'quotations_received', 'quotations_evaluated', 'po_generated', 'po_signed', 'closed']) ? 'completed' : 'not_started'),
+                'description' => 'Manager reviews MRF and approves vendor selection process',
             ],
             [
                 'step' => 4,
-                'name' => 'Supply Chain Director Approval',
-                'status' => ($mrf->workflow_state === 'invoice_approved' || $mrf->workflow_state === 'vendor_approved') ? 'completed' : 
-                           (in_array($mrf->workflow_state, ['vendor_selected', 'supply_chain_review']) ? 'pending' : 'not_started'),
+                'name' => 'RFQ Issued to Vendors',
+                'status' => $mrf->rfqs()->exists() ? 'completed' : 
+                           ($mrf->workflow_state === 'rfq_issued' ? 'pending' : 'not_started'),
+                'completedAt' => $mrf->rfqs()->exists() ? $mrf->rfqs()->first()->created_at->toIso8601String() : null,
+                'rfqCount' => $mrf->rfqs()->count(),
+                'description' => 'Requests for Quotation sent to identified vendors',
             ],
             [
                 'step' => 5,
-                'name' => 'Procurement Generates PO',
-                'status' => $mrf->po_number ? 'completed' : ($mrf->workflow_state === 'invoice_approved' ? 'pending' : 'not_started'),
-                'completedAt' => $mrf->po_generated_at ? $mrf->po_generated_at->toIso8601String() : null,
-                'poNumber' => $mrf->po_number,
+                'name' => 'Quotations Received & Evaluated',
+                'status' => in_array($mrf->workflow_state, ['quotations_evaluated', 'po_generated', 'po_signed', 'closed']) ? 'completed' : 
+                           ($mrf->workflow_state === 'quotations_received' ? 'pending' : 'not_started'),
+                'quotationCount' => $mrf->quotations()->count(),
+                'description' => 'Vendors submit quotations, evaluated for best fit',
             ],
             [
                 'step' => 6,
-                'name' => 'Finance Review & Processing',
-                'status' => $mrf->payment_status === 'approved' ? 'completed' : 
-                           ($mrf->po_number ? 'pending' : 'not_started'),
-                'completedAt' => $mrf->payment_approved_at ? $mrf->payment_approved_at->toIso8601String() : null,
+                'name' => 'Purchase Order Generated',
+                'status' => $mrf->po_number ? 'completed' : 
+                           ($mrf->workflow_state === 'po_generated' ? 'pending' : 'not_started'),
+                'completedAt' => $mrf->po_generated_at ? $mrf->po_generated_at->toIso8601String() : null,
+                'poNumber' => $mrf->po_number,
+                'description' => 'PO created from selected quotation',
             ],
             [
                 'step' => 7,
-                'name' => 'Goods Received Note (GRN)',
-                'status' => $mrf->grn_completed ? 'completed' : ($mrf->grn_requested ? 'pending' : 'not_started'),
-                'completedAt' => $mrf->grn_completed_at ? $mrf->grn_completed_at->toIso8601String() : null,
-            ],
-            [
-                'step' => 8,
-                'name' => 'Mark as Paid / Closed',
-                'status' => $mrf->status === 'Completed' ? 'completed' : 'not_started',
+                'name' => 'Process Complete',
+                'status' => in_array($mrf->workflow_state, ['po_signed', 'closed']) ? 'completed' : 'not_started',
+                'completedAt' => $mrf->po_signed_at ? $mrf->po_signed_at->toIso8601String() : null,
+                'description' => 'MRF process ends after PO creation',
             ],
         ];
 
@@ -618,6 +620,7 @@ class MRFController extends Controller
                 'currentStep' => collect($steps)->where('status', 'pending')->first()['step'] ?? 
                                  (collect($steps)->where('status', 'completed')->last()['step'] ?? 1),
                 'steps' => $steps,
+                'currentWorkflowState' => $mrf->workflow_state,
             ],
         ]);
     }
@@ -721,8 +724,8 @@ class MRFController extends Controller
                 'department' => $request->department,
                 'date' => now(),
                 'status' => 'pending',
-                'current_stage' => 'executive_review',
-                    'workflow_state' => WorkflowStateService::STATE_EXECUTIVE_REVIEW, // Immediately move to executive review
+                'current_stage' => 'supply_chain_director_review',
+                    'workflow_state' => WorkflowStateService::STATE_SUPPLY_CHAIN_DIRECTOR_REVIEW, // Route to Supply Chain Director first
                 'approval_history' => [],
                 'is_resubmission' => false,
                 'pfi_url' => $pfiUrl,
