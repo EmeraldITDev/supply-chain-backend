@@ -156,6 +156,18 @@ class VendorController extends Controller
         ]);
 
         try {
+            // Guard: Ensure request is a single object, not an array of registrations
+            $allData = $request->all();
+            if (is_array($allData) && isset($allData[0]) && is_array($allData[0])) {
+                return response()->json([
+                    'success' => false,
+                    'error' => 'Invalid request format: Batch registration not supported. Send one registration at a time.',
+                    'code' => 'INVALID_REQUEST_FORMAT',
+                    'expected' => 'Single object with companyName, email, category, etc.',
+                    'received' => 'Array of objects'
+                ], 422);
+            }
+
             // Get form fields - support both camelCase and snake_case
             $companyName = $request->input('companyName') ?? $request->input('company_name');
             $category = $request->input('category');
@@ -342,6 +354,24 @@ class VendorController extends Controller
             $documentRecords = $registration->documents ?? collect([]);
             
             foreach ($documentRecords as $doc) {
+                // Guard: Skip if doc is not an object (handle arrays or invalid data)
+                if (is_array($doc) && !($doc instanceof \stdClass)) {
+                    \Log::warning('Document record is array, converting to object', [
+                        'registration_id' => $registration->id,
+                        'doc_keys' => array_keys($doc)
+                    ]);
+                    $doc = (object) $doc;
+                }
+                
+                // Additional guard: Ensure doc has required properties
+                if (!isset($doc->id)) {
+                    \Log::warning('Document missing id property, skipping', [
+                        'registration_id' => $registration->id,
+                        'doc' => $doc
+                    ]);
+                    continue;
+                }
+                
                 $filePath = $doc->file_path ?? null;
                 $fileUrl = $doc->file_share_url ?? $doc->file_url ?? null;
                 
@@ -361,8 +391,8 @@ class VendorController extends Controller
                 
                 $formattedDocuments[] = [
                     'id' => (string) $doc->id,
-                    'fileName' => $doc->file_name,
-                    'name' => $doc->file_name,
+                    'fileName' => $doc->file_name ?? null,
+                    'name' => $doc->file_name ?? null,
                     'filePath' => $filePath,
                     'fileUrl' => $fileUrl,
                     'file_url' => $fileUrl,

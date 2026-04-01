@@ -93,16 +93,17 @@ class UpdateExpiredDocuments extends Command
 
         // Prepare email data
         $mailData = [
-            'vendor_name' => $registration->company_name,
+            'vendorName' => $registration->company_name,
             'registration_id' => $registration->id,
-            'expired_documents' => $expiredDocs->map(function ($doc) {
+            'expiredDocuments' => $expiredDocs->map(function ($doc) {
                 return [
-                    'type' => $doc->type,
+                    'document_type' => $doc->type,
                     'expiry_date' => $doc->expiry_date->format('Y-m-d'),
                     'file_name' => $doc->file_name,
                 ];
             })->toArray(),
-            'dashboard_url' => config('app.url') . '/vendor/registrations/' . $registration->id,
+            'registrationStatus' => $registration->status,
+            'dashboardUrl' => config('app.frontend_url', config('app.url')) . '/vendor/documents',
         ];
 
         // Send email
