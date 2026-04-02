@@ -566,7 +566,7 @@ class MRFController extends Controller
             ],
             [
                 'step' => 2,
-                'name' => $isEmeraldContract ? 'Executive Approval (Dr. Gomi Babajide)' : 'Supply Chain Director Initial Approval',
+                'name' => $isEmeraldContract ? 'Executive Approval (bunmi.babajide@emeraldcfze.com)' : 'Supply Chain Director Initial Approval',
                 'status' => $isEmeraldContract
                     ? ($mrf->workflow_state === 'executive_review' ? 'pending' :
                         (in_array($mrf->workflow_state, ['executive_approved', 'procurement_review', 'procurement_approved', 'rfq_issued', 'quotations_received', 'quotations_evaluated', 'vendor_selected', 'invoice_approved', 'po_generated', 'po_signed', 'closed']) ? 'completed' : 'not_started'))

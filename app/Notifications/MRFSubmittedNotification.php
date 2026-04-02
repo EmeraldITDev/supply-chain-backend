@@ -33,7 +33,7 @@ class MRFSubmittedNotification extends Notification implements ShouldQueue
     {
         $isEmeraldContract = strtolower(trim((string) $this->mrf->contract_type)) === 'emerald';
         $firstApprovalLabel = $isEmeraldContract
-            ? 'Executive Approval (Dr. Gomi Babajide)'
+            ? 'Executive Approval (bunmi.babajide@emeraldcfze.com)'
             : 'Supply Chain Director Initial Approval';
 
         return [

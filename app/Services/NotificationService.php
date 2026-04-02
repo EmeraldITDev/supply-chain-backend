@@ -25,7 +25,7 @@ class NotificationService
     /**
      * Notify first approver(s) about new MRF submission.
      *
-     * Emerald contracts are routed to Executive first (Dr. Gomi Babajide).
+     * Emerald contracts are routed to Executive first (bunmi.babajide@emeraldcfze.com).
      * Non-Emerald contracts are routed to Supply Chain Director first.
      */
     public function notifyMRFSubmitted(MRF $mrf): void
@@ -36,12 +36,12 @@ class NotificationService
 
             if ($isEmeraldContract) {
                 // Required first approver for Emerald flow.
-                $namedExecutive = User::where('name', 'Dr. Gomi Babajide')->first();
+                $namedExecutive = User::where('email', 'bunmi.babajide@emeraldcfze.com')->first();
 
                 if ($namedExecutive) {
                     $notifiables->push($namedExecutive);
                 } else {
-                    Log::warning('Configured Emerald executive approver not found by name; falling back to executive role.', [
+                    Log::warning('Configured Emerald executive approver not found by email; falling back to executive role.', [
                         'mrf_id' => $mrf->mrf_id,
                     ]);
                     $notifiables = User::whereIn('role', ['executive', 'admin'])->get();
