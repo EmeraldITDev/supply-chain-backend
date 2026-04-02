@@ -49,7 +49,7 @@ class WorkflowStateService
      */
     private array $validTransitions = [
         // New simplified workflow
-        self::STATE_MRF_CREATED => [self::STATE_SUPPLY_CHAIN_DIRECTOR_REVIEW],
+        self::STATE_MRF_CREATED => [self::STATE_SUPPLY_CHAIN_DIRECTOR_REVIEW, self::STATE_EXECUTIVE_REVIEW],
         self::STATE_SUPPLY_CHAIN_DIRECTOR_REVIEW => [self::STATE_SUPPLY_CHAIN_DIRECTOR_APPROVED, self::STATE_SUPPLY_CHAIN_DIRECTOR_REJECTED],
         self::STATE_SUPPLY_CHAIN_DIRECTOR_APPROVED => [self::STATE_PROCUREMENT_REVIEW],
         self::STATE_SUPPLY_CHAIN_DIRECTOR_REJECTED => [], // Terminal state (can resubmit by creating new MRF)
@@ -244,6 +244,9 @@ class WorkflowStateService
     {
         $displayNames = [
             self::STATE_MRF_CREATED => 'MRF Created',
+            self::STATE_SUPPLY_CHAIN_DIRECTOR_REVIEW => 'Supply Chain Director Review',
+            self::STATE_SUPPLY_CHAIN_DIRECTOR_APPROVED => 'Supply Chain Director Approved',
+            self::STATE_SUPPLY_CHAIN_DIRECTOR_REJECTED => 'Supply Chain Director Rejected',
             self::STATE_EXECUTIVE_REVIEW => 'Executive Review',
             self::STATE_EXECUTIVE_APPROVED => 'Executive Approved',
             self::STATE_EXECUTIVE_REJECTED => 'Executive Rejected',

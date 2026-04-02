@@ -549,6 +549,8 @@ class MRFController extends Controller
             ], 404);
         }
 
+        $isEmeraldContract = strtolower(trim((string) $mrf->contract_type)) === 'emerald';
+
         // Determine step statuses based on workflow state
         $steps = [
             [
@@ -564,18 +566,23 @@ class MRFController extends Controller
             ],
             [
                 'step' => 2,
-                'name' => 'Supply Chain Director Review',
-                'status' => $mrf->workflow_state === 'supply_chain_director_review' ? 'pending' : 
-                           (in_array($mrf->workflow_state, ['supply_chain_director_approved', 'procurement_review', 'procurement_approved', 'rfq_issued', 'quotations_received', 'quotations_evaluated', 'po_generated', 'po_signed', 'closed']) ? 'completed' : 'not_started'),
-                'completedAt' => in_array($mrf->workflow_state, ['supply_chain_director_approved', 'procurement_review', 'procurement_approved', 'rfq_issued', 'quotations_received', 'quotations_evaluated', 'po_generated', 'po_signed', 'closed']) ? now()->toIso8601String() : null,
-                'description' => 'Director approves MRF and budget allocation',
+                'name' => $isEmeraldContract ? 'Executive Approval (Dr. Gomi Babajide)' : 'Supply Chain Director Initial Approval',
+                'status' => $isEmeraldContract
+                    ? ($mrf->workflow_state === 'executive_review' ? 'pending' :
+                        (in_array($mrf->workflow_state, ['executive_approved', 'procurement_review', 'procurement_approved', 'rfq_issued', 'quotations_received', 'quotations_evaluated', 'vendor_selected', 'invoice_approved', 'po_generated', 'po_signed', 'closed']) ? 'completed' : 'not_started'))
+                    : ($mrf->workflow_state === 'supply_chain_director_review' ? 'pending' :
+                        (in_array($mrf->workflow_state, ['supply_chain_director_approved', 'procurement_review', 'procurement_approved', 'rfq_issued', 'quotations_received', 'quotations_evaluated', 'vendor_selected', 'invoice_approved', 'po_generated', 'po_signed', 'closed']) ? 'completed' : 'not_started')),
+                'completedAt' => null,
+                'description' => $isEmeraldContract
+                    ? 'Executive performs first approval for Emerald contract MRFs'
+                    : 'Supply Chain Director performs first approval for non-Emerald contract MRFs',
             ],
             [
                 'step' => 3,
-                'name' => 'Procurement Manager Review',
-                'status' => $mrf->workflow_state === 'procurement_review' ? 'pending' : 
-                           (in_array($mrf->workflow_state, ['procurement_approved', 'rfq_issued', 'quotations_received', 'quotations_evaluated', 'po_generated', 'po_signed', 'closed']) ? 'completed' : 'not_started'),
-                'description' => 'Manager reviews MRF and approves vendor selection process',
+                'name' => 'Procurement Manager Sources Quotations',
+                'status' => in_array($mrf->workflow_state, ['procurement_review', 'procurement_approved', 'rfq_issued', 'quotations_received']) ? 'pending' : 
+                           (in_array($mrf->workflow_state, ['quotations_evaluated', 'vendor_selected', 'invoice_approved', 'po_generated', 'po_signed', 'closed']) ? 'completed' : 'not_started'),
+                'description' => 'Procurement manager sources and evaluates onboarded vendor quotations',
             ],
             [
                 'step' => 4,
@@ -588,11 +595,11 @@ class MRFController extends Controller
             ],
             [
                 'step' => 5,
-                'name' => 'Quotations Received & Evaluated',
-                'status' => in_array($mrf->workflow_state, ['quotations_evaluated', 'po_generated', 'po_signed', 'closed']) ? 'completed' : 
-                           ($mrf->workflow_state === 'quotations_received' ? 'pending' : 'not_started'),
+                'name' => 'Supply Chain Director Final Quote Approval',
+                'status' => in_array($mrf->workflow_state, ['invoice_approved', 'po_generated', 'po_signed', 'closed']) ? 'completed' : 
+                           ($mrf->workflow_state === 'vendor_selected' ? 'pending' : 'not_started'),
                 'quotationCount' => $mrf->quotations()->count(),
-                'description' => 'Vendors submit quotations, evaluated for best fit',
+                'description' => 'Selected vendor/quotation is submitted for final Supply Chain Director approval',
             ],
             [
                 'step' => 6,
@@ -651,7 +658,7 @@ class MRFController extends Controller
             $validator = Validator::make($request->all(), [
                 'title' => 'required|string|max:255',
                 'category' => 'required|string|max:255',
-                'contractType' => 'required|string|in:emerald,oando,dangote,heritage',
+                'contractType' => 'required|string|max:255',
                 'urgency' => 'required|in:Low,Medium,High,Critical',
                 'description' => 'required|string',
                 'quantity' => 'required|string',
@@ -708,6 +715,13 @@ class MRFController extends Controller
                     $pfiShareUrl = $pfiUrl;
             }
 
+            $normalizedContractType = strtolower(trim((string) $request->contractType));
+            $isEmeraldContract = $normalizedContractType === 'emerald';
+            $initialStage = $isEmeraldContract ? 'executive_review' : 'supply_chain_director_review';
+            $initialWorkflowState = $isEmeraldContract
+                ? WorkflowStateService::STATE_EXECUTIVE_REVIEW
+                : WorkflowStateService::STATE_SUPPLY_CHAIN_DIRECTOR_REVIEW;
+
             try {
             $mrf = MRF::create([
                 'mrf_id' => $mrfId,
@@ -724,8 +738,8 @@ class MRFController extends Controller
                 'department' => $request->department,
                 'date' => now(),
                 'status' => 'pending',
-                'current_stage' => 'supply_chain_director_review',
-                    'workflow_state' => WorkflowStateService::STATE_SUPPLY_CHAIN_DIRECTOR_REVIEW, // Route to Supply Chain Director first
+                'current_stage' => $initialStage,
+                    'workflow_state' => $initialWorkflowState,
                 'approval_history' => [],
                 'is_resubmission' => false,
                 'pfi_url' => $pfiUrl,

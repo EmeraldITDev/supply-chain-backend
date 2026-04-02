@@ -252,4 +252,12 @@ class MRF extends Model
 
         return "MRF-{$contractPrefix}-{$year}-{$newNumber}";
     }
+
+    /**
+     * Check whether this MRF uses Emerald contract workflow.
+     */
+    public function isEmeraldContract(): bool
+    {
+        return strtolower(trim((string) $this->contract_type)) === 'emerald';
+    }
 }

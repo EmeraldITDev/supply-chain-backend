@@ -23,18 +23,36 @@ use Illuminate\Support\Facades\Log;
 class NotificationService
 {
     /**
-     * Notify procurement managers about new MRF submission
+     * Notify first approver(s) about new MRF submission.
+     *
+     * Emerald contracts are routed to Executive first (Dr. Gomi Babajide).
+     * Non-Emerald contracts are routed to Supply Chain Director first.
      */
     public function notifyMRFSubmitted(MRF $mrf): void
     {
         try {
-            // Get all procurement managers and admins
-            $notifiables = User::whereIn('role', [
-                'procurement_manager',
-                'supply_chain_director',
-                'supply_chain',
-                'admin'
-            ])->get();
+            $isEmeraldContract = strtolower(trim((string) $mrf->contract_type)) === 'emerald';
+            $notifiables = collect();
+
+            if ($isEmeraldContract) {
+                // Required first approver for Emerald flow.
+                $namedExecutive = User::where('name', 'Dr. Gomi Babajide')->first();
+
+                if ($namedExecutive) {
+                    $notifiables->push($namedExecutive);
+                } else {
+                    Log::warning('Configured Emerald executive approver not found by name; falling back to executive role.', [
+                        'mrf_id' => $mrf->mrf_id,
+                    ]);
+                    $notifiables = User::whereIn('role', ['executive', 'admin'])->get();
+                }
+            } else {
+                $notifiables = User::whereIn('role', [
+                    'supply_chain_director',
+                    'supply_chain',
+                    'admin',
+                ])->get();
+            }
 
             foreach ($notifiables as $user) {
                 $user->notify(new MRFSubmittedNotification($mrf));

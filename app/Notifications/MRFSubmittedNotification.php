@@ -31,13 +31,20 @@ class MRFSubmittedNotification extends Notification implements ShouldQueue
      */
     public function toArray($notifiable): array
     {
+        $isEmeraldContract = strtolower(trim((string) $this->mrf->contract_type)) === 'emerald';
+        $firstApprovalLabel = $isEmeraldContract
+            ? 'Executive Approval (Dr. Gomi Babajide)'
+            : 'Supply Chain Director Initial Approval';
+
         return [
             'type' => 'mrf_submitted',
             'title' => 'New MRF Submitted',
-            'message' => "A new Material Requisition Form ({$this->mrf->mrf_id}) has been submitted by {$this->mrf->requester_name}",
+            'message' => "A new Material Requisition Form ({$this->mrf->mrf_id}) has been submitted by {$this->mrf->requester_name} and is awaiting {$firstApprovalLabel}.",
             'mrf_id' => $this->mrf->id,
             'mrf_number' => $this->mrf->mrf_id,
             'requester' => $this->mrf->requester_name,
+            'contract_type' => $this->mrf->contract_type,
+            'first_approval_stage_label' => $firstApprovalLabel,
             'urgency' => $this->mrf->urgency,
             'category' => $this->mrf->category,
             'estimated_cost' => $this->mrf->estimated_cost,

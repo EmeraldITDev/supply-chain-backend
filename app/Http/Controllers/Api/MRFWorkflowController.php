@@ -213,9 +213,25 @@ class MRFWorkflowController extends Controller
             ], 404);
         }
 
-        // Check if MRF is in supply chain director approved status (new workflow)
-        // or in pending status (for backward compatibility)
-        $validStates = ['supply_chain_director_approved', 'pending', 'procurement_review'];
+        $isEmeraldContract = strtolower(trim((string) $mrf->contract_type)) === 'emerald';
+
+        // Contract-type driven initial approval gate:
+        // - Emerald: procurement can only proceed after executive approval
+        // - Non-Emerald: procurement can only proceed after initial SCD approval
+        $validStates = $isEmeraldContract
+            ? ['executive_approved', 'procurement_review']
+            : ['supply_chain_director_approved', 'procurement_review'];
+
+        // Keep compatibility for legacy records that only store "pending" after initial approval.
+        if ($mrf->workflow_state === 'pending') {
+            if ($isEmeraldContract && (bool) $mrf->executive_approved) {
+                $validStates[] = 'pending';
+            }
+            if (!$isEmeraldContract) {
+                $validStates[] = 'pending';
+            }
+        }
+
         if (!in_array($mrf->workflow_state, $validStates)) {
             return response()->json([
                 'success' => false,
@@ -789,6 +805,14 @@ class MRFWorkflowController extends Controller
                 'error' => 'MRF not found',
                 'code' => 'NOT_FOUND'
             ], 404);
+        }
+
+        if (strtolower(trim((string) $mrf->contract_type)) !== 'emerald') {
+            return response()->json([
+                'success' => false,
+                'error' => 'Executive approval is only valid for Emerald contract MRFs.',
+                'code' => 'INVALID_CONTRACT_WORKFLOW',
+            ], 422);
         }
 
         // Check if MRF is in correct workflow state
