@@ -9,6 +9,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 class Quotation extends Model
 {
     protected $fillable = [
+        'mrf_id',
         'quotation_id',
         'rfq_id',
         'vendor_id',
@@ -97,6 +98,10 @@ class Quotation extends Model
         $this->total_amount = $this->items()->sum('total_price');
     }
 
+    public function mrf()
+    {
+        return $this->belongsTo(MRF::class, 'mrf_id');
+    }
     /**
      * Generate Quotation ID
      */

@@ -74,9 +74,9 @@ class RFQ extends Model
     /**
      * Get quotations for this RFQ
      */
-    public function quotations(): HasMany
+    public function quotations()
     {
-        return $this->hasMany(Quotation::class, 'rfq_id');
+        return $this->hasMany(\App\Models\Quotation::class, 'mrf_id');
     }
     
     /**

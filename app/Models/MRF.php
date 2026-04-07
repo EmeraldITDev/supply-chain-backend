@@ -132,6 +132,10 @@ class MRF extends Model
         return $this->hasMany(RFQ::class, 'mrf_id');
     }
 
+    public function quotations()
+    {
+        return $this->hasMany(\App\Models\Quotation::class, 'mrf_id');
+    }
     /**
      * Get MRF items
      */
