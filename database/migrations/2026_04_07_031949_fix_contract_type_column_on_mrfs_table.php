@@ -13,11 +13,11 @@ return new class extends Migration
     public function up(): void
     {
         // If column exists but is an enum, convert to varchar
-        if (Schema::hasColumn('mrfs', 'contract_type')) {
-            DB::statement("ALTER TABLE mrfs MODIFY contract_type VARCHAR(255) NULL");
+        if (Schema::hasColumn('m_r_f_s', 'contract_type')) {
+            DB::statement("ALTER TABLE m_r_f_s MODIFY contract_type VARCHAR(255) NULL");
         } else {
             // If column doesn't exist at all, add it
-            Schema::table('mrfs', function (Blueprint $table) {
+            Schema::table('m_r_f_s', function (Blueprint $table) {
                 $table->string('contract_type', 255)->nullable()->after('status');
             });
         }
