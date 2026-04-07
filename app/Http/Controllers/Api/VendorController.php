@@ -555,7 +555,9 @@ class VendorController extends Controller
                 'approvalRemarks' => $reg->approval_remarks,
                 'vendorId' => $reg->vendor ? $reg->vendor->vendor_id : null,
                 'documents' => $formattedDocuments,
-                'createdAt' => $reg->created_at->toIso8601String(),
+                'createdAt' => $reg->created_at
+                    ? \Carbon\Carbon::parse($reg->created_at)->toIso8601String()
+                    : null,
                 // Financial and country (masked account number for display)
                 'countryCode' => $reg->country_code,
                 'bankName' => $reg->bank_name,
