@@ -40,7 +40,7 @@ class RFQ extends Model
     /**
      * Get the MRF this RFQ is based on
      */
-    public function mrf(): BelongsTo
+    public function mrf()
     {
         return $this->belongsTo(MRF::class, 'mrf_id');
     }
@@ -76,7 +76,7 @@ class RFQ extends Model
      */
     public function quotations()
     {
-        return $this->hasMany(\App\Models\Quotation::class, 'mrf_id');
+        return $this->hasMany(Quotation::class, 'rfq_id');
     }
     
     /**

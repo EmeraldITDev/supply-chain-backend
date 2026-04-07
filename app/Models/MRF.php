@@ -127,7 +127,7 @@ class MRF extends Model
     /**
      * Get RFQs created from this MRF
      */
-    public function rfqs(): HasMany
+    public function rfqs()
     {
         return $this->hasMany(RFQ::class, 'mrf_id');
     }

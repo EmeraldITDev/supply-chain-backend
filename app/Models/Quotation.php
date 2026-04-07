@@ -9,7 +9,6 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 class Quotation extends Model
 {
     protected $fillable = [
-        'mrf_id',
         'quotation_id',
         'rfq_id',
         'vendor_id',
@@ -53,7 +52,7 @@ class Quotation extends Model
     /**
      * Get the RFQ this quotation is for
      */
-    public function rfq(): BelongsTo
+    public function rfq()
     {
         return $this->belongsTo(RFQ::class, 'rfq_id');
     }
