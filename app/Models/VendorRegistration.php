@@ -43,6 +43,9 @@ class VendorRegistration extends Model
         'approved_at' => 'datetime',
         'password_changed_at' => 'datetime',
         'documents' => 'array',
+        'created_at' => 'datetime',
+        'updated_at' => 'datetime',
+        'approved_at' => 'datetime',
     ];
 
     /**

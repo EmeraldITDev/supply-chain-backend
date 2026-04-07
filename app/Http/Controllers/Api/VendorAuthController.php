@@ -113,7 +113,9 @@ class VendorAuthController extends Controller
                         'rating' => (float) ($vendor->rating ?? 0),
                     ],
                     'token' => $token,
-                    'expiresAt' => $expiresAt->toIso8601String(),
+                    'expiresAt' => $expiresAt
+                        ? \Carbon\Carbon::parse($expiresAt)->toIso8601String()
+                    : null,
                     'requiresPasswordChange' => $user->must_change_password ?? false,
                 ]
             ], 200);
@@ -216,7 +218,9 @@ class VendorAuthController extends Controller
                         'role' => $user->role,
                         'mustChangePassword' => $user->must_change_password ?? false,
                     ],
-                    'tokenExpiresAt' => $currentToken->expires_at ? $currentToken->expires_at->toIso8601String() : null,
+                    'tokenExpiresAt' => $currentToken->expires_at
+                        ? \Carbon\Carbon::parse($currentToken->expires_at)->toIso8601String()
+                        : null,
                 ]
             ], 200);
         } catch (\Exception $e) {
@@ -316,7 +320,9 @@ class VendorAuthController extends Controller
                     'category' => $vendor->category,
                     'status' => $vendor->status,
                     'rating' => (float) ($vendor->rating ?? 0),
-                    'updatedAt' => $vendor->updated_at->toIso8601String(),
+                    'updatedAt' => $vendor->updated_at
+                        ? \Carbon\Carbon::parse($vendor->updated_at)->toIso8601String()
+                        : null,
                 ]
             ]
         ], 200);
@@ -364,8 +370,12 @@ class VendorAuthController extends Controller
                     'rating' => (float) ($vendor->rating ?? 0),
                     'totalOrders' => $vendor->total_orders ?? 0,
                     'taxId' => $vendor->tax_id,
-                    'createdAt' => $vendor->created_at->toIso8601String(),
-                    'updatedAt' => $vendor->updated_at->toIso8601String(),
+                    'createdAt' => $vendor->created_at
+                        ? \Carbon\Carbon::parse($vendor->created_at)->toIso8601String()
+                        : null,
+                    'updatedAt' => $vendor->updated_at
+                        ? \Carbon\Carbon::parse($vendor->updated_at)->toIso8601String()
+                        : null,
                 ],
                 'user' => [
                     'id' => $user->id,

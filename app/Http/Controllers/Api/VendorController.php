@@ -723,9 +723,15 @@ class VendorController extends Controller
                 'name' => $registration->approver->name,
                 'email' => $registration->approver->email,
             ] : null,
-            'approvedAt' => $registration->approved_at ? $registration->approved_at->toIso8601String() : null,
-            'createdAt' => $registration->created_at->toIso8601String(),
-            'updatedAt' => $registration->updated_at->toIso8601String(),
+            'approvedAt' => $registration->approved_at
+                ? \Carbon\Carbon::parse($registration->approved_at)->toIso8601String()
+                : null,
+            'createdAt' => $registration->created_at
+                ? \Carbon\Carbon::parse($registration->created_at)->toIso8601String()
+                : null,
+            'updatedAt' => $registration->updated_at
+                ? \Carbon\Carbon::parse($registration->updated_at)->toIso8601String()
+                : null,
             // Financial and country (masked account number for display)
             'countryCode' => $registration->country_code,
             'bankName' => $registration->bank_name,
@@ -1315,7 +1321,9 @@ class VendorController extends Controller
                     'id' => $r->id,
                     'comment' => $r->comment,
                     'rating' => (float) $r->rating,
-                    'createdAt' => $r->created_at->toIso8601String(),
+                    'createdAt' => $r->created_at
+                        ? \Carbon\Carbon::parse($r->created_at)->toIso8601String()
+                        : null,
                     'createdBy' => [
                         'id' => $r->user->id,
                         'name' => $r->user->name,
@@ -1358,7 +1366,9 @@ class VendorController extends Controller
                     'id' => $r->id,
                     'comment' => $r->comment,
                     'rating' => (float) $r->rating,
-                    'createdAt' => $r->created_at->toIso8601String(),
+                    'createdAt' => $r->created_at
+                        ? \Carbon\Carbon::parse($r->created_at)->toIso8601String()
+                        : null,
                     'createdBy' => [
                         'id' => $r->user->id,
                         'name' => $r->user->name,
