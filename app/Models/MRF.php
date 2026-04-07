@@ -35,6 +35,7 @@ class MRF extends Model
         'rejected_at',
         'is_resubmission',
         'previous_submission_id',
+        'contract_type',
         'remarks',
         // PFI (Proforma Invoice)
         'pfi_url',

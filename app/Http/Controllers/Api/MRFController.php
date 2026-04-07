@@ -727,7 +727,7 @@ class MRFController extends Controller
                 'mrf_id' => $mrfId,
                 'title' => $request->title,
                 'category' => $request->category,
-                    'contract_type' => $request->contractType,
+                'contract_type' => $request->contractType,
                 'urgency' => $request->urgency,
                 'description' => $request->description,
                 'quantity' => $request->quantity,
