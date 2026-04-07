@@ -54,7 +54,7 @@ class Quotation extends Model
      */
     public function rfq()
     {
-        return $this->belongsTo(RFQ::class, 'rfq_id');
+        return $this->hasMany(\App\Models\Quotation::class, 'rfq_id');
     }
 
     /**
