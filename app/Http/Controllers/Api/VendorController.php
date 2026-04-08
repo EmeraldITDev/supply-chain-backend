@@ -399,7 +399,9 @@ class VendorController extends Controller
                     'url' => $fileUrl,
                     'fileSize' => $doc->file_size,
                     'fileType' => $doc->file_type,
-                    'uploadedAt' => $doc->uploaded_at ? $doc->uploaded_at->toIso8601String() : now()->toIso8601String(),
+                    'uploadedAt' => $doc->uploaded_at
+                        ? \Carbon\Carbon::parse($doc->uploaded_at)->toIso8601String()
+                        : now()->toIso8601String(),
                 ];
             }
             

@@ -42,6 +42,7 @@ class VendorRegistration extends Model
     protected $casts = [
         'approved_at' => 'datetime',
         'password_changed_at' => 'datetime',
+        'uploaded_at' => 'datetime',
         'documents' => 'array',
         'created_at' => 'datetime',
         'updated_at' => 'datetime',
