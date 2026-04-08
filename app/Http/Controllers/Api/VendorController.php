@@ -406,7 +406,7 @@ class VendorController extends Controller
             }
             
             // Get document count for response
-            $documentCount = $registration->documents->count();
+            $documentCount = count($registration->documents ?? []);
             
             return response()->json([
                 'success' => true,
