@@ -15,7 +15,7 @@ return [
     |
     */
 
-    'paths' => ['*'], // Handle all paths since CORS middleware is global
+    'paths' => ['api/*', 'sanctum/csrf-cookie'], // Handle all paths since CORS middleware is global
 
     'allowed_methods' => ['*'],
 
