@@ -438,143 +438,16 @@ class VendorController extends Controller
      * Get all vendor registrations (procurement_manager and supply_chain_director only)
      */
     public function registrations(Request $request)
-    {
-        $user = $request->user();
+{
+    $user = $request->user();
 
-        // Check permission - allow procurement manager, supply chain director, and executive-level roles
-        $allowedRoles = [
-            'procurement_manager',
-            'supply_chain_director',
-            'supply_chain', // alias for supply_chain_director
-            'executive',
-            'chairman',
-            'admin'
-        ];
-        
-        if (!in_array($user->role, $allowedRoles)) {
-            return response()->json([
-                'success' => false,
-                'error' => 'Insufficient permissions',
-                'code' => 'FORBIDDEN'
-            ], 403);
-        }
-
-        $query = VendorRegistration::with(['vendor', 'approver', 'documents']);
-
-        // Filter by status
-        if ($request->has('status')) {
-            $query->where('status', $request->status);
-        }
-
-        $registrations = $query->orderBy('created_at', 'desc')->get();
-
-        $mappedRegistrations = $registrations->map(function($reg) {
-            // Format documents with download URLs using VendorDocumentService
-            // Priority: Use documents relationship (table) first, then fallback to JSON column
-            $formattedDocuments = [];
-            $documentService = app(VendorDocumentService::class);
-            
-            // First, try to get documents from the relationship (more reliable)
-            $documentRecords = ($reg->documents instanceof \Illuminate\Support\Collection) ? $reg->documents : collect(is_array($reg->documents) ? $reg->documents : []);
-            
-            // If no documents in relationship, try JSON column
-            if ($documentRecords->isEmpty()) {
-                $documentMetadata = is_array($reg->documents) ? $reg->documents : [];
-                // Convert JSON array to collection-like structure
-                $documentRecords = collect($documentMetadata)->map(function($doc) {
-                    return (object) $doc; // Convert to object for consistency
-                });
-            }
-            
-            foreach ($documentRecords as $doc) {
-                // Handle both Eloquent models and array/object data
-                $docId = is_object($doc) && isset($doc->id) ? $doc->id : (is_array($doc) ? ($doc['id'] ?? null) : null);
-                $filePath = is_object($doc) && isset($doc->file_path) ? $doc->file_path : (is_array($doc) ? ($doc['file_path'] ?? null) : null);
-                $fileName = is_object($doc) && isset($doc->file_name) ? $doc->file_name : (is_array($doc) ? ($doc['file_name'] ?? 'Unknown') : 'Unknown');
-                $fileType = is_object($doc) && isset($doc->file_type) ? $doc->file_type : (is_array($doc) ? ($doc['file_type'] ?? null) : null);
-                $fileSize = is_object($doc) && isset($doc->file_size) ? $doc->file_size : (is_array($doc) ? ($doc['file_size'] ?? null) : null);
-                $fileShareUrl = is_object($doc) && isset($doc->file_share_url) ? $doc->file_share_url : (is_array($doc) ? ($doc['file_share_url'] ?? null) : null);
-                $uploadedAt = is_object($doc) && isset($doc->uploaded_at) ? $doc->uploaded_at : (is_array($doc) ? ($doc['uploaded_at'] ?? now()->toIso8601String()) : now()->toIso8601String());
-                
-                $fileUrl = null;
-                
-                if ($filePath && !$fileShareUrl) {
-                    try {
-                        $fileUrl = $documentService->getDocumentUrl($filePath, $docId, $reg->id);
-                    } catch (\Exception $e) {
-                        \Log::warning("Failed to generate document URL for {$filePath}: " . $e->getMessage());
-                        // Fallback to API download endpoint
-                        if ($docId) {
-                            $fileUrl = url("/api/vendors/registrations/{$reg->id}/documents/{$docId}/download");
-                        }
-                    }
-                } else if ($fileShareUrl) {
-                    // If we have a share URL (S3 or other storage), use it as the file URL
-                    $fileUrl = $fileShareUrl;
-                } else if ($docId) {
-                    // Last resort: use download endpoint
-                    $fileUrl = url("/api/vendors/registrations/{$reg->id}/documents/{$docId}/download");
-                }
-                
-                // Format uploaded_at
-                $uploadedAtFormatted = $uploadedAt;
-                if ($uploadedAt instanceof \Carbon\Carbon || $uploadedAt instanceof \DateTime) {
-                    $uploadedAtFormatted = $uploadedAt->toIso8601String();
-                } elseif (is_string($uploadedAt)) {
-                    // Already a string, keep as is
-                } else {
-                    $uploadedAtFormatted = now()->toIso8601String();
-                }
-                
-                $formattedDocuments[] = [
-                    'id' => (string) ($docId ?? ''),
-                    'type' => $fileType,
-                    'fileName' => $fileName,
-                    'name' => $fileName,
-                    'filePath' => $filePath,
-                    'fileUrl' => $fileUrl,
-                    'file_url' => $fileUrl,
-                    'url' => $fileUrl,
-                    'file_share_url' => $fileShareUrl,
-                    'fileShareUrl' => $fileShareUrl, // Also include camelCase for frontend compatibility
-                    'fileSize' => $fileSize,
-                    'fileData' => $fileUrl,
-                    'uploadedAt' => $uploadedAtFormatted,
-                ];
-            }
-
-            return [
-                'id' => (string) $reg->id, // Ensure ID is a string for frontend
-                'companyName' => $reg->company_name,
-                'category' => $reg->category,
-                'email' => $reg->email,
-                'phone' => $reg->phone,
-                'address' => $reg->address,
-                'taxId' => $reg->tax_id,
-                'contactPerson' => $reg->contact_person,
-                'status' => $reg->status,
-                'rejectionReason' => $reg->rejection_reason,
-                'approvalRemarks' => $reg->approval_remarks,
-                'vendorId' => $reg->vendor ? $reg->vendor->vendor_id : null,
-                'documents' => $formattedDocuments,
-                'createdAt' => $reg->created_at
-                    ? \Carbon\Carbon::parse($reg->created_at)->toIso8601String()
-                    : null,
-                // Financial and country (masked account number for display)
-                'countryCode' => $reg->country_code,
-                'bankName' => $reg->bank_name,
-                'accountNumber' => $this->maskAccountNumber($reg->account_number),
-                'accountName' => $reg->account_name,
-                'currency' => $reg->currency,
-            ];
-        });
-
-        return response()->json([
-            'success' => true,
-            'data' => $mappedRegistrations,
-        ]);
-    }
-
+    return response()->json([
+        'success' => true,
+        'user_role' => $user?->role,
+        'count' => \App\Models\VendorRegistration::count(),
+        'latest' => \App\Models\VendorRegistration::latest()->first(),
+    ]);
+}
     /**
      * Get a single vendor registration by ID
      */
