@@ -247,13 +247,13 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/vendors', [VendorController::class, 'index']);
     Route::get('/vendors/quotations', [VendorController::class, 'getVendorQuotations']);
     Route::delete('/vendors/quotations/{id}', [QuotationController::class, 'destroy']); // Vendor can delete their own quotations
-    Route::get('/vendors/{id}', [VendorController::class, 'show']);
     Route::delete('/vendors/{id}', [VendorController::class, 'destroy']);
     Route::post('/vendors/invite', [VendorController::class, 'inviteVendor']);
     Route::post('/vendors/{id}/rating', [VendorController::class, 'addRating']);
     Route::get('/vendors/{id}/comments', [VendorController::class, 'getComments']);
     Route::get('/vendors/registrations', [VendorController::class, 'registrations']);
     Route::get('/vendors/registrations/{id}', [VendorController::class, 'getRegistration']);
+    Route::get('/vendors/{id}', [VendorController::class, 'show']);
     Route::get('/vendors/registrations/{registrationId}/documents/{documentId}/download', [VendorController::class, 'downloadDocument']);
     Route::get('/vendors/documents/expiring', [VendorController::class, 'getExpiringDocuments']);
     Route::post('/vendors/registrations/{id}/approve', [VendorController::class, 'approveRegistration']);
