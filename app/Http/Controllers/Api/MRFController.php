@@ -1541,6 +1541,74 @@ class MRFController extends Controller
         }
     }
 
+    public function executiveReject(Request $request, $id)
+    {
+        $user = $request->user();
+
+        if (!$user) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Unauthorized'
+            ], 401);
+        }
+
+        $allowedRoles = ['executive', 'chairman', 'admin'];
+
+        if (!in_array($user->role, $allowedRoles)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'You do not have permission to reject this MRF.'
+            ], 403);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'reason' => ['required', 'string']
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Validation failed',
+                'errors' => $validator->errors()
+            ], 422);
+        }
+
+        $mrf = MRF::find($id);
+
+        if (!$mrf) {
+            return response()->json([
+                'success' => false,
+                'message' => 'MRF not found.'
+            ], 404);
+        }
+
+        if ($mrf->workflow_state !== 'executive_review') {
+            return response()->json([
+                'success' => false,
+                'message' => 'Only MRFs in executive_review can be rejected by Executive.'
+            ], 422);
+        }
+
+        $mrf->workflow_state = 'rejected';
+        $mrf->status = 'rejected';
+        $mrf->current_stage = 'executive_review';
+        $mrf->rejection_reason = $request->reason;
+        $mrf->rejection_comments = $request->reason;
+        $mrf->rejected_by = $user->id;
+        $mrf->rejected_at = now();
+        $mrf->executive_approved = false;
+        $mrf->executive_approved_by = null;
+        $mrf->executive_approved_at = null;
+        $mrf->executive_remarks = $request->reason;
+
+        $mrf->save();
+
+        return response()->json([
+            'success' => true,
+            'message' => 'MRF rejected successfully.',
+            'data' => $mrf
+        ]);
+    }
     /**
      * Download signed PO PDF
      */
