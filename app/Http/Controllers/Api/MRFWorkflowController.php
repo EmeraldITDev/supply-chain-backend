@@ -275,6 +275,7 @@ class MRFWorkflowController extends Controller
             'approver_name' => $user->name,
             'approver_email' => $user->email,
             'remarks' => $request->remarks,
+            'performed_by' => $user->id
         ]);
 
         // Log activity
