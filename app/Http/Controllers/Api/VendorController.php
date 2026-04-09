@@ -438,16 +438,39 @@ class VendorController extends Controller
      * Get all vendor registrations (procurement_manager and supply_chain_director only)
      */
     public function registrations(Request $request)
-{
-    $user = $request->user();
-
-    return response()->json([
-        'success' => true,
-        'user_role' => $user?->role,
-        'count' => \App\Models\VendorRegistration::count(),
-        'latest' => \App\Models\VendorRegistration::latest()->first(),
-    ]);
-}
+    {
+        $user = $request->user();
+    
+        $allowedRoles = [
+            'procurement_manager',
+            'supply_chain_director',
+            'supply_chain',
+            'executive',
+            'chairman',
+            'admin'
+        ];
+        
+        if (!in_array($user->role, $allowedRoles)) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Insufficient permissions',
+                'code' => 'FORBIDDEN'
+            ], 403);
+        }
+    
+        $query = VendorRegistration::with(['vendor', 'approver', 'documents']);
+    
+        if ($request->has('status')) {
+            $query->where('status', $request->status);
+        }
+    
+        $registrations = $query->orderBy('created_at', 'desc')->get();
+    
+        return response()->json([
+            'success' => true,
+            'data' => $registrations
+        ]);
+    }
     /**
      * Get a single vendor registration by ID
      */
