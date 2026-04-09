@@ -1591,7 +1591,7 @@ class MRFController extends Controller
             ], 422);
         }
 
-        $mrf->workflow_state = 'rejected';
+        $mrf->workflow_state = 'executive_review';
         $mrf->status = 'rejected';
         $mrf->current_stage = 'executive_review';
         $mrf->rejection_reason = $request->reason;
