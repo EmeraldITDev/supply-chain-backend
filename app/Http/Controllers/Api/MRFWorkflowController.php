@@ -150,6 +150,7 @@ class MRFWorkflowController extends Controller
             'approver_email' => $user->email,
             'remarks' => $request->remarks,
             'performer_name' => $user->name,
+            'performer_role' => $user->role,
             'performed_by' => $user->id
         ]);
 
