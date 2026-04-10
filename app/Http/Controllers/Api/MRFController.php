@@ -1633,6 +1633,74 @@ class MRFController extends Controller
             'data' => $mrf
         ]);
     }
+
+    public function supplyChainDirectorReject(Request $request, $id)
+    {
+        $user = $request->user();
+
+        if (!$user) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Unauthorized'
+            ], 401);
+        }
+
+        $allowedRoles = ['supply_chain_director', 'supply_chain', 'admin'];
+
+        if (!in_array($user->role, $allowedRoles)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'You do not have permission to reject this MRF.'
+            ], 403);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'reason' => ['required', 'string']
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Validation failed',
+                'errors' => $validator->errors()
+            ], 422);
+        }
+
+        $mrf = is_numeric($id)
+            ? MRF::find($id)
+            : MRF::where('mrf_id', $id)->first();
+
+        if (!$mrf) {
+            return response()->json([
+                'success' => false,
+                'message' => 'MRF not found.'
+            ], 404);
+        }
+
+        if ($mrf->workflow_state !== 'supply_chain_director_review') {
+            return response()->json([
+                'success' => false,
+                'message' => 'Only MRFs in supply_chain_director_review can be rejected by Supply Chain Director.'
+            ], 422);
+        }
+
+        $mrf->workflow_state = 'supply_chain_director_rejected';
+        $mrf->status = 'rejected';
+        $mrf->current_stage = 'rejected';
+        $mrf->rejection_reason = $request->reason;
+        $mrf->rejection_comments = $request->reason;
+        $mrf->rejected_by = $user->id;
+        $mrf->rejected_at = now();
+        $mrf->remarks = $request->reason;
+
+        $mrf->save();
+
+        return response()->json([
+            'success' => true,
+            'message' => 'MRF rejected successfully.',
+            'data' => $mrf
+        ]);
+    }
     /**
      * Download signed PO PDF
      */

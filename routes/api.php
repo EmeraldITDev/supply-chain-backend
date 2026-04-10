@@ -180,6 +180,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/mrfs/{id}/reject', [MRFController::class, 'reject']); // Legacy
     Route::delete('/mrfs/{id}', [MRFController::class, 'destroy']);
     Route::post('/mrfs/{id}/executive-reject', [MRFController::class, 'executiveReject']);
+    Route::post('/mrfs/{id}/supply-chain-director-reject', [MRFController::class, 'supplyChainDirectorReject']);
     
     // MRF Workflow routes (new simplified workflow)
     // NEW: Supply Chain Director is first approver
