@@ -138,6 +138,9 @@ class MRFWorkflowController extends Controller
             'current_stage' => $isApproved ? 'procurement_review' : 'rejected',
             'workflow_state' => $isApproved ? 'supply_chain_director_approved' : 'supply_chain_director_rejected',
             'remarks' => $request->remarks,
+            'director_approved_at' => $isApproved ? now() : null,
+            'procurement_review_started_at' => $isApproved ? now() : null,
+            'last_action_by_role' => in_array($user->role, ['admin']) ? 'admin' : 'supply_chain_director',
         ]);
 
         // Record approval history
