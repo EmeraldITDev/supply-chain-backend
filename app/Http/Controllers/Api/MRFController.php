@@ -1654,7 +1654,9 @@ class MRFController extends Controller
     {
         $user = $request->user();
     
-        $mrf = MRF::find($id);
+        $mrf = is_numeric($id)
+            ? MRF::find($id)
+            : MRF::where('mrf_id', $id)->first();
     
         if (!$mrf) {
             return response()->json([
