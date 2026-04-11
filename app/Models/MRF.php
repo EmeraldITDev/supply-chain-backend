@@ -48,6 +48,9 @@ class MRF extends Model
         'procurement_review_started_at',
         'last_action_by_role',
 
+        'director_approved_by',
+        'director_remarks',
+        
         'executive_remarks',
         // Chairman approval
         'chairman_approved',
