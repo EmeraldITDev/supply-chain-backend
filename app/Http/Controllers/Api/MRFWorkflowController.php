@@ -898,6 +898,8 @@ class MRFWorkflowController extends Controller
         $mrf->update([
             'status' => 'procurement_review',
             'current_stage' => 'procurement',
+            'procurement_review_started_at' => now(),
+            'last_action_by_role' => in_array($user->role, ['admin']) ? 'admin' : 'executive',
         ]);
 
         // Record in approval history
