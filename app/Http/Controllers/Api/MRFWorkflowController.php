@@ -852,6 +852,7 @@ class MRFWorkflowController extends Controller
             'executive_approved_by' => $user->id,
             'executive_approved_at' => now(),
             'executive_remarks' => $request->remarks,
+            'last_action_by_role' => in_array($user->role, ['admin']) ? 'admin' : 'executive',
         ]);
 
         // Transition to executive_approved state, then to procurement_review
