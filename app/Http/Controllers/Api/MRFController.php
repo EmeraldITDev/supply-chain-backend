@@ -399,11 +399,24 @@ class MRFController extends Controller
                         'id' => null,
                         'name' => $quotation->vendor_name ?? 'Unknown Vendor',
                     ],
+                    
                     'totalAmount' => (float) $quotation->total_amount,
+                    'total_amount' => (float) $quotation->total_amount,
+                    'total_order_value' => (float) $quotation->total_amount,
+                    'totalOrderValue' => (float) $quotation->total_amount,
+                    'price' => (float) ($quotation->price ?? $quotation->total_amount),
+
                     'currency' => $quotation->currency ?? 'NGN',
+
                     'deliveryDays' => $quotation->delivery_days ?? null,
+                    'delivery_days' => $quotation->delivery_days ?? null,
                     'deliveryDate' => $quotation->delivery_date ? $quotation->delivery_date->format('Y-m-d') : null,
+                    'delivery_date' => $quotation->delivery_date ? $quotation->delivery_date->format('Y-m-d') : null,
+
                     'paymentTerms' => $quotation->payment_terms ?? null,
+                    'payment_terms' => $quotation->payment_terms ?? null,
+                    'payment_terms_text' => $quotation->payment_terms ?? null,
+
                     'validityDays' => $quotation->validity_days,
                     'warrantyPeriod' => $quotation->warranty_period,
                     'notes' => $quotation->notes,
@@ -500,11 +513,20 @@ class MRFController extends Controller
                             'name' => $selectedQuotation->vendor_name ?? 'Unknown Vendor',
                         ],
                         'totalAmount' => (float) $selectedQuotation->total_amount,
+                        'total_amount' => (float) $selectedQuotation->total_amount,
+                        'total_order_value' => (float) $selectedQuotation->total_amount,
+                        'totalOrderValue' => (float) $selectedQuotation->total_amount,
                         'currency' => $selectedQuotation->currency ?? 'NGN',
-                        'price' => (float) $selectedQuotation->price,
+                        'price' => (float) ($selectedQuotation->price ?? $selectedQuotation->total_amount),
+
                         'deliveryDays' => $selectedQuotation->delivery_days ?? null,
+                        'delivery_days' => $selectedQuotation->delivery_days ?? null,
                         'deliveryDate' => $selectedQuotation->delivery_date ? $selectedQuotation->delivery_date->format('Y-m-d') : null,
+                        'delivery_date' => $selectedQuotation->delivery_date ? $selectedQuotation->delivery_date->format('Y-m-d') : null,
+
                         'paymentTerms' => $selectedQuotation->payment_terms ?? null,
+                        'payment_terms' => $selectedQuotation->payment_terms ?? null,
+                        'payment_terms_text' => $selectedQuotation->payment_terms ?? null,
                         'validityDays' => $selectedQuotation->validity_days,
                         'warrantyPeriod' => $selectedQuotation->warranty_period,
                         'notes' => $selectedQuotation->notes,
