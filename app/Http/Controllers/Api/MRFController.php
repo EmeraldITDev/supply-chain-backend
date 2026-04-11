@@ -149,6 +149,9 @@ class MRFController extends Controller
                 'executive_approved' => $mrf->executive_approved ?? false,
                 'executive_approved_at' => $mrf->executive_approved_at?->toIso8601String(),
                 'executive_remarks' => $mrf->executive_remarks,
+                'scd_approved_by' => $mrf->director_approved_by ?? $mrf->scd_approved_by ?? $mrf->supply_chain_approved_by ?? null,
+                'scd_approved_at' => ($mrf->scd_approved_at ?? $mrf->director_approved_at ?? $mrf->supply_chain_approved_at)?->toIso8601String(),
+                'scd_remarks' => $mrf->scd_remarks ?? $mrf->director_remarks ?? $mrf->supply_chain_remarks ?? $mrf->remarks ?? null,
                 'chairman_approved' => $mrf->chairman_approved ?? false,
                 'chairman_approved_at' => $mrf->chairman_approved_at?->toIso8601String(),
                 'chairman_remarks' => $mrf->chairman_remarks,
@@ -256,7 +259,7 @@ class MRFController extends Controller
      */
     public function show($id)
     {
-        $mrf = MRF::where('mrf_id', $id)->with('requester')->first();
+        $mrf = MRF::where('mrf_id', $id)->with(['requester', 'directorApprover'])->first();
 
         if (!$mrf) {
             return response()->json([
@@ -296,6 +299,18 @@ class MRFController extends Controller
                 'email' => $mrf->executiveApprover->email,
             ] : null,
             'executiveRemarks' => $mrf->executive_remarks,
+            'scd_approved_by' => $mrf->directorApprover?->name
+                ?? $mrf->director_approved_by
+                ?? $mrf->scd_approved_by
+                ?? $mrf->supply_chain_approved_by
+                ?? null,
+            'scd_approved_at' => ($mrf->scd_approved_at ?? $mrf->director_approved_at ?? $mrf->supply_chain_approved_at)?->toIso8601String(),
+            'scd_remarks' => $mrf->scd_remarks
+                ?? $mrf->director_remarks
+                ?? $mrf->supply_chain_remarks
+                ?? $mrf->remarks
+                ?? null,
+            
             'chairmanApproved' => (bool) $mrf->chairman_approved,
             'chairmanApprovedAt' => $mrf->chairman_approved_at ? $mrf->chairman_approved_at->toIso8601String() : null,
             // PO information - allows Supply Chain to review/download unsigned PO

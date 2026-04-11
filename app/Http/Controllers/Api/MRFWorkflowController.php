@@ -140,6 +140,8 @@ class MRFWorkflowController extends Controller
             'remarks' => $request->remarks,
             'director_approved_at' => $isApproved ? now() : null,
             'procurement_review_started_at' => $isApproved ? now() : null,
+            'director_approved_by' => $isApproved ? $user->name : null,
+            'director_remarks' => $isApproved ? $request->remarks : null,
             'last_action_by_role' => in_array($user->role, ['admin']) ? 'admin' : 'supply_chain_director',
         ]);
 
