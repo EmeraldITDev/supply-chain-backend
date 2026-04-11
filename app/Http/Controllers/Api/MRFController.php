@@ -1679,29 +1679,21 @@ class MRFController extends Controller
             'category' => 'sometimes|string',
         ]);
     
-        // Update changed fields
         $mrf->fill($validated);
     
-        // Clear rejection info
         $mrf->rejection_reason = null;
         $mrf->rejection_comments = null;
         $mrf->rejected_by = null;
         $mrf->rejected_at = null;
     
-        // Mark as resubmission
         $mrf->is_resubmission = true;
     
-        // Route workflow again
         if (strtolower(trim((string) $mrf->contract_type)) === 'emerald') {
-    
             $mrf->workflow_state = 'executive_review';
             $mrf->current_stage = 'executive_review';
-    
         } else {
-    
             $mrf->workflow_state = 'supply_chain_director_review';
             $mrf->current_stage = 'supply_chain_director_review';
-    
         }
     
         $mrf->status = 'pending';
