@@ -1624,6 +1624,7 @@ class MRFController extends Controller
         $mrf->executive_approved_by = null;
         $mrf->executive_approved_at = null;
         $mrf->executive_remarks = $request->reason;
+        $mrf->last_action_by_role = in_array($user->role, ['admin']) ? 'admin' : 'executive';
 
         $mrf->save();
 
@@ -1692,6 +1693,7 @@ class MRFController extends Controller
         $mrf->rejected_by = $user->id;
         $mrf->rejected_at = now();
         $mrf->remarks = $request->reason;
+        $mrf->last_action_by_role = in_array($user->role, ['admin']) ? 'admin' : 'supply_chain_director';
 
         $mrf->save();
 
