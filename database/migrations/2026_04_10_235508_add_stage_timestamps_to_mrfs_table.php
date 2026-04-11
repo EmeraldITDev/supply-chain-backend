@@ -12,9 +12,17 @@ return new class extends Migration
     public function up(): void
     {
         Schema::table('m_r_f_s', function (Blueprint $table) {
-            $table->timestamp('executive_approved_at')->nullable();
-            $table->timestamp('director_approved_at')->nullable();
-            $table->timestamp('procurement_review_started_at')->nullable();
+            if (!Schema::hasColumn('m_r_f_s', 'executive_approved_at')) {
+                $table->timestamp('executive_approved_at')->nullable();
+            }
+    
+            if (!Schema::hasColumn('m_r_f_s', 'director_approved_at')) {
+                $table->timestamp('director_approved_at')->nullable();
+            }
+    
+            if (!Schema::hasColumn('m_r_f_s', 'procurement_review_started_at')) {
+                $table->timestamp('procurement_review_started_at')->nullable();
+            }    
         });
     }
 
@@ -24,11 +32,17 @@ return new class extends Migration
     public function down(): void
     {
         Schema::table('m_r_f_s', function (Blueprint $table) {
-            $table->dropColumn([
-                'executive_approved_at',
-                'director_approved_at',
-                'procurement_review_started_at'
-            ]);
+            if (Schema::hasColumn('m_r_f_s', 'executive_approved_at')) {
+                $table->dropColumn('executive_approved_at');
+            }
+    
+            if (Schema::hasColumn('m_r_f_s', 'director_approved_at')) {
+                $table->dropColumn('director_approved_at');
+            }
+    
+            if (Schema::hasColumn('m_r_f_s', 'procurement_review_started_at')) {
+                $table->dropColumn('procurement_review_started_at');
+            }    
         });
     }
 };
