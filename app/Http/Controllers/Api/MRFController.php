@@ -1653,25 +1653,23 @@ class MRFController extends Controller
     public function resubmit(Request $request, $id)
     {
         $user = $request->user();
-
+    
         $mrf = MRF::find($id);
-
+    
         if (!$mrf) {
             return response()->json([
                 'success' => false,
                 'message' => 'MRF not found'
             ], 404);
         }
-
-        // Optional: ensure only the owner or authorized roles can resubmit
+    
         if ($mrf->status !== 'rejected') {
             return response()->json([
                 'success' => false,
                 'message' => 'Only rejected MRFs can be resubmitted'
             ], 400);
         }
-
-        // Validate only the fields that may be updated
+    
         $validated = $request->validate([
             'title' => 'sometimes|string',
             'description' => 'sometimes|string',
@@ -1680,29 +1678,36 @@ class MRFController extends Controller
             'justification' => 'sometimes|string',
             'category' => 'sometimes|string',
         ]);
-
-        // Update only provided fields
+    
+        // Update changed fields
         $mrf->fill($validated);
-
-        // Reset rejection data
+    
+        // Clear rejection info
         $mrf->rejection_reason = null;
-
+        $mrf->rejection_comments = null;
+        $mrf->rejected_by = null;
+        $mrf->rejected_at = null;
+    
         // Mark as resubmission
         $mrf->is_resubmission = true;
-
-        // Reset workflow based on contract type
+    
+        // Route workflow again
         if (strtolower(trim((string) $mrf->contract_type)) === 'emerald') {
+    
             $mrf->workflow_state = 'executive_review';
             $mrf->current_stage = 'executive_review';
+    
         } else {
+    
             $mrf->workflow_state = 'supply_chain_director_review';
             $mrf->current_stage = 'supply_chain_director_review';
+    
         }
-
+    
         $mrf->status = 'pending';
-
+    
         $mrf->save();
-
+    
         return response()->json([
             'success' => true,
             'message' => 'MRF resubmitted successfully',
