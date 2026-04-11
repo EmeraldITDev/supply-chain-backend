@@ -44,6 +44,10 @@ class MRF extends Model
         'executive_approved',
         'executive_approved_by',
         'executive_approved_at',
+        'director_approved_at',
+        'procurement_review_started_at',
+        'last_action_by_role',
+
         'executive_remarks',
         // Chairman approval
         'chairman_approved',
@@ -99,6 +103,8 @@ class MRF extends Model
         'executive_approved_at' => 'datetime',
         'chairman_approved' => 'boolean',
         'chairman_approved_at' => 'datetime',
+        'procurement_review_started_at' => 'datetime',
+        'director_approved_at' => 'datetime',
         'rejected_at' => 'datetime',
         'po_generated_at' => 'datetime',
         'po_signed_at' => 'datetime',

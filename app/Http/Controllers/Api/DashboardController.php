@@ -179,7 +179,7 @@ class DashboardController extends Controller
         $user = $request->user();
 
         // Check permission
-        $allowedRoles = ['supply_chain_director', 'supply_chain', 'admin'];
+        $allowedRoles = ['supply_chain_director', 'director', 'admin'];
         $hasAllowedRole =
             (isset($user->role) && in_array($user->role, $allowedRoles)) ||
             (method_exists($user, 'hasAnyRole') && $user->hasAnyRole($allowedRoles));

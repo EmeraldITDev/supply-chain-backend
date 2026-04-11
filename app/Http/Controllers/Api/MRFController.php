@@ -1645,7 +1645,7 @@ class MRFController extends Controller
             ], 401);
         }
 
-        $allowedRoles = ['supply_chain_director', 'supply_chain', 'admin'];
+        $allowedRoles = ['supply_chain_director', 'director', 'admin'];
 
         if (!in_array($user->role, $allowedRoles)) {
             return response()->json([
