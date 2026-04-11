@@ -178,6 +178,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::put('/mrfs/{id}', [MRFController::class, 'update']);
     Route::post('/mrfs/{id}/approve', [MRFController::class, 'approve']); // Legacy
     Route::post('/mrfs/{id}/reject', [MRFController::class, 'reject']); // Legacy
+    Route::post('/mrfs/{id}/resubmit', [MRFController::class, 'resubmit']);
     Route::delete('/mrfs/{id}', [MRFController::class, 'destroy']);
     Route::post('/mrfs/{id}/executive-reject', [MRFController::class, 'executiveReject']);
     Route::post('/mrfs/{id}/supply-chain-director-reject', [MRFController::class, 'supplyChainDirectorReject']);
