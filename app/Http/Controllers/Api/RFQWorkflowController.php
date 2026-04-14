@@ -277,6 +277,8 @@ class RFQWorkflowController extends Controller
                         // Amount fields (both formats)
                         'total_amount' => (float) $quotation->total_amount,
                         'totalAmount' => (float) $quotation->total_amount,
+                        'total_order_value' => (float) $quotation->total_amount,
+                        'totalOrderValue' => (float) $quotation->total_amount,
                         'price' => (string) ($quotation->price ?? $quotation->total_amount),
                         'currency' => $quotation->currency ?? 'NGN',
                         
