@@ -246,13 +246,21 @@ class RFQWorkflowController extends Controller
                 $vendor = $quotation->vendor;
                 
                 // Calculate delivery_days from delivery_date if not provided
+                // Calculate delivery_days from delivery_date if not provided
                 $deliveryDays = $quotation->delivery_days;
-                if (!$deliveryDays && $quotation->delivery_date) {
-                    $deliveryDays = now()->diffInDays($quotation->delivery_date, false);
+
+                if ($deliveryDays === null && $quotation->delivery_date) {
+                    $deliveryDays = now()->startOfDay()->diffInDays(
+                        \Carbon\Carbon::parse($quotation->delivery_date)->startOfDay(),
+                        false
+                    );
+
                     if ($deliveryDays < 0) {
                         $deliveryDays = 0; // If delivery date is in the past, set to 0
                     }
                 }
+
+                $deliveryDays = (int) $deliveryDays;
                 
                 // Get submitted date (prefer submitted_at, fallback to created_at)
                 $submittedDate = $quotation->submitted_at ?? $quotation->created_at;

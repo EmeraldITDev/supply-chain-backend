@@ -72,12 +72,19 @@ class QuotationController extends Controller
             'data' => $quotations->map(function($quotation) {
                 // Calculate delivery_days from delivery_date if not provided
                 $deliveryDays = $quotation->delivery_days;
-                if (!$deliveryDays && $quotation->delivery_date) {
-                    $deliveryDays = now()->diffInDays($quotation->delivery_date, false);
+
+                if ($deliveryDays === null && $quotation->delivery_date) {
+                    $deliveryDays = now()->startOfDay()->diffInDays(
+                        \Carbon\Carbon::parse($quotation->delivery_date)->startOfDay(),
+                        false
+                    );
+
                     if ($deliveryDays < 0) {
                         $deliveryDays = 0;
                     }
                 }
+
+                $deliveryDays = (int) $deliveryDays;
                 
                 // Get submitted date (prefer submitted_at, fallback to created_at)
                 $submittedDate = $quotation->submitted_at ?? $quotation->created_at;
@@ -97,6 +104,12 @@ class QuotationController extends Controller
                     'price' => (string) ($quotation->price ?? $quotation->total_amount),
                     'totalAmount' => (float) $quotation->total_amount,
                     'total_amount' => (float) $quotation->total_amount,
+                    'currency' => $quotation->currency ?? 'NGN',
+                    'price' => (string) ($quotation->price ?? $quotation->total_amount),
+                    'totalAmount' => (float) $quotation->total_amount,
+                    'total_amount' => (float) $quotation->total_amount,
+                    'total_order_value' => (float) $quotation->total_amount,
+                    'totalOrderValue' => (float) $quotation->total_amount,
                     'currency' => $quotation->currency ?? 'NGN',
                     
                     // Delivery fields (both formats)

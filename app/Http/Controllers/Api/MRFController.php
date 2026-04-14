@@ -383,6 +383,21 @@ class MRFController extends Controller
                 if ($quotation->status === 'Rejected' || $quotation->review_status === 'rejected') {
                     continue; // Rejected quotations are not shown in active view but remain in database for historical tracking
                 }
+
+                $deliveryDays = $quotation->delivery_days;
+
+                if ($deliveryDays === null && $quotation->delivery_date) {
+                    $deliveryDays = now()->startOfDay()->diffInDays(
+                        \Carbon\Carbon::parse($quotation->delivery_date)->startOfDay(),
+                        false
+                    );
+
+                    if ($deliveryDays < 0) {
+                        $deliveryDays = 0;
+                    }
+                }
+
+                $deliveryDays = (int) $deliveryDays;
                 
                 $allQuotations->push([
                     'id' => $quotation->quotation_id,
@@ -408,8 +423,8 @@ class MRFController extends Controller
 
                     'currency' => $quotation->currency ?? 'NGN',
 
-                    'deliveryDays' => $quotation->delivery_days ?? null,
-                    'delivery_days' => $quotation->delivery_days ?? null,
+                    'deliveryDays' => $deliveryDays,
+                    'delivery_days' => $deliveryDays,
                     'deliveryDate' => $quotation->delivery_date ? $quotation->delivery_date->format('Y-m-d') : null,
                     'delivery_date' => $quotation->delivery_date ? $quotation->delivery_date->format('Y-m-d') : null,
 
