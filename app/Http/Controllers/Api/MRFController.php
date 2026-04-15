@@ -911,6 +911,7 @@ class MRFController extends Controller
                 'code' => 'SERVER_ERROR'
             ], 500);
         }
+        
     }
 
     /**
