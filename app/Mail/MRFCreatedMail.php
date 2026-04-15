@@ -29,7 +29,7 @@ class MRFCreatedMail extends Mailable
     public function envelope(): Envelope
     {
         return new Envelope(
-            subject: 'M R F Created Mail',
+            subject: 'New MRF Created - ' . ($this->data['mrf_id'] ?? ''),
         );
     }
 
@@ -45,10 +45,12 @@ class MRFCreatedMail extends Mailable
     public function content(): Content
     {
         return new Content(
-            view: 'view.name',
+            view: 'emails.mrf-created',
+            with: [
+                'data' => $this->data,
+            ],
         );
     }
-
     /**
      * Get the attachments for the message.
      *
