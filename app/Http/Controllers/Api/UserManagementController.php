@@ -87,7 +87,7 @@ class UserManagementController extends Controller
         $validator = Validator::make($request->all(), [
             'name' => 'required|string|max:255',
             'email' => 'required|email|unique:users,email',
-            'role' => 'required|in:employee,executive,procurement,procurement_manager,supply_chain_director,supply_chain,finance,finance_officer,admin',
+            'role' => 'required|in:admin,employee,executive,procurement_manager,supply_chain_director,finance,chairman,logistics,vendor',
             'department' => 'nullable|string|max:255',
             'password' => 'required|string|min:8',
             'is_admin' => 'nullable|boolean',
