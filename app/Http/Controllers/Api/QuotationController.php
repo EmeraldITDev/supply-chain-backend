@@ -293,6 +293,9 @@ class QuotationController extends Controller
             'total_amount' => $calculatedTotal,
             'currency' => 'NGN', // Default currency
             'delivery_date' => $request->deliveryDate,
+            'delivery_days' => $request->deliveryDays,
+            'payment_terms' => $request->paymentTerms,
+            
             'validity_days' => 30, // Default validity period
             'notes' => $request->notes,
             'status' => 'Pending',
