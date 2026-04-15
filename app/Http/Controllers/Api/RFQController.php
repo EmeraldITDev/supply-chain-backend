@@ -88,6 +88,7 @@ class RFQController extends Controller
             'vendorIds' => 'required|array|min:1',
             'vendorIds.*' => 'required|string|exists:vendors,vendor_id',
             'paymentTerms' => 'nullable|string',
+            'payment_terms' => 'nullable|string',
             'notes' => 'nullable|string',
             'supportingDocuments' => 'nullable|array',
             'supportingDocuments.*' => 'nullable|string|url', // URLs to supporting documents

@@ -294,8 +294,8 @@ class QuotationController extends Controller
             'currency' => 'NGN', // Default currency
             'delivery_date' => $request->deliveryDate,
             'delivery_days' => $request->deliveryDays,
-            'payment_terms' => $request->paymentTerms,
-            
+            'payment_terms' => $request->paymentTerms ?? $request->payment_terms,
+            'warranty_period' => $request->warrantyPeriod ?? $request->warranty_period,
             'validity_days' => 30, // Default validity period
             'notes' => $request->notes,
             'status' => 'Pending',
