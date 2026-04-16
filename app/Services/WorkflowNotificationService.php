@@ -3,24 +3,64 @@
 namespace App\Services;
 
 use App\Mail\MRFCreatedMail;
-use Illuminate\Support\Facades\Mail;
+use App\Mail\SRFCreatedMail;
+use App\Mail\MRFApprovedMail;
+use App\Mail\MRFRejectedMail;
 use App\Models\User;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Mail;
 
 class WorkflowNotificationService
 {
-    public function sendMRFCreated(array $mrf, array $roles = []): void
+    public function notifyMRFSubmitted($mrf): void
     {
-        $recipients = $this->getEmailsByRoles($roles);
+        $emails = $this->getEmailsByRoles(
+            $this->isEmeraldContract($mrf)
+                ? ['executive']
+                : ['supply_chain_director']
+        );
 
-        foreach ($recipients as $email) {
-            Mail::to($email)->queue(new MRFCreatedMail([
-                'mrf_id' => $mrf['mrf_id'] ?? null,
-                'title' => $mrf['title'] ?? null,
-                'department' => $mrf['department'] ?? null,
-                'created_by' => $mrf['created_by'] ?? null,
-                'status' => $mrf['status'] ?? null,
-                'url' => $mrf['url'] ?? null,
-            ]));
+        foreach ($emails as $email) {
+            Mail::to($email)->queue(new MRFCreatedMail($mrf));
+        }
+    }
+
+    public function notifySRFSubmitted($srf): void
+    {
+        $emails = $this->getEmailsByRoles(['supply_chain_director', 'procurement_manager', 'executive']);
+
+        foreach ($emails as $email) {
+            Mail::to($email)->queue(new SRFCreatedMail($srf));
+        }
+    }
+
+    public function notifyMRFApproved($mrf): void
+    {
+        $emails = collect([
+            $mrf->requester?->email ?? null,
+        ])
+        ->filter()
+        ->unique()
+        ->values()
+        ->toArray();
+
+        foreach ($emails as $email) {
+            Mail::to($email)->queue(new MRFApprovedMail($mrf));
+        }
+    }
+
+    public function notifyMRFRejected($mrf, ?string $remarks = null): void
+    {
+        $emails = collect([
+            $mrf->requester?->email ?? null,
+        ])
+        ->filter()
+        ->unique()
+        ->values()
+        ->toArray();
+
+        foreach ($emails as $email) {
+            Mail::to($email)->queue(new MRFRejectedMail($mrf, $remarks));
         }
     }
 
@@ -32,5 +72,10 @@ class WorkflowNotificationService
             ->unique()
             ->values()
             ->toArray();
+    }
+
+    private function isEmeraldContract($mrf): bool
+    {
+        return strtolower(trim((string) $mrf->contract_type)) === 'emerald';
     }
 }

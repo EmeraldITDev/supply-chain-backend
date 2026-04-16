@@ -1681,6 +1681,16 @@ class MRFController extends Controller
 
         $mrf->save();
 
+        try {
+            $mrf->load('requester');
+            $this->notificationService->notifyMRFRejected($mrf, $request->remarks ?? null);
+        } catch (\Exception $e) {
+            \Log::error('Failed to send MRF rejected notification', [
+                'mrf_id' => $mrf->mrf_id,
+                'error' => $e->getMessage()
+            ]);
+        }
+
         return response()->json([
             'success' => true,
             'message' => 'MRF rejected successfully.',

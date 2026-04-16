@@ -145,6 +145,16 @@ class MRFWorkflowController extends Controller
             'last_action_by_role' => in_array($user->role, ['admin']) ? 'admin' : 'supply_chain_director',
         ]);
 
+        try {
+            $mrf->load('requester');
+            $this->notificationService->notifyMRFApproved($mrf);
+        } catch (\Exception $e) {
+            \Log::error('Failed to send MRF approved notification', [
+                'mrf_id' => $mrf->mrf_id,
+                'error' => $e->getMessage()
+            ]);
+        }
+
         // Record approval history
         $approvalRecord = MRFApprovalHistory::create([
             'mrf_id' => $mrf->id,
@@ -856,6 +866,16 @@ class MRFWorkflowController extends Controller
             'executive_remarks' => $request->remarks,
             'last_action_by_role' => in_array($user->role, ['admin']) ? 'admin' : 'executive',
         ]);
+
+        try {
+            $mrf->load('requester');
+            $this->notificationService->notifyMRFApproved($mrf);
+        } catch (\Exception $e) {
+            \Log::error('Failed to send MRF approved notification', [
+                'mrf_id' => $mrf->mrf_id,
+                'error' => $e->getMessage()
+            ]);
+        }
 
         // Transition to executive_approved state, then to procurement_review
         // First transition: executive_review -> executive_approved

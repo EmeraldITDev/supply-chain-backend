@@ -9,21 +9,23 @@ use Illuminate\Mail\Mailables\Content;
 use Illuminate\Mail\Mailables\Envelope;
 use Illuminate\Queue\SerializesModels;
 
-class MRFCreatedMail extends Mailable implements ShouldQueue
+class MRFRejectedMail extends Mailable
 {
     use Queueable, SerializesModels;
 
     public $mrf;
+    public $remarks;
 
-    public function __construct($mrf)
+    public function __construct($mrf, ?string $remarks = null)
     {
         $this->mrf = $mrf;
+        $this->remarks = $remarks;
     }
 
     public function build(): self
     {
         return $this
-            ->subject('New MRF Submitted - ' . $this->mrf->mrf_id)
-            ->view('emails.mrf-created');
+            ->subject('MRF Rejected - ' . $this->mrf->mrf_id)
+            ->view('emails.mrf-rejected');
     }
 }

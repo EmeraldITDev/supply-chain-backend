@@ -30,6 +30,7 @@ class DashboardController extends Controller
             'supply_chain',          // alias for supply_chain_director
             'executive',
             'chairman',
+            'logistics_manager',
             'admin',
         ];
         

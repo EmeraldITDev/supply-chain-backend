@@ -174,6 +174,15 @@ class SRFController extends Controller
             'invoice_share_url' => $invoiceShareUrl,
         ]);
 
+        try {
+            $this->notificationService->notifySRFSubmitted($srf);
+        } catch (\Exception $e) {
+            \Log::error('Failed to send SRF notification', [
+                'srf_id' => $srf->srf_id ?? $srf->id,
+                'error' => $e->getMessage()
+            ]);
+        }
+
         return response()->json([
             'id' => $srf->srf_id,
             'title' => $srf->title,
