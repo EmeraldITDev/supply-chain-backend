@@ -6,6 +6,7 @@ use App\Models\MRF;
 use Illuminate\Bus\Queueable;
 use Illuminate\Notifications\Notification;
 use Illuminate\Contracts\Queue\ShouldQueue;
+use Illuminate\Notifications\Messages\MailMessage;
 
 class MRFRejectedNotification extends Notification implements ShouldQueue
 {
@@ -27,7 +28,26 @@ class MRFRejectedNotification extends Notification implements ShouldQueue
      */
     public function via($notifiable): array
     {
-        return ['database'];
+        return ['mail', 'database'];
+    }
+
+    /**
+     * Get the mail representation of the notification.
+     */
+    public function toMail($notifiable): MailMessage
+    {
+        $frontendUrl = config('app.frontend_url', 'https://emerald-supply-chain.vercel.app');
+        $mrfUrl = rtrim($frontendUrl, '/') . '/mrfs/' . $this->mrf->mrf_id;
+
+        return (new MailMessage)
+            ->subject("MRF Rejected - {$this->mrf->mrf_id}")
+            ->greeting("Hello {$notifiable->name},")
+            ->line("Your Material Requisition Form has been rejected.")
+            ->line("**MRF Number:** {$this->mrf->mrf_id}")
+            ->line("**Rejected By:** {$this->rejectorName}")
+            ->when($this->reason, fn($mail) => $mail->line("**Reason:** {$this->reason}"))
+            ->action('View MRF Details', $mrfUrl)
+            ->line('Please review and resubmit if necessary.');
     }
 
     /**

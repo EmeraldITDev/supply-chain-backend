@@ -6,6 +6,7 @@ use App\Models\MRF;
 use Illuminate\Bus\Queueable;
 use Illuminate\Notifications\Notification;
 use Illuminate\Contracts\Queue\ShouldQueue;
+use Illuminate\Notifications\Messages\MailMessage;
 
 class MRFSubmittedNotification extends Notification implements ShouldQueue
 {
@@ -23,7 +24,34 @@ class MRFSubmittedNotification extends Notification implements ShouldQueue
      */
     public function via($notifiable): array
     {
-        return ['database'];
+        return ['mail', 'database'];
+    }
+
+    /**
+     * Get the mail representation of the notification.
+     */
+    public function toMail($notifiable): MailMessage
+    {
+        $frontendUrl = config('app.frontend_url', 'https://emerald-supply-chain.vercel.app');
+        $mrfUrl = rtrim($frontendUrl, '/') . '/mrfs/' . $this->mrf->mrf_id;
+
+        $isEmeraldContract = strtolower(trim((string) $this->mrf->contract_type)) === 'emerald';
+        $firstApprovalLabel = $isEmeraldContract
+            ? 'Executive Approval'
+            : 'Supply Chain Director Initial Approval';
+
+        return (new MailMessage)
+            ->subject("New MRF Submitted - {$this->mrf->mrf_id}")
+            ->greeting("Hello {$notifiable->name},")
+            ->line("A new Material Requisition Form has been submitted and requires your attention.")
+            ->line("**MRF Number:** {$this->mrf->mrf_id}")
+            ->line("**Submitted By:** {$this->mrf->requester_name}")
+            ->line("**Category:** {$this->mrf->category}")
+            ->line("**Estimated Cost:** " . ($this->mrf->estimated_cost ? '$' . number_format($this->mrf->estimated_cost, 2) : 'Not specified'))
+            ->line("**Urgency:** {$this->mrf->urgency}")
+            ->line("**Approval Stage:** {$firstApprovalLabel}")
+            ->action('Review MRF', $mrfUrl)
+            ->line('Please review and provide your approval or feedback.');
     }
 
     /**
