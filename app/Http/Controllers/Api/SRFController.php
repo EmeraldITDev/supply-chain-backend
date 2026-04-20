@@ -4,11 +4,19 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\SRF;
+use App\Services\WorkflowNotificationService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
 
 class SRFController extends Controller
 {
+    protected WorkflowNotificationService $workflowNotificationService;
+
+    public function __construct(WorkflowNotificationService $workflowNotificationService)
+    {
+        $this->workflowNotificationService = $workflowNotificationService;
+    }
+
     /**
      * Get all SRFs
      */
@@ -175,7 +183,8 @@ class SRFController extends Controller
         ]);
 
         try {
-            $this->notificationService->notifySRFSubmitted($srf);
+            $srf->loadMissing('requester');
+            $this->workflowNotificationService->notifySRFSubmitted($srf);
         } catch (\Exception $e) {
             \Log::error('Failed to send SRF notification', [
                 'srf_id' => $srf->srf_id ?? $srf->id,

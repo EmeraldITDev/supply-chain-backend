@@ -7,11 +7,19 @@ use App\Models\Activity;
 use App\Models\RFQ;
 use App\Models\MRF;
 use App\Models\Vendor;
+use App\Services\WorkflowNotificationService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
 
 class RFQController extends Controller
 {
+    protected WorkflowNotificationService $workflowNotificationService;
+
+    public function __construct(WorkflowNotificationService $workflowNotificationService)
+    {
+        $this->workflowNotificationService = $workflowNotificationService;
+    }
+
     /**
      * Get all RFQs
      */
@@ -210,6 +218,18 @@ class RFQController extends Controller
             ]);
         } catch (\Exception $e) {
             \Log::warning('Failed to log RFQ sent activity', ['error' => $e->getMessage()]);
+        }
+
+        try {
+            $rfq->loadMissing('vendors');
+            $this->workflowNotificationService->notifyRFQSent($rfq);
+        } catch (\Exception $e) {
+            \Log::error('Failed to send RFQ sent email notifications', [
+                'event' => 'rfq_sent',
+                'recipient' => null,
+                'model_id' => $rfq->rfq_id,
+                'error' => $e->getMessage(),
+            ]);
         }
 
         return response()->json([

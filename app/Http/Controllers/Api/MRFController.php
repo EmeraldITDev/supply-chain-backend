@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\MRF;
 use App\Models\Activity;
 use App\Services\NotificationService;
+use App\Services\WorkflowNotificationService;
 use App\Services\WorkflowStateService;
 use App\Services\PermissionService;
 use Illuminate\Http\Request;
@@ -19,15 +20,18 @@ use Dompdf\Options;
 class MRFController extends Controller
 {
     protected NotificationService $notificationService;
+    protected WorkflowNotificationService $workflowNotificationService;
     protected WorkflowStateService $workflowService;
     protected PermissionService $permissionService;
 
     public function __construct(
         NotificationService $notificationService,
+        WorkflowNotificationService $workflowNotificationService,
         WorkflowStateService $workflowService,
         PermissionService $permissionService
     ) {
         $this->notificationService = $notificationService;
+        $this->workflowNotificationService = $workflowNotificationService;
         $this->workflowService = $workflowService;
         $this->permissionService = $permissionService;
     }
@@ -870,6 +874,16 @@ class MRFController extends Controller
                     'error' => $e->getMessage()
                 ]);
             }
+            try {
+                $this->workflowNotificationService->notifyMRFSubmitted($mrf);
+            } catch (\Exception $e) {
+                \Log::error('Failed to send MRF created email notification', [
+                    'event' => 'mrf_created',
+                    'recipient' => null,
+                    'model_id' => $mrf->mrf_id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
 
             return response()->json([
                 'success' => true,
@@ -1072,6 +1086,17 @@ class MRFController extends Controller
 
         // Send notification to requester
         $this->notificationService->notifyMRFApproved($mrf, $user, $request->remarks);
+        try {
+            $mrf->loadMissing('requester');
+            $this->workflowNotificationService->notifyMRFApproved($mrf);
+        } catch (\Exception $e) {
+            \Log::error('Failed to send MRF approved email notification', [
+                'event' => 'mrf_approved',
+                'recipient' => $mrf->requester?->email,
+                'model_id' => $mrf->mrf_id,
+                'error' => $e->getMessage(),
+            ]);
+        }
 
         return response()->json([
             'success' => true,
@@ -1130,6 +1155,17 @@ class MRFController extends Controller
 
         // Send notification to requester
         $this->notificationService->notifyMRFRejected($mrf, $user, $request->reason);
+        try {
+            $mrf->loadMissing('requester');
+            $this->workflowNotificationService->notifyMRFRejected($mrf, $request->reason);
+        } catch (\Exception $e) {
+            \Log::error('Failed to send MRF rejected email notification', [
+                'event' => 'mrf_rejected',
+                'recipient' => $mrf->requester?->email,
+                'model_id' => $mrf->mrf_id,
+                'error' => $e->getMessage(),
+            ]);
+        }
 
         return response()->json([
             'success' => true,
@@ -1683,7 +1719,8 @@ class MRFController extends Controller
 
         try {
             $mrf->load('requester');
-            $this->notificationService->notifyMRFRejected($mrf, $request->remarks ?? null);
+            $this->notificationService->notifyMRFRejected($mrf, $user, $request->reason);
+            $this->workflowNotificationService->notifyMRFRejected($mrf, $request->reason);
         } catch (\Exception $e) {
             \Log::error('Failed to send MRF rejected notification', [
                 'mrf_id' => $mrf->mrf_id,

@@ -11,6 +11,7 @@ use App\Models\QuotationItem;
 use App\Models\Vendor;
 use App\Services\NotificationService;
 use App\Services\EmailService;
+use App\Services\WorkflowNotificationService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\DB;
@@ -19,11 +20,17 @@ class RFQWorkflowController extends Controller
 {
     protected NotificationService $notificationService;
     protected EmailService $emailService;
+    protected WorkflowNotificationService $workflowNotificationService;
 
-    public function __construct(NotificationService $notificationService, EmailService $emailService)
+    public function __construct(
+        NotificationService $notificationService,
+        EmailService $emailService,
+        WorkflowNotificationService $workflowNotificationService
+    )
     {
         $this->notificationService = $notificationService;
         $this->emailService = $emailService;
+        $this->workflowNotificationService = $workflowNotificationService;
     }
 
     /**
@@ -499,6 +506,16 @@ class RFQWorkflowController extends Controller
 
             // Send notifications
             $this->notificationService->notifyQuotationAwarded($selectedQuotation);
+            try {
+                $this->workflowNotificationService->notifyVendorSelected($selectedQuotation);
+            } catch (\Exception $e) {
+                \Log::error('Failed to send vendor selected email notifications', [
+                    'event' => 'vendor_selected',
+                    'recipient' => null,
+                    'model_id' => $selectedQuotation->quotation_id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
             
             // Notify rejected vendors
             $rejectedQuotations = Quotation::where('rfq_id', $rfq->id)
@@ -794,6 +811,16 @@ class RFQWorkflowController extends Controller
 
         // Notify procurement managers
         $this->notificationService->notifyQuotationSubmitted($quotation, $quotation->vendor_name);
+        try {
+            $this->workflowNotificationService->notifyQuotationSubmitted($quotation);
+        } catch (\Exception $e) {
+            \Log::error('Failed to send quotation submitted email notifications', [
+                'event' => 'quotation_submitted',
+                'recipient' => null,
+                'model_id' => $quotation->quotation_id,
+                'error' => $e->getMessage(),
+            ]);
+        }
 
         // Load items for response
         $quotation->load('items');

@@ -12,6 +12,7 @@ use App\Models\Vendor;
 use App\Models\QuotationItem;
 use App\Services\NotificationService;
 use App\Services\EmailService;
+use App\Services\WorkflowNotificationService;
 use App\Services\WorkflowStateService;
 use App\Services\PermissionService;
 use Illuminate\Http\Request;
@@ -25,17 +26,20 @@ class MRFWorkflowController extends Controller
 {
     protected NotificationService $notificationService;
     protected EmailService $emailService;
+    protected WorkflowNotificationService $workflowNotificationService;
     protected WorkflowStateService $workflowService;
     protected PermissionService $permissionService;
 
     public function __construct(
         NotificationService $notificationService, 
         EmailService $emailService,
+        WorkflowNotificationService $workflowNotificationService,
         WorkflowStateService $workflowService,
         PermissionService $permissionService
     ) {
         $this->notificationService = $notificationService;
         $this->emailService = $emailService;
+        $this->workflowNotificationService = $workflowNotificationService;
         $this->workflowService = $workflowService;
         $this->permissionService = $permissionService;
     }
@@ -1484,6 +1488,17 @@ class MRFWorkflowController extends Controller
         
         // Also notify Supply Chain Director (for signature workflow)
         $this->notificationService->notifyPOReadyForSignature($mrf);
+        try {
+            $mrf->loadMissing(['requester', 'selectedVendor']);
+            $this->workflowNotificationService->notifyPOGenerated($mrf);
+        } catch (\Exception $e) {
+            Log::error('Failed to send PO generated email notifications', [
+                'event' => 'po_generated',
+                'recipient' => null,
+                'model_id' => $mrf->mrf_id,
+                'error' => $e->getMessage(),
+            ]);
+        }
 
         // Refresh MRF to get updated values
         $mrf->refresh();
