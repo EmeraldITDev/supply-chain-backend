@@ -12,6 +12,7 @@ use Illuminate\Support\Facades\Mail;
 
 class WorkflowNotificationService
 {
+    //temporary function
     public function notifyMRFSubmitted($mrf): void
     {
         $emails = $this->getEmailsByRoles(
@@ -19,8 +20,19 @@ class WorkflowNotificationService
                 ? ['executive']
                 : ['supply_chain_director']
         );
-
+    
+        \Log::info('MRF notification recipients', [
+            'mrf_id' => $mrf->mrf_id,
+            'contract_type' => $mrf->contract_type,
+            'emails' => $emails,
+        ]);
+    
         foreach ($emails as $email) {
+            \Log::info('Queueing MRF created email', [
+                'mrf_id' => $mrf->mrf_id,
+                'email' => $email,
+            ]);
+    
             Mail::to($email)->queue(new MRFCreatedMail($mrf));
         }
     }
