@@ -471,11 +471,29 @@ class VendorController extends Controller
 
         $registrations = $query->orderBy('created_at', 'desc')->get();
 
-        return response()->json([
-            'success' => true,
-            'data' => $registrations
-        ]);
-    }
+        $mappedRegistrations = $registrations->map(function ($registration) {
+        return [
+            'id' => (string) $registration->id,
+            'companyName' => $registration->company_name,
+            'category' => $registration->category,
+            'email' => $registration->email,
+            'phone' => $registration->phone,
+            'address' => $registration->address,
+            'taxId' => $registration->tax_id,
+            'contactPerson' => $registration->contact_person,
+            'status' => $registration->status,
+            'submittedDate' => optional($registration->created_at)?->toIso8601String(),
+            'reviewedDate' => optional($registration->approved_at)?->toIso8601String(),
+            'reviewedBy' => $registration->approver->name ?? null,
+            'reviewNotes' => $registration->approval_remarks,
+            ];
+        });
+
+            return response()->json([
+                'success' => true,
+                'data' => $mappedRegistrations
+            ]);
+        }
     /**
      * Get a single vendor registration by ID
      */
