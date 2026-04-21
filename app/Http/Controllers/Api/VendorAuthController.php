@@ -48,7 +48,7 @@ class VendorAuthController extends Controller
             // Check if vendor is approved/active (case-insensitive and trim whitespace)
             $vendorStatus = strtolower(trim($vendor->status));
             $allowedStatuses = ['approved', 'active']; // Allow both approved and active status
-            
+
             if (!in_array($vendorStatus, $allowedStatuses)) {
                 Log::warning('Vendor login failed: not approved/active', [
                     'email' => $request->email,
@@ -101,17 +101,7 @@ class VendorAuthController extends Controller
             return response()->json([
                 'success' => true,
                 'data' => [
-                    'vendor' => [
-                        'id' => $vendor->vendor_id,
-                        'name' => $vendor->name,
-                        'email' => $vendor->email,
-                        'phone' => $vendor->phone,
-                        'address' => $vendor->address,
-                        'contactPerson' => $vendor->contact_person,
-                        'category' => $vendor->category,
-                        'status' => $vendor->status,
-                        'rating' => (float) ($vendor->rating ?? 0),
-                    ],
+                    'vendor' => $this->formatVendorData($vendor),
                     'token' => $token,
                     'expiresAt' => $expiresAt
                         ? \Carbon\Carbon::parse($expiresAt)->toIso8601String()
@@ -173,17 +163,17 @@ class VendorAuthController extends Controller
 
             // Get vendor record - use vendor_id from users table
             $vendor = null;
-            
+
             // Method 1: Try vendor relationship
             if ($user->vendor_id && method_exists($user, 'vendor')) {
                 $vendor = $user->vendor;
             }
-            
+
             // Method 2: Find vendor by vendor_id if relationship didn't work
             if (!$vendor && $user->vendor_id) {
                 $vendor = Vendor::find($user->vendor_id);
             }
-            
+
             // Method 3: Try finding vendor by email as last resort
             if (!$vendor) {
                 $vendor = Vendor::where('email', $user->email)->first();
@@ -199,29 +189,17 @@ class VendorAuthController extends Controller
 
             return response()->json([
                 'success' => true,
-                'data' => [
-                    'vendor' => [
-                        'id' => $vendor->vendor_id,
-                        'name' => $vendor->name,
-                        'email' => $vendor->email,
-                        'phone' => $vendor->phone,
-                        'address' => $vendor->address,
-                        'contactPerson' => $vendor->contact_person,
-                        'category' => $vendor->category,
-                        'status' => $vendor->status,
-                        'rating' => (float) ($vendor->rating ?? 0),
-                    ],
-                    'user' => [
-                        'id' => $user->id,
-                        'name' => $user->name,
-                        'email' => $user->email,
-                        'role' => $user->role,
-                        'mustChangePassword' => $user->must_change_password ?? false,
-                    ],
-                    'tokenExpiresAt' => $currentToken->expires_at
-                        ? \Carbon\Carbon::parse($currentToken->expires_at)->toIso8601String()
-                        : null,
-                ]
+                'data' => $this->formatVendorData($vendor),
+                'user' => [
+                    'id' => $user->id,
+                    'name' => $user->name,
+                    'email' => $user->email,
+                    'role' => $user->role,
+                    'mustChangePassword' => $user->must_change_password ?? false,
+                ],
+                'tokenExpiresAt' => $currentToken->expires_at
+                    ? \Carbon\Carbon::parse($currentToken->expires_at)->toIso8601String()
+                    : null,
             ], 200);
         } catch (\Exception $e) {
             Log::error('Get vendor info error', [
@@ -282,7 +260,7 @@ class VendorAuthController extends Controller
 
         // Build update data
         $updateData = [];
-        
+
         if ($request->has('contact_person')) {
             $updateData['contact_person'] = $request->contact_person;
             // Also update user name if contact person changes
@@ -309,22 +287,7 @@ class VendorAuthController extends Controller
         return response()->json([
             'success' => true,
             'message' => 'Profile updated successfully',
-            'data' => [
-                'vendor' => [
-                    'id' => $vendor->vendor_id,
-                    'name' => $vendor->name,
-                    'email' => $vendor->email,
-                    'phone' => $vendor->phone,
-                    'address' => $vendor->address,
-                    'contactPerson' => $vendor->contact_person,
-                    'category' => $vendor->category,
-                    'status' => $vendor->status,
-                    'rating' => (float) ($vendor->rating ?? 0),
-                    'updatedAt' => $vendor->updated_at
-                        ? \Carbon\Carbon::parse($vendor->updated_at)->toIso8601String()
-                        : null,
-                ]
-            ]
+            'data' => $this->formatVendorData($vendor)
         ], 200);
     }
 
@@ -357,33 +320,7 @@ class VendorAuthController extends Controller
 
         return response()->json([
             'success' => true,
-            'data' => [
-                'vendor' => [
-                    'id' => $vendor->vendor_id,
-                    'name' => $vendor->name,
-                    'email' => $vendor->email,
-                    'phone' => $vendor->phone,
-                    'address' => $vendor->address,
-                    'contactPerson' => $vendor->contact_person,
-                    'category' => $vendor->category,
-                    'status' => $vendor->status,
-                    'rating' => (float) ($vendor->rating ?? 0),
-                    'totalOrders' => $vendor->total_orders ?? 0,
-                    'taxId' => $vendor->tax_id,
-                    'createdAt' => $vendor->created_at
-                        ? \Carbon\Carbon::parse($vendor->created_at)->toIso8601String()
-                        : null,
-                    'updatedAt' => $vendor->updated_at
-                        ? \Carbon\Carbon::parse($vendor->updated_at)->toIso8601String()
-                        : null,
-                ],
-                'user' => [
-                    'id' => $user->id,
-                    'name' => $user->name,
-                    'email' => $user->email,
-                    'mustChangePassword' => $user->must_change_password ?? false,
-                ]
-            ]
+            'data' => $this->formatVendorData($vendor),
         ], 200);
     }
 
@@ -502,7 +439,7 @@ class VendorAuthController extends Controller
         // Notify procurement managers about password reset request
         try {
             $notificationService = app(\App\Services\NotificationService::class);
-            
+
             // Get all procurement managers and supply chain directors
             $procurementManagers = User::whereIn('role', [
                 'procurement_manager',
@@ -546,14 +483,96 @@ class VendorAuthController extends Controller
         $lowercase = 'abcdefghijkmnpqrstuvwxyz';
         $numbers = '23456789';
         $special = '!@#$%&*';
-        
+
         $password = '';
         $password .= substr(str_shuffle($uppercase), 0, 3);
         $password .= substr(str_shuffle($lowercase), 0, 3);
         $password .= substr(str_shuffle($numbers), 0, 3);
         $password .= substr(str_shuffle($special), 0, 3);
-        
+
         return str_shuffle($password);
+    }
+
+    /**
+     * Format vendor data with all profile fields
+     * Returns a complete vendor object with normalized field names for the frontend
+     */
+    private function formatVendorData(Vendor $vendor): array
+    {
+        // Get vendor registration if it exists for additional data
+        $registration = $vendor->registrations()->latest()->first();
+
+        // Get documents if they exist
+        $documents = null;
+        if ($registration && $registration->documents) {
+            $documents = is_array($registration->documents)
+                ? $registration->documents
+                : json_decode($registration->documents, true);
+        }
+
+        return [
+            // Basic identification
+            'id' => $vendor->vendor_id,
+            'vendorId' => $vendor->vendor_id,
+            'name' => $vendor->name,
+            'companyName' => $vendor->name,
+
+            // Contact information
+            'email' => $vendor->email,
+            'phone' => $vendor->phone,
+            'alternatePhone' => $vendor->alternate_phone,
+            'contactPerson' => $vendor->contact_person,
+            'contactPersonTitle' => $vendor->contact_person_title,
+            'contactPersonEmail' => $vendor->contact_person_email,
+            'contactPersonPhone' => $vendor->contact_person_phone,
+
+            // Address information
+            'address' => $vendor->address,
+            'city' => $vendor->city,
+            'state' => $vendor->state,
+            'postalCode' => $vendor->postal_code,
+            'country_code' => $vendor->country_code,
+            'countryCode' => $vendor->country_code,
+
+            // Business information
+            'category' => $vendor->category,
+            'website' => $vendor->website,
+            'taxId' => $vendor->tax_id,
+            'tax_id' => $vendor->tax_id,
+            'yearEstablished' => $vendor->year_established,
+            'year_established' => $vendor->year_established,
+            'numberOfEmployees' => $vendor->number_of_employees,
+            'number_of_employees' => $vendor->number_of_employees,
+            'annualRevenue' => $vendor->annual_revenue,
+            'annual_revenue' => $vendor->annual_revenue,
+
+            // Status and rating
+            'status' => $vendor->status,
+            'rating' => (float) ($vendor->rating ?? 0),
+
+            // Statistics
+            'totalOrders' => $vendor->total_orders ?? 0,
+            'total_orders' => $vendor->total_orders ?? 0,
+
+            // Timestamps
+            'createdAt' => $vendor->created_at
+                ? \Carbon\Carbon::parse($vendor->created_at)->toIso8601String()
+                : null,
+            'created_at' => $vendor->created_at
+                ? \Carbon\Carbon::parse($vendor->created_at)->toIso8601String()
+                : null,
+            'updatedAt' => $vendor->updated_at
+                ? \Carbon\Carbon::parse($vendor->updated_at)->toIso8601String()
+                : null,
+            'updated_at' => $vendor->updated_at
+                ? \Carbon\Carbon::parse($vendor->updated_at)->toIso8601String()
+                : null,
+
+            // Documents
+            'documents' => $documents,
+            'registration_documents' => $documents,
+            'kyc_documents' => $documents,
+        ];
     }
 
     /**
@@ -564,14 +583,14 @@ class VendorAuthController extends Controller
         try {
             $user = $request->user();
             $currentToken = $request->user()->currentAccessToken();
-            
+
             // Create new token with 30 days expiration for vendors
             $expiresAt = now()->addDays(30);
             $tokenName = 'vendor-auth-token';
-            
+
             // Delete old token
             $currentToken->delete();
-            
+
             // Create new token
             $newToken = $user->createToken($tokenName, ['*'], $expiresAt)->plainTextToken;
 
