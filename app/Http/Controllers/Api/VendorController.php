@@ -58,7 +58,7 @@ class VendorController extends Controller
 
     /**
      * Find vendor by ID (supports both primary key and vendor_id)
-     * 
+     *
      * @param mixed $id - Can be primary key (integer) or vendor_id (string like "V001")
      * @return Vendor|null
      */
@@ -66,12 +66,12 @@ class VendorController extends Controller
     {
         // Try to find by vendor_id first (business identifier like "V001")
         $vendor = Vendor::where('vendor_id', $id)->first();
-        
+
         // If not found and $id is numeric, try by primary key
         if (!$vendor && is_numeric($id)) {
             $vendor = Vendor::find($id);
         }
-        
+
         return $vendor;
     }
 
@@ -154,6 +154,11 @@ class VendorController extends Controller
             'email' => $request->email ?? $request->get('email'),
             'has_documents' => $request->hasFile('documents'),
         ]);
+        $payloadForLog = $request->except(['account_number', 'documents']);
+        $payloadForLog['account_number_present'] = $request->filled('account_number');
+        $payloadForLog['documents_present'] = $request->hasFile('documents');
+
+        \Log::info('Vendor registration payload snapshot', $payloadForLog);
 
         try {
             // Guard: Ensure request is a single object, not an array of registrations
@@ -175,13 +180,13 @@ class VendorController extends Controller
             $address = $request->input('address');
             $taxId = $request->input('taxId') ?? $request->input('tax_id');
             $contactPerson = $request->input('contactPerson') ?? $request->input('contact_person');
-            
+
             // Normalize email (trim and lowercase) for consistent checking
             $email = strtolower(trim($request->email ?? $request->get('email')));
-            
+
             // Check if registration with this email already exists (case-insensitive)
             $existingRegistration = VendorRegistration::whereRaw('LOWER(email) = ?', [strtolower($email)])->first();
-            
+
             if ($existingRegistration) {
                 // If it's pending, return success (idempotent - same as if they just submitted)
                 if (strtolower($existingRegistration->status) === 'pending') {
@@ -195,7 +200,7 @@ class VendorController extends Controller
                         ]
                     ], 200);
                 }
-                
+
                 // If it's approved or rejected, return appropriate message
                 return response()->json([
                     'success' => false,
@@ -289,25 +294,25 @@ class VendorController extends Controller
             if ($request->hasFile('documents')) {
                 try {
                     $documents = $request->file('documents');
-                    
+
                     // Normalize to array - file() can return single file or array
                     if (!is_array($documents)) {
                         $documents = [$documents];
                     }
-                    
+
                     // Filter out null values
                     $documents = array_filter($documents, function($doc) {
                         return $doc !== null;
                     });
-                    
+
                     if (!empty($documents)) {
                         \Log::info('Processing document uploads', [
                             'registration_id' => $registration->id,
                             'document_count' => count($documents)
                         ]);
-                        
+
                         $documentService->storeDocuments($registration, $documents);
-                        
+
                         \Log::info('Documents stored successfully', [
                             'registration_id' => $registration->id
                         ]);
@@ -347,12 +352,12 @@ class VendorController extends Controller
             // Reload registration with documents to include in response
             $registration->load('documents');
             $registration->refresh();
-            
+
             // Format documents for response
             $documentService = app(VendorDocumentService::class);
             $formattedDocuments = [];
             $documentRecords = $registration->documents ?? collect([]);
-            
+
             foreach ($documentRecords as $doc) {
                 // Guard: Skip if doc is not an object (handle arrays or invalid data)
                 if (is_array($doc) && !($doc instanceof \stdClass)) {
@@ -362,7 +367,7 @@ class VendorController extends Controller
                     ]);
                     $doc = (object) $doc;
                 }
-                
+
                 // Additional guard: Ensure doc has required properties
                 if (!isset($doc->id)) {
                     \Log::warning('Document missing id property, skipping', [
@@ -371,10 +376,10 @@ class VendorController extends Controller
                     ]);
                     continue;
                 }
-                
+
                 $filePath = $doc->file_path ?? null;
                 $fileUrl = $doc->file_share_url ?? $doc->file_url ?? null;
-                
+
                 if ($filePath && !$fileUrl) {
                     try {
                         $fileUrl = $documentService->getDocumentUrl($filePath, $doc->id, $registration->id);
@@ -388,7 +393,7 @@ class VendorController extends Controller
                         }
                     }
                 }
-                
+
                 $formattedDocuments[] = [
                     'id' => (string) $doc->id,
                     'fileName' => $doc->file_name ?? null,
@@ -404,10 +409,10 @@ class VendorController extends Controller
                         : now()->toIso8601String(),
                 ];
             }
-            
+
             // Get document count for response
             $documentCount = count($registration->documents ?? []);
-            
+
             return response()->json([
                 'success' => true,
                 'message' => 'Vendor registration submitted successfully',
@@ -424,7 +429,7 @@ class VendorController extends Controller
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString()
             ]);
-            
+
             return response()->json([
                 'success' => false,
                 'error' => 'An error occurred during registration. Please try again.',
@@ -440,7 +445,7 @@ class VendorController extends Controller
     public function registrations(Request $request)
     {
         $user = $request->user();
-    
+
         $allowedRoles = [
             'procurement_manager',
             'supply_chain_director',
@@ -449,7 +454,7 @@ class VendorController extends Controller
             'chairman',
             'admin'
         ];
-        
+
         if (!in_array($user->role, $allowedRoles)) {
             return response()->json([
                 'success' => false,
@@ -457,15 +462,15 @@ class VendorController extends Controller
                 'code' => 'FORBIDDEN'
             ], 403);
         }
-    
+
         $query = VendorRegistration::with(['vendor', 'approver', 'documents']);
-    
+
         if ($request->has('status')) {
             $query->where('status', $request->status);
         }
-    
+
         $registrations = $query->orderBy('created_at', 'desc')->get();
-    
+
         return response()->json([
             'success' => true,
             'data' => $registrations
@@ -487,7 +492,7 @@ class VendorController extends Controller
             'chairman',
             'admin'
         ];
-        
+
         if (!in_array($user->role, $allowedRoles)) {
             return response()->json([
                 'success' => false,
@@ -510,7 +515,7 @@ class VendorController extends Controller
         // Priority: Use documents relationship (table) first, then fallback to JSON column
         $formattedDocuments = [];
         $documentService = app(VendorDocumentService::class);
-        
+
         // First, try to get documents from the relationship (more reliable)
         // Check if documents relationship is loaded (will be a Collection)
         $documentRecords = null;
@@ -528,13 +533,13 @@ class VendorController extends Controller
                 ]);
             }
         }
-        
+
         // If no documents in relationship, try JSON column
         if (!$documentRecords || $documentRecords->isEmpty()) {
             // Access the JSON column directly (not the relationship)
             $jsonDocuments = $registration->getAttribute('documents');
             $documentMetadata = is_array($jsonDocuments) ? $jsonDocuments : [];
-            
+
             if (!empty($documentMetadata)) {
                 // Convert JSON array to collection-like structure
                 $documentRecords = collect($documentMetadata)->map(function($doc) {
@@ -544,7 +549,7 @@ class VendorController extends Controller
                 $documentRecords = collect([]);
             }
         }
-        
+
         foreach ($documentRecords as $doc) {
             // Handle both Eloquent models and array/object data
             $docId = is_object($doc) && isset($doc->id) ? $doc->id : (is_array($doc) ? ($doc['id'] ?? null) : null);
@@ -554,9 +559,9 @@ class VendorController extends Controller
             $fileSize = is_object($doc) && isset($doc->file_size) ? $doc->file_size : (is_array($doc) ? ($doc['file_size'] ?? null) : null);
             $fileShareUrl = is_object($doc) && isset($doc->file_share_url) ? $doc->file_share_url : (is_array($doc) ? ($doc['file_share_url'] ?? null) : null);
             $uploadedAt = is_object($doc) && isset($doc->uploaded_at) ? $doc->uploaded_at : (is_array($doc) ? ($doc['uploaded_at'] ?? now()->toIso8601String()) : now()->toIso8601String());
-            
+
             $fileUrl = null;
-            
+
             if ($filePath && !$fileShareUrl) {
                 try {
                     $fileUrl = $documentService->getDocumentUrl($filePath, $docId, $registration->id);
@@ -574,7 +579,7 @@ class VendorController extends Controller
                 // Last resort: use download endpoint
                 $fileUrl = url("/api/vendors/registrations/{$registration->id}/documents/{$docId}/download");
             }
-            
+
             // Format uploaded_at
             $uploadedAtFormatted = $uploadedAt;
             if ($uploadedAt instanceof \Carbon\Carbon || $uploadedAt instanceof \DateTime) {
@@ -584,7 +589,7 @@ class VendorController extends Controller
             } else {
                 $uploadedAtFormatted = now()->toIso8601String();
             }
-            
+
             $formattedDocuments[] = [
                 'id' => (string) ($docId ?? ''),
                 'type' => $fileType,
@@ -660,7 +665,7 @@ class VendorController extends Controller
             'chairman',
             'admin'
         ];
-        
+
         $hasAllowedRole =
             (isset($user->role) && in_array($user->role, $allowedRoles)) ||
             (method_exists($user, 'hasAnyRole') && $user->hasAnyRole($allowedRoles));
@@ -742,7 +747,7 @@ class VendorController extends Controller
                     'code' => 'DUPLICATE_EMAIL'
                 ], 422);
             }
-            
+
             // Log the full error for debugging
             \Log::error('Vendor approval database error: ' . $e->getMessage(), [
                 'registration_id' => $id,
@@ -750,12 +755,12 @@ class VendorController extends Controller
                 'sql_state' => $e->getCode(),
                 'trace' => $e->getTraceAsString()
             ]);
-            
+
             // Return detailed error in non-production or if debug is enabled
             $errorMessage = config('app.debug') || config('app.env') !== 'production'
                 ? $e->getMessage()
                 : 'Database error during vendor approval. Please check the logs.';
-            
+
             return response()->json([
                 'success' => false,
                 'error' => $errorMessage,
@@ -769,12 +774,12 @@ class VendorController extends Controller
                 'user_id' => $user->id,
                 'trace' => $e->getTraceAsString()
             ]);
-            
+
             // Return detailed error in non-production or if debug is enabled
             $errorMessage = config('app.debug') || config('app.env') !== 'production'
                 ? $e->getMessage() . ' (File: ' . basename($e->getFile()) . ', Line: ' . $e->getLine() . ')'
                 : ($e->getMessage() ?: 'An unexpected error occurred during vendor approval.');
-            
+
             return response()->json([
                 'success' => false,
                 'error' => $errorMessage,
@@ -799,7 +804,7 @@ class VendorController extends Controller
             'chairman',
             'admin'
         ];
-        
+
         $hasAllowedRole =
             (isset($user->role) && in_array($user->role, $allowedRoles)) ||
             (method_exists($user, 'hasAnyRole') && $user->hasAnyRole($allowedRoles));
@@ -879,7 +884,7 @@ class VendorController extends Controller
             'chairman',
             'admin'
         ];
-        
+
         if (!in_array($user->role, $allowedRoles)) {
             return response()->json([
                 'success' => false,
@@ -918,7 +923,7 @@ class VendorController extends Controller
         if ($request->boolean('resetPassword', false)) {
             // Generate random secure password (12 characters)
             $newPassword = Str::random(12);
-            
+
             // Update password and force change on next login
             $vendorUser->update([
                 'password' => Hash::make($newPassword),
@@ -987,7 +992,7 @@ class VendorController extends Controller
             'chairman',
             'admin'
         ];
-        
+
         if (!in_array($user->role, $allowedRoles)) {
             return response()->json([
                 'success' => false,
@@ -1030,7 +1035,7 @@ class VendorController extends Controller
         if ($vendorUser) {
             // Revoke all tokens
             $vendorUser->tokens()->delete();
-            
+
             // Delete user account
             $vendorUser->delete();
         }
@@ -1066,7 +1071,7 @@ class VendorController extends Controller
             'chairman',
             'admin'
         ];
-        
+
         if (!in_array($user->role, $allowedRoles)) {
             return response()->json([
                 'success' => false,
@@ -1123,7 +1128,7 @@ class VendorController extends Controller
             // Redirect to share URL for download
             return redirect($document->file_share_url);
         }
-        
+
         // Get document content from S3/local storage
         $content = $documentService->getDocumentContent($document);
 
@@ -1321,17 +1326,17 @@ class VendorController extends Controller
 
         // Get vendor from authenticated user - try multiple methods
         $vendor = null;
-        
+
         // Method 1: Try vendor relationship
         if ($user->vendor_id && method_exists($user, 'vendor')) {
             $vendor = $user->vendor;
         }
-        
+
         // Method 2: Find vendor by vendor_id if relationship didn't work
         if (!$vendor && $user->vendor_id) {
             $vendor = Vendor::find($user->vendor_id);
         }
-        
+
         // Method 3: Try finding vendor by email as last resort
         if (!$vendor) {
             $vendor = Vendor::where('email', $user->email)->first();
@@ -1589,7 +1594,7 @@ class VendorController extends Controller
             ->map(function ($document) use ($now) {
                 $expiryDate = \Carbon\Carbon::parse($document->expiryDate);
                 $daysUntilExpiry = $now->diffInDays($expiryDate);
-                
+
                 return [
                     'id' => $document->id,
                     'file_name' => $document->file_name,
