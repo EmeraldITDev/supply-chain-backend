@@ -270,6 +270,14 @@ class VendorController extends Controller
                 'has_financial' => !empty($bankName) || !empty($accountNumber) || !empty($accountName) || !empty($currency) || !empty($financialCountryCode),
             ]);
 
+            // temporary
+            \Log::info('VENDOR REGISTRATION REQUEST DEBUG', [
+                'annual_revenue' => $request->annual_revenue,
+                'number_of_employees' => $request->number_of_employees,
+                'year_established' => $request->year_established,
+                'all' => $request->all(),
+            ]);
+
             $registration = VendorRegistration::create([
                 'company_name' => $companyName,
                 'category' => $category,
