@@ -997,6 +997,65 @@ class VendorController extends Controller
     }
 
     /**
+     * Update vendor profile fields (admin-only endpoint)
+     * Allows procurement managers and supply chain directors to update specific vendor profile fields
+     */
+    public function adminUpdate(Request $request, string $uuid)
+    {
+        $user = $request->user();
+
+        // Check permission - only procurement_manager and supply_chain_director
+        $allowedRoles = [
+            'procurement_manager',
+            'supply_chain_director',
+        ];
+
+        if (!in_array($user->role, $allowedRoles)) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Insufficient permissions',
+                'code' => 'FORBIDDEN'
+            ], 403);
+        }
+
+        // Find vendor by vendor_id or primary key
+        $vendor = $this->findVendor($uuid);
+
+        if (!$vendor) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Vendor not found',
+                'code' => 'NOT_FOUND'
+            ], 404);
+        }
+
+        // Validate input - accept only specified profile fields
+        $validator = Validator::make($request->all(), [
+            'annual_revenue' => 'nullable|string',
+            'number_of_employees' => 'nullable|string',
+            'year_established' => 'nullable|integer|min:1900|max:' . date('Y'),
+            'website' => 'nullable|url',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Validation failed',
+                'errors' => $validator->errors(),
+                'code' => 'VALIDATION_ERROR'
+            ], 422);
+        }
+
+        // Update only the allowed fields
+        $vendor->update($validator->validated());
+
+        return response()->json([
+            'success' => true,
+            'data' => $vendor->fresh(),
+        ]);
+    }
+
+    /**
      * Delete a vendor
      * Soft deletes the vendor and deactivates their user account
      */

@@ -66,7 +66,7 @@ Route::post('/vendors/auth/password-reset', [VendorAuthController::class, 'reque
 // ======================================
 Route::middleware('auth:sanctum')->group(function () {
     $logisticsInternalRoles = 'role:procurement_manager,logistics_manager,supply_chain_director,admin,executive,chairman,finance';
-    
+
     // Trip routes - forward to logistics controllers
     Route::post('/trips', [LogisticsTripController::class, 'store'])->middleware($logisticsInternalRoles);
     Route::get('/trips', [LogisticsTripController::class, 'index'])->middleware($logisticsInternalRoles);
@@ -77,13 +77,13 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::put('/trips/{id}/assign-vendor', [LogisticsTripController::class, 'assignVendor'])->middleware($logisticsInternalRoles);
     Route::post('/trips/{id}/cancel', [LogisticsTripController::class, 'cancel'])->middleware($logisticsInternalRoles);
     Route::post('/trips/bulk-upload', [LogisticsTripController::class, 'bulkUpload'])->middleware($logisticsInternalRoles);
-    
+
     // Journey routes - forward to logistics controllers
     Route::post('/journeys', [LogisticsJourneyController::class, 'store'])->middleware($logisticsInternalRoles);
     Route::get('/journeys/{trip_id}', [LogisticsJourneyController::class, 'listByTrip'])->middleware($logisticsInternalRoles);
     Route::put('/journeys/{id}', [LogisticsJourneyController::class, 'update'])->middleware($logisticsInternalRoles);
     Route::post('/journeys/{id}/update-status', [LogisticsJourneyController::class, 'updateStatus'])->middleware('role:vendor,logistics_manager,procurement_manager,supply_chain_director,admin');
-    
+
     // Fleet routes - forward to logistics controllers
     Route::post('/fleet/vehicles', [LogisticsFleetController::class, 'store'])->middleware($logisticsInternalRoles);
     Route::get('/fleet/vehicles', [LogisticsFleetController::class, 'index'])->middleware($logisticsInternalRoles);
@@ -100,19 +100,19 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::put('/vehicles/{id}', [LogisticsFleetController::class, 'update'])->middleware($logisticsInternalRoles);
     Route::delete('/vehicles/{id}', [LogisticsFleetController::class, 'destroy'])->middleware($logisticsInternalRoles);
     Route::post('/vehicles/{id}/maintenance', [LogisticsFleetController::class, 'storeMaintenance'])->middleware($logisticsInternalRoles);
-    
+
     // Materials routes - forward to logistics controllers
     Route::post('/materials', [LogisticsMaterialController::class, 'store'])->middleware($logisticsInternalRoles);
     Route::get('/materials', [LogisticsMaterialController::class, 'index'])->middleware($logisticsInternalRoles);
     Route::get('/materials/{id}', [LogisticsMaterialController::class, 'show'])->middleware($logisticsInternalRoles);
     Route::delete('/materials/{id}', [LogisticsMaterialController::class, 'destroy'])->middleware($logisticsInternalRoles);
     Route::post('/materials/bulk-upload', [LogisticsMaterialController::class, 'bulkUpload'])->middleware($logisticsInternalRoles);
-    
+
     // Documents routes - forward to logistics controllers
     Route::post('/documents', [LogisticsDocumentController::class, 'store'])->middleware($logisticsInternalRoles);
     Route::get('/documents/{entity_type}/{entity_id}', [LogisticsDocumentController::class, 'list'])->middleware($logisticsInternalRoles);
     Route::delete('/documents/{id}', [LogisticsDocumentController::class, 'destroy'])->middleware($logisticsInternalRoles);
-    
+
     // Report routes - forward to logistics controllers
     Route::post('/reports', [LogisticsReportController::class, 'store'])->middleware($logisticsInternalRoles);
     Route::get('/reports', [LogisticsReportController::class, 'index'])->middleware($logisticsInternalRoles);
@@ -128,7 +128,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/refresh', [AuthController::class, 'refreshToken']); // Alias for frontend compatibility
     Route::put('/auth/profile', [AuthController::class, 'updateProfile']);
     Route::post('/auth/change-password', [AuthController::class, 'changePassword']);
-    
+
     // Session management - keep-alive and status check
     Route::post('/auth/keep-alive', function () {
         return response()->json([
@@ -142,7 +142,7 @@ Route::middleware('auth:sanctum')->group(function () {
             'expires_in_minutes' => 5
         ]);
     });
-    
+
     Route::get('/auth/session-status', function () {
         $user = auth()->user();
         return response()->json([
@@ -182,14 +182,14 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::delete('/mrfs/{id}', [MRFController::class, 'destroy']);
     Route::post('/mrfs/{id}/executive-reject', [MRFController::class, 'executiveReject']);
     Route::post('/mrfs/{id}/supply-chain-director-reject', [MRFController::class, 'supplyChainDirectorReject']);
-    
+
     // MRF Workflow routes (new simplified workflow)
     // NEW: Supply Chain Director is first approver
     Route::post('/mrfs/{id}/supply-chain-director-approve', [\App\Http\Controllers\Api\MRFWorkflowController::class, 'supplyChainDirectorApprove']);
-    
+
     // Procurement Manager approval (after Supply Chain Director)
     Route::post('/mrfs/{id}/procurement-approve', [\App\Http\Controllers\Api\MRFWorkflowController::class, 'procurementApprove']);
-    
+
     // Legacy routes (for backward compatible with existing MRFs)
     Route::post('/mrfs/{id}/executive-approve', [\App\Http\Controllers\Api\MRFWorkflowController::class, 'executiveApprove']);
     Route::post('/mrfs/{id}/chairman-approve', [\App\Http\Controllers\Api\MRFWorkflowController::class, 'chairmanApprove']);
@@ -206,11 +206,11 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/mrfs/{id}/reject-po', [\App\Http\Controllers\Api\MRFWorkflowController::class, 'rejectPO']);
     Route::post('/mrfs/{id}/process-payment', [\App\Http\Controllers\Api\MRFWorkflowController::class, 'processPayment']);
     Route::post('/mrfs/{id}/approve-payment', [\App\Http\Controllers\Api\MRFWorkflowController::class, 'approvePayment']);
-    
+
     // GRN endpoints
     Route::post('/mrfs/{id}/request-grn', [\App\Http\Controllers\Api\GRNController::class, 'requestGRN']);
     Route::post('/mrfs/{id}/complete-grn', [\App\Http\Controllers\Api\GRNController::class, 'completeGRN']);
-    
+
     // User management (admin only)
     Route::get('/users', [\App\Http\Controllers\Api\UserManagementController::class, 'index']);
     Route::post('/users', [\App\Http\Controllers\Api\UserManagementController::class, 'store']);
@@ -227,7 +227,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/rfqs', [RFQController::class, 'index']);
     Route::post('/rfqs', [RFQController::class, 'store']);
     Route::put('/rfqs/{id}', [RFQController::class, 'update']);
-    
+
     // RFQ Workflow routes (enhanced)
     Route::get('/vendors/rfqs', [\App\Http\Controllers\Api\RFQWorkflowController::class, 'getVendorRFQs']); // Vendor portal
     Route::post('/rfqs/{id}/mark-viewed', [\App\Http\Controllers\Api\RFQWorkflowController::class, 'markAsViewed']); // Vendor marks as viewed
@@ -262,6 +262,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/vendors/registrations/{id}/approve', [VendorController::class, 'approveRegistration']);
     Route::post('/vendors/registrations/{id}/reject', [VendorController::class, 'rejectRegistration']);
     Route::put('/vendors/{id}/credentials', [VendorController::class, 'updateVendorCredentials']);
+    Route::put('/vendors/{uuid}', [VendorController::class, 'adminUpdate'])->middleware('role:procurement_manager,supply_chain_director');
 
     // Dashboard routes
     Route::get('/dashboard/procurement-manager', [DashboardController::class, 'procurementManagerDashboard']);
