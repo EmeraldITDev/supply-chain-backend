@@ -502,6 +502,12 @@ class VendorAuthController extends Controller
         // Get vendor registration if it exists for additional data
         $registration = $vendor->registrations()->latest()->first();
 
+        // 👇 ADD LOG RIGHT HERE
+        \Log::info('VENDOR REGISTRATION DEBUG', [
+            'vendor_id' => $vendor->vendor_id,
+            'registration' => $registration
+        ]);
+
         // Get documents if they exist
         $documents = null;
         if ($registration && $registration->documents) {
@@ -536,14 +542,13 @@ class VendorAuthController extends Controller
 
             // Business information
             'category' => $vendor->category,
-            'website' => $vendor->website,
+            'website' => $vendor->website ?? $registration?->website,
             'taxId' => $vendor->tax_id,
             'tax_id' => $vendor->tax_id,
-            'yearEstablished' => $vendor->year_established,
-            'year_established' => $vendor->year_established,
-            'numberOfEmployees' => $vendor->number_of_employees,
+            'yearEstablished' => $vendor->year_established ?? $registration?->year_established,
+            'numberOfEmployees' => $vendor->number_of_employees ?? $registration?->number_of_employees,
             'number_of_employees' => $vendor->number_of_employees,
-            'annualRevenue' => $vendor->annual_revenue,
+            'annualRevenue' => $vendor->annual_revenue ?? $registration?->annual_revenue,
             'annual_revenue' => $vendor->annual_revenue,
 
             // Status and rating
