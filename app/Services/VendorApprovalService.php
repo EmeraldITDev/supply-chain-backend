@@ -34,13 +34,13 @@ class VendorApprovalService
         $lowercase = 'abcdefghijkmnpqrstuvwxyz';
         $numbers = '23456789'; // Exclude 0 and 1
         $special = '!@#$%&*';
-        
+
         $password = '';
         $password .= substr(str_shuffle($uppercase), 0, 3);
         $password .= substr(str_shuffle($lowercase), 0, 3);
         $password .= substr(str_shuffle($numbers), 0, 3);
         $password .= substr(str_shuffle($special), 0, 3);
-        
+
         // Shuffle the final password
         return str_shuffle($password);
     }
@@ -96,12 +96,12 @@ class VendorApprovalService
                 'must_change_password' => true,
                 'password_changed_at' => null,
             ];
-            
+
             // Only add vendor_id if the column exists
             if (Schema::hasColumn('users', 'vendor_id')) {
                 $userData['vendor_id'] = $vendor->id;
             }
-            
+
             $user = User::create($userData);
         } catch (\Illuminate\Database\QueryException $e) {
             // Handle specific database errors
@@ -197,6 +197,22 @@ class VendorApprovalService
                     'tax_id' => $registration->tax_id,
                     'contact_person' => $registration->contact_person,
                     'status' => 'Active',
+                    // Extended profile fields from registration
+                    'year_established' => $registration->year_established,
+                    'number_of_employees' => $registration->number_of_employees,
+                    'annual_revenue' => $registration->annual_revenue,
+                    'website' => $registration->website,
+                    'country_code' => $registration->country_code,
+                    'contact_person_email' => $registration->contact_person_email,
+                    'contact_person_phone' => $registration->contact_person_phone,
+                    'contact_person_title' => $registration->contact_person_title,
+                    'city' => $registration->city,
+                    'state' => $registration->state,
+                    'postal_code' => $registration->postal_code,
+                    'alternate_phone' => $registration->alternate_phone,
+                    'bank_name' => $registration->bank_name,
+                    'account_name' => $registration->account_name,
+                    'currency' => $registration->currency,
                 ]);
             } else {
                 // Create new vendor record from registration
@@ -213,6 +229,22 @@ class VendorApprovalService
                         'status' => 'Active',
                         'rating' => 0,
                         'total_orders' => 0,
+                        // Extended profile fields from registration
+                        'year_established' => $registration->year_established,
+                        'number_of_employees' => $registration->number_of_employees,
+                        'annual_revenue' => $registration->annual_revenue,
+                        'website' => $registration->website,
+                        'country_code' => $registration->country_code,
+                        'contact_person_email' => $registration->contact_person_email,
+                        'contact_person_phone' => $registration->contact_person_phone,
+                        'contact_person_title' => $registration->contact_person_title,
+                        'city' => $registration->city,
+                        'state' => $registration->state,
+                        'postal_code' => $registration->postal_code,
+                        'alternate_phone' => $registration->alternate_phone,
+                        'bank_name' => $registration->bank_name,
+                        'account_name' => $registration->account_name,
+                        'currency' => $registration->currency,
                     ]);
                 } catch (\Exception $e) {
                     \Log::error('Failed to create vendor: ' . $e->getMessage(), [
