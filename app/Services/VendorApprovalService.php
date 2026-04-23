@@ -258,6 +258,7 @@ class VendorApprovalService
 
             // Transfer documents from registration to vendor — runs for both new and existing vendors
             if ($registration->documents && count($registration->documents) > 0) {
+                \Log::info('Document structure:', ['first_doc' => $registration->documents[0]]);
             foreach ($registration->documents as $doc) {
                 $vendor->documents()->updateOrCreate(
                     ['s3_key' => $doc['s3_key']],
