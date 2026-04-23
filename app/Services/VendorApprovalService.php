@@ -254,7 +254,7 @@ class VendorApprovalService
                     ]);
                     throw new \Exception('Failed to create vendor record: ' . $e->getMessage());
                 }
-                if ($registration->documents && $registration->documents->count() > 0) {
+                if ($registration->documents && count($registration->documents) > 0) {
                 foreach ($registration->documents as $doc) {
                     $vendor->documents()->updateOrCreate(
                         ['s3_key' => $doc->s3_key],
