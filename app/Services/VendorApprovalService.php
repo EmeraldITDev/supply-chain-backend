@@ -254,7 +254,10 @@ class VendorApprovalService
                     ]);
                     throw new \Exception('Failed to create vendor record: ' . $e->getMessage());
                 }
-                if ($registration->documents && count($registration->documents) > 0) {
+            }
+
+            // Transfer documents from registration to vendor — runs for both new and existing vendors
+            if ($registration->documents && count($registration->documents) > 0) {
                 foreach ($registration->documents as $doc) {
                     $vendor->documents()->updateOrCreate(
                         ['s3_key' => $doc->s3_key],
@@ -267,7 +270,6 @@ class VendorApprovalService
                     );
                 }
             }
-            }
 
             // Create or update user account
             $user = $this->createVendorUser($registration, $vendor, $temporaryPassword);
@@ -275,11 +277,11 @@ class VendorApprovalService
             // Update registration
             try {
                 $registration->update([
-                    'status' => VendorRegistration::STATUS_APPROVED, // Use constant to ensure correct casing
+                    'status' => VendorRegistration::STATUS_APPROVED,
                     'vendor_id' => $vendor->id,
                     'approved_by' => $approvedBy,
                     'approved_at' => now(),
-                    'temp_password' => $temporaryPassword, // Store temporarily (not hashed) for reference
+                    'temp_password' => $temporaryPassword,
                 ]);
             } catch (\Exception $e) {
                 \Log::error('Failed to update registration: ' . $e->getMessage(), [
@@ -294,7 +296,6 @@ class VendorApprovalService
             try {
                 $this->sendApprovalEmail($registration, $temporaryPassword);
             } catch (\Exception $e) {
-                // Log but don't fail - email is not critical
                 \Log::warning('Failed to send approval email, but vendor was approved: ' . $e->getMessage());
             }
 
@@ -308,7 +309,6 @@ class VendorApprovalService
                     'moved_count' => count($movedDocuments)
                 ]);
             } catch (\Exception $e) {
-                // Log but don't fail approval if document migration fails
                 \Log::error('Failed to move documents to vendor folder: ' . $e->getMessage(), [
                     'registration_id' => $registration->id,
                     'vendor_id' => $vendor->id,
@@ -330,5 +330,6 @@ class VendorApprovalService
             ];
         });
     }
+
 }
 

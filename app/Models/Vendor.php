@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use App\Models\VendorDocument;
 
 class Vendor extends Model
 {
@@ -63,6 +64,14 @@ class Vendor extends Model
     public function registrations(): HasMany
     {
         return $this->hasMany(VendorRegistration::class, 'vendor_id');
+    }
+
+    /**
+     * Get vendor documents
+     */
+    public function documents()
+    {
+        return $this->hasMany(VendorDocument::class);
     }
 
     /**
