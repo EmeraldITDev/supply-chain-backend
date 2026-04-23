@@ -114,9 +114,9 @@ class VendorController extends Controller
     /**
      * Get vendor by ID
      */
-   public function show($id)
+    public function show($id)
     {
-        $vendor = Vendor::with('documents')->findOrFail($id);
+        $vendor = Vendor::findOrFail($id);
 
         if (!$vendor) {
             return response()->json([
@@ -126,27 +126,39 @@ class VendorController extends Controller
             ], 404);
         }
 
-        foreach ($vendor->documents as $doc) {
-            $doc->url = Storage::disk('s3')->temporaryUrl(
-                $doc->s3_key,
-                now()->addDays(7)
-            );
+        // Load documents via the vendor registration since documents belong to registrations
+        $registration = \App\Models\VendorRegistration::where('email', $vendor->email)
+            ->latest()
+            ->first();
+
+        $documents = [];
+        if ($registration && $registration->documents) {
+            foreach ($registration->documents as $doc) {
+                $documents[] = [
+                    'file_name'      => $doc['file_name'] ?? null,
+                    'file_type'      => $doc['file_type'] ?? null,
+                    'file_path'      => $doc['file_path'] ?? null,
+                    'file_url'       => $doc['file_url'] ?? null,
+                    'file_share_url' => $doc['file_share_url'] ?? null,
+                    'uploaded_at'    => $doc['uploaded_at'] ?? null,
+                ];
+            }
         }
 
         return response()->json([
-            'id' => $vendor->vendor_id,
-            'name' => $vendor->name,
-            'category' => $vendor->category,
-            'rating' => $vendor->rating ? (float) $vendor->rating : 0,
-            'totalOrders' => $vendor->total_orders,
-            'status' => $vendor->status,
-            'email' => $vendor->email,
-            'phone' => $vendor->phone,
-            'address' => $vendor->address,
-            'taxId' => $vendor->tax_id,
+            'id'            => $vendor->vendor_id,
+            'name'          => $vendor->name,
+            'category'      => $vendor->category,
+            'rating'        => $vendor->rating ? (float) $vendor->rating : 0,
+            'totalOrders'   => $vendor->total_orders,
+            'status'        => $vendor->status,
+            'email'         => $vendor->email,
+            'phone'         => $vendor->phone,
+            'address'       => $vendor->address,
+            'taxId'         => $vendor->tax_id,
             'contactPerson' => $vendor->contact_person,
-            'notes' => $vendor->notes,
-            'documents' => $vendor->documents,
+            'notes'         => $vendor->notes,
+            'documents'     => $documents,
         ]);
     }
 
