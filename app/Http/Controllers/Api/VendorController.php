@@ -114,9 +114,9 @@ class VendorController extends Controller
     /**
      * Get vendor by ID
      */
-    public function show($id)
+   public function show($id)
     {
-        $vendor = Vendor::where('vendor_id', $id)->first();
+        $vendor = Vendor::with('documents')->findOrFail($id);
 
         if (!$vendor) {
             return response()->json([
@@ -124,6 +124,13 @@ class VendorController extends Controller
                 'error' => 'Vendor not found',
                 'code' => 'NOT_FOUND'
             ], 404);
+        }
+
+        foreach ($vendor->documents as $doc) {
+            $doc->url = Storage::disk('s3')->temporaryUrl(
+                $doc->s3_key,
+                now()->addDays(7)
+            );
         }
 
         return response()->json([
@@ -139,6 +146,7 @@ class VendorController extends Controller
             'taxId' => $vendor->tax_id,
             'contactPerson' => $vendor->contact_person,
             'notes' => $vendor->notes,
+            'documents' => $vendor->documents,
         ]);
     }
 

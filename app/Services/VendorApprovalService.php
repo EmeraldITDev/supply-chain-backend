@@ -254,6 +254,19 @@ class VendorApprovalService
                     ]);
                     throw new \Exception('Failed to create vendor record: ' . $e->getMessage());
                 }
+                if ($registration->documents && $registration->documents->count() > 0) {
+                foreach ($registration->documents as $doc) {
+                    $vendor->documents()->updateOrCreate(
+                        ['s3_key' => $doc->s3_key],
+                        [
+                            'file_name'     => $doc->file_name,
+                            'file_type'     => $doc->file_type,
+                            'document_type' => $doc->document_type ?? null,
+                            's3_key'        => $doc->s3_key,
+                        ]
+                    );
+                }
+            }
             }
 
             // Create or update user account
