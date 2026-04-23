@@ -5,7 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
-use App\Models\VendorDocument;
+use App\Models\VendorRegistrationDocument;
 
 class Vendor extends Model
 {
@@ -71,9 +71,9 @@ class Vendor extends Model
      */
     public function documents()
     {
-        return $this->hasMany(VendorDocument::class);
+        return $this->hasMany(VendorRegistrationDocument::class);
     }
-
+    
     /**
      * Get vendor ratings
      */
