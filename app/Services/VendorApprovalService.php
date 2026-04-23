@@ -258,18 +258,18 @@ class VendorApprovalService
 
             // Transfer documents from registration to vendor — runs for both new and existing vendors
             if ($registration->documents && count($registration->documents) > 0) {
-                foreach ($registration->documents as $doc) {
-                    $vendor->documents()->updateOrCreate(
-                        ['s3_key' => $doc->s3_key],
-                        [
-                            'file_name'     => $doc->file_name,
-                            'file_type'     => $doc->file_type,
-                            'document_type' => $doc->document_type ?? null,
-                            's3_key'        => $doc->s3_key,
-                        ]
-                    );
-                }
+            foreach ($registration->documents as $doc) {
+                $vendor->documents()->updateOrCreate(
+                    ['s3_key' => $doc['s3_key']],
+                    [
+                        'file_name'     => $doc['file_name'] ?? null,
+                        'file_type'     => $doc['file_type'] ?? null,
+                        'document_type' => $doc['document_type'] ?? null,
+                        's3_key'        => $doc['s3_key'],
+                    ]
+                );
             }
+        }
 
             // Create or update user account
             $user = $this->createVendorUser($registration, $vendor, $temporaryPassword);
