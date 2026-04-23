@@ -116,7 +116,7 @@ class VendorController extends Controller
      */
     public function show($id)
     {
-        $vendor = Vendor::findOrFail($id);
+        $vendor = Vendor::where('vendor_id', $id)->firstOrFail();
 
         if (!$vendor) {
             return response()->json([
