@@ -182,6 +182,10 @@ class VendorController extends Controller
             'contactPerson' => $vendor->contact_person,
             'notes'         => $vendor->notes,
             'documents'     => $documents,
+            'annual_revenue'      => $vendor->annual_revenue,
+            'number_of_employees' => $vendor->number_of_employees,
+            'year_established'    => $vendor->year_established,
+            'website'             => $vendor->website,
         ]);
     }
 
