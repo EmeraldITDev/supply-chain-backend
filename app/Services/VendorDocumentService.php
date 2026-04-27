@@ -24,7 +24,7 @@ class VendorDocumentService
         // Use 'public' for local development, 's3' for production
         // Can be overridden via DOCUMENTS_DISK env variable
         $disk = config('filesystems.documents_disk', env('DOCUMENTS_DISK', 'public'));
-        
+
         // Safety check: If S3 is requested, verify it's available
         if ($disk === 's3') {
             // Check if Flysystem AWS S3 package is installed
@@ -32,14 +32,14 @@ class VendorDocumentService
                 \Log::warning('S3 disk requested but league/flysystem-aws-s3-v3 package not installed. Falling back to public disk. Run: composer require league/flysystem-aws-s3-v3');
                 return 'public';
             }
-            
+
             // Check if AWS credentials are configured
             $s3Config = config('filesystems.disks.s3');
             if (empty($s3Config) || empty($s3Config['key']) || empty($s3Config['secret'])) {
                 \Log::warning('S3 disk requested but AWS credentials not configured. Falling back to public disk.');
                 return 'public';
             }
-            
+
             // Try to verify S3 connection is working (without actually connecting)
             // This will catch configuration errors early
             try {
@@ -54,7 +54,7 @@ class VendorDocumentService
                 return 'public';
             }
         }
-        
+
         return $disk;
     }
 
@@ -100,7 +100,7 @@ class VendorDocumentService
                 // Upload to storage (S3 or public)
                 $disk = $this->getStorageDisk();
                 $basePath = "vendor_documents/{$year}/{$companyName}";
-                
+
                 // For local/public storage, ensure directory exists
                 if ($disk === 'public' || $disk === 'local') {
                     $fullPath = storage_path("app/{$disk}/{$basePath}");
@@ -109,10 +109,10 @@ class VendorDocumentService
                         @mkdir($fullPath, 0755, true);
                     }
                 }
-                
+
                 try {
                     $filePath = $document->storeAs($basePath, $fileName, $disk);
-                    
+
                     \Log::info("File stored successfully", [
                         'file_path' => $filePath,
                         'disk' => $disk,
@@ -125,13 +125,13 @@ class VendorDocumentService
                             'error' => $e->getMessage()
                         ]);
                         $disk = 'public';
-                        
+
                         // Ensure public directory exists
                         $fullPath = storage_path("app/public/{$basePath}");
                         if (!file_exists($fullPath)) {
                             @mkdir($fullPath, 0755, true);
                         }
-                        
+
                         $filePath = $document->storeAs($basePath, $fileName, $disk);
                     } else {
                         \Log::error("Storage failed for disk: {$disk}", [
@@ -283,19 +283,20 @@ class VendorDocumentService
      * @param string $filePath
      * @return string
      */
-    public function getDocumentUrl(string $filePath, $documentId = null, $registrationId = null): string
+    public function getDocumentUrl(string $filePath, $documentId = null, $registrationId = null, bool $isApproved = false): string
     {
         $disk = $this->getStorageDisk();
 
-        // For S3, generate temporary signed URL (valid for 1 hour)
+        // For S3, generate signed URL
+        // Approved vendors get 1-year URL (permanent), pending vendors get 1-hour URL
         if ($disk === 's3') {
             try {
+                $expiry = $isApproved ? now()->addYears(10) : now()->addHours(48);
                 return Storage::disk($disk)->temporaryUrl(
                     $filePath,
-                    now()->addHour()
+                    $expiry
                 );
             } catch (\Exception $e) {
-                // If S3 fails, fallback to API download endpoint
                 \Log::warning("S3 URL generation failed for {$filePath}: " . $e->getMessage());
                 if ($registrationId && $documentId) {
                     return url("/api/vendors/registrations/{$registrationId}/documents/{$documentId}/download");
@@ -306,11 +307,9 @@ class VendorDocumentService
 
         // For local/public disk, check if file exists
         if (!Storage::disk($disk)->exists($filePath)) {
-            // If file doesn't exist, use API download endpoint as fallback
             if ($registrationId && $documentId) {
                 return url("/api/vendors/registrations/{$registrationId}/documents/{$documentId}/download");
             }
-            // Try to extract from path or find in database
             if (preg_match('/vendor_documents\/(\d+)\//', $filePath, $matches)) {
                 $regId = $matches[1];
                 if (!$documentId) {
@@ -325,7 +324,6 @@ class VendorDocumentService
             throw new \Exception("File not found: {$filePath}");
         }
 
-        // Return public URL for local storage
         return Storage::disk($disk)->url($filePath);
     }
 
@@ -368,7 +366,7 @@ class VendorDocumentService
             if ($tryDisk === $disk) {
                 continue; // Already tried
             }
-            
+
             try {
                 if (Storage::disk($tryDisk)->exists($document->file_path)) {
                     \Log::info("Document found on different disk", [
@@ -425,7 +423,7 @@ class VendorDocumentService
     {
         $disk = $this->getStorageDisk();
         $movedDocuments = [];
-        
+
         \Log::info("Moving documents to vendor folder", [
             'registration_id' => $registration->id,
             'vendor_id' => $vendor->id,
@@ -435,7 +433,7 @@ class VendorDocumentService
 
         // Get all documents for this registration
         $documents = VendorRegistrationDocument::where('vendor_registration_id', $registration->id)->get();
-        
+
         if ($documents->isEmpty()) {
             \Log::warning("No documents found to move for registration", [
                 'registration_id' => $registration->id
@@ -451,7 +449,7 @@ class VendorDocumentService
         foreach ($documents as $document) {
             try {
                 $oldPath = $document->file_path;
-                
+
                 if (!$oldPath || !Storage::disk($disk)->exists($oldPath)) {
                     \Log::warning("Document file not found, skipping", [
                         'document_id' => $document->id,
@@ -489,7 +487,7 @@ class VendorDocumentService
                 // Generate new URL
                 $newFileUrl = null;
                 $newFileShareUrl = null;
-                
+
                 if ($disk === 's3') {
                     try {
                         $newFileUrl = Storage::disk($disk)->temporaryUrl($newPath, now()->addHours(24));
@@ -548,7 +546,7 @@ class VendorDocumentService
         if (count($movedDocuments) > 0) {
             $registration->refresh();
             $documentMetadata = is_array($registration->documents) ? $registration->documents : [];
-            
+
             foreach ($documentMetadata as &$doc) {
                 $docRecord = VendorRegistrationDocument::find($doc['id'] ?? null);
                 if ($docRecord) {
@@ -557,7 +555,7 @@ class VendorDocumentService
                     $doc['file_share_url'] = $docRecord->file_share_url;
                 }
             }
-            
+
             $registration->update(['documents' => $documentMetadata]);
         }
 

@@ -413,7 +413,12 @@ class VendorController extends Controller
 
                 if ($filePath && !$fileUrl) {
                     try {
-                        $fileUrl = $documentService->getDocumentUrl($filePath, $doc->id, $registration->id);
+                        $fileUrl = $documentService->getDocumentUrl(
+                            $filePath,
+                            $doc->id,
+                            $registration->id,
+                            $registration->status === VendorRegistration::STATUS_APPROVED
+);
                     } catch (\Exception $e) {
                         \Log::warning("Failed to generate document URL", [
                             'error' => $e->getMessage(),
@@ -613,7 +618,12 @@ class VendorController extends Controller
 
             if ($filePath && !$fileShareUrl) {
                 try {
-                    $fileUrl = $documentService->getDocumentUrl($filePath, $docId, $registration->id);
+                    $fileUrl = $documentService->getDocumentUrl(
+                        $filePath,
+                        $docId,
+                        $registration->id,
+                        $registration->status === VendorRegistration::STATUS_APPROVED
+                    );
                 } catch (\Exception $e) {
                     \Log::warning("Failed to generate document URL for {$filePath}: " . $e->getMessage());
                     // Fallback to API download endpoint
