@@ -138,7 +138,7 @@ class MRFWorkflowController extends Controller
 
         // Update MRF
         $mrf->update([
-            'status' => $isApproved ? 'pending' : 'rejected',
+            'status' => $isApproved ? 'procurement_review' : 'rejected',
             'current_stage' => $isApproved ? 'procurement_review' : 'rejected',
             'workflow_state' => $isApproved ? 'supply_chain_director_approved' : 'supply_chain_director_rejected',
             'remarks' => $request->remarks,
