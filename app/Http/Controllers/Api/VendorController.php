@@ -133,7 +133,30 @@ class VendorController extends Controller
 
         $documents = [];
         if ($registration && $registration->documents) {
+            $documentService = app(\App\Services\VendorDocumentService::class);
+            $isApproved = $registration->status === \App\Models\VendorRegistration::STATUS_APPROVED;
+
             foreach ($registration->documents as $doc) {
+                $filePath = $doc['file_path'] ?? null;
+                $freshUrl = null;
+
+                if ($filePath) {
+                    try {
+                        $freshUrl = $documentService->getDocumentUrl(
+                            $filePath,
+                            $doc['id'] ?? null,
+                            $registration->id,
+                            $isApproved
+                        );
+                    } catch (\Exception $e) {
+                        \Log::warning('Failed to regenerate document URL in show()', [
+                            'file_path' => $filePath,
+                            'error' => $e->getMessage()
+                        ]);
+                        $freshUrl = $doc['file_share_url'] ?? $doc['file_url'] ?? null;
+                    }
+                }
+                
                 $documents[] = [
                     'file_name'      => $doc['file_name'] ?? null,
                     'file_type'      => $doc['file_type'] ?? null,
