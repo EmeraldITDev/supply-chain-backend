@@ -299,7 +299,7 @@ class VendorDocumentService
             } catch (\Exception $e) {
                 \Log::warning("S3 URL generation failed for {$filePath}: " . $e->getMessage());
                 if ($registrationId && $documentId) {
-                    return url("/api/vendors/registrations/{$registrationId}/documents/{$documentId}/download");
+                    return Storage::disk($disk)->url($filePath);
                 }
                 throw $e;
             }
@@ -308,17 +308,17 @@ class VendorDocumentService
         // For local/public disk, check if file exists
         if (!Storage::disk($disk)->exists($filePath)) {
             if ($registrationId && $documentId) {
-                return url("/api/vendors/registrations/{$registrationId}/documents/{$documentId}/download");
+                return Storage::disk($disk)->url($filePath);
             }
             if (preg_match('/vendor_documents\/(\d+)\//', $filePath, $matches)) {
                 $regId = $matches[1];
                 if (!$documentId) {
                     $document = VendorRegistrationDocument::where('file_path', $filePath)->first();
                     if ($document) {
-                        return url("/api/vendors/registrations/{$regId}/documents/{$document->id}/download");
+                        return Storage::disk($disk)->url($filePath);
                     }
                 } else {
-                    return url("/api/vendors/registrations/{$regId}/documents/{$documentId}/download");
+                    return Storage::disk($disk)->url($filePath);
                 }
             }
             throw new \Exception("File not found: {$filePath}");
