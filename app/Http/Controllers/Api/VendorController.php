@@ -732,6 +732,33 @@ class VendorController extends Controller
     }
 
     /**
+     * backfill vendor Profiles
+     */
+    public function backfillProfiles()
+    {
+        $vendors = Vendor::whereNull('annual_revenue')->get();
+
+        foreach ($vendors as $vendor) {
+            $registration = \App\Models\VendorRegistration::where('email', $vendor->email)
+                ->latest()
+                ->first();
+
+            if (!$registration) continue;
+
+            $vendor->update([
+                'annual_revenue'      => $registration->annual_revenue,
+                'number_of_employees' => $registration->number_of_employees,
+                'year_established'    => $registration->year_established,
+                'website'             => $registration->website,
+            ]);
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Vendor profiles backfilled successfully',
+        ]);
+    }
+    /**
      * Approve vendor registration (procurement_manager and supply_chain_director only)
      */
     public function approveRegistration(Request $request, $id, VendorApprovalService $approvalService)
