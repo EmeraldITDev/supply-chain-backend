@@ -156,15 +156,15 @@ class VendorController extends Controller
                         $freshUrl = $doc['file_share_url'] ?? $doc['file_url'] ?? null;
                     }
                 }
-                
-                $documents[] = [
-                    'file_name'      => $doc['file_name'] ?? null,
-                    'file_type'      => $doc['file_type'] ?? null,
-                    'file_path'      => $doc['file_path'] ?? null,
-                    'file_url'       => $doc['file_url'] ?? null,
-                    'file_share_url' => $doc['file_share_url'] ?? null,
-                    'uploaded_at'    => $doc['uploaded_at'] ?? null,
-                ];
+
+               $documents[] = [
+                'file_name'      => $doc['file_name'] ?? null,
+                'file_type'      => $doc['file_type'] ?? null,
+                'file_path'      => $doc['file_path'] ?? null,
+                'file_url'       => $freshUrl,
+                'file_share_url' => $freshUrl,
+                'uploaded_at'    => $doc['uploaded_at'] ?? null,
+            ];
             }
         }
 
