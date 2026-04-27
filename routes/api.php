@@ -217,6 +217,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::put('/users/{id}', [\App\Http\Controllers\Api\UserManagementController::class, 'update']);
     Route::delete('/users/{id}', [\App\Http\Controllers\Api\UserManagementController::class, 'destroy']);
     Route::post('/mrfs/{id}/workflow-reject', [\App\Http\Controllers\Api\MRFWorkflowController::class, 'rejectMRF']);
+    Route::post('/admin/backfill-vendor-profiles', [\App\Http\Controllers\Api\VendorController::class, 'backfillProfiles'])
+    ->middleware(['auth:sanctum']);
 
     // SRF routes
     Route::get('/srfs', [SRFController::class, 'index']);
