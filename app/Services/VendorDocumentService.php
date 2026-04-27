@@ -291,7 +291,7 @@ class VendorDocumentService
         // Approved vendors get 1-year URL (permanent), pending vendors get 1-hour URL
         if ($disk === 's3') {
             try {
-                $expiry = $isApproved ? now()->addYears(10) : now()->addHours(48);
+                $expiry = $isApproved ? now()->addDays(7) : now()->addHours(48);
                 return Storage::disk($disk)->temporaryUrl(
                     $filePath,
                     $expiry
