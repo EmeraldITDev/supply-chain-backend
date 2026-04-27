@@ -186,6 +186,7 @@ class VendorController extends Controller
             'number_of_employees' => $vendor->number_of_employees,
             'year_established'    => $vendor->year_established,
             'website'             => $vendor->website,
+            'created_at'          => $vendor->created_at,
         ]);
     }
 
@@ -341,6 +342,7 @@ class VendorController extends Controller
                 'currency' => $currency,
                 'tax_id' => $taxId,
                 'contact_person' => $contactPerson,
+                'website' => $request->website,
                 'status' => VendorRegistration::STATUS_PENDING,
             ]);
 
