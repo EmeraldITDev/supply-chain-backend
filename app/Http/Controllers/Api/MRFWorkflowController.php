@@ -375,6 +375,7 @@ class MRFWorkflowController extends Controller
             WorkflowStateService::STATE_EXECUTIVE_APPROVED,
             'executive_approved',
             'procurement_review',
+            'supply_chain_director_approved',
         ];
 
         // Also check if executive has approved (which means procurement can proceed)
