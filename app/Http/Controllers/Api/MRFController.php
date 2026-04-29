@@ -99,6 +99,12 @@ class MRFController extends Controller
                 }
             }
 
+            $testPath = 'purchase-orders/2026/04/po_PO-2026-0428-052_1777376606.pdf';
+            \Log::info('S3 file exists check', [
+                'path'   => $testPath,
+                'exists' => Storage::disk($disk)->exists($testPath),
+                'disk'   => $disk,
+            ]);
             // Signed PO
             if (!empty($mrf->signed_po_url)) {
                 $path = Storage::disk($disk)->exists($mrf->signed_po_url)
@@ -226,6 +232,11 @@ class MRFController extends Controller
         return response()->json($mrfs->map(function($mrf) {
             // Generate fresh PO URLs on every request to prevent expiration
             $freshPOUrls = $this->generateFreshPOUrls($mrf);
+            \Log::info('Fresh PO URLs generated', [
+                'mrf_id'           => $mrf->mrf_id,
+                'unsigned_po_path' => $mrf->unsigned_po_url,
+                'fresh_url'        => $freshPOUrls['unsigned_po_url'],
+            ]);
 
             return [
                 'id' => $mrf->mrf_id,
