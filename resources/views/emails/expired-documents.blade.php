@@ -35,13 +35,13 @@ To upload your renewed documents:
 
 **Note**: This is an automated message. Please do not reply to this email.
 
-@component('mail::button', ['url' => config('app.frontend_url') . '/vendor/documents', 'color' => 'primary'])
+@component('mail::button', ['url' => config('app.frontend_url') . '/vendor-portal', 'color' => 'primary'])
 Upload Documents Now
 @endcomponent
 
 Thank you for your cooperation and continued partnership.
 
-Best regards,  
+Best regards,
 {{ config('app.name', 'Supply Chain Team') }}
 
 ---

@@ -26,7 +26,7 @@
             <p><strong>Status:</strong> {{ $quotation->status }}</p>
         </div>
         <p>
-            <a class="button" href="{{ rtrim((string) config('app.frontend_url'), '/') . '/rfqs/' . optional($quotation->rfq)->rfq_id }}">
+            <a class="button" href="{{ rtrim((string) config('app.frontend_url'), '/') . '/vendor-portal' }}">
                 View RFQ Details
             </a>
         </p>

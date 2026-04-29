@@ -24,14 +24,14 @@ class UpdateExpiredDocuments extends Command
                 ->whereNotNull('expiry_date')
                 ->where('expiry_date', '<', Carbon::now())
                 ->update(['status' => 'Expired']);
-            
+
             $this->info("✅ Updated {$updated} documents to Expired status");
 
             // Step 2: Handle vendor registrations with expired required documents
             $this->handleExpiredVendorRegistrations();
 
             $this->info('=== Document Expiry Check Complete ===');
-            
+
         } catch (\Exception $e) {
             $this->error('❌ Error during expiry check: ' . $e->getMessage());
             \Log::error('UpdateExpiredDocuments command failed', [
@@ -47,7 +47,7 @@ class UpdateExpiredDocuments extends Command
             // Get all approved registrations
             $registrations = VendorRegistration::where('status', 'Approved')
                 ->get();
-            
+
             $this->line("Checking {$registrations->count()} approved registrations...");
 
             foreach ($registrations as $registration) {
@@ -56,10 +56,10 @@ class UpdateExpiredDocuments extends Command
                     ->where('is_required', true)
                     ->where('status', 'Expired')
                     ->exists();
-                
+
                 if ($hasExpiredRequiredDoc) {
                     $this->line("⚠️  Registration {$registration->id} ({$registration->company_name}) has expired required docs");
-                    
+
                     // Update registration status
                     $registration->update([
                         'status' => 'Documents Incomplete',
@@ -103,7 +103,7 @@ class UpdateExpiredDocuments extends Command
                 ];
             })->toArray(),
             'registrationStatus' => $registration->status,
-            'dashboardUrl' => config('app.frontend_url', config('app.url')) . '/vendor/documents',
+            'dashboardUrl' => config('app.frontend_url', config('app.url')) . '/vendor-portal',
         ];
 
         // Send email

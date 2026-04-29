@@ -27,7 +27,7 @@
             <p><strong>Date:</strong> {{ optional($mrf->date)->format('Y-m-d') }}</p>
         </div>
         <p>
-            <a class="button" href="{{ rtrim((string) config('app.frontend_url'), '/') . '/mrfs/' . $mrf->mrf_id }}">
+            <a class="button" href="{{ rtrim((string) config('app.frontend_url'), '/') . '/procurement' }}">
                 View MRF
             </a>
         </p>

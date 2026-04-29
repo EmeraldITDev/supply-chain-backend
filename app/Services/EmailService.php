@@ -15,7 +15,7 @@ class EmailService
         try {
             Mail::send('emails.vendor-invitation', [
                 'companyName' => $companyName,
-                'registrationUrl' => config('app.frontend_url') . '/vendor/register',
+                'registrationUrl' => config('app.frontend_url') . '/vendor-portal',
                 'portalUrl' => config('app.frontend_url'),
             ], function ($message) use ($email, $companyName) {
                 $message->to($email)
@@ -50,8 +50,8 @@ class EmailService
                 'companyName' => $companyName,
                 'email' => $email,
                 'temporaryPassword' => $temporaryPassword,
-                'loginUrl' => config('app.frontend_url') . '/vendor/login',
-                'changePasswordUrl' => config('app.frontend_url') . '/vendor/change-password',
+                'loginUrl' => config('app.frontend_url') . '/vendor-portal',
+                'changePasswordUrl' => config('app.frontend_url') . '/vendor-portal',
             ], function ($message) use ($email, $companyName) {
                 $message->to($email)
                     ->subject('Vendor Registration Approved - ' . config('app.name'));
@@ -84,7 +84,7 @@ class EmailService
             Mail::send('emails.password-reset', [
                 'name' => $name,
                 'temporaryPassword' => $temporaryPassword,
-                'loginUrl' => config('app.frontend_url') . '/vendor/login',
+                'loginUrl' => config('app.frontend_url') . '/vendor-portal',
             ], function ($message) use ($email) {
                 $message->to($email)
                     ->subject('Password Reset - ' . config('app.name'));
@@ -114,7 +114,7 @@ class EmailService
             Mail::send('emails.document-expiry', [
                 'companyName' => $companyName,
                 'documents' => $expiringDocuments,
-                'portalUrl' => config('app.frontend_url') . '/vendor/documents',
+                'portalUrl' => config('app.frontend_url') . '/vendor-portal',
             ], function ($message) use ($email) {
                 $message->to($email)
                     ->subject('Document Expiry Reminder - ' . config('app.name'));
@@ -148,7 +148,7 @@ class EmailService
                 'rfqId' => $rfqId,
                 'rfqTitle' => $rfqTitle,
                 'deadline' => $deadline,
-                'rfqUrl' => config('app.frontend_url') . '/vendor/rfqs/' . $rfqId,
+                'rfqUrl' => config('app.frontend_url') . '/vendor-portal',
             ], function ($message) use ($email, $rfqId) {
                 $message->to($email)
                     ->subject("New RFQ Assigned: {$rfqId} - " . config('app.name'));
@@ -186,7 +186,7 @@ class EmailService
                 'quotationId' => $quotationId,
                 'status' => $status,
                 'remarks' => $remarks,
-                'portalUrl' => config('app.frontend_url') . '/vendor/quotations',
+                'portalUrl' => config('app.frontend_url') . '/vendor-portal',
             ], function ($message) use ($email, $quotationId, $status) {
                 $message->to($email)
                     ->subject("Quotation {$quotationId} - {$status} - " . config('app.name'));
