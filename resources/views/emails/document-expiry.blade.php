@@ -61,12 +61,12 @@
     <div class="header">
         <h1>⚠️ Document Expiry Reminder</h1>
     </div>
-    
+
     <div class="content">
         <p>Dear {{ $companyName }},</p>
-        
+
         <p>This is a reminder that the following documents in your vendor profile are expiring soon or have already expired:</p>
-        
+
         <div class="document-list">
             @foreach($documents as $document)
             <div class="document-item">
@@ -75,24 +75,24 @@
             </div>
             @endforeach
         </div>
-        
+
         <p><strong>Action Required:</strong> Please update these documents as soon as possible to maintain your vendor status and continue receiving business opportunities.</p>
-        
+
         <div style="text-align: center;">
             <a href="{{ $portalUrl }}" class="button">Update Documents</a>
         </div>
-        
+
         <p>Failure to update expired documents may result in suspension of your vendor account.</p>
-        
+
         <p>If you have any questions, please contact our vendor support team.</p>
-        
+
         <p>Best regards,<br>
-        Supply Chain Management Team</p>
+        Emerald Industrial CFZE Team</p>
     </div>
-    
+
     <div class="footer">
         <p>This is an automated email. Please do not reply.</p>
-        <p>&copy; {{ date('Y') }} Supply Chain Management System. All rights reserved.</p>
+        <p>&copy; {{ date('Y') }} Emerald Industrial CFZE. All rights reserved.</p>
     </div>
 </body>
 </html>

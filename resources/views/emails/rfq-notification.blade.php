@@ -58,30 +58,31 @@
 </head>
 <body>
     <div class="header">
+        <img src="{{ config('app.frontend_url') }}/images/emerald-logo.png" alt="Emerald Industrial CFZE" style="height: 60px; margin-bottom: 10px;">
         <h1>New RFQ Assigned</h1>
     </div>
-    
+
     <div class="content">
         <p>Dear {{ $companyName }},</p>
-        
+
         <p>A new Request for Quotation (RFQ) has been assigned to your company.</p>
-        
+
         <div class="rfq-details">
             <h3>RFQ Details:</h3>
             <p><strong>RFQ ID:</strong> {{ $rfqId }}</p>
             <p><strong>Title:</strong> {{ $rfqTitle }}</p>
         </div>
-        
+
         <div class="deadline">
             <strong>⏰ Submission Deadline:</strong> {{ $deadline }}
         </div>
-        
+
         <p>Please review the RFQ details and submit your quotation before the deadline.</p>
-        
+
         <div style="text-align: center;">
             <a href="{{ $rfqUrl }}" class="button">View RFQ & Submit Quotation</a>
         </div>
-        
+
         <h3>Important Notes:</h3>
         <ul>
             <li>Carefully review all requirements and specifications</li>
@@ -89,14 +90,14 @@
             <li>Submit before the deadline to be considered</li>
             <li>Contact us if you have any questions or clarifications</li>
         </ul>
-        
+
         <p>We look forward to receiving your competitive quotation.</p>
-        
+
         <p>Best regards,<br>
         Procurement Team<br>
         Supply Chain Management</p>
     </div>
-    
+
     <div class="footer">
         <p>This is an automated email. Please do not reply.</p>
         <p>&copy; {{ date('Y') }} Supply Chain Management System. All rights reserved.</p>

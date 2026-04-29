@@ -14,6 +14,7 @@
 </head>
 <body>
     <div class="header">
+        <img src="{{ config('app.frontend_url') }}/images/emerald-logo.png" alt="Emerald Industrial CFZE" style="height: 60px; margin-bottom: 10px;">
         <h2>Vendor Selection Update</h2>
     </div>
     <div class="content">
@@ -32,7 +33,8 @@
         </p>
     </div>
     <div class="footer">
-        <p>This is an automated workflow notification.</p>
+        <p>This is an automated workflow notification from Emerald Industrial CFZE.</p>
+        <p>&copy; {{ date('Y') }} Emerald Industrial CFZE. All rights reserved.</p>
     </div>
 </body>
 </html>

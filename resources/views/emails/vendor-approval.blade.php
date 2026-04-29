@@ -61,14 +61,15 @@
 </head>
 <body>
     <div class="header">
+        <img src="{{ config('app.frontend_url') }}/images/emerald-logo.png" alt="Emerald Industrial CFZE" style="height: 60px; margin-bottom: 10px;">
         <h1>✓ Vendor Registration Approved</h1>
     </div>
 
     <div class="content">
         <p>Dear {{ $companyName }},</p>
 
-        <p>Congratulations! Your vendor registration has been approved. Welcome to our Supply Chain Management vendor network!</p>
-        
+        <p>Congratulations! Your vendor registration has been approved. Welcome to Emerald Industrial CFZE's vendor network!</p>
+
         <h3>Your Login Credentials:</h3>
         <div class="credentials">
             <p><strong>Email:</strong> {{ $email }}</p>
@@ -95,15 +96,15 @@
         <p>If you encounter any issues logging in, please contact our support team.</p>
 
         <p>We look forward to a successful partnership!</p>
-        
+
         <p>Best regards,<br>
-        Supply Chain Management Team</p>
+        Emerald Industrial CFZE Team</p>
     </div>
 
     <div class="footer">
         <p>This is an automated email. Please do not reply.</p>
         <p>Keep your credentials secure and do not share them with anyone.</p>
-        <p>&copy; {{ date('Y') }} Supply Chain Management System. All rights reserved.</p>
+        <p>&copy; {{ date('Y') }} Emerald Industrial CFZE. All rights reserved.</p>
     </div>
 </body>
 </html>

@@ -54,32 +54,32 @@
     <div class="header">
         <h1>Password Reset</h1>
     </div>
-    
+
     <div class="content">
         <p>Dear {{ $name }},</p>
-        
+
         <p>Your password has been reset as requested.</p>
-        
+
         <h3>Your New Temporary Password:</h3>
         <div class="credentials">
             <p><strong>Temporary Password:</strong> <code>{{ $temporaryPassword }}</code></p>
         </div>
-        
+
         <p>For security reasons, you will be required to change this password upon your next login.</p>
-        
+
         <div style="text-align: center;">
             <a href="{{ $loginUrl }}" class="button">Login Now</a>
         </div>
-        
+
         <p><strong>Security Notice:</strong> If you did not request this password reset, please contact our support team immediately.</p>
-        
+
         <p>Best regards,<br>
-        Supply Chain Management Team</p>
+        Emerald Industrial CFZE Team</p>
     </div>
-    
+
     <div class="footer">
         <p>This is an automated email. Please do not reply.</p>
-        <p>&copy; {{ date('Y') }} Supply Chain Management System. All rights reserved.</p>
+        <p>&copy; {{ date('Y') }} Emerald Industrial CFZE. All rights reserved.</p>
     </div>
 </body>
 </html>

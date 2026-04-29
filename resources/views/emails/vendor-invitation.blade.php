@@ -45,16 +45,17 @@
 </head>
 <body>
     <div class="header">
+        <img src="{{ config('app.frontend_url') }}/images/emerald-logo.png" alt="Emerald Industrial CFZE" style="height: 60px; margin-bottom: 10px;">
         <h1>Vendor Registration Invitation</h1>
     </div>
-    
+
     <div class="content">
         <p>Dear {{ $companyName }},</p>
-        
-        <p>You have been invited to register as a vendor in our Supply Chain Management system.</p>
-        
+
+        <p>You have been invited to register as a vendor in Emerald Industrial CFZE's procurement system.</p>
+
         <p>We value potential partnerships with quality vendors and would like to invite you to join our vendor network.</p>
-        
+
         <h3>Next Steps:</h3>
         <ol>
             <li>Click the registration button below</li>
@@ -62,22 +63,22 @@
             <li>Upload required documents (business license, tax certificates, etc.)</li>
             <li>Submit your registration for approval</li>
         </ol>
-        
+
         <div style="text-align: center;">
             <a href="{{ $registrationUrl }}" class="button">Register Now</a>
         </div>
-        
+
         <p>Once your registration is approved, you will receive login credentials to access the vendor portal.</p>
-        
+
         <p>If you have any questions, please contact our procurement team.</p>
-        
+
         <p>Best regards,<br>
-        Supply Chain Management Team</p>
+        Emerald Industrial CFZE Team</p>
     </div>
-    
+
     <div class="footer">
         <p>This is an automated email. Please do not reply.</p>
-        <p>&copy; {{ date('Y') }} Supply Chain Management System. All rights reserved.</p>
+        <p>&copy; {{ date('Y') }} Emerald Industrial CFZE. All rights reserved.</p>
     </div>
 </body>
 </html>
