@@ -35,7 +35,7 @@ class MRFController extends Controller
         $this->workflowService = $workflowService;
         $this->permissionService = $permissionService;
     }
-    
+
     /**
      * Get the storage disk for documents
      */
@@ -43,7 +43,7 @@ class MRFController extends Controller
     {
         return config('filesystems.documents_disk', env('DOCUMENTS_DISK', 's3'));
     }
-    
+
     /**
      * Get file URL - for S3 uses temporary signed URL, for local uses public URL
      */
@@ -60,7 +60,7 @@ class MRFController extends Controller
                 return Storage::disk($disk)->url($filePath);
             }
         }
-        
+
         // For local/public storage
         $url = Storage::disk($disk)->url($filePath);
         if (!filter_var($url, FILTER_VALIDATE_URL)) {
@@ -94,7 +94,7 @@ class MRFController extends Controller
         // Sort
         $sortBy = $request->get('sortBy', 'date');
         $sortOrder = $request->get('sortOrder', 'desc');
-        
+
         $allowedSortFields = ['date', 'estimated_cost', 'title', 'status', 'created_at'];
         if (in_array($sortBy, $allowedSortFields)) {
             $query->orderBy($sortBy, $sortOrder);
@@ -104,7 +104,7 @@ class MRFController extends Controller
 
         // Filter by requester (for employees to see only their own)
         $user = $request->user();
-        
+
         // If user is a vendor, they typically don't need direct access to MRFs
         // But allow access and return empty array or MRFs related to their RFQs
         $isVendor = false;
@@ -114,7 +114,7 @@ class MRFController extends Controller
             // For now, return empty array - vendors should access MRFs through RFQs
             return response()->json([]);
         }
-        
+
         if ($user && in_array($user->role, ['employee', 'general_employee'])) {
             $query->where('requester_id', $user->id);
         }
@@ -144,6 +144,12 @@ class MRFController extends Controller
                 'isResubmission' => $mrf->is_resubmission,
                 'pfiUrl' => $mrf->pfi_url,
                 'pfiShareUrl' => $mrf->pfi_share_url,
+                'attachmentUrl' => $mrf->attachment_url,
+                'attachmentShareUrl' => $mrf->attachment_share_url,
+                'attachment_url' => $mrf->attachment_url,
+                'attachment_share_url' => $mrf->attachment_share_url,
+                'attachmentName' => $mrf->attachment_name,
+                'attachment_name' => $mrf->attachment_name,
                 'grnRequested' => $mrf->grn_requested,
                 'grnRequestedAt' => $mrf->grn_requested_at?->toIso8601String(),
                 'grnCompleted' => $mrf->grn_completed,
@@ -176,13 +182,13 @@ class MRFController extends Controller
             // Handle database errors (e.g., missing columns)
             $errorMessage = $e->getMessage();
             $errorCode = $e->getCode();
-            
+
             Log::error('MRF index query error', [
                 'error' => $errorMessage,
                 'code' => $errorCode,
                 'sql_state' => $e->errorInfo[0] ?? null,
             ]);
-            
+
             // Check for column-related errors (MySQL, PostgreSQL, SQLite variations)
             $columnErrorPatterns = [
                 "Unknown column",
@@ -192,16 +198,16 @@ class MRFController extends Controller
                 "SQLSTATE[42S22]", // MySQL: Column not found
                 "SQLSTATE[42703]", // PostgreSQL: Undefined column
             ];
-            
+
             $isColumnError = false;
             foreach ($columnErrorPatterns as $pattern) {
-                if (stripos($errorMessage, $pattern) !== false || 
+                if (stripos($errorMessage, $pattern) !== false ||
                     preg_match('/' . $pattern . '/i', $errorMessage)) {
                     $isColumnError = true;
                     break;
                 }
             }
-            
+
             // Return empty array if it's a column error (migration not run yet)
             if ($isColumnError) {
                 Log::warning('MRF index: Missing database columns detected. Migration may need to be run.', [
@@ -209,7 +215,7 @@ class MRFController extends Controller
                 ]);
                 return response()->json([]);
             }
-            
+
             // For other database errors, return error response
             return response()->json([
                 'success' => false,
@@ -224,7 +230,7 @@ class MRFController extends Controller
                 'file' => $e->getFile(),
                 'line' => $e->getLine(),
             ]);
-            
+
             return response()->json([
                 'success' => false,
                 'error' => 'An error occurred while fetching MRFs',
@@ -314,7 +320,7 @@ class MRFController extends Controller
                 ?? $mrf->supply_chain_remarks
                 ?? $mrf->remarks
                 ?? null,
-            
+
             'chairmanApproved' => (bool) $mrf->chairman_approved,
             'chairmanApprovedAt' => $mrf->chairman_approved_at ? $mrf->chairman_approved_at->toIso8601String() : null,
             // PO information - allows Supply Chain to review/download unsigned PO
@@ -332,6 +338,13 @@ class MRFController extends Controller
             'poGeneratedAt' => $mrf->po_generated_at?->toIso8601String(),
             'po_signed_at' => $mrf->po_signed_at?->toIso8601String(),
             'poSignedAt' => $mrf->po_signed_at?->toIso8601String(),
+            // Supporting attachment
+            'attachmentUrl' => $mrf->attachment_url,
+            'attachmentShareUrl' => $mrf->attachment_share_url,
+            'attachment_url' => $mrf->attachment_url,
+            'attachment_share_url' => $mrf->attachment_share_url,
+            'attachmentName' => $mrf->attachment_name,
+            'attachment_name' => $mrf->attachment_name,
         ]);
     }
 
@@ -377,7 +390,7 @@ class MRFController extends Controller
 
         // Get all RFQs for this MRF
         $rfqs = $mrf->rfqs;
-        
+
         // Collect all quotations from all RFQs
         // Exclude rejected quotations from active view (they remain accessible for historical tracking)
         $allQuotations = collect();
@@ -402,7 +415,7 @@ class MRFController extends Controller
                 }
 
                 $deliveryDays = (int) $deliveryDays;
-                
+
                 $allQuotations->push([
                     'id' => $quotation->quotation_id,
                     'rfqId' => $rfq->rfq_id,
@@ -418,7 +431,7 @@ class MRFController extends Controller
                         'id' => null,
                         'name' => $quotation->vendor_name ?? 'Unknown Vendor',
                     ],
-                    
+
                     'totalAmount' => (float) $quotation->total_amount,
                     'total_amount' => (float) $quotation->total_amount,
                     'total_order_value' => (float) $quotation->total_amount,
@@ -649,7 +662,7 @@ class MRFController extends Controller
                     )
                     : ($mrf->workflow_state === 'supply_chain_director_review' ? 'pending' :
                         (in_array($mrf->workflow_state, ['supply_chain_director_approved', 'procurement_review', 'procurement_approved', 'rfq_issued', 'quotations_received', 'quotations_evaluated', 'vendor_selected', 'invoice_approved', 'po_generated', 'po_signed', 'closed']) ? 'completed' : 'not_started')),
-                        
+
                 'completedAt' => null,
                 'description' => $isEmeraldContract
                     ? 'Executive performs first approval for Emerald contract MRFs'
@@ -658,14 +671,14 @@ class MRFController extends Controller
             [
                 'step' => 3,
                 'name' => 'Procurement Manager Sources Quotations',
-                'status' => in_array($mrf->workflow_state, ['procurement_review', 'procurement_approved', 'rfq_issued', 'quotations_received']) ? 'pending' : 
+                'status' => in_array($mrf->workflow_state, ['procurement_review', 'procurement_approved', 'rfq_issued', 'quotations_received']) ? 'pending' :
                            (in_array($mrf->workflow_state, ['quotations_evaluated', 'vendor_selected', 'invoice_approved', 'po_generated', 'po_signed', 'closed']) ? 'completed' : 'not_started'),
                 'description' => 'Procurement manager sources and evaluates onboarded vendor quotations',
             ],
             [
                 'step' => 4,
                 'name' => 'RFQ Issued to Vendors',
-                'status' => $mrf->rfqs()->exists() ? 'completed' : 
+                'status' => $mrf->rfqs()->exists() ? 'completed' :
                            ($mrf->workflow_state === 'rfq_issued' ? 'pending' : 'not_started'),
                 'completedAt' => $mrf->rfqs()->exists() ? $mrf->rfqs()->first()->created_at->toIso8601String() : null,
                 'rfqCount' => $mrf->rfqs()->count(),
@@ -674,7 +687,7 @@ class MRFController extends Controller
             [
                 'step' => 5,
                 'name' => 'Supply Chain Director Final Quote Approval',
-                'status' => in_array($mrf->workflow_state, ['invoice_approved', 'po_generated', 'po_signed', 'closed']) ? 'completed' : 
+                'status' => in_array($mrf->workflow_state, ['invoice_approved', 'po_generated', 'po_signed', 'closed']) ? 'completed' :
                            ($mrf->workflow_state === 'vendor_selected' ? 'pending' : 'not_started'),
                 'quotationCount' => $mrf->quotations()->count(),
                 'description' => 'Selected vendor/quotation is submitted for final Supply Chain Director approval',
@@ -682,7 +695,7 @@ class MRFController extends Controller
             [
                 'step' => 6,
                 'name' => 'Purchase Order Generated',
-                'status' => $mrf->po_number ? 'completed' : 
+                'status' => $mrf->po_number ? 'completed' :
                            ($mrf->workflow_state === 'po_generated' ? 'pending' : 'not_started'),
                 'completedAt' => $mrf->po_generated_at ? $mrf->po_generated_at->toIso8601String() : null,
                 'poNumber' => $mrf->po_number,
@@ -702,7 +715,7 @@ class MRFController extends Controller
             'data' => [
                 'mrfId' => $mrf->mrf_id,
                 'title' => $mrf->title,
-                'currentStep' => collect($steps)->where('status', 'pending')->first()['step'] ?? 
+                'currentStep' => collect($steps)->where('status', 'pending')->first()['step'] ??
                                  (collect($steps)->where('status', 'completed')->last()['step'] ?? 1),
                 'steps' => $steps,
                 'currentWorkflowState' => $mrf->workflow_state,
@@ -744,6 +757,7 @@ class MRFController extends Controller
                 'justification' => 'required|string',
                 'department' => 'nullable|string|max:255',
                 'pfi' => 'nullable|file|mimes:pdf,doc,docx|max:10240', // Optional PFI upload (10MB max)
+                'attachment' => 'nullable|file|max:10240', // Max 10MB, any file type
             ]);
 
             if ($validator->fails()) {
@@ -767,30 +781,54 @@ class MRFController extends Controller
 
             // Generate MRF ID with contract type
             $mrfId = MRF::generateMRFId($request->contractType);
-            
+
             // Handle PFI upload if provided
             $pfiUrl = null;
             $pfiShareUrl = null;
-            
+
             if ($request->hasFile('pfi')) {
                 $pfiFile = $request->file('pfi');
-                
+
                 // Upload to S3 storage
                 $disk = $this->getStorageDisk();
                 $pfiFileName = "pfi_{$mrfId}_" . time() . "." . $pfiFile->getClientOriginalExtension();
                 $pfiPath = "mrfs/" . date('Y/m') . "/{$mrfId}/{$pfiFileName}";
-                
+
                 // Ensure directory structure exists (for S3, this is just the path)
                 $directory = dirname($pfiPath);
                 if ($disk !== 's3' && !Storage::disk($disk)->exists($directory)) {
                     Storage::disk($disk)->makeDirectory($directory, 0755, true);
                 }
-                
+
                 $pfiFile->storeAs($directory, basename($pfiPath), $disk);
-                
+
                 // Get URL (temporary signed URL for S3, public URL for local)
                 $pfiUrl = $this->getFileUrl($pfiPath, $disk);
                     $pfiShareUrl = $pfiUrl;
+            }
+
+            // Handle supporting attachment upload if provided
+            $attachmentUrl = null;
+            $attachmentShareUrl = null;
+            $attachmentName = null;
+
+            if ($request->hasFile('attachment')) {
+                $attachmentFile = $request->file('attachment');
+
+                $disk = $this->getStorageDisk();
+                $attachmentFileName = "attachment_{$mrfId}_" . time() . "." . $attachmentFile->getClientOriginalExtension();
+                $attachmentPath = "mrfs/" . date('Y/m') . "/{$mrfId}/{$attachmentFileName}";
+
+                $directory = dirname($attachmentPath);
+                if ($disk !== 's3' && !Storage::disk($disk)->exists($directory)) {
+                    Storage::disk($disk)->makeDirectory($directory, 0755, true);
+                }
+
+                $attachmentFile->storeAs($directory, basename($attachmentPath), $disk);
+
+                $attachmentUrl = $this->getFileUrl($attachmentPath, $disk);
+                $attachmentShareUrl = $attachmentUrl;
+                $attachmentName = $attachmentFile->getClientOriginalName();
             }
 
             $normalizedContractType = strtolower(trim((string) $request->contractType));
@@ -822,12 +860,15 @@ class MRFController extends Controller
                 'is_resubmission' => false,
                 'pfi_url' => $pfiUrl,
                 'pfi_share_url' => $pfiShareUrl,
+                'attachment_url' => $attachmentUrl,
+                'attachment_share_url' => $attachmentShareUrl,
+                'attachment_name' => $attachmentName,
             ]);
             } catch (\Illuminate\Database\QueryException $e) {
                 // Check if it's a column not found error
                 $errorMessage = $e->getMessage();
-                if (str_contains($errorMessage, 'contract_type') || 
-                    str_contains($errorMessage, 'column') || 
+                if (str_contains($errorMessage, 'contract_type') ||
+                    str_contains($errorMessage, 'column') ||
                     str_contains($errorMessage, 'does not exist') ||
                     str_contains($errorMessage, 'Unknown column')) {
                     Log::error('Database column missing - migration may not have been run', [
@@ -909,6 +950,9 @@ class MRFController extends Controller
                 'isResubmission' => $mrf->is_resubmission,
                     'pfiUrl' => $mrf->pfi_url,
                     'pfiShareUrl' => $mrf->pfi_share_url,
+                    'attachmentUrl' => $mrf->attachment_url,
+                    'attachmentShareUrl' => $mrf->attachment_share_url,
+                    'attachmentName' => $mrf->attachment_name,
                 ]
             ], 201);
         } catch (\Exception $e) {
@@ -925,7 +969,7 @@ class MRFController extends Controller
                 'code' => 'SERVER_ERROR'
             ], 500);
         }
-        
+
     }
 
     /**
@@ -1027,7 +1071,7 @@ class MRFController extends Controller
     public function approve(Request $request, $id)
     {
         $user = $request->user();
-        
+
         // Check if user has permission (procurement or finance role)
         if (!in_array($user->role, ['procurement', 'finance', 'admin'])) {
             return response()->json([
@@ -1115,7 +1159,7 @@ class MRFController extends Controller
     public function reject(Request $request, $id)
     {
         $user = $request->user();
-        
+
         // Check if user has permission
         if (!in_array($user->role, ['procurement', 'finance', 'admin'])) {
             return response()->json([
@@ -1184,7 +1228,7 @@ class MRFController extends Controller
     public function generatePO(Request $request, $id)
     {
         $user = $request->user();
-        
+
         // Check if user has procurement permission
         if (!in_array($user->role, ['procurement', 'admin'])) {
             return response()->json([
@@ -1224,12 +1268,12 @@ class MRFController extends Controller
         if ($request->hasFile('unsigned_po')) {
             $file = $request->file('unsigned_po');
             $fileName = time() . '_' . $file->getClientOriginalName();
-            
+
             // Store in public disk (configured to storage/app/public)
             $disk = config('filesystems.documents_disk', 'public');
             $path = $file->storeAs('documents/pos', $fileName, $disk);
             $unsignedPoPath = $path;
-            
+
             Log::info('PO file uploaded', [
                 'mrf_id' => $id,
                 'file_name' => $fileName,
@@ -1287,7 +1331,7 @@ class MRFController extends Controller
     public function uploadSignedPO(Request $request, $id)
     {
         $user = $request->user();
-        
+
         // Check if user has supply chain permission
         if (!in_array($user->role, ['supply_chain', 'admin'])) {
             return response()->json([
@@ -1326,11 +1370,11 @@ class MRFController extends Controller
         if ($request->hasFile('signed_po')) {
             $file = $request->file('signed_po');
             $fileName = time() . '_signed_' . $file->getClientOriginalName();
-            
+
             $disk = config('filesystems.documents_disk', 'public');
             $path = $file->storeAs('documents/pos/signed', $fileName, $disk);
             $signedPoPath = $path;
-            
+
             Log::info('Signed PO uploaded', [
                 'mrf_id' => $id,
                 'file_name' => $fileName,
@@ -1384,7 +1428,7 @@ class MRFController extends Controller
     public function rejectPO(Request $request, $id)
     {
         $user = $request->user();
-        
+
         // Check if user has supply chain permission
         if (!in_array($user->role, ['supply_chain', 'admin'])) {
             return response()->json([
@@ -1481,11 +1525,11 @@ class MRFController extends Controller
 
         // Check if user is the requester
         $isRequester = $mrf->requester_id == $user->id;
-        
+
         // Check if user is a procurement manager or admin (admin can always delete)
         $isAdmin = $user->role === 'admin';
         $isProcurementManager = in_array($user->role, ['procurement_manager', 'procurement', 'admin']);
-        
+
         // Admin can always delete any MRF (force delete capability)
         if ($isAdmin) {
             try {
@@ -1495,7 +1539,7 @@ class MRFController extends Controller
                 $mrf->approvalHistory()->delete();
 
         $mrf->delete();
-                
+
                 Log::info('MRF force deleted by admin', [
                     'mrf_id' => $id,
                     'deleted_by' => $user->id,
@@ -1511,7 +1555,7 @@ class MRFController extends Controller
                     'mrf_id' => $id,
                     'error' => $e->getMessage()
                 ]);
-                
+
                 return response()->json([
                     'success' => false,
                     'error' => 'Failed to delete MRF: ' . $e->getMessage(),
@@ -1519,16 +1563,16 @@ class MRFController extends Controller
                 ], 500);
             }
         }
-        
+
         // For non-admin users, check deletion permissions
         $canDelete = false;
-        
+
         // Check if MRF has PO or is too far in workflow
         // Only count signed PO as "too far" - unsigned PO can be deleted
         $hasSignedPO = !empty(trim($mrf->signed_po_url ?? ''));
         $hasUnsignedPO = !empty(trim($mrf->po_number ?? '')) || !empty(trim($mrf->unsigned_po_url ?? ''));
         $tooFarInWorkflow = in_array($statusLower, ['finance', 'paid', 'completed', 'chairman_payment']);
-        
+
         // Procurement managers can delete MRFs in supply_chain if PO is not signed yet
         // This allows them to delete MRFs that are stuck in supply_chain
         if ($isProcurementManager) {
@@ -1536,28 +1580,28 @@ class MRFController extends Controller
             // 1. No PO at all, OR
             // 2. Has unsigned PO but not signed (supply_chain status), OR
             // 3. Is in early stages (pending, procurement, rejected)
-            $isSupplyChain = in_array($statusLower, ['supply_chain', 'supply chain']) || 
+            $isSupplyChain = in_array($statusLower, ['supply_chain', 'supply chain']) ||
                            in_array($currentStageLower, ['supply_chain', 'supply chain']);
-            
+
             if (!$hasSignedPO) {
                 // No signed PO - can delete if:
                 // - No PO at all, OR
                 // - Has unsigned PO and is in supply_chain (can delete and regenerate), OR
                 // - Is in early stages
-                if (!$hasUnsignedPO || $isSupplyChain || 
+                if (!$hasUnsignedPO || $isSupplyChain ||
                     in_array($statusLower, ['pending', 'procurement', 'rejected', 'executive approval', 'executive_review', 'chairman_review'])) {
                     $canDelete = true;
                 }
             }
         }
-        
+
         if ($isRequester && !$canDelete) {
             // Requester can delete if no PO has been generated and not too far in workflow
             if (!$hasUnsignedPO && !$tooFarInWorkflow) {
                 $canDelete = true;
             }
         }
-        
+
         // Also allow deletion for pending/rejected statuses (original logic)
         if (!$canDelete && in_array($statusLower, ['pending', 'rejected'])) {
             $canDelete = true;
@@ -1580,7 +1624,7 @@ class MRFController extends Controller
 
         try {
             $mrf->delete();
-            
+
             Log::info('MRF deleted', [
                 'mrf_id' => $id,
                 'deleted_by' => $user->id,
@@ -1596,7 +1640,7 @@ class MRFController extends Controller
                 'mrf_id' => $id,
                 'error' => $e->getMessage()
             ]);
-            
+
             return response()->json([
                 'success' => false,
                 'error' => 'Failed to delete MRF: ' . $e->getMessage(),
@@ -1631,9 +1675,9 @@ class MRFController extends Controller
         try {
             // Generate PDF on-the-fly from MRF data
             $pdfContent = $this->generatePOPDFFromMRF($mrf);
-            
+
             $filename = "PO_{$mrf->po_number}.pdf";
-            
+
             return response($pdfContent, 200)
                 ->header('Content-Type', 'application/pdf')
                 ->header('Content-Disposition', 'attachment; filename="' . $filename . '"');
@@ -1738,25 +1782,25 @@ class MRFController extends Controller
     public function resubmit(Request $request, $id)
     {
         $user = $request->user();
-    
+
         $mrf = is_numeric($id)
             ? MRF::find($id)
             : MRF::where('mrf_id', $id)->first();
-    
+
         if (!$mrf) {
             return response()->json([
                 'success' => false,
                 'message' => 'MRF not found'
             ], 404);
         }
-    
+
         if ($mrf->status !== 'rejected') {
             return response()->json([
                 'success' => false,
                 'message' => 'Only rejected MRFs can be resubmitted'
             ], 400);
         }
-    
+
         $validated = $request->validate([
             'title' => 'sometimes|string',
             'description' => 'sometimes|string',
@@ -1765,16 +1809,16 @@ class MRFController extends Controller
             'justification' => 'sometimes|string',
             'category' => 'sometimes|string',
         ]);
-    
+
         $mrf->fill($validated);
-    
+
         $mrf->rejection_reason = null;
         $mrf->rejection_comments = null;
         $mrf->rejected_by = null;
         $mrf->rejected_at = null;
-    
+
         $mrf->is_resubmission = true;
-    
+
         if (strtolower(trim((string) $mrf->contract_type)) === 'emerald') {
             $mrf->workflow_state = 'executive_review';
             $mrf->current_stage = 'executive_review';
@@ -1782,11 +1826,11 @@ class MRFController extends Controller
             $mrf->workflow_state = 'supply_chain_director_review';
             $mrf->current_stage = 'supply_chain_director_review';
         }
-    
+
         $mrf->status = 'pending';
-    
+
         $mrf->save();
-    
+
         return response()->json([
             'success' => true,
             'message' => 'MRF resubmitted successfully',
@@ -1888,12 +1932,12 @@ class MRFController extends Controller
         try {
             $disk = $this->getStorageDisk();
             $urlPath = parse_url($mrf->signed_po_url, PHP_URL_PATH);
-            
+
             // Try to extract file path
             $baseUrl = Storage::disk($disk)->url('');
             $filePath = str_replace($baseUrl, '', $mrf->signed_po_url);
             $filePath = ltrim(str_replace('/storage/', '', $filePath), '/');
-            
+
             if (empty($filePath) || !Storage::disk($disk)->exists($filePath)) {
                 // Try alternative path extraction
                 $filePath = ltrim($urlPath, '/');
@@ -1904,7 +1948,7 @@ class MRFController extends Controller
 
             $pdfContent = Storage::disk($disk)->get($filePath);
             $filename = "PO_Signed_{$mrf->po_number}.pdf";
-            
+
             return response($pdfContent, 200)
                 ->header('Content-Type', 'application/pdf')
                 ->header('Content-Disposition', 'attachment; filename="' . $filename . '"');
@@ -1929,7 +1973,7 @@ class MRFController extends Controller
     {
         // Load relationships
         $mrf->load(['requester', 'items']);
-        
+
         // Get RFQ and quotation data
         $rfq = \App\Models\RFQ::where('mrf_id', $mrf->mrf_id)->first();
         if (!$rfq) {
@@ -1956,15 +2000,15 @@ class MRFController extends Controller
         }
 
         $vendor = $quotation->vendor;
-        
+
         // Get items from quotation_items, RFQ items, or MRF items
         $items = \App\Models\QuotationItem::where('quotation_id', $quotation->id)->get();
-        
+
         if ($items->isEmpty()) {
             $rfq->load('items');
             $items = $rfq->items;
         }
-        
+
         if ($items->isEmpty()) {
             $items = $mrf->items;
         }
@@ -1986,7 +2030,7 @@ class MRFController extends Controller
 
         // Format date
         $poDate = $mrf->po_generated_at ? \Carbon\Carbon::parse($mrf->po_generated_at)->format('d/m/Y') : now()->format('d/m/Y');
-        
+
         // Build vendor address
         $vendorAddress = '';
         if (!empty($vendor->address)) {
@@ -2006,7 +2050,7 @@ class MRFController extends Controller
         // Calculate tax (use MRF tax_amount if set, otherwise calculate from tax_rate)
         $taxRate = $mrf->tax_rate ?? 0;
         $tax = $mrf->tax_amount ?? 0;
-        
+
         // If tax_amount is not set but tax_rate is, calculate it
         if ($tax == 0 && $taxRate > 0) {
             $tax = ($subtotal * $taxRate) / 100;
@@ -2079,14 +2123,14 @@ class MRFController extends Controller
     <title>Purchase Order - ' . htmlspecialchars($poNumber) . '</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { 
-            font-family: Arial, sans-serif; 
-            font-size: 11px; 
+        body {
+            font-family: Arial, sans-serif;
+            font-size: 11px;
             line-height: 1.4;
             color: #000;
             padding: 20px;
         }
-        .header { 
+        .header {
             margin-bottom: 20px;
             border-bottom: 2px solid #000;
             padding-bottom: 15px;
@@ -2278,7 +2322,7 @@ class MRFController extends Controller
             $quantity = $item->quantity ?? 1;
             $unitPrice = $item->unit_price ?? ($item->total_price ?? 0) / $quantity;
             $itemTotal = $unitPrice * $quantity;
-            
+
             // Display tax for item (if tax_rate > 0, show percentage, otherwise "No VAT")
             $taxDisplay = $taxRate > 0 ? number_format($taxRate, 2) . '%' : 'No VAT';
 
@@ -2320,7 +2364,7 @@ class MRFController extends Controller
         <div>Please upon delivery, sign off your delivery note with the warehouse, attach you invoice and a copy of your PO and submit all to this email: ' . htmlspecialchars($invoiceEmail) . ($invoiceCC ? ' cc: ' . htmlspecialchars($invoiceCC) : '') . '</div>
 
         <div class="terms-title" style="margin-top: 15px;">SPECIAL NOTES, TERMS OF SALE:</div>';
-        
+
         // Use custom terms if provided, otherwise use default
         if (!empty($specialTerms)) {
             $html .= '<div>' . nl2br(htmlspecialchars($specialTerms)) . '</div>';
@@ -2334,7 +2378,7 @@ class MRFController extends Controller
             <li>Items delivery must be accompanied by Airway Bill, Invoice and Delivery Note all duly signed by Emerald representative at the site.</li>
         </ol>';
         }
-        
+
         $html .= '
     </div>
 </body>
@@ -2366,7 +2410,7 @@ class MRFController extends Controller
                 $mimeType = $imageInfo['mime'] ?? 'image/png';
                 $base64 = base64_encode($imageData);
                 $dataUri = 'data:' . $mimeType . ';base64,' . $base64;
-                
+
                 return '<div class="logo-container">
                     <img src="' . $dataUri . '" alt="Company Logo" />
                 </div>';
