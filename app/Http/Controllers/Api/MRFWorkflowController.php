@@ -15,6 +15,7 @@ use App\Services\EmailService;
 use App\Services\WorkflowNotificationService;
 use App\Services\WorkflowStateService;
 use App\Services\PermissionService;
+use App\Services\PurchaseOrderPdfService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\Storage;
@@ -2544,187 +2545,13 @@ class MRFWorkflowController extends Controller
      */
     private function generatePOPDF(array $data, string $poNumber, $user): string
     {
-        $mrf = $data['mrf'];
-        $rfq = $data['rfq'];
-        $quotation = $data['quotation'];
-        $vendor = $data['vendor'];
-        $items = $data['items'];
-        $company = $data['company'];
+        $html = app(PurchaseOrderPdfService::class)->htmlFromWorkflow($data, $poNumber, $user);
 
-        // Set timezone to Africa/Lagos
-        $date = now()->setTimezone('Africa/Lagos');
-
-        // Build HTML template
-        $html = '<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="UTF-8">
-    <title>Purchase Order - ' . htmlspecialchars($poNumber) . '</title>
-    <style>
-        body { font-family: Arial, sans-serif; margin: 20px; font-size: 12px; }
-        .header { text-align: center; margin-bottom: 30px; border-bottom: 2px solid #000; padding-bottom: 20px; }
-        .header h1 { margin: 0; font-size: 24px; }
-        .company-info, .vendor-info { margin-bottom: 20px; }
-        .info-section { display: inline-block; vertical-align: top; width: 48%; }
-        .info-section h3 { margin-top: 0; border-bottom: 1px solid #ccc; padding-bottom: 5px; }
-        .items-table { width: 100%; border-collapse: collapse; margin: 20px 0; }
-        .items-table th, .items-table td { border: 1px solid #000; padding: 8px; text-align: left; }
-        .items-table th { background-color: #f0f0f0; font-weight: bold; }
-        .items-table .text-right { text-align: right; }
-        .terms { margin-top: 30px; }
-        .terms h3 { border-bottom: 1px solid #ccc; padding-bottom: 5px; }
-        .footer { margin-top: 50px; }
-        .signature-section { margin-top: 40px; }
-        .signature-line { border-top: 1px solid #000; width: 200px; margin-top: 50px; }
-    </style>
-</head>
-<body>
-    <div class="header">
-        <h1>PURCHASE ORDER</h1>
-        <p><strong>PO Number:</strong> ' . htmlspecialchars($poNumber) . '</p>
-        <p><strong>Date:</strong> ' . $date->format('F d, Y') . '</p>
-    </div>
-
-    <div class="company-info">
-        <div class="info-section">
-            <h3>Company Information</h3>
-            <p><strong>' . htmlspecialchars($company['name']) . '</strong></p>';
-
-        if (!empty($company['address'])) {
-            $html .= '<p>' . nl2br(htmlspecialchars($company['address'])) . '</p>';
-        }
-        if (!empty($company['phone'])) {
-            $html .= '<p><strong>Phone:</strong> ' . htmlspecialchars($company['phone']) . '</p>';
-        }
-        if (!empty($company['email'])) {
-            $html .= '<p><strong>Email:</strong> ' . htmlspecialchars($company['email']) . '</p>';
-        }
-        if (!empty($company['tax_id'])) {
-            $html .= '<p><strong>Tax ID:</strong> ' . htmlspecialchars($company['tax_id']) . '</p>';
-        }
-
-        $html .= '</div>
-        <div class="info-section">
-            <h3>Vendor Information</h3>
-            <p><strong>' . htmlspecialchars($vendor['name']) . '</strong></p>';
-
-        if (!empty($vendor['address'])) {
-            $html .= '<p>' . nl2br(htmlspecialchars($vendor['address'])) . '</p>';
-        }
-        if (!empty($vendor['contact_person'])) {
-            $html .= '<p><strong>Contact Person:</strong> ' . htmlspecialchars($vendor['contact_person']) . '</p>';
-        }
-        if (!empty($vendor['phone'])) {
-            $html .= '<p><strong>Phone:</strong> ' . htmlspecialchars($vendor['phone']) . '</p>';
-        }
-        if (!empty($vendor['email'])) {
-            $html .= '<p><strong>Email:</strong> ' . htmlspecialchars($vendor['email']) . '</p>';
-        }
-        if (!empty($vendor['tax_id'])) {
-            $html .= '<p><strong>Tax ID:</strong> ' . htmlspecialchars($vendor['tax_id']) . '</p>';
-        }
-
-        $html .= '</div>
-    </div>
-
-    <div class="mrf-reference">
-        <h3>MRF Reference</h3>
-        <p><strong>MRF ID:</strong> ' . htmlspecialchars($mrf['id']) . '</p>
-        <p><strong>MRF Title:</strong> ' . htmlspecialchars($mrf['title']) . '</p>
-        <p><strong>Requested by:</strong> ' . htmlspecialchars($mrf['requester_name']) . '</p>';
-
-        if (!empty($mrf['department'])) {
-            $html .= '<p><strong>Department:</strong> ' . htmlspecialchars($mrf['department']) . '</p>';
-        }
-
-        $html .= '</div>
-
-    <table class="items-table">
-        <thead>
-            <tr>
-                <th>Item Name</th>
-                <th>Description</th>
-                <th>Quantity</th>
-                <th>Unit</th>
-                <th class="text-right">Unit Price</th>
-                <th class="text-right">Total</th>
-            </tr>
-        </thead>
-        <tbody>';
-
-        $grandTotal = 0;
-        foreach ($items as $item) {
-            $total = $item['total_price'];
-            $grandTotal += $total;
-            $html .= '<tr>
-                <td>' . htmlspecialchars($item['name']) . '</td>
-                <td>' . htmlspecialchars($item['description'] ?? '') . '</td>
-                <td>' . htmlspecialchars($item['quantity']) . '</td>
-                <td>' . htmlspecialchars($item['unit'] ?? '') . '</td>
-                <td class="text-right">' . number_format($item['unit_price'], 2) . ' ' . htmlspecialchars($quotation['currency']) . '</td>
-                <td class="text-right">' . number_format($total, 2) . ' ' . htmlspecialchars($quotation['currency']) . '</td>
-            </tr>';
-        }
-
-        $html .= '<tr>
-                <td colspan="5" style="text-align: right; font-weight: bold;">Total Amount:</td>
-                <td class="text-right" style="font-weight: bold;">' . number_format($grandTotal, 2) . ' ' . htmlspecialchars($quotation['currency']) . '</td>
-            </tr>
-        </tbody>
-    </table>
-
-    <div class="terms">
-        <h3>Terms & Conditions</h3>
-        <p><strong>Total Amount:</strong> ' . number_format($grandTotal, 2) . ' ' . htmlspecialchars($quotation['currency']) . '</p>';
-
-        if (!empty($quotation['delivery_days'])) {
-            $html .= '<p><strong>Delivery:</strong> ' . htmlspecialchars($quotation['delivery_days']) . ' days</p>';
-        } elseif (!empty($quotation['delivery_date'])) {
-            $deliveryDate = $quotation['delivery_date'];
-            if ($deliveryDate instanceof \DateTime || $deliveryDate instanceof \Carbon\Carbon) {
-                $html .= '<p><strong>Delivery Date:</strong> ' . $deliveryDate->format('F d, Y') . '</p>';
-            } else {
-                $html .= '<p><strong>Delivery Date:</strong> ' . htmlspecialchars($deliveryDate) . '</p>';
-            }
-        }
-
-        if (!empty($quotation['payment_terms'])) {
-            $html .= '<p><strong>Payment Terms:</strong> ' . htmlspecialchars($quotation['payment_terms']) . '</p>';
-        }
-
-        if (!empty($quotation['validity_days'])) {
-            $html .= '<p><strong>Validity:</strong> ' . htmlspecialchars($quotation['validity_days']) . ' days</p>';
-        }
-
-        if (!empty($quotation['warranty_period'])) {
-            $html .= '<p><strong>Warranty Period:</strong> ' . htmlspecialchars($quotation['warranty_period']) . '</p>';
-        }
-
-        $html .= '<p><strong>Standard Terms:</strong></p>
-        <ul>
-            <li>Payment shall be made according to the payment terms specified above.</li>
-            <li>Goods must be delivered in good condition and as per specifications.</li>
-            <li>All deliveries must be accompanied by proper documentation.</li>
-            <li>This Purchase Order is subject to our standard terms and conditions.</li>
-        </ul>
-    </div>
-
-    <div class="footer">
-        <div class="signature-section">
-            <p><strong>Prepared by:</strong> ' . htmlspecialchars($user->name) . '</p>
-            <p><strong>Date:</strong> ' . $date->format('F d, Y') . '</p>
-            <div class="signature-line"></div>
-            <p><em>Signature: Supply Chain Director (To be signed)</em></p>
-        </div>
-    </div>
-</body>
-</html>';
-
-        // Generate PDF using dompdf
         $options = new Options();
         $options->set('isHtml5ParserEnabled', true);
         $options->set('isRemoteEnabled', true);
-        $options->set('defaultFont', 'Arial');
+        $options->set('defaultFont', 'DejaVu Sans');
+        $options->set('chroot', public_path());
 
         $dompdf = new Dompdf($options);
         $dompdf->loadHtml($html);
