@@ -40,6 +40,10 @@ class MRF extends Model
         // PFI (Proforma Invoice)
         'pfi_url',
         'pfi_share_url',
+        // Supporting Attachment
+        'attachment_url',
+        'attachment_share_url',
+        'attachment_name',
         // Executive approval
         'executive_approved',
         'executive_approved_by',
@@ -50,7 +54,7 @@ class MRF extends Model
 
         'director_approved_by',
         'director_remarks',
-        
+
         'executive_remarks',
         // Chairman approval
         'chairman_approved',
