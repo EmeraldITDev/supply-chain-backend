@@ -138,45 +138,38 @@ class MRFController extends Controller
      * Also ensures the path has the proper directory prefix
      */
     private function extractFilePathFromUrl(string $urlOrPath): ?string
-    {
-        // If it's already a file path (no protocol), process it
-        if (!str_contains($urlOrPath, '://')) {
-            $path = $urlOrPath;
-        } else {
-            // For S3 URLs, extract the path portion
-            if (str_contains($urlOrPath, 's3')) {
-                // Parse the URL
-                $parsed = parse_url($urlOrPath);
-                if (isset($parsed['path'])) {
-                    // Remove leading slash and bucket name if present
-                    $path = ltrim($parsed['path'], '/');
-                    // Remove bucket name if it's in the path
-                    $parts = explode('/', $path, 2);
-                    $path = $parts[1] ?? $parts[0] ?? null;
-                } else {
-                    return null;
-                }
-            } else {
-                return null;
-            }
-        }
+{
+    // If it's already a plain file path (no protocol), return as-is
+    if (!str_contains($urlOrPath, '://')) {
+        return $urlOrPath ?: null;
+    }
 
-        if (!$path) {
+    // For S3 URLs, extract just the path portion
+    if (str_contains($urlOrPath, 's3')) {
+        $parsed = parse_url($urlOrPath);
+
+        if (!isset($parsed['path'])) {
             return null;
         }
 
-        // If the path doesn't have the purchase-orders prefix, try to add it
-        if (!str_contains($path, 'purchase-orders/')) {
-            // Check if it looks like a date-based filename path (e.g., 2026/04/po_...pdf)
-            if (preg_match('/^\d{4}\/\d{2}\/.+\.pdf$/', $path)) {
-                // This is likely an unsigned PO - add the unsigned prefix
-                return 'purchase-orders/unsigned/' . $path;
-            }
+        // Remove leading slash to get the raw S3 key
+        $path = ltrim($parsed['path'], '/');
+
+        // The S3 bucket name is the first segment of the path
+        // e.g. "supply-chain-vendor-documents/purchase-orders/2026/04/file.pdf"
+        // We need to remove the bucket name if present
+        $bucketName = config('filesystems.disks.s3.bucket', '');
+
+        if ($bucketName && str_starts_with($path, $bucketName . '/')) {
+            $path = substr($path, strlen($bucketName) + 1);
         }
 
-        return $path;
+        // Return the full path including purchase-orders prefix
+        return $path ?: null;
     }
 
+    return null;
+}
     /**
      * Get all MRFs with optional filters
      */
