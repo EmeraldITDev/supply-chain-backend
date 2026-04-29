@@ -2118,8 +2118,8 @@ class MRFController extends Controller
         // Load relationships
         $mrf->load(['requester', 'items']);
 
-        // Get RFQ and quotation data
-        $rfq = \App\Models\RFQ::where('mrf_id', $mrf->mrf_id)->first();
+        // Get RFQ and quotation data (r_f_q_s.mrf_id is FK to m_r_f_s.id, not the string mrf_id)
+        $rfq = \App\Models\RFQ::where('mrf_id', $mrf->id)->first();
         if (!$rfq) {
             throw new \Exception('RFQ not found for this MRF');
         }
