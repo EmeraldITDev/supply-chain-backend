@@ -8,7 +8,7 @@ return new class extends Migration
 {
     public function up(): void
     {
-        Schema::table('mrfs', function (Blueprint $table) {
+        Schema::table('m_r_f_s', function (Blueprint $table) {
             $table->string('attachment_url')->nullable()->after('pfi_share_url');
             $table->string('attachment_share_url')->nullable()->after('attachment_url');
             $table->string('attachment_name')->nullable()->after('attachment_share_url');
@@ -17,7 +17,7 @@ return new class extends Migration
 
     public function down(): void
     {
-        Schema::table('mrfs', function (Blueprint $table) {
+        Schema::table('m_r_f_s', function (Blueprint $table) {
             $table->dropColumn(['attachment_url', 'attachment_share_url', 'attachment_name']);
         });
     }
