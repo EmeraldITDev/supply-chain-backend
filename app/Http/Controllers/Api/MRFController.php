@@ -2219,7 +2219,7 @@ class MRFController extends Controller
             'invoice_submission_email' => $mrf->invoice_submission_email ?? 'accountpayables@emeraldcfze.com',
             'invoice_submission_cc' => $mrf->invoice_submission_cc ?? 'douglas.anuforo@emeraldcfze.com',
             'special_terms' => $mrf->po_special_terms,
-            'requester' => $mrf->requester,
+            'mrf_department' => $mrf->department,
         ]);
 
         // Generate PDF using dompdf

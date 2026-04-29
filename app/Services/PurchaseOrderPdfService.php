@@ -7,20 +7,18 @@ use Illuminate\Support\Facades\View;
 
 class PurchaseOrderPdfService
 {
-    private const EMERALD_GREEN = '#0d5c3f';
-
     /**
-     * Embed company logo as HTML for Dompdf (data URI).
+     * Embed company logo as HTML for Dompdf (data URI). Prefer Emerald assets in public/images.
      */
     public function logoHtml(): string
     {
         $logoPaths = [
+            public_path('images/emerald-logo.png'),
+            public_path('images/emerald-logo.jpg'),
             public_path('images/logo.png'),
             public_path('images/logo.jpg'),
             public_path('images/company-logo.png'),
             public_path('images/company-logo.jpg'),
-            public_path('images/emerald-logo.png'),
-            public_path('images/emerald-logo.jpg'),
         ];
 
         foreach ($logoPaths as $logoPath) {
@@ -30,7 +28,7 @@ class PurchaseOrderPdfService
                 $mimeType = $imageInfo['mime'] ?? 'image/png';
                 $dataUri = 'data:' . $mimeType . ';base64,' . base64_encode($imageData);
 
-                return '<div class="logo-wrap"><img src="' . $dataUri . '" alt="Company Logo" class="logo-img" /></div>';
+                return '<div class="logo-wrap"><img src="' . $dataUri . '" alt="Logo" class="logo-img" /></div>';
             }
         }
 
@@ -44,7 +42,6 @@ class PurchaseOrderPdfService
      */
     public function htmlFromMrf(array $data): string
     {
-        $requester = $data['requester'] ?? null;
         $company = $data['company'];
         $vendor = $data['vendor'];
         $items = $data['items'];
@@ -53,48 +50,7 @@ class PurchaseOrderPdfService
         $tax = (float) $data['tax'];
         $total = (float) $data['total'];
         $currency = $data['currency'] ?? 'NGN';
-
-        $lineItems = [];
-        $row = 1;
-        foreach ($items as $item) {
-            $itemName = $item->item_name ?? $item->name ?? 'Item';
-            $description = $item->description ?? $item->specifications ?? '';
-            $quantity = (float) ($item->quantity ?? 1);
-            $unit = $item->unit ?? '—';
-            $unitPrice = (float) ($item->unit_price ?? (($item->total_price ?? 0) / max($quantity, 1)));
-            $lineTotal = $unitPrice * $quantity;
-
-            $lineItems[] = [
-                'index' => $row++,
-                'title' => $itemName,
-                'description' => $description,
-                'uom' => $unit,
-                'qty' => $this->fmtQty($quantity),
-                'unit_price' => $this->fmtMoney($unitPrice),
-                'total' => $this->fmtMoney($lineTotal),
-            ];
-        }
-
-        $commentsParts = [];
-        if (!empty($data['payment_terms'])) {
-            $commentsParts[] = 'Payment terms: ' . $data['payment_terms'];
-        }
-        if (!empty($data['invoice_submission_email'])) {
-            $cc = !empty($data['invoice_submission_cc']) ? ' cc: ' . $data['invoice_submission_cc'] : '';
-            $commentsParts[] = 'Invoice submission: ' . $data['invoice_submission_email'] . $cc;
-        }
-        if (!empty($data['special_terms'])) {
-            $commentsParts[] = $data['special_terms'];
-        } else {
-            $commentsParts[] = "Standard terms:\n"
-                . "- All items must be high quality, brand new and according to the specification. Anything less may trigger rejection.\n"
-                . "- All packages must be clearly marked.\n"
-                . "- Package contents must be marked with item number, material number, description, manufacturer's part number and quantity.\n"
-                . "- Small items with the same part numbers must be tagged and packed together; tags visible on the outside of the bag or box.\n"
-                . "- Items must be packed in a sturdy case to withstand handling.\n"
-                . "- Delivery must be accompanied by Airway Bill, Invoice and Delivery Note, duly signed by an Emerald representative at site.";
-        }
-        $comments = implode("\n\n", array_filter($commentsParts));
+        $mrfDepartment = isset($data['mrf_department']) ? trim((string) $data['mrf_department']) : '';
 
         $poDateRaw = (string) $data['po_date'];
         try {
@@ -105,39 +61,53 @@ class PurchaseOrderPdfService
             $poDate = Carbon::now();
         }
 
-        return View::make('pdf.purchase-order', [
-            'emerald_green' => self::EMERALD_GREEN,
-            'logo_html' => $this->logoHtml(),
-            'po_number' => $data['po_number'],
-            'po_date_formatted' => $poDate->format('F d, Y'),
-            'document_title' => 'PURCHASE ORDER',
-            'table_section_title' => 'PURCHASE ORDER LINES',
-            'order_info_title' => 'Order Information',
-            'supplier_info_title' => 'Supplier Information',
-            'order_rows' => array_values(array_filter([
-                ['label' => 'PO Number:', 'value' => $data['po_number']],
-                ['label' => 'Date:', 'value' => $poDate->format('F d, Y')],
-                ['label' => 'Bill / Ship To:', 'value' => $data['ship_to']],
-                ['label' => 'Buyer:', 'value' => $company['name']],
-                ['label' => 'Buyer Address:', 'value' => $company['address']],
-                ['label' => 'Website:', 'value' => (string) ($company['website'] ?? '')],
-                ['label' => 'Email:', 'value' => (string) ($company['email'] ?? '')],
-                ['label' => 'Phone:', 'value' => (string) ($company['phone'] ?? '')],
-                ['label' => 'Tax ID:', 'value' => (string) ($company['tax_id'] ?? '')],
-            ], fn ($row) => ($row['value'] ?? '') !== '' || in_array($row['label'], [
-                'PO Number:', 'Date:', 'Bill / Ship To:', 'Buyer:', 'Buyer Address:',
-            ], true))),
-            'supplier_rows' => $this->supplierInfoRows($vendor),
-            'line_items' => $lineItems,
-            'subtotal' => $this->fmtMoney($subtotal),
-            'tax' => $this->fmtMoney($tax),
-            'tax_rate' => $taxRate,
-            'total' => $this->fmtMoney($total),
-            'currency' => $currency,
-            'show_tax_breakdown' => $tax > 0 || $taxRate > 0,
-            'comments' => $comments,
-            'signature_blocks' => $this->signatureBlocksForMrf($requester, $vendor),
-        ])->render();
+        $lineItems = [];
+        $rowIndex = 0;
+        foreach ($items as $item) {
+            $itemName = $item->item_name ?? $item->name ?? 'Item';
+            $description = (string) ($item->description ?? $item->specifications ?? '');
+            $quantity = (float) ($item->quantity ?? 1);
+            $unitPrice = (float) ($item->unit_price ?? (($item->total_price ?? 0) / max($quantity, 1)));
+            $lineTotal = $unitPrice * $quantity;
+
+            $deptPrefix = $rowIndex === 0 ? ($mrfDepartment !== '' ? $mrfDepartment : null) : null;
+
+            $lineItems[] = [
+                'description_segments' => $this->descriptionSegments($deptPrefix, $itemName, $description),
+                'qty' => $this->fmtQty($quantity),
+                'rate' => $this->fmtMoney($unitPrice),
+                'tax_label' => $taxRate > 0 ? rtrim(rtrim(number_format($taxRate, 2, '.', ''), '0'), '.') . '%' : '—',
+                'amount' => $this->fmtMoney($lineTotal),
+            ];
+            $rowIndex++;
+        }
+
+        $paymentTerms = (string) ($data['payment_terms'] ?? '');
+        $additionalNotes = $this->buildAdditionalNotesMrf($data);
+
+        $approverName = (string) ($data['approved_by_name'] ?? env('PO_APPROVER_NAME', ''));
+        $approverDate = (string) ($data['approved_by_date'] ?? '');
+        if ($approverName !== '' && $approverDate === '') {
+            $approverDate = $poDate->format('F j, Y');
+        }
+
+        return View::make('pdf.purchase-order', $this->baseViewVars(
+            $company,
+            $vendor,
+            $data['ship_to'],
+            $data['po_number'],
+            $poDate,
+            $lineItems,
+            $paymentTerms,
+            $additionalNotes,
+            $subtotal,
+            $tax,
+            $total,
+            $currency,
+            $tax > 0 || $taxRate > 0,
+            $approverName,
+            $approverDate,
+        ))->render();
     }
 
     /**
@@ -150,13 +120,14 @@ class PurchaseOrderPdfService
         $mrf = $data['mrf'];
         $quotation = $data['quotation'];
         $vendor = $data['vendor'];
-        $company = $data['company'];
+        $company = $this->normalizeCompany($data['company']);
         $items = $data['items'];
 
         $date = now()->setTimezone('Africa/Lagos');
+        $mrfDepartment = trim((string) ($mrf['department'] ?? ''));
 
         $lineItems = [];
-        $row = 1;
+        $rowIndex = 0;
         $subtotal = 0.0;
         foreach ($items as $item) {
             $qty = (float) ($item['quantity'] ?? 1);
@@ -164,18 +135,18 @@ class PurchaseOrderPdfService
             $lineTotal = (float) ($item['total_price'] ?? ($unitPrice * $qty));
             $subtotal += $lineTotal;
 
-            $name = $item['item_name'] ?? $item['name'] ?? 'Item';
-            $desc = $item['description'] ?? $item['specifications'] ?? '';
+            $name = (string) ($item['item_name'] ?? $item['name'] ?? 'Item');
+            $desc = (string) ($item['description'] ?? $item['specifications'] ?? '');
+            $deptPrefix = $rowIndex === 0 ? ($mrfDepartment !== '' ? $mrfDepartment : null) : null;
 
             $lineItems[] = [
-                'index' => $row++,
-                'title' => $name,
-                'description' => $desc,
-                'uom' => $item['unit'] ?? '—',
+                'description_segments' => $this->descriptionSegments($deptPrefix, $name, $desc),
                 'qty' => $this->fmtQty($qty),
-                'unit_price' => $this->fmtMoney($unitPrice),
-                'total' => $this->fmtMoney($lineTotal),
+                'rate' => $this->fmtMoney($unitPrice),
+                'tax_label' => '—',
+                'amount' => $this->fmtMoney($lineTotal),
             ];
+            $rowIndex++;
         }
 
         $tax = 0.0;
@@ -183,166 +154,157 @@ class PurchaseOrderPdfService
         $currency = $quotation['currency'] ?? 'NGN';
 
         $shipTo = env('COMPANY_ADDRESS', $company['address'] ?? '');
+        $paymentTerms = (string) ($quotation['payment_terms'] ?? '');
 
-        $commentsParts = [];
-        if (!empty($quotation['payment_terms'])) {
-            $commentsParts[] = 'Payment terms: ' . $quotation['payment_terms'];
-        }
+        $additionalParts = [];
         if (!empty($quotation['delivery_days'])) {
-            $commentsParts[] = 'Delivery: ' . $quotation['delivery_days'] . ' days';
+            $additionalParts[] = 'Delivery: ' . $quotation['delivery_days'] . ' days';
         } elseif (!empty($quotation['delivery_date'])) {
             $d = $quotation['delivery_date'];
-            if ($d instanceof \DateTimeInterface) {
-                $commentsParts[] = 'Delivery date: ' . Carbon::instance($d)->format('F d, Y');
-            } else {
-                $commentsParts[] = 'Delivery date: ' . (string) $d;
+            try {
+                $additionalParts[] = 'Delivery date: ' . Carbon::parse($d)->format('F d, Y');
+            } catch (\Throwable) {
+                $additionalParts[] = 'Delivery date: ' . (string) $d;
             }
         }
         if (!empty($quotation['warranty_period'])) {
-            $commentsParts[] = 'Warranty: ' . $quotation['warranty_period'];
+            $additionalParts[] = 'Warranty: ' . $quotation['warranty_period'];
         }
-        $commentsParts[] = 'MRF: ' . ($mrf['id'] ?? '') . ' — ' . ($mrf['title'] ?? '');
-        $comments = implode("\n\n", array_filter($commentsParts));
+        if (!empty($quotation['validity_days'])) {
+            $additionalParts[] = 'Validity: ' . $quotation['validity_days'] . ' days';
+        }
+        $additionalParts[] = 'MRF: ' . ($mrf['id'] ?? '') . ' — ' . ($mrf['title'] ?? '');
+        $additionalParts[] = 'Payment shall be made according to the payment terms above. Goods must be delivered as per specifications with proper documentation.';
 
-        return View::make('pdf.purchase-order', [
-            'emerald_green' => self::EMERALD_GREEN,
+        return View::make('pdf.purchase-order', $this->baseViewVars(
+            $company,
+            $vendor,
+            $shipTo,
+            $poNumber,
+            $date,
+            $lineItems,
+            $paymentTerms,
+            implode("\n\n", array_filter($additionalParts)),
+            $subtotal,
+            $tax,
+            $total,
+            $currency,
+            false,
+            (string) ($user->name ?? ''),
+            $date->format('F j, Y'),
+        ))->render();
+    }
+
+    /**
+     * @param  array<string, mixed>  $company
+     * @param  array<string, mixed>  $vendor
+     * @param  list<array<string, mixed>>  $lineItems
+     * @return array<string, mixed>
+     */
+    private function baseViewVars(
+        array $company,
+        array $vendor,
+        string $shipTo,
+        string $poNumber,
+        Carbon $poDate,
+        array $lineItems,
+        string $paymentTerms,
+        string $additionalNotes,
+        float $subtotal,
+        float $tax,
+        float $total,
+        string $currency,
+        bool $showTaxBreakdown,
+        string $approvedByName,
+        string $approvedByDate
+    ): array {
+        $company = $this->normalizeCompany($company);
+
+        return [
             'logo_html' => $this->logoHtml(),
+            'company' => $company,
+            'supplier_name' => (string) ($vendor['name'] ?? ''),
+            'supplier_address' => (string) ($vendor['address'] ?? ''),
+            'buyer_name' => (string) ($company['name'] ?? ''),
+            'ship_to_address' => $shipTo,
             'po_number' => $poNumber,
-            'po_date_formatted' => $date->format('F d, Y'),
-            'document_title' => 'PURCHASE ORDER',
-            'table_section_title' => 'PURCHASE ORDER LINES',
-            'order_info_title' => 'Order Information',
-            'supplier_info_title' => 'Supplier Information',
-            'order_rows' => [
-                ['label' => 'PO Number:', 'value' => $poNumber],
-                ['label' => 'Date:', 'value' => $date->format('F d, Y')],
-                ['label' => 'Bill / Ship To:', 'value' => $shipTo],
-                ['label' => 'MRF Reference:', 'value' => ($mrf['id'] ?? '')],
-                ['label' => 'Requested By:', 'value' => $mrf['requester_name'] ?? ''],
-                ['label' => 'Department:', 'value' => $mrf['department'] ?? ''],
-                ['label' => 'Buyer:', 'value' => $company['name'] ?? ''],
-                ['label' => 'Buyer Address:', 'value' => $company['address'] ?? ''],
-            ],
-            'supplier_rows' => $this->supplierInfoRows($vendor),
+            'po_date_short' => $poDate->format('d/m/Y'),
+            'document_title' => 'Purchase Order',
             'line_items' => $lineItems,
+            'payment_terms' => $paymentTerms,
+            'additional_notes' => trim($additionalNotes),
             'subtotal' => $this->fmtMoney($subtotal),
             'tax' => $this->fmtMoney($tax),
-            'tax_rate' => 0.0,
             'total' => $this->fmtMoney($total),
             'currency' => $currency,
-            'show_tax_breakdown' => false,
-            'comments' => $comments,
-            'signature_blocks' => $this->signatureBlocksForWorkflow($user, $vendor),
-        ])->render();
-    }
-
-    /**
-     * @return list<array{title: string, name: string, position: string, phone: string, email: string}>
-     */
-    private function signatureBlocksForMrf(?object $requester, array $vendor): array
-    {
-        $reqName = $requester?->name ?? 'N/A';
-        $reqRole = $requester?->role ?? ($requester?->department ?? '');
-        $reqPhone = (string) ($requester?->phone ?? '');
-        $reqEmail = (string) ($requester?->email ?? '');
-
-        $vendorName = $vendor['name'] ?? 'N/A';
-
-        return [
-            [
-                'title' => 'Vendor (order acknowledged by)',
-                'name' => $vendorName,
-                'position' => 'Vendor',
-                'phone' => (string) ($vendor['phone'] ?? ''),
-                'email' => (string) ($vendor['email'] ?? ''),
-            ],
-            [
-                'title' => 'Emerald (Issued by)',
-                'name' => $reqName,
-                'position' => $reqRole !== '' ? $reqRole : 'Requester',
-                'phone' => $reqPhone,
-                'email' => $reqEmail,
-            ],
-            [
-                'title' => 'Vendor (witnessed by)',
-                'name' => 'N/A',
-                'position' => '',
-                'phone' => '',
-                'email' => '',
-            ],
-            [
-                'title' => 'Emerald (Supervised by)',
-                'name' => 'N/A',
-                'position' => 'Procurement Manager',
-                'phone' => '',
-                'email' => '',
-            ],
+            'show_tax_breakdown' => $showTaxBreakdown,
+            'approved_by_name' => $approvedByName,
+            'approved_by_date' => $approvedByDate,
         ];
     }
 
     /**
-     * @param  array<string, mixed>  $vendor
-     * @return list<array{title: string, name: string, position: string, phone: string, email: string}>
+     * @param  array<string, mixed>  $company
+     * @return array<string, string>
      */
-    private function signatureBlocksForWorkflow(object $user, array $vendor): array
+    private function normalizeCompany(array $company): array
     {
         return [
-            [
-                'title' => 'Vendor (order acknowledged by)',
-                'name' => $vendor['name'] ?? 'N/A',
-                'position' => 'Vendor',
-                'phone' => $vendor['phone'] ?? '',
-                'email' => $vendor['email'] ?? '',
-            ],
-            [
-                'title' => 'Emerald (Issued by)',
-                'name' => $user->name ?? 'N/A',
-                'position' => $user->role ?? ($user->department ?? ''),
-                'phone' => $user->phone ?? '',
-                'email' => $user->email ?? '',
-            ],
-            [
-                'title' => 'Vendor (witnessed by)',
-                'name' => 'N/A',
-                'position' => '',
-                'phone' => '',
-                'email' => '',
-            ],
-            [
-                'title' => 'Emerald (Supervised by)',
-                'name' => 'N/A',
-                'position' => 'Procurement Manager',
-                'phone' => '',
-                'email' => '',
-            ],
+            'name' => (string) ($company['name'] ?? env('COMPANY_NAME', 'Emerald Industrial Co. FZE')),
+            'address' => (string) ($company['address'] ?? env('COMPANY_ADDRESS', '')),
+            'email' => (string) ($company['email'] ?? env('COMPANY_EMAIL', '')),
+            'website' => (string) ($company['website'] ?? env('COMPANY_WEBSITE', 'https://emeraldcfze.com/')),
         ];
     }
 
     /**
-     * @param  array<string, mixed>  $vendor
-     * @return list<array{label: string, value: string}>
+     * @param  array<string, mixed>  $data
      */
-    private function supplierInfoRows(array $vendor): array
+    private function buildAdditionalNotesMrf(array $data): string
     {
-        $rows = [
-            ['label' => 'Supplier Name:', 'value' => (string) ($vendor['name'] ?? '')],
-            ['label' => 'Supplier Address:', 'value' => (string) ($vendor['address'] ?? '')],
-        ];
-        foreach (
-            [
-                'Contact Person:' => 'contact_person',
-                'Phone:' => 'phone',
-                'Email:' => 'email',
-                'Tax ID:' => 'tax_id',
-            ] as $label => $key
-        ) {
-            $val = (string) ($vendor[$key] ?? '');
-            if ($val !== '') {
-                $rows[] = ['label' => $label, 'value' => $val];
+        $parts = [];
+        if (!empty($data['invoice_submission_email'])) {
+            $cc = !empty($data['invoice_submission_cc']) ? ' cc: ' . $data['invoice_submission_cc'] : '';
+            $parts[] = 'Invoice submission: ' . $data['invoice_submission_email'] . $cc;
+        }
+        if (!empty($data['special_terms'])) {
+            $parts[] = $data['special_terms'];
+        } else {
+            $parts[] = "Standard terms:\n"
+                . "- All items must be high quality, brand new and according to the specification.\n"
+                . "- All packages must be clearly marked.\n"
+                . "- Package contents must be marked with item number, material number, description, manufacturer's part number and quantity.\n"
+                . "- Small items with the same part numbers must be tagged and packed together.\n"
+                . "- Items must be packed in a sturdy case to withstand handling.\n"
+                . '- Delivery must be accompanied by Airway Bill, Invoice and Delivery Note, duly signed by an Emerald representative at site.';
+        }
+
+        return implode("\n\n", array_filter($parts));
+    }
+
+    /**
+     * @return list<array{text: string, class: string}>
+     */
+    private function descriptionSegments(?string $departmentPrefix, string $itemName, string $description): array
+    {
+        $segments = [];
+        if ($departmentPrefix !== null && trim($departmentPrefix) !== '') {
+            foreach (preg_split('/\r\n|\r|\n/', $departmentPrefix) as $ln) {
+                $t = trim($ln);
+                if ($t !== '') {
+                    $segments[] = ['text' => $t, 'class' => 'sub'];
+                }
             }
         }
 
-        return $rows;
+        $segments[] = ['text' => $itemName, 'class' => 'title'];
+
+        $desc = trim($description);
+        if ($desc !== '' && strcasecmp($desc, trim($itemName)) !== 0) {
+            $segments[] = ['text' => $desc, 'class' => 'sub'];
+        }
+
+        return $segments;
     }
 
     private function fmtMoney(float $amount): string

@@ -8,269 +8,256 @@
         body {
             font-family: DejaVu Sans, Arial, Helvetica, sans-serif;
             font-size: 10px;
-            line-height: 1.35;
-            color: #111;
-            padding: 16px 20px 24px;
+            line-height: 1.4;
+            color: #000;
+            padding: 18px 22px 28px;
         }
-        .doc-header {
+        .top-band {
             width: 100%;
             border-collapse: collapse;
             margin-bottom: 14px;
         }
-        .doc-header td { vertical-align: top; }
-        .logo-wrap { max-width: 200px; }
-        .logo-img { max-width: 180px; max-height: 72px; object-fit: contain; display: block; }
+        .top-band td { vertical-align: top; }
+        .brand-cell { width: 62%; padding-right: 12px; }
+        .logo-row { margin-bottom: 8px; }
+        .logo-wrap { display: block; }
+        .logo-img { max-width: 200px; max-height: 64px; object-fit: contain; display: block; }
         .logo-placeholder {
-            width: 140px; height: 56px; border: 1px solid #ccc;
-            display: table-cell; vertical-align: middle; text-align: center;
-            font-size: 9px; color: #666;
+            width: 160px; height: 52px; border: 1px solid #ccc;
+            text-align: center; line-height: 52px; font-size: 9px; color: #666;
         }
-        .header-meta { text-align: right; padding-top: 4px; }
-        .header-meta .meta-line { margin-bottom: 4px; font-size: 10px; }
-        .header-meta .meta-label { font-weight: bold; }
-        .doc-title {
-            font-size: 17px;
+        .company-name {
+            font-size: 12px;
             font-weight: bold;
-            letter-spacing: 0.02em;
-            margin-top: 10px;
-            text-transform: uppercase;
+            margin-bottom: 4px;
         }
-        .info-grid {
+        .company-lines {
+            font-size: 9.5px;
+            color: #111;
+            white-space: pre-wrap;
+        }
+        .doc-title {
+            font-size: 20px;
+            font-weight: bold;
+            margin-top: 16px;
+            letter-spacing: 0.02em;
+        }
+        .pair-grid {
             width: 100%;
             border-collapse: collapse;
-            margin-bottom: 12px;
+            margin: 16px 0 12px;
         }
-        .info-grid td {
+        .pair-grid td {
             width: 50%;
             vertical-align: top;
-            padding: 8px 10px 10px 0;
-            border: 1px solid #222;
+            border: 1px solid #000;
+            padding: 10px 12px;
+            min-height: 72px;
         }
-        .info-grid td:last-child { padding-right: 0; padding-left: 10px; }
-        .info-col-title {
+        .pair-label {
             font-weight: bold;
-            font-size: 11px;
+            font-size: 10px;
             text-transform: uppercase;
             margin-bottom: 8px;
-            border-bottom: 1px solid #333;
-            padding-bottom: 4px;
+            letter-spacing: 0.04em;
         }
-        .info-row { margin-bottom: 5px; font-size: 9.5px; }
-        .info-row .lbl { font-weight: bold; display: inline; }
-        .info-row .val { display: inline; }
-        .section-banner {
-            font-weight: bold;
-            font-size: 11px;
-            text-align: center;
-            text-transform: uppercase;
-            letter-spacing: 0.06em;
-            margin: 12px 0 8px;
-            padding: 6px 8px;
-            border: 1px solid #222;
-            background: #f4f4f4;
+        .pair-body {
+            font-size: 9.5px;
         }
+        .pair-body .primary { font-weight: bold; margin-bottom: 4px; }
+        .po-meta {
+            margin: 10px 0 14px;
+            font-size: 10px;
+        }
+        .po-meta span { margin-right: 28px; }
+        .po-meta strong { font-weight: bold; }
         .items-table {
             width: 100%;
             border-collapse: collapse;
-            margin-bottom: 10px;
-            font-size: 9px;
+            margin-bottom: 14px;
+            font-size: 9.5px;
         }
         .items-table th {
-            background: {{ $emerald_green }};
-            color: #fff;
-            border: 1px solid #0a4a32;
-            padding: 7px 4px;
+            background: #e8e8e8;
+            color: #000;
+            border: 1px solid #000;
+            padding: 8px 6px;
             font-weight: bold;
-            text-align: center;
-            vertical-align: middle;
+            text-align: left;
         }
+        .items-table th.col-qty { text-align: center; width: 44px; }
+        .items-table th.col-rate { text-align: right; width: 88px; }
+        .items-table th.col-tax { text-align: center; width: 52px; }
+        .items-table th.col-amt { text-align: right; width: 96px; }
         .items-table td {
-            border: 1px solid #222;
-            padding: 6px 4px;
+            border: 1px solid #000;
+            padding: 8px 6px;
             vertical-align: top;
         }
-        .items-table .c-num { width: 28px; text-align: center; }
-        .items-table .c-desc { text-align: left; }
-        .items-table .c-uom { width: 44px; text-align: center; }
-        .items-table .c-qty { width: 52px; text-align: center; }
-        .items-table .c-money { width: 72px; text-align: right; white-space: nowrap; }
-        .item-title { font-weight: bold; }
-        .item-desc { font-size: 8.5px; color: #333; margin-top: 2px; }
-        .totals-table {
+        .items-table td.col-qty { text-align: center; }
+        .items-table td.col-rate { text-align: right; white-space: nowrap; }
+        .items-table td.col-tax { text-align: center; }
+        .items-table td.col-amt { text-align: right; white-space: nowrap; }
+        .desc-line { margin-bottom: 2px; }
+        .desc-line.sub { font-size: 8.5px; color: #333; }
+        .desc-line.title { font-weight: bold; font-size: 10px; }
+        .payment-block {
+            margin: 16px 0 12px;
+            font-size: 9.5px;
+        }
+        .payment-block .lbl {
+            font-weight: bold;
+            margin-bottom: 6px;
+        }
+        .payment-text {
+            white-space: pre-wrap;
+            max-width: 100%;
+        }
+        .notes-block {
+            margin-top: 12px;
+            font-size: 8.5px;
+            color: #333;
+        }
+        .notes-block .lbl { font-weight: bold; margin-bottom: 4px; color: #000; }
+        .totals-wrap {
             width: 100%;
-            max-width: 320px;
+            margin: 14px 0 20px;
+        }
+        .totals-table {
+            width: 260px;
             margin-left: auto;
             border-collapse: collapse;
-            font-size: 9.5px;
-            margin-bottom: 14px;
+            font-size: 10px;
         }
-        .totals-table td { padding: 4px 6px; border: 1px solid #222; }
-        .totals-table .t-label { font-weight: bold; text-align: right; }
+        .totals-table td {
+            padding: 5px 8px;
+            border: 1px solid #000;
+        }
+        .totals-table .t-label { font-weight: bold; text-align: left; }
         .totals-table .t-val { text-align: right; white-space: nowrap; }
-        .totals-table .t-grand td { font-weight: bold; background: #f0f0f0; }
-        .comments-wrap {
-            margin-top: 6px;
-            margin-bottom: 16px;
-        }
-        .comments-label {
-            font-weight: bold;
+        .totals-table tr.grand td { font-weight: bold; background: #f5f5f5; }
+        .approval {
+            margin-top: 28px;
+            max-width: 280px;
             font-size: 10px;
-            margin-bottom: 4px;
         }
-        .comments-box {
-            border: 1px solid #222;
-            min-height: 64px;
-            padding: 8px 10px;
-            font-size: 9px;
-            white-space: pre-wrap;
-        }
-        .sig-heading {
-            font-weight: bold;
-            font-size: 10px;
-            margin: 18px 0 10px;
-            text-align: center;
-            text-transform: uppercase;
-        }
-        .sig-grid {
-            width: 100%;
-            border-collapse: collapse;
-            font-size: 9px;
-        }
-        .sig-grid td {
-            width: 50%;
-            vertical-align: top;
-            border: 1px solid #222;
-            padding: 10px 12px 12px;
-        }
-        .sig-block-title {
-            font-weight: bold;
-            margin-bottom: 8px;
-            font-size: 9.5px;
-        }
-        .sig-field { margin-bottom: 5px; }
-        .sig-field .sl { font-weight: bold; }
-        .sig-spacer { height: 28px; border-bottom: 1px solid #999; margin: 6px 0 4px; max-width: 95%; }
+        .approval .lbl { font-weight: bold; margin-bottom: 4px; }
+        .approval .val { margin-bottom: 14px; min-height: 14px; }
+        .approval .rule { border-bottom: 1px solid #000; min-height: 1px; margin-top: 4px; margin-bottom: 10px; }
     </style>
 </head>
 <body>
-    <table class="doc-header">
+    <table class="top-band">
         <tr>
-            <td style="width: 42%;">
-                {!! $logo_html !!}
-            </td>
-            <td style="width: 58%;" class="header-meta">
-                <div class="meta-line"><span class="meta-label">PO Number:</span> {{ $po_number }}</div>
-                <div class="meta-line"><span class="meta-label">Date:</span> {{ $po_date_formatted }}</div>
+            <td class="brand-cell">
+                <div class="logo-row">{!! $logo_html !!}</div>
+                <div class="company-name">{{ $company['name'] }}</div>
+                <div class="company-lines">{!! nl2br(e($company['address'] ?? '')) !!}</div>
+                @if (!empty($company['email']))
+                    <div class="company-lines" style="margin-top: 4px;">{{ $company['email'] }}</div>
+                @endif
+                @if (!empty($company['website']))
+                    <div class="company-lines">{{ $company['website'] }}</div>
+                @endif
                 <div class="doc-title">{{ $document_title }}</div>
             </td>
+            <td></td>
         </tr>
     </table>
 
-    <table class="info-grid">
+    <table class="pair-grid">
         <tr>
             <td>
-                <div class="info-col-title">{{ $order_info_title }}</div>
-                @foreach ($order_rows as $row)
-                    <div class="info-row">
-                        <span class="lbl">{{ $row['label'] }}</span>
-                        <span class="val">{!! nl2br(e($row['value'] ?? '')) !!}</span>
-                    </div>
-                @endforeach
+                <div class="pair-label">Supplier</div>
+                <div class="pair-body">
+                    <div class="primary">{{ $supplier_name }}</div>
+                    @if ($supplier_address !== '')
+                        <div>{!! nl2br(e($supplier_address)) !!}</div>
+                    @endif
+                </div>
             </td>
             <td>
-                <div class="info-col-title">{{ $supplier_info_title }}</div>
-                @foreach ($supplier_rows as $row)
-                    <div class="info-row">
-                        <span class="lbl">{{ $row['label'] }}</span>
-                        <span class="val">{!! nl2br(e($row['value'] ?? '')) !!}</span>
-                    </div>
-                @endforeach
+                <div class="pair-label">Ship To</div>
+                <div class="pair-body">
+                    <div class="primary">{{ $buyer_name }}</div>
+                    @if ($ship_to_address !== '')
+                        <div>{!! nl2br(e($ship_to_address)) !!}</div>
+                    @endif
+                </div>
             </td>
         </tr>
     </table>
 
-    <div class="section-banner">{{ $table_section_title }}</div>
+    <div class="po-meta">
+        <span><strong>P.O. NO.</strong> {{ $po_number }}</span>
+        <span><strong>DATE</strong> {{ $po_date_short }}</span>
+    </div>
 
     <table class="items-table">
         <thead>
             <tr>
-                <th class="c-num">ITEM</th>
-                <th class="c-desc">DESCRIPTION</th>
-                <th class="c-uom">UOM</th>
-                <th class="c-qty">QTY</th>
-                <th class="c-money">UNIT PRICE ({{ $currency }})</th>
-                <th class="c-money">TOTAL ({{ $currency }})</th>
+                <th>Description</th>
+                <th class="col-qty">Qty</th>
+                <th class="col-rate">Rate</th>
+                <th class="col-tax">Tax</th>
+                <th class="col-amt">Amount</th>
             </tr>
         </thead>
         <tbody>
             @foreach ($line_items as $line)
                 <tr>
-                    <td class="c-num">{{ $line['index'] }}</td>
-                    <td class="c-desc">
-                        <div class="item-title">{{ $line['title'] }}</div>
-                        @if (!empty($line['description']))
-                            <div class="item-desc">{!! nl2br(e($line['description'])) !!}</div>
-                        @endif
+                    <td>
+                        @foreach ($line['description_segments'] as $seg)
+                            @if (($seg['text'] ?? '') !== '')
+                                <div class="desc-line {{ $seg['class'] ?? '' }}">{!! nl2br(e($seg['text'])) !!}</div>
+                            @endif
+                        @endforeach
                     </td>
-                    <td class="c-uom">{{ $line['uom'] }}</td>
-                    <td class="c-qty">{{ $line['qty'] }}</td>
-                    <td class="c-money">{{ $line['unit_price'] }}</td>
-                    <td class="c-money">{{ $line['total'] }}</td>
+                    <td class="col-qty">{{ $line['qty'] }}</td>
+                    <td class="col-rate">{{ $line['rate'] }}</td>
+                    <td class="col-tax">{{ $line['tax_label'] }}</td>
+                    <td class="col-amt">{{ $line['amount'] }}</td>
                 </tr>
             @endforeach
         </tbody>
     </table>
 
-    <table class="totals-table">
-        <tr>
-            <td class="t-label">Subtotal</td>
-            <td class="t-val">{{ $subtotal }}</td>
-        </tr>
-        @if ($show_tax_breakdown)
-            <tr>
-                <td class="t-label">Tax @if ($tax_rate > 0)({{ number_format($tax_rate, 2) }}%)@endif</td>
-                <td class="t-val">{{ $tax }}</td>
-            </tr>
-        @endif
-        <tr class="t-grand">
-            <td class="t-label">Total ({{ $currency }})</td>
-            <td class="t-val">{{ $total }}</td>
-        </tr>
-    </table>
-
-    <div class="comments-wrap">
-        <div class="comments-label">COMMENTS:</div>
-        <div class="comments-box">@if ($comments !== ''){!! nl2br(e($comments)) !!}@else &nbsp; @endif</div>
+    <div class="payment-block">
+        <div class="lbl">PAYMENT TERMS:</div>
+        <div class="payment-text">{!! nl2br(e($payment_terms)) !!}</div>
     </div>
 
-    <div class="sig-heading">Authorized signatories</div>
-    <table class="sig-grid">
-        <tr>
-            @foreach (array_slice($signature_blocks, 0, 2) as $sig)
-                <td>
-                    <div class="sig-block-title">{{ $sig['title'] }}</div>
-                    <div class="sig-field"><span class="sl">Name:</span> {{ $sig['name'] }}</div>
-                    <div class="sig-field"><span class="sl">Position:</span> {{ $sig['position'] }}</div>
-                    <div class="sig-spacer"></div>
-                    <div class="sig-field"><span class="sl">Sign/Date:</span></div>
-                    <div class="sig-field"><span class="sl">Phone:</span> {{ $sig['phone'] }}</div>
-                    <div class="sig-field"><span class="sl">Email:</span> {{ $sig['email'] }}</div>
-                </td>
-            @endforeach
-        </tr>
-        <tr>
-            @foreach (array_slice($signature_blocks, 2, 2) as $sig)
-                <td>
-                    <div class="sig-block-title">{{ $sig['title'] }}</div>
-                    <div class="sig-field"><span class="sl">Name:</span> {{ $sig['name'] }}</div>
-                    <div class="sig-field"><span class="sl">Position:</span> {{ $sig['position'] }}</div>
-                    <div class="sig-spacer"></div>
-                    <div class="sig-field"><span class="sl">Sign/Date:</span></div>
-                    <div class="sig-field"><span class="sl">Phone:</span> {{ $sig['phone'] }}</div>
-                    <div class="sig-field"><span class="sl">Email:</span> {{ $sig['email'] }}</div>
-                </td>
-            @endforeach
-        </tr>
-    </table>
+    @if ($additional_notes !== '')
+        <div class="notes-block">
+            <div class="lbl">NOTES:</div>
+            <div class="payment-text">{!! nl2br(e($additional_notes)) !!}</div>
+        </div>
+    @endif
+
+    <div class="totals-wrap">
+        <table class="totals-table">
+            <tr>
+                <td class="t-label">SUBTOTAL</td>
+                <td class="t-val">{{ $subtotal }}</td>
+            </tr>
+            @if ($show_tax_breakdown)
+                <tr>
+                    <td class="t-label">TAX</td>
+                    <td class="t-val">{{ $tax }}</td>
+                </tr>
+            @endif
+            <tr class="grand">
+                <td class="t-label">TOTAL {{ $currency }}</td>
+                <td class="t-val">{{ $total }}</td>
+            </tr>
+        </table>
+    </div>
+
+    <div class="approval">
+        <div class="lbl">Approved By</div>
+        <div class="val">{{ $approved_by_name }}</div>
+        <div class="lbl">Date</div>
+        <div class="val">{{ $approved_by_date }}</div>
+    </div>
 </body>
 </html>
