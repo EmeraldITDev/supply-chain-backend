@@ -5,6 +5,8 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\URL;
 
 class MRF extends Model
 {
@@ -284,5 +286,31 @@ class MRF extends Model
     public function isEmeraldContract(): bool
     {
         return strtolower(trim((string) $this->contract_type)) === 'emerald';
+    }
+
+    /**
+     * Time-limited URL that streams the unsigned PO PDF rendered from current data (not the S3 snapshot).
+     * Use this for unsignedPoUrl in API responses so the layout always matches the latest template.
+     */
+    public function freshUnsignedPoStreamUrl(): ?string
+    {
+        if (empty($this->po_number) || empty($this->unsigned_po_url)) {
+            return null;
+        }
+
+        try {
+            return URL::temporarySignedRoute(
+                'mrfs.po-signed-download',
+                now()->addMinutes((int) env('PO_SIGNED_URL_TTL', 120)),
+                ['id' => $this->mrf_id]
+            );
+        } catch (\Throwable $e) {
+            Log::warning('Failed to build signed PO stream URL', [
+                'mrf_id' => $this->mrf_id,
+                'error' => $e->getMessage(),
+            ]);
+
+            return null;
+        }
     }
 }

@@ -1506,6 +1506,8 @@ class MRFWorkflowController extends Controller
         // Refresh MRF to get updated values
         $mrf->refresh();
 
+        $poStreamUrl = $mrf->freshUnsignedPoStreamUrl() ?? $mrf->unsigned_po_url;
+
         return response()->json([
             'success' => true,
             'message' => 'PO generated successfully',
@@ -1514,15 +1516,15 @@ class MRFWorkflowController extends Controller
                     'id' => $mrf->mrf_id,
                 'po_number' => $mrf->po_number,
                     'poNumber' => $mrf->po_number,
-                'unsigned_po_url' => $mrf->unsigned_po_url,
-                    'unsignedPOUrl' => $mrf->unsigned_po_url,
-                    'unsigned_po_share_url' => $mrf->unsigned_po_share_url,
-                    'unsignedPOShareUrl' => $mrf->unsigned_po_share_url,
+                'unsigned_po_url' => $poStreamUrl,
+                    'unsignedPOUrl' => $poStreamUrl,
+                    'unsigned_po_share_url' => $poStreamUrl,
+                    'unsignedPOShareUrl' => $poStreamUrl,
                     'workflow_state' => $mrf->workflow_state,
                     'workflowState' => $mrf->workflow_state,
                 'status' => $mrf->status,
                 ],
-                'po_url' => $mrf->unsigned_po_url,
+                'po_url' => $poStreamUrl,
             ]
         ]);
     }
@@ -2471,12 +2473,13 @@ class MRFWorkflowController extends Controller
             $items = collect($items);
         }
 
-        // Get company information from config
-        $companyName = config('app.name', env('APP_NAME', 'Company Name'));
+        // Company block on PO — prefer explicit env so APP_NAME=Laravel does not leak onto PDFs
+        $companyName = env('COMPANY_NAME', config('app.name', 'Emerald Industrial Co. FZE'));
         $companyAddress = env('COMPANY_ADDRESS', '');
         $companyPhone = env('COMPANY_PHONE', '');
         $companyEmail = env('COMPANY_EMAIL', config('mail.from.address', ''));
         $companyTaxId = env('COMPANY_TAX_ID', '');
+        $companyWebsite = env('COMPANY_WEBSITE', 'https://emeraldcfze.com/');
 
         // Format items for PO template
         $formattedItems = $items->map(function($item) {
@@ -2535,6 +2538,7 @@ class MRFWorkflowController extends Controller
                     'phone' => $companyPhone,
                     'email' => $companyEmail,
                     'tax_id' => $companyTaxId,
+                    'website' => $companyWebsite,
                 ],
             ]
         ];

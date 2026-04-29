@@ -432,7 +432,7 @@ class DashboardController extends Controller
                         'email' => $mrf->requester->email,
                     ] : null,
                     'poNumber' => $mrf->po_number,
-                    'unsignedPoUrl' => $mrf->unsigned_po_url,
+                    'unsignedPoUrl' => $mrf->freshUnsignedPoStreamUrl() ?? $mrf->unsigned_po_url,
                     'signedPoUrl' => $mrf->signed_po_url,
                     'signedPoShareUrl' => $mrf->signed_po_share_url,
                     'poGeneratedAt' => $mrf->po_generated_at ? $mrf->po_generated_at->toIso8601String() : null,

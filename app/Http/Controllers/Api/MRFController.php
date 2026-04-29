@@ -87,25 +87,22 @@ class MRFController extends Controller
         ];
 
         try {
-            // Unsigned PO
-            if (!empty($mrf->unsigned_po_url)) {
-                // Try as direct path first, then extract from URL
+            // Prefer streaming URL so PDF always uses the current template (S3 file may be an old snapshot).
+            $streamUrl = $mrf->freshUnsignedPoStreamUrl();
+            if ($streamUrl) {
+                $freshUrls['unsigned_po_url'] = $streamUrl;
+                $freshUrls['unsigned_po_share_url'] = $streamUrl;
+            } elseif (!empty($mrf->unsigned_po_url)) {
                 $path = Storage::disk($disk)->exists($mrf->unsigned_po_url)
                     ? $mrf->unsigned_po_url
                     : $this->extractFilePathFromUrl($mrf->unsigned_po_url);
 
                 if ($path && Storage::disk($disk)->exists($path)) {
-                    $freshUrls['unsigned_po_url']       = $this->getFileUrl($path, $disk);
+                    $freshUrls['unsigned_po_url'] = $this->getFileUrl($path, $disk);
                     $freshUrls['unsigned_po_share_url'] = $freshUrls['unsigned_po_url'];
                 }
             }
 
-            $testPath = 'purchase-orders/2026/04/po_PO-2026-0428-052_1777376606.pdf';
-            \Log::info('S3 file exists check', [
-                'path'   => $testPath,
-                'exists' => Storage::disk($disk)->exists($testPath),
-                'disk'   => $disk,
-            ]);
             // Signed PO
             if (!empty($mrf->signed_po_url)) {
                 $path = Storage::disk($disk)->exists($mrf->signed_po_url)
@@ -224,13 +221,7 @@ class MRFController extends Controller
         $mrfs = $query->get();
 
         return response()->json($mrfs->map(function($mrf) {
-            // Generate fresh PO URLs on every request to prevent expiration
             $freshPOUrls = $this->generateFreshPOUrls($mrf);
-            \Log::info('Fresh PO URLs generated', [
-                'mrf_id'           => $mrf->mrf_id,
-                'unsigned_po_path' => $mrf->unsigned_po_url,
-                'fresh_url'        => $freshPOUrls['unsigned_po_url'],
-            ]);
 
             return [
                 'id' => $mrf->mrf_id,
@@ -389,6 +380,8 @@ class MRFController extends Controller
             ], 404);
         }
 
+        $freshPOUrls = $this->generateFreshPOUrls($mrf);
+
         return response()->json([
             'id' => $mrf->mrf_id,
             'title' => $mrf->title,
@@ -436,10 +429,10 @@ class MRFController extends Controller
             // PO information - allows Supply Chain to review/download unsigned PO
             'po_number' => $mrf->po_number,
             'poNumber' => $mrf->po_number,
-            'unsigned_po_url' => $mrf->unsigned_po_url,
-            'unsignedPoUrl' => $mrf->unsigned_po_url,
-            'unsigned_po_share_url' => $mrf->unsigned_po_share_url,
-            'unsignedPoShareUrl' => $mrf->unsigned_po_share_url,
+            'unsigned_po_url' => $freshPOUrls['unsigned_po_url'] ?? $mrf->unsigned_po_url,
+            'unsignedPoUrl' => $freshPOUrls['unsigned_po_url'] ?? $mrf->unsigned_po_url,
+            'unsigned_po_share_url' => $freshPOUrls['unsigned_po_share_url'] ?? $mrf->unsigned_po_share_url,
+            'unsignedPoShareUrl' => $freshPOUrls['unsigned_po_share_url'] ?? $mrf->unsigned_po_share_url,
             'signed_po_url' => $mrf->signed_po_url,
             'signedPoUrl' => $mrf->signed_po_url,
             'signed_po_share_url' => $mrf->signed_po_share_url,
@@ -1760,9 +1753,25 @@ class MRFController extends Controller
     }
 
     /**
-     * Download unsigned PO PDF
+     * Download unsigned PO PDF (authenticated API).
      */
     public function downloadPO(Request $request, $id)
+    {
+        return $this->streamUnsignedPOPdfResponse($id, true);
+    }
+
+    /**
+     * Same PDF as downloadPO, reachable via temporary signed URL (e.g. opened from unsignedPoUrl in the browser).
+     */
+    public function downloadPOBySignedLink(Request $request, string $id)
+    {
+        return $this->streamUnsignedPOPdfResponse($id, false);
+    }
+
+    /**
+     * @return \Illuminate\Http\Response|\Illuminate\Http\JsonResponse
+     */
+    private function streamUnsignedPOPdfResponse(string $id, bool $asAttachment)
     {
         $mrf = MRF::where('mrf_id', $id)->first();
 
@@ -1770,7 +1779,7 @@ class MRFController extends Controller
             return response()->json([
                 'success' => false,
                 'error' => 'MRF not found',
-                'code' => 'NOT_FOUND'
+                'code' => 'NOT_FOUND',
             ], 404);
         }
 
@@ -1778,30 +1787,29 @@ class MRFController extends Controller
             return response()->json([
                 'success' => false,
                 'error' => 'PO not generated yet',
-                'code' => 'NO_PO'
+                'code' => 'NO_PO',
             ], 404);
         }
 
         try {
-            // Generate PDF on-the-fly from MRF data
             $pdfContent = $this->generatePOPDFFromMRF($mrf);
-
             $filename = "PO_{$mrf->po_number}.pdf";
+            $disposition = $asAttachment ? 'attachment' : 'inline';
 
             return response($pdfContent, 200)
                 ->header('Content-Type', 'application/pdf')
-                ->header('Content-Disposition', 'attachment; filename="' . $filename . '"');
+                ->header('Content-Disposition', $disposition . '; filename="' . $filename . '"');
         } catch (\Exception $e) {
-            Log::error('Failed to download PO', [
+            Log::error('Failed to stream unsigned PO PDF', [
                 'mrf_id' => $id,
                 'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
+                'trace' => $e->getTraceAsString(),
             ]);
 
             return response()->json([
                 'success' => false,
                 'error' => 'Failed to generate PO PDF: ' . $e->getMessage(),
-                'code' => 'PDF_GENERATION_FAILED'
+                'code' => 'PDF_GENERATION_FAILED',
             ], 500);
         }
     }
