@@ -9,9 +9,14 @@ class PurchaseOrderPdfService
 {
     /**
      * Embed company logo as HTML for Dompdf (data URI). Prefer Emerald assets in public/images.
+     * Dompdf needs PHP GD (or compatible stack) to rasterize PNG/JPEG in PDFs; without GD, use text-only branding.
      */
     public function logoHtml(): string
     {
+        if (!extension_loaded('gd')) {
+            return '<div class="logo-wrap logo-text-fallback" style="font-weight:bold;font-size:11px;color:#0d5c3f;">Emerald</div>';
+        }
+
         $logoPaths = [
             public_path('images/emerald-logo.png'),
             public_path('images/emerald-logo.jpg'),
@@ -24,8 +29,8 @@ class PurchaseOrderPdfService
         foreach ($logoPaths as $logoPath) {
             if (file_exists($logoPath)) {
                 $imageData = file_get_contents($logoPath);
-                $imageInfo = getimagesize($logoPath);
-                $mimeType = $imageInfo['mime'] ?? 'image/png';
+                $imageInfo = @getimagesize($logoPath);
+                $mimeType = is_array($imageInfo) && isset($imageInfo['mime']) ? $imageInfo['mime'] : 'image/png';
                 $dataUri = 'data:' . $mimeType . ';base64,' . base64_encode($imageData);
 
                 return '<div class="logo-wrap"><img src="' . $dataUri . '" alt="Logo" class="logo-img" /></div>';

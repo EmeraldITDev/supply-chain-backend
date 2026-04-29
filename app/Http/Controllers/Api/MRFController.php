@@ -2236,6 +2236,7 @@ class MRFController extends Controller
         $options->set('isRemoteEnabled', true);
         $options->set('defaultFont', 'DejaVu Sans');
         $options->set('chroot', public_path());
+        $options->set('pdfBackend', 'CPDF');
 
         $dompdf = new Dompdf($options);
         $dompdf->loadHtml($html);

@@ -8,9 +8,13 @@ RUN apt-get update && apt-get install -y \
     libzip-dev \
     libonig-dev \
     libxml2-dev \
+    libpng-dev \
+    libjpeg62-turbo-dev \
+    libfreetype6-dev \
     zip \
     curl \
-    && docker-php-ext-install \
+    && docker-php-ext-configure gd --with-freetype --with-jpeg \
+    && docker-php-ext-install -j"$(nproc)" \
         pdo \
         pdo_pgsql \
         pdo_mysql \
@@ -18,7 +22,8 @@ RUN apt-get update && apt-get install -y \
         xml \
         ctype \
         bcmath \
-        zip
+        zip \
+        gd
 
 # Enable Apache rewrite (Laravel routing)
 RUN a2enmod rewrite
@@ -43,7 +48,7 @@ RUN chown -R www-data:www-data /var/www/html \
 
 # Install PHP dependencies (remove composer.lock to allow fresh install of new AWS SDK)
 RUN rm -f composer.lock && \
-    composer install --no-dev --optimize-autoloader --no-scripts --no-interaction --ignore-platform-reqs
+    composer install --no-dev --optimize-autoloader --no-scripts --no-interaction
 
 EXPOSE 80
 CMD ["apache2-foreground"]
