@@ -33,8 +33,8 @@
         </p>
     </div>
     <div class="footer">
-        <p>This is an automated workflow notification from Emerald Industrial CFZE.</p>
-        <p>&copy; {{ date('Y') }} Emerald Industrial CFZE. All rights reserved.</p>
+        <p>This is an automated workflow notification from {{ config('app.name', 'Emerald Industrial CFZE') }}.</p>
+        <p>&copy; {{ date('Y') }} {{ config('app.name', 'Emerald Industrial CFZE') }}. All rights reserved.</p>
     </div>
 </body>
 </html>

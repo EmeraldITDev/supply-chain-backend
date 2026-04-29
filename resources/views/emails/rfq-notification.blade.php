@@ -95,12 +95,12 @@
 
         <p>Best regards,<br>
         Procurement Team<br>
-        Supply Chain Management</p>
+        {{ config('app.name', 'Emerald Industrial CFZE') }}</p>
     </div>
 
     <div class="footer">
         <p>This is an automated email. Please do not reply.</p>
-        <p>&copy; {{ date('Y') }} Supply Chain Management System. All rights reserved.</p>
+        <p>&copy; {{ date('Y') }} {{ config('app.name', 'Emerald Industrial CFZE') }}. All rights reserved.</p>
     </div>
 </body>
 </html>

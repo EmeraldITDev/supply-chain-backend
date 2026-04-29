@@ -92,7 +92,7 @@
 
     <div class="footer">
         <p>This is an automated email. Please do not reply.</p>
-        <p>&copy; {{ date('Y') }} Emerald Industrial CFZE. All rights reserved.</p>
+        <p>&copy; {{ date('Y') }} {{ config('app.name', 'Emerald Industrial CFZE') }}. All rights reserved.</p>
     </div>
 </body>
 </html>

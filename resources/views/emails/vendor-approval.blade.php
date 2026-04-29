@@ -98,13 +98,13 @@
         <p>We look forward to a successful partnership!</p>
 
         <p>Best regards,<br>
-        Emerald Industrial CFZE Team</p>
+        {{ config('app.name', 'Emerald Industrial CFZE') }} Team</p>
     </div>
 
     <div class="footer">
         <p>This is an automated email. Please do not reply.</p>
         <p>Keep your credentials secure and do not share them with anyone.</p>
-        <p>&copy; {{ date('Y') }} Emerald Industrial CFZE. All rights reserved.</p>
+        <p>&copy; {{ date('Y') }} {{ config('app.name', 'Emerald Industrial CFZE') }}. All rights reserved.</p>
     </div>
 </body>
 </html>
