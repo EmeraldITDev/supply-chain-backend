@@ -162,7 +162,7 @@ class VendorDocumentService
                 // Get URL (temporary signed URL for S3, public URL for local)
                 if ($disk === 's3') {
                     try {
-                        $fileUrl = Storage::disk($disk)->temporaryUrl($filePath, now()->addHours(24));
+                        $fileUrl = Storage::disk($disk)->temporaryUrl($filePath, now()->addDays(7));
                         $fileShareUrl = $fileUrl;
                     } catch (\Exception $e) {
                         \Log::warning('S3 temporary URL generation failed, using regular URL', [
@@ -490,7 +490,7 @@ class VendorDocumentService
 
                 if ($disk === 's3') {
                     try {
-                        $newFileUrl = Storage::disk($disk)->temporaryUrl($newPath, now()->addHours(24));
+                        $newFileUrl = Storage::disk($disk)->temporaryUrl($newPath, now()->addDays(7));
                         $newFileShareUrl = $newFileUrl;
                     } catch (\Exception $e) {
                         \Log::warning('S3 temporary URL generation failed for moved document', [

@@ -75,50 +75,52 @@ class MRFController extends Controller
      * Generate fresh PO URLs - Called on every API response to ensure URLs never expire
      * This regenerates signed URLs with 7-day expiration
      */
-    protected function generateFreshPOUrls(MRF $mrf): array
+   protected function generateFreshPOUrls(MRF $mrf): array
     {
         $disk = $this->getStorageDisk();
         $freshUrls = [
-            'unsigned_po_url' => null,
+            'unsigned_po_url'       => null,
             'unsigned_po_share_url' => null,
-            'signed_po_url' => null,
-            'signed_po_share_url' => null,
+            'signed_po_url'         => null,
+            'signed_po_share_url'   => null,
         ];
 
         try {
-            // Regenerate unsigned PO URL if file path exists
+            // Unsigned PO
             if (!empty($mrf->unsigned_po_url)) {
-                // Extract file path from URL if it's a full URL
-                $unsigned_po_path = $this->extractFilePathFromUrl($mrf->unsigned_po_url);
-                if ($unsigned_po_path && Storage::disk($disk)->exists($unsigned_po_path)) {
-                    $freshUrls['unsigned_po_url'] = $this->getFileUrl($unsigned_po_path, $disk);
+                // Try as direct path first, then extract from URL
+                $path = Storage::disk($disk)->exists($mrf->unsigned_po_url)
+                    ? $mrf->unsigned_po_url
+                    : $this->extractFilePathFromUrl($mrf->unsigned_po_url);
+
+                if ($path && Storage::disk($disk)->exists($path)) {
+                    $freshUrls['unsigned_po_url']       = $this->getFileUrl($path, $disk);
                     $freshUrls['unsigned_po_share_url'] = $freshUrls['unsigned_po_url'];
                 }
             }
 
-            // Regenerate signed PO URL if file path exists
+            // Signed PO
             if (!empty($mrf->signed_po_url)) {
-                // Extract file path from URL if it's a full URL
-                $signed_po_path = $this->extractFilePathFromUrl($mrf->signed_po_url);
-                if ($signed_po_path) {
-                    // Try the extracted path first
-                    if (Storage::disk($disk)->exists($signed_po_path)) {
-                        $freshUrls['signed_po_url'] = $this->getFileUrl($signed_po_path, $disk);
+                $path = Storage::disk($disk)->exists($mrf->signed_po_url)
+                    ? $mrf->signed_po_url
+                    : $this->extractFilePathFromUrl($mrf->signed_po_url);
+
+                if ($path && Storage::disk($disk)->exists($path)) {
+                    $freshUrls['signed_po_url']       = $this->getFileUrl($path, $disk);
+                    $freshUrls['signed_po_share_url'] = $freshUrls['signed_po_url'];
+                } else {
+                    // Fallback: try signed prefix
+                    $signedPath = 'purchase-orders/signed/' . basename($mrf->signed_po_url);
+                    if (Storage::disk($disk)->exists($signedPath)) {
+                        $freshUrls['signed_po_url']       = $this->getFileUrl($signedPath, $disk);
                         $freshUrls['signed_po_share_url'] = $freshUrls['signed_po_url'];
-                    } else {
-                        // If path doesn't exist, try with signed prefix
-                        $signedPath = 'purchase-orders/signed/' . basename($signed_po_path);
-                        if (Storage::disk($disk)->exists($signedPath)) {
-                            $freshUrls['signed_po_url'] = $this->getFileUrl($signedPath, $disk);
-                            $freshUrls['signed_po_share_url'] = $freshUrls['signed_po_url'];
-                        }
                     }
                 }
             }
         } catch (\Exception $e) {
             Log::warning('Failed to generate fresh PO URLs', [
                 'mrf_id' => $mrf->mrf_id,
-                'error' => $e->getMessage()
+                'error'  => $e->getMessage()
             ]);
         }
 
