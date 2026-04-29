@@ -55,8 +55,9 @@ class MRFWorkflowController extends Controller
 
     /**
      * Get file URL - for S3 uses temporary signed URL, for local uses public URL
+     * Default expiration is 7 days to prevent URL expiration issues
      */
-    protected function getFileUrl(string $filePath, string $disk, int $expirationHours = 24): string
+    protected function getFileUrl(string $filePath, string $disk, int $expirationHours = 168): string
     {
         if ($disk === 's3') {
             try {

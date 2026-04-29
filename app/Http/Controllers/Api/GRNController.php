@@ -27,7 +27,7 @@ class GRNController extends Controller
         $this->permissionService = $permissionService;
         $this->notificationService = $notificationService;
     }
-    
+
     /**
      * Get the storage disk for documents
      */
@@ -35,11 +35,12 @@ class GRNController extends Controller
     {
         return config('filesystems.documents_disk', env('DOCUMENTS_DISK', 's3'));
     }
-    
+
     /**
      * Get file URL - for S3 uses temporary signed URL, for local uses public URL
+     * Default expiration is 7 days to prevent URL expiration issues
      */
-    protected function getFileUrl(string $filePath, string $disk, int $expirationHours = 24): string
+    protected function getFileUrl(string $filePath, string $disk, int $expirationHours = 168): string
     {
         if ($disk === 's3') {
             try {
@@ -52,7 +53,7 @@ class GRNController extends Controller
                 return Storage::disk($disk)->url($filePath);
             }
         }
-        
+
         // For local/public storage
         $url = Storage::disk($disk)->url($filePath);
         if (!filter_var($url, FILTER_VALIDATE_URL)) {
@@ -188,19 +189,19 @@ class GRNController extends Controller
         $disk = $this->getStorageDisk();
         $grnFileName = "grn_{$mrf->po_number}_" . time() . "." . $grnFile->getClientOriginalExtension();
         $grnPath = "grns/" . date('Y/m') . "/{$mrf->mrf_id}/{$grnFileName}";
-        
+
         // Ensure directory structure exists (for S3, this is just the path)
         $directory = dirname($grnPath);
         if ($disk !== 's3' && !Storage::disk($disk)->exists($directory)) {
             Storage::disk($disk)->makeDirectory($directory, 0755, true);
         }
-        
+
         $grnFile->storeAs($directory, basename($grnPath), $disk);
-        
+
         // Get URL (temporary signed URL for S3, public URL for local)
         $grnUrl = $this->getFileUrl($grnPath, $disk);
         $grnShareUrl = $grnUrl;
-        
+
         Log::info('GRN uploaded to storage', [
                     'mrf_id' => $mrf->mrf_id,
                     'po_number' => $mrf->po_number,

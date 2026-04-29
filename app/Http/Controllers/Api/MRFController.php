@@ -46,8 +46,9 @@ class MRFController extends Controller
 
     /**
      * Get file URL - for S3 uses temporary signed URL, for local uses public URL
+     * Default expiration is 7 days to prevent URL expiration issues
      */
-    protected function getFileUrl(string $filePath, string $disk, int $expirationHours = 24): string
+    protected function getFileUrl(string $filePath, string $disk, int $expirationHours = 168): string
     {
         if ($disk === 's3') {
             try {
@@ -69,6 +70,77 @@ class MRFController extends Controller
         }
         return $url;
     }
+
+    /**
+     * Generate fresh PO URLs - Called on every API response to ensure URLs never expire
+     * This regenerates signed URLs with 7-day expiration
+     */
+    protected function generateFreshPOUrls(MRF $mrf): array
+    {
+        $disk = $this->getStorageDisk();
+        $freshUrls = [
+            'unsigned_po_url' => null,
+            'unsigned_po_share_url' => null,
+            'signed_po_url' => null,
+            'signed_po_share_url' => null,
+        ];
+
+        try {
+            // Regenerate unsigned PO URL if file path exists
+            if (!empty($mrf->unsigned_po_url)) {
+                // Extract file path from URL if it's a full URL
+                $unsigned_po_path = $this->extractFilePathFromUrl($mrf->unsigned_po_url);
+                if ($unsigned_po_path) {
+                    $freshUrls['unsigned_po_url'] = $this->getFileUrl($unsigned_po_path, $disk);
+                    $freshUrls['unsigned_po_share_url'] = $freshUrls['unsigned_po_url'];
+                }
+            }
+
+            // Regenerate signed PO URL if file path exists
+            if (!empty($mrf->signed_po_url)) {
+                // Extract file path from URL if it's a full URL
+                $signed_po_path = $this->extractFilePathFromUrl($mrf->signed_po_url);
+                if ($signed_po_path) {
+                    $freshUrls['signed_po_url'] = $this->getFileUrl($signed_po_path, $disk);
+                    $freshUrls['signed_po_share_url'] = $freshUrls['signed_po_url'];
+                }
+            }
+        } catch (\Exception $e) {
+            Log::warning('Failed to generate fresh PO URLs', [
+                'mrf_id' => $mrf->mrf_id,
+                'error' => $e->getMessage()
+            ]);
+        }
+
+        return $freshUrls;
+    }
+
+    /**
+     * Extract file path from S3 URL or return the path if it's already a path
+     */
+    private function extractFilePathFromUrl(string $urlOrPath): ?string
+    {
+        // If it's already a file path (no protocol), return as-is
+        if (!str_contains($urlOrPath, '://')) {
+            return $urlOrPath;
+        }
+
+        // For S3 URLs, extract the path portion
+        if (str_contains($urlOrPath, 's3')) {
+            // Parse the URL
+            $parsed = parse_url($urlOrPath);
+            if (isset($parsed['path'])) {
+                // Remove leading slash and bucket name if present
+                $path = ltrim($parsed['path'], '/');
+                // Remove bucket name if it's in the path
+                $parts = explode('/', $path, 2);
+                return $parts[1] ?? $parts[0] ?? null;
+            }
+        }
+
+        return null;
+    }
+
     /**
      * Get all MRFs with optional filters
      */
@@ -122,6 +194,9 @@ class MRFController extends Controller
         $mrfs = $query->get();
 
         return response()->json($mrfs->map(function($mrf) {
+            // Generate fresh PO URLs on every request to prevent expiration
+            $freshPOUrls = $this->generateFreshPOUrls($mrf);
+
             return [
                 'id' => $mrf->mrf_id,
                 'title' => $mrf->title,
@@ -165,15 +240,15 @@ class MRFController extends Controller
                 'chairman_approved' => $mrf->chairman_approved ?? false,
                 'chairman_approved_at' => $mrf->chairman_approved_at?->toIso8601String(),
                 'chairman_remarks' => $mrf->chairman_remarks,
-                // PO information (both formats)
+                // PO information with fresh regenerated URLs
                 'po_number' => $mrf->po_number,
                 'poNumber' => $mrf->po_number,
-                'unsigned_po_url' => $mrf->unsigned_po_url,
-                'unsignedPOUrl' => $mrf->unsigned_po_url,
-                'unsigned_po_share_url' => $mrf->unsigned_po_share_url,
-                'unsignedPOShareUrl' => $mrf->unsigned_po_share_url,
-                'signed_po_url' => $mrf->signed_po_url,
-                'signedPOUrl' => $mrf->signed_po_url,
+                'unsigned_po_url' => $freshPOUrls['unsigned_po_url'] ?? $mrf->unsigned_po_url,
+                'unsignedPOUrl' => $freshPOUrls['unsigned_po_url'] ?? $mrf->unsigned_po_url,
+                'unsigned_po_share_url' => $freshPOUrls['unsigned_po_share_url'] ?? $mrf->unsigned_po_share_url,
+                'unsignedPOShareUrl' => $freshPOUrls['unsigned_po_share_url'] ?? $mrf->unsigned_po_share_url,
+                'signed_po_url' => $freshPOUrls['signed_po_url'] ?? $mrf->signed_po_url,
+                'signedPOUrl' => $freshPOUrls['signed_po_url'] ?? $mrf->signed_po_url,
                 'po_generated_at' => $mrf->po_generated_at?->toIso8601String(),
                 'poGeneratedAt' => $mrf->po_generated_at?->toIso8601String(),
             ];

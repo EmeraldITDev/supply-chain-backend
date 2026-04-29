@@ -40,7 +40,7 @@ class SRFController extends Controller
 
         // Filter by requester (for employees to see only their own)
         $user = $request->user();
-        
+
         // If user is a vendor, they typically don't need direct access to SRFs
         // Allow access but return empty array
         $isVendor = false;
@@ -49,7 +49,7 @@ class SRFController extends Controller
             // Vendors don't typically need SRFs - return empty array
             return response()->json([]);
         }
-        
+
         if ($user && in_array($user->role, ['employee', 'general_employee'])) {
             $query->where('requester_id', $user->id);
         }
@@ -125,25 +125,25 @@ class SRFController extends Controller
         $invoiceUrl = null;
         $invoiceShareUrl = null;
         $srfId = SRF::generateSRFId();
-        
+
         if ($request->hasFile('invoice')) {
             $invoiceFile = $request->file('invoice');
             $disk = config('filesystems.documents_disk', env('DOCUMENTS_DISK', 's3'));
             $invoiceFileName = "invoice_{$srfId}_" . time() . "." . $invoiceFile->getClientOriginalExtension();
             $invoicePath = "srfs/" . date('Y/m') . "/{$srfId}/{$invoiceFileName}";
-            
+
             // Ensure directory structure exists (for S3, this is just the path)
             $directory = dirname($invoicePath);
             if ($disk !== 's3' && !\Storage::disk($disk)->exists($directory)) {
                 \Storage::disk($disk)->makeDirectory($directory, 0755, true);
             }
-            
+
             $invoiceFile->storeAs($directory, basename($invoicePath), $disk);
-            
+
             // Get URL (temporary signed URL for S3, public URL for local)
             if ($disk === 's3') {
                 try {
-                    $invoiceUrl = \Storage::disk($disk)->temporaryUrl($invoicePath, now()->addHours(24));
+                    $invoiceUrl = \Storage::disk($disk)->temporaryUrl($invoicePath, now()->addDays(7));
                     $invoiceShareUrl = $invoiceUrl;
                 } catch (\Exception $e) {
                     \Log::warning('S3 temporary URL generation failed, using regular URL', [
