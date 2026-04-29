@@ -90,7 +90,7 @@ class MRFController extends Controller
             if (!empty($mrf->unsigned_po_url)) {
                 // Extract file path from URL if it's a full URL
                 $unsigned_po_path = $this->extractFilePathFromUrl($mrf->unsigned_po_url);
-                if ($unsigned_po_path) {
+                if ($unsigned_po_path && Storage::disk($disk)->exists($unsigned_po_path)) {
                     $freshUrls['unsigned_po_url'] = $this->getFileUrl($unsigned_po_path, $disk);
                     $freshUrls['unsigned_po_share_url'] = $freshUrls['unsigned_po_url'];
                 }
@@ -101,8 +101,18 @@ class MRFController extends Controller
                 // Extract file path from URL if it's a full URL
                 $signed_po_path = $this->extractFilePathFromUrl($mrf->signed_po_url);
                 if ($signed_po_path) {
-                    $freshUrls['signed_po_url'] = $this->getFileUrl($signed_po_path, $disk);
-                    $freshUrls['signed_po_share_url'] = $freshUrls['signed_po_url'];
+                    // Try the extracted path first
+                    if (Storage::disk($disk)->exists($signed_po_path)) {
+                        $freshUrls['signed_po_url'] = $this->getFileUrl($signed_po_path, $disk);
+                        $freshUrls['signed_po_share_url'] = $freshUrls['signed_po_url'];
+                    } else {
+                        // If path doesn't exist, try with signed prefix
+                        $signedPath = 'purchase-orders/signed/' . basename($signed_po_path);
+                        if (Storage::disk($disk)->exists($signedPath)) {
+                            $freshUrls['signed_po_url'] = $this->getFileUrl($signedPath, $disk);
+                            $freshUrls['signed_po_share_url'] = $freshUrls['signed_po_url'];
+                        }
+                    }
                 }
             }
         } catch (\Exception $e) {
@@ -117,28 +127,46 @@ class MRFController extends Controller
 
     /**
      * Extract file path from S3 URL or return the path if it's already a path
+     * Also ensures the path has the proper directory prefix
      */
     private function extractFilePathFromUrl(string $urlOrPath): ?string
     {
-        // If it's already a file path (no protocol), return as-is
+        // If it's already a file path (no protocol), process it
         if (!str_contains($urlOrPath, '://')) {
-            return $urlOrPath;
-        }
-
-        // For S3 URLs, extract the path portion
-        if (str_contains($urlOrPath, 's3')) {
-            // Parse the URL
-            $parsed = parse_url($urlOrPath);
-            if (isset($parsed['path'])) {
-                // Remove leading slash and bucket name if present
-                $path = ltrim($parsed['path'], '/');
-                // Remove bucket name if it's in the path
-                $parts = explode('/', $path, 2);
-                return $parts[1] ?? $parts[0] ?? null;
+            $path = $urlOrPath;
+        } else {
+            // For S3 URLs, extract the path portion
+            if (str_contains($urlOrPath, 's3')) {
+                // Parse the URL
+                $parsed = parse_url($urlOrPath);
+                if (isset($parsed['path'])) {
+                    // Remove leading slash and bucket name if present
+                    $path = ltrim($parsed['path'], '/');
+                    // Remove bucket name if it's in the path
+                    $parts = explode('/', $path, 2);
+                    $path = $parts[1] ?? $parts[0] ?? null;
+                } else {
+                    return null;
+                }
+            } else {
+                return null;
             }
         }
 
-        return null;
+        if (!$path) {
+            return null;
+        }
+
+        // If the path doesn't have the purchase-orders prefix, try to add it
+        if (!str_contains($path, 'purchase-orders/')) {
+            // Check if it looks like a date-based filename path (e.g., 2026/04/po_...pdf)
+            if (preg_match('/^\d{4}\/\d{2}\/.+\.pdf$/', $path)) {
+                // This is likely an unsigned PO - add the unsigned prefix
+                return 'purchase-orders/unsigned/' . $path;
+            }
+        }
+
+        return $path;
     }
 
     /**
@@ -2006,18 +2034,44 @@ class MRFController extends Controller
 
         try {
             $disk = $this->getStorageDisk();
-            $urlPath = parse_url($mrf->signed_po_url, PHP_URL_PATH);
 
-            // Try to extract file path
-            $baseUrl = Storage::disk($disk)->url('');
-            $filePath = str_replace($baseUrl, '', $mrf->signed_po_url);
-            $filePath = ltrim(str_replace('/storage/', '', $filePath), '/');
+            // Extract file path using our helper method
+            $filePath = $this->extractFilePathFromUrl($mrf->signed_po_url);
 
-            if (empty($filePath) || !Storage::disk($disk)->exists($filePath)) {
-                // Try alternative path extraction
-                $filePath = ltrim($urlPath, '/');
-                if (!Storage::disk($disk)->exists($filePath)) {
-                    throw new \Exception('Signed PO file not found in storage');
+            if (empty($filePath)) {
+                throw new \Exception('Could not extract file path from stored URL');
+            }
+
+            // Try the extracted path
+            if (!Storage::disk($disk)->exists($filePath)) {
+                // Try alternative paths
+                $alternatives = [
+                    'purchase-orders/signed/' . basename($filePath),
+                    ltrim($filePath, '/'),
+                    'purchase-orders/signed/' . ltrim($filePath, 'purchase-orders/signed/')
+                ];
+
+                $found = false;
+                foreach ($alternatives as $alt) {
+                    if (Storage::disk($disk)->exists($alt)) {
+                        $filePath = $alt;
+                        $found = true;
+                        Log::info('Found signed PO at alternative path', [
+                            'mrf_id' => $id,
+                            'alternative_path' => $alt
+                        ]);
+                        break;
+                    }
+                }
+
+                if (!$found) {
+                    Log::error('Signed PO file not found in S3', [
+                        'mrf_id' => $id,
+                        'expected_path' => $filePath,
+                        'tried_alternatives' => $alternatives,
+                        'stored_url' => $mrf->signed_po_url
+                    ]);
+                    throw new \Exception('Signed PO file not found in storage. File may have been deleted or path is incorrect.');
                 }
             }
 
