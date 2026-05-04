@@ -85,11 +85,11 @@ class QuotationController extends Controller
                 }
 
                 $deliveryDays = (int) $deliveryDays;
-                
+
                 // Get submitted date (prefer submitted_at, fallback to created_at)
                 $submittedDate = $quotation->submitted_at ?? $quotation->created_at;
                 $createdAt = $quotation->created_at;
-                
+
             return [
                     // ID fields
                 'id' => $quotation->quotation_id,
@@ -99,7 +99,7 @@ class QuotationController extends Controller
                     'vendor_id' => $quotation->vendor ? $quotation->vendor->vendor_id : null,
                 'vendorName' => $quotation->vendor_name,
                     'vendor_name' => $quotation->vendor_name,
-                    
+
                     // Amount fields (both formats)
                     'price' => (string) ($quotation->price ?? $quotation->total_amount),
                     'totalAmount' => (float) $quotation->total_amount,
@@ -111,36 +111,36 @@ class QuotationController extends Controller
                     'total_order_value' => (float) $quotation->total_amount,
                     'totalOrderValue' => (float) $quotation->total_amount,
                     'currency' => $quotation->currency ?? 'NGN',
-                    
+
                     // Delivery fields (both formats)
                     'delivery_days' => $deliveryDays,
                     'deliveryDays' => $deliveryDays,
                     'delivery_date' => $quotation->delivery_date ? $quotation->delivery_date->format('Y-m-d') : null,
                     'deliveryDate' => $quotation->delivery_date ? $quotation->delivery_date->format('Y-m-d') : null,
-                    
+
                     // Payment terms (all variants)
                     'payment_terms' => $quotation->payment_terms ?? null,
                     'paymentTerms' => $quotation->payment_terms ?? null,
                     'payment_terms_text' => $quotation->payment_terms ?? null,
-                    
+
                     // Validity and warranty
                     'validity_days' => $quotation->validity_days ?? null,
                     'validityDays' => $quotation->validity_days ?? null,
                     'warranty_period' => $quotation->warranty_period ?? null,
                     'warrantyPeriod' => $quotation->warranty_period ?? null,
-                    
+
                     // Date fields (all formats)
                     'submitted_date' => $submittedDate ? $submittedDate->toIso8601String() : null,
                     'submittedDate' => $submittedDate ? $submittedDate->toIso8601String() : null,
                     'submitted_at' => $submittedDate ? $submittedDate->toIso8601String() : null,
                     'created_at' => $createdAt ? $createdAt->toIso8601String() : null,
                     'createdAt' => $createdAt ? $createdAt->toIso8601String() : null,
-                    
+
                     // Status fields
                     'status' => $quotation->status ?? 'Pending',
                     'reviewStatus' => $quotation->review_status ?? 'pending',
                     'review_status' => $quotation->review_status ?? 'pending',
-                    
+
                     // Notes and remarks
                     'notes' => $quotation->notes ?? null,
                     'remarks' => $quotation->approval_remarks ?? $quotation->notes ?? null,
@@ -150,10 +150,10 @@ class QuotationController extends Controller
                     'revision_notes' => $quotation->revision_notes ?? null,
                     'approvalRemarks' => $quotation->approval_remarks ?? null,
                     'approval_remarks' => $quotation->approval_remarks ?? null,
-                    
+
                     // Attachments
                     'attachments' => $quotation->attachments ?? [],
-                    
+
                     // Items
                     'items' => $quotation->items->map(function($item) {
                         return [
@@ -180,7 +180,13 @@ class QuotationController extends Controller
      */
     public function store(Request $request)
     {
-        $validator = Validator::make($request->all(), [
+        // Normalize items field: if it's a single object instead of array, wrap it
+        $data = $request->all();
+        if (isset($data['items']) && !is_array($data['items'])) {
+            $data['items'] = [$data['items']];
+        }
+
+        $validator = Validator::make($data, [
             'rfqId' => 'required|exists:r_f_q_s,rfq_id',
             'vendorId' => 'required|exists:vendors,vendor_id',
             'vendorName' => 'required|string|max:255',
@@ -273,7 +279,7 @@ class QuotationController extends Controller
                     'submitted_at' => now(),
                 ]);
                 $quotation = $existing;
-                
+
                 // Delete existing quotation items before creating new ones
                 QuotationItem::where('quotation_id', $quotation->id)->delete();
             } else {
@@ -328,7 +334,7 @@ class QuotationController extends Controller
                     'specifications' => $specifications,
                 ]);
             }
-            
+
             // Recalculate total from items and update quotation
             $itemsTotal = QuotationItem::where('quotation_id', $quotation->id)->sum('total_price');
             if ($itemsTotal > 0) {
@@ -727,7 +733,7 @@ class QuotationController extends Controller
     public function close(Request $request, $id)
     {
         $user = $request->user();
-        
+
         // Authorization check - only procurement can close
         if (!in_array($user->role, ['procurement_manager', 'procurement', 'admin'])) {
             return response()->json([
@@ -789,7 +795,7 @@ class QuotationController extends Controller
     public function reopen(Request $request, $id)
     {
         $user = $request->user();
-        
+
         // Authorization check - only procurement can reopen
         if (!in_array($user->role, ['procurement_manager', 'procurement', 'admin'])) {
             return response()->json([

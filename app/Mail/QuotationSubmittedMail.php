@@ -13,6 +13,7 @@ class QuotationSubmittedMail extends Mailable implements ShouldQueue
     use Queueable, SerializesModels;
 
     public Quotation $quotation;
+    public string $vendorPortalUrl = 'https://scm.emeraldcfze.com/vendor-portal';
 
     public function __construct(Quotation $quotation)
     {
@@ -23,6 +24,7 @@ class QuotationSubmittedMail extends Mailable implements ShouldQueue
     {
         return $this
             ->subject('Quotation Submitted - ' . $this->quotation->quotation_id)
-            ->view('emails.quotation-submitted');
+            ->view('emails.quotation-submitted')
+            ->with('vendorPortalUrl', $this->vendorPortalUrl);
     }
 }

@@ -36,7 +36,7 @@ class RFQSentMail extends Mailable implements ShouldQueue
                     ? $this->rfq->getDisplayTitle()
                     : ($this->rfq->title ?? $this->rfq->description),
                 'deadline' => $deadline,
-                'rfqUrl' => rtrim((string) config('app.frontend_url'), '/') . '/vendor-portal',
+                'rfqUrl' => 'https://scm.emeraldcfze.com/vendor-portal',
             ]);
     }
 }

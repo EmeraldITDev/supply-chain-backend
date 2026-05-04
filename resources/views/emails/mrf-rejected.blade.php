@@ -30,7 +30,7 @@
         @endif
 
         <p>
-            <a href="{{ config('app.frontend_url') . '/procurement/' }}">
+            <a href="{{ $mrfUrl ?? (config('app.frontend_url') . '/procurement/') }}">
                 View MRF
             </a>
         </p>

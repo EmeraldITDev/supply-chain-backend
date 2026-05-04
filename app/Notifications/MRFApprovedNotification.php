@@ -36,8 +36,21 @@ class MRFApprovedNotification extends Notification implements ShouldQueue
      */
     public function toMail($notifiable): MailMessage
     {
-        $frontendUrl = config('app.frontend_url', 'https://emerald-supply-chain.vercel.app');
-        $mrfUrl = rtrim($frontendUrl, '/') . '/mrfs/' . $this->mrf->mrf_id;
+        // Check if recipient has procurement module access
+        $hasProcurementAccess = in_array($notifiable->role, [
+            'procurement',
+            'procurement_manager',
+            'supply_chain_director',
+            'supply_chain',
+            'admin'
+        ]);
+
+        // Build URL based on procurement access
+        if ($hasProcurementAccess) {
+            $mrfUrl = 'https://scm.emeraldcfze.com/procurement';
+        } else {
+            $mrfUrl = 'https://scm.emeraldcfze.com';
+        }
 
         return (new MailMessage)
             ->subject("MRF Approved - {$this->mrf->mrf_id}")

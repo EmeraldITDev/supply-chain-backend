@@ -30,7 +30,7 @@
     <p><strong>Status:</strong> {{ ucfirst($mrf->status) }}</p>
 
     <p>
-        <a href="{{ config('app.frontend_url') . '/procurement/'">
+        <a href="{{ $mrfUrl ?? (config('app.frontend_url') . '/procurement/') }}">
             View MRF
         </a>
     </p>

@@ -28,7 +28,7 @@
             <p><strong>Submitted At:</strong> {{ optional($quotation->submitted_at)->format('Y-m-d H:i') }}</p>
         </div>
         <p>
-            <a class="button" href="{{ rtrim((string) config('app.frontend_url'), '/') . '/vendor-portal' }}">
+            <a class="button" href="{{ $vendorPortalUrl ?? (rtrim((string) config('app.frontend_url'), '/') . '/vendor-portal') }}">
                 Review Quotation
             </a>
         </p>
