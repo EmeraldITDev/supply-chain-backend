@@ -40,7 +40,7 @@ class RFQWorkflowController extends Controller
     public function getVendorRFQs(Request $request)
     {
         $user = $request->user();
-        
+
         // Verify user is a vendor - check both direct role field and Spatie roles
         $isVendor = false;
         if ($user->role === 'vendor') {
@@ -56,25 +56,25 @@ class RFQWorkflowController extends Controller
                 'code' => 'FORBIDDEN'
             ], 403);
         }
-        
+
         // Get vendor from authenticated user - try multiple methods
         $vendor = null;
-        
+
         // Method 1: Try vendor relationship
         if ($user->vendor_id && method_exists($user, 'vendor')) {
             $vendor = $user->vendor;
         }
-        
+
         // Method 2: Find vendor by vendor_id if relationship didn't work
         if (!$vendor && $user->vendor_id) {
             $vendor = Vendor::find($user->vendor_id);
         }
-        
+
         // Method 3: Try finding vendor by email as last resort
         if (!$vendor) {
             $vendor = Vendor::where('email', $user->email)->first();
         }
-        
+
         if (!$vendor) {
             return response()->json([
                 'success' => false,
@@ -102,7 +102,7 @@ class RFQWorkflowController extends Controller
             // Get pivot data for this vendor (should be loaded from the relationship)
             $vendorPivot = $rfq->vendors->firstWhere('id', $vendor->id);
             $pivot = $vendorPivot ? $vendorPivot->pivot : null;
-            
+
             // Check if vendor has submitted quotation
             $hasSubmitted = Quotation::where('rfq_id', $rfq->id)
                 ->where('vendor_id', $vendor->id)
@@ -178,7 +178,7 @@ class RFQWorkflowController extends Controller
 
         // Get vendor from authenticated user
         $vendor = $user->vendor ?? Vendor::find($user->vendor_id);
-        
+
         if (!$vendor) {
             return response()->json([
                 'success' => false,
@@ -251,7 +251,7 @@ class RFQWorkflowController extends Controller
             ->map(function ($quotation) {
                 // Handle missing vendor gracefully
                 $vendor = $quotation->vendor;
-                
+
                 // Calculate delivery_days from delivery_date if not provided
                 // Calculate delivery_days from delivery_date if not provided
                 $deliveryDays = $quotation->delivery_days;
@@ -268,11 +268,11 @@ class RFQWorkflowController extends Controller
                 }
 
                 $deliveryDays = (int) $deliveryDays;
-                
+
                 // Get submitted date (prefer submitted_at, fallback to created_at)
                 $submittedDate = $quotation->submitted_at ?? $quotation->created_at;
                 $createdAt = $quotation->created_at;
-                
+
                 return [
                     'quotation' => [
                         // ID fields
@@ -280,7 +280,7 @@ class RFQWorkflowController extends Controller
                         'rfq_id' => $quotation->rfq_id,
                         'vendor_id' => $quotation->vendor_id,
                         'quoteNumber' => $quotation->quote_number,
-                        
+
                         // Amount fields (both formats)
                         'total_amount' => (float) $quotation->total_amount,
                         'totalAmount' => (float) $quotation->total_amount,
@@ -288,39 +288,39 @@ class RFQWorkflowController extends Controller
                         'totalOrderValue' => (float) $quotation->total_amount,
                         'price' => (string) ($quotation->price ?? $quotation->total_amount),
                         'currency' => $quotation->currency ?? 'NGN',
-                        
+
                         // Delivery fields (both formats)
                         'delivery_days' => $deliveryDays,
                         'deliveryDays' => $deliveryDays,
                         'delivery_date' => $quotation->delivery_date?->format('Y-m-d'),
                         'deliveryDate' => $quotation->delivery_date?->format('Y-m-d'),
-                        
+
                         // Payment terms (both formats)
                         'payment_terms' => $quotation->payment_terms ?? null,
                         'paymentTerms' => $quotation->payment_terms ?? null,
                         'payment_terms_text' => $quotation->payment_terms ?? null,
-                        
+
                         // Validity and warranty
                         'validity_days' => $quotation->validity_days ?? null,
                         'validityDays' => $quotation->validity_days ?? null,
                         'warranty_period' => $quotation->warranty_period ?? null,
                         'warrantyPeriod' => $quotation->warranty_period ?? null,
-                        
+
                         // Status fields
                         'status' => $quotation->status ?? 'submitted',
                         'reviewStatus' => $quotation->review_status ?? 'pending',
-                        
+
                         // Date fields (all formats)
                         'submitted_date' => $submittedDate?->toIso8601String(),
                         'submittedDate' => $submittedDate?->toIso8601String(),
                         'submitted_at' => $submittedDate?->toIso8601String(),
                         'created_at' => $createdAt?->toIso8601String(),
                         'createdAt' => $createdAt?->toIso8601String(),
-                        
+
                         // Notes and remarks
                         'notes' => $quotation->notes ?? null,
                         'remarks' => $quotation->approval_remarks ?? $quotation->notes ?? null,
-                        
+
                         // Attachments
                         'attachments' => $quotation->attachments ?? [],
                     ],
@@ -516,13 +516,13 @@ class RFQWorkflowController extends Controller
                     'error' => $e->getMessage(),
                 ]);
             }
-            
+
             // Notify rejected vendors
             $rejectedQuotations = Quotation::where('rfq_id', $rfq->id)
                 ->where('id', '!=', $selectedQuotation->id)
                 ->with('vendor')
                 ->get();
-                
+
             foreach ($rejectedQuotations as $rejectedQuotation) {
                 $this->notificationService->notifyQuotationRejected($rejectedQuotation);
             }
@@ -551,7 +551,7 @@ class RFQWorkflowController extends Controller
             ]);
         } catch (\Exception $e) {
             DB::rollBack();
-            
+
             return response()->json([
                 'success' => false,
                 'error' => 'Failed to select vendor',
@@ -583,7 +583,7 @@ class RFQWorkflowController extends Controller
                 'error' => 'Only vendors can submit quotations',
                 'code' => 'FORBIDDEN',
             ];
-            
+
             // Include debug info only in debug mode
             if (config('app.debug')) {
                 $response['debug'] = [
@@ -593,7 +593,7 @@ class RFQWorkflowController extends Controller
                     'user_email' => $user->email,
                 ];
             }
-            
+
             return response()->json($response, 403);
         }
 
@@ -703,7 +703,7 @@ class RFQWorkflowController extends Controller
                 // Update existing quotation (resubmission)
                 // Provide default value for validity_days if not provided (default is 30 days)
                 $validityDays = $request->validityDays ?? $existing->validity_days ?? 30;
-                
+
                 $existing->update([
                     'vendor_name' => $request->vendorName ?? $vendor->name,
                     'price' => $request->price,
@@ -722,7 +722,7 @@ class RFQWorkflowController extends Controller
                     'submitted_at' => now(),
                 ]);
                 $quotation = $existing;
-                
+
                 // Delete existing quotation items before creating new ones
                 QuotationItem::where('quotation_id', $quotation->id)->delete();
             } else {
@@ -736,7 +736,7 @@ class RFQWorkflowController extends Controller
             // Create new quotation
             // Provide default value for validity_days if not provided (default is 30 days)
             $validityDays = $request->validityDays ?? 30;
-            
+
             $quotation = Quotation::create([
                 'quotation_id' => Quotation::generateQuotationId(),
                 'rfq_id' => $rfq->id,
@@ -763,7 +763,7 @@ class RFQWorkflowController extends Controller
             foreach ($request->items as $itemData) {
                 // Try to get item name from request first
                 $itemName = $itemData['itemName'] ?? $itemData['name'] ?? null;
-                
+
                 // If item name not provided, try to get it from the linked RFQ item
                 $rfqItemId = $itemData['rfqItemId'] ?? $itemData['rfq_item_id'] ?? null;
                 if (!$itemName && $rfqItemId) {
@@ -772,12 +772,12 @@ class RFQWorkflowController extends Controller
                         $itemName = $rfqItem->item_name;
                     }
                 }
-                
+
                 // Only use 'Item' as absolute fallback
                 if (!$itemName) {
                     $itemName = 'Item';
                 }
-                
+
                 $description = $itemData['description'] ?? '';
                 $quantity = $itemData['quantity'] ?? 1;
                 $unit = $itemData['unit'] ?? 'unit';
@@ -797,7 +797,7 @@ class RFQWorkflowController extends Controller
                     'specifications' => $specifications,
                 ]);
             }
-            
+
             // Recalculate total from items and update quotation
             $itemsTotal = QuotationItem::where('quotation_id', $quotation->id)->sum('total_price');
             if ($itemsTotal > 0) {
@@ -839,7 +839,7 @@ class RFQWorkflowController extends Controller
 
         // Load items for response
         $quotation->load('items');
-        
+
         return response()->json([
             'success' => true,
             'message' => 'Quotation submitted successfully',

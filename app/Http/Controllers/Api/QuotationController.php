@@ -315,7 +315,7 @@ class QuotationController extends Controller
             foreach ($request->items as $itemData) {
                 // Try to get item name from request first
                 $itemName = $itemData['itemName'] ?? $itemData['name'] ?? null;
-                
+
                 // If item name not provided, try to get it from the linked RFQ item
                 $rfqItemId = $itemData['rfqItemId'] ?? $itemData['rfq_item_id'] ?? null;
                 if (!$itemName && $rfqItemId) {
@@ -324,12 +324,12 @@ class QuotationController extends Controller
                         $itemName = $rfqItem->item_name;
                     }
                 }
-                
+
                 // Only use 'Item' as absolute fallback
                 if (!$itemName) {
                     $itemName = 'Item';
                 }
-                
+
                 $description = $itemData['description'] ?? '';
                 $quantity = $itemData['quantity'] ?? 1;
                 $unit = $itemData['unit'] ?? 'unit';
