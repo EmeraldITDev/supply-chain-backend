@@ -761,13 +761,28 @@ class RFQWorkflowController extends Controller
         // Handle quotation items if provided
         if ($request->has('items') && is_array($request->items) && count($request->items) > 0) {
             foreach ($request->items as $itemData) {
-                $itemName = $itemData['itemName'] ?? $itemData['name'] ?? 'Item';
+                // Try to get item name from request first
+                $itemName = $itemData['itemName'] ?? $itemData['name'] ?? null;
+                
+                // If item name not provided, try to get it from the linked RFQ item
+                $rfqItemId = $itemData['rfqItemId'] ?? $itemData['rfq_item_id'] ?? null;
+                if (!$itemName && $rfqItemId) {
+                    $rfqItem = RFQItem::find($rfqItemId);
+                    if ($rfqItem) {
+                        $itemName = $rfqItem->item_name;
+                    }
+                }
+                
+                // Only use 'Item' as absolute fallback
+                if (!$itemName) {
+                    $itemName = 'Item';
+                }
+                
                 $description = $itemData['description'] ?? '';
                 $quantity = $itemData['quantity'] ?? 1;
                 $unit = $itemData['unit'] ?? 'unit';
                 $unitPrice = $itemData['unitPrice'] ?? $itemData['unit_price'] ?? 0;
                 $totalPrice = $itemData['totalPrice'] ?? $itemData['total_price'] ?? ($unitPrice * $quantity);
-                $rfqItemId = $itemData['rfqItemId'] ?? $itemData['rfq_item_id'] ?? null;
                 $specifications = $itemData['specifications'] ?? '';
 
                 QuotationItem::create([
