@@ -639,14 +639,17 @@ class RFQWorkflowController extends Controller
             'currency' => 'nullable|string|max:10',
             'items' => 'nullable|array',
             'items.*.rfqItemId' => 'nullable|exists:rfq_items,id',
-            'items.*.itemName' => 'nullable|string|max:255',
-            'items.*.name' => 'nullable|string|max:255',
+            'items.*.itemName' => 'nullable|string|min:2|max:255|not_in:Item,item,ITEM,Product,product,Unnamed,unnamed',
+            'items.*.name' => 'nullable|string|min:2|max:255|not_in:Item,item,ITEM,Product,product,Unnamed,unnamed',
             'items.*.description' => 'nullable|string',
             'items.*.quantity' => 'nullable|integer|min:1',
             'items.*.unit' => 'nullable|string|max:50',
             'items.*.unitPrice' => 'nullable|numeric|min:0',
             'items.*.totalPrice' => 'nullable|numeric|min:0',
             'items.*.specifications' => 'nullable|string',
+        ], [], [
+            'items.*.itemName' => 'Item name',
+            'items.*.name' => 'Item name (name field)',
         ]);
 
         if ($validator->fails()) {

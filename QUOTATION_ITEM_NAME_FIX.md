@@ -20,7 +20,10 @@ $itemName = $itemData['itemName'] ?? $itemData['name'] ?? 'Item';
 
 When vendors submitted quotations with items but didn't explicitly provide item names, the system defaulted to the literal string `'Item'`, which was then stored in the `quotation_items.item_name` field.
 
-## Solution Applied
+## Complete Solution
+
+### Part 1: Code Changes - Intelligent Item Name Resolution
+
 Both endpoints have been fixed to intelligently resolve item names with a proper fallback chain:
 
 ### 1. **RFQWorkflowController::submitQuotation** - FIXED ✓
@@ -253,6 +256,272 @@ Quotation submission endpoint.
   ]
 }
 ```
+
+## Key Field Names for Frontend
+The responses use both snake_case and camelCase for compatibility:
+
+| Field | Formats | Type | Notes |
+|-------|---------|------|-------|
+| Item Name | `item_name` (snake_case) or `name` (alias) | String | Now populated from RFQ items if not explicitly provided |
+| Description | `description` | String | Optional |
+| Quantity | `quantity` | Integer | Required |
+| Unit | `unit` | String | e.g., "units", "kg", "liter" |
+| Unit Price | `unit_price` (snake_case) or `unitPrice` (camelCase) | Float | 2 decimal places |
+| Total Price | `total_price` (snake_case) or `totalPrice` (camelCase) | Float | Calculated as quantity × unit_price |
+| Specifications | `specifications` | String | Optional technical specs |
+| RFQ Item ID | `rfq_item_id` (snake_case) or `rfqItemId` (camelCase) | Integer | Links to source RFQ item |
+
+## Testing Recommendations
+1. **Submit quotation without explicit item names**: Verify that item names are populated from RFQ items
+2. **Submit quotation with explicit item names**: Verify that provided names take precedence
+3. **Submit quotation items without rfq_item_id link**: Verify fallback to "Item" only when necessary
+4. **RFQ management view**: Verify quotation items display actual names instead of "Item"
+5. **Quotation list view**: Verify items show proper names across all vendor quotations
+
+## Deployment Notes
+- **Database**: No migrations needed - existing data remains in `quotation_items.item_name` field
+- **Backward Compatibility**: Fully maintained - existing APIs continue to work
+- **API Response Format**: Unchanged - only data values are corrected going forward
+- **Frontend Impact**: Frontend no longer needs to provide default "Item" text - backend now handles this intelligently
+
+---
+
+## Part 2: Validation Rules - Prevent Future Bugs
+
+### New Validation in QuotationController & RFQWorkflowController
+
+Both controllers now validate item submissions with enhanced rules to prevent generic placeholders:
+
+```php
+'items.*.itemName' => 'nullable|string|min:2|max:255|not_in:Item,item,ITEM,Product,product,Unnamed,unnamed',
+'items.*.name' => 'nullable|string|min:2|max:255|not_in:Item,item,ITEM,Product,product,Unnamed,unnamed',
+```
+
+**Rules Applied:**
+- ✅ Minimum 2 characters (prevents single-letter placeholders)
+- ✅ Maximum 255 characters (database constraint)
+- ✅ Rejects generic names: `Item`, `item`, `ITEM`, `Product`, `product`, `Unnamed`, `unnamed`
+- ✅ Nullable: If not provided, system will auto-resolve from RFQ item
+
+**Files Modified:**
+- [app/Http/Controllers/Api/QuotationController.php](app/Http/Controllers/Api/QuotationController.php#L190-L207)
+- [app/Http/Controllers/Api/RFQWorkflowController.php](app/Http/Controllers/Api/RFQWorkflowController.php#L638-L660)
+
+### Custom Validation Rule (Optional Future Enhancement)
+
+A custom Laravel validation rule has been created for advanced validation scenarios:
+- [app/Rules/ValidQuotationItemName.php](app/Rules/ValidQuotationItemName.php)
+
+This rule can be used in future implementations to:
+- Validate that either itemName is provided OR rfq_item_id is valid and resolvable
+- Prevent submissions with unresolvable references
+- Provide detailed error messages about which field failed
+
+---
+
+## Part 3: SQL Backfill - Fix Existing Bad Data
+
+Comprehensive SQL scripts are provided in [SQL_QUOTATION_ITEM_BACKFILL.sql](SQL_QUOTATION_ITEM_BACKFILL.sql).
+
+### Step 1: Inspect All Bad Data
+
+First, identify the full scope of contaminated rows across the system:
+
+```sql
+SELECT 
+    qi.id                  AS quotation_item_id,
+    qi.quotation_id,
+    qi.item_name           AS current_incorrect_name,
+    q.quotation_id         AS quote_number,
+    r.rfq_id               AS rfq_number,
+    v.vendor_id            AS vendor_number,
+    m.mrf_id               AS mrf_number,
+    qi.created_at
+FROM quotation_items qi
+JOIN quotations q ON q.id = qi.quotation_id
+LEFT JOIN rfqs r ON r.id = q.rfq_id
+LEFT JOIN vendors v ON v.id = q.vendor_id
+LEFT JOIN m_r_f_s m ON m.id = r.mrf_id
+WHERE LOWER(TRIM(qi.item_name)) IN ('item', 'product', 'unnamed')
+ORDER BY qi.created_at DESC;
+```
+
+**Expected Output for Your Case:**
+```
+quotation_item_id │ quotation_id │ current_incorrect_name │ quote_number │ rfq_number   │ vendor_number │ mrf_number
+──────────────────┼──────────────┼────────────────────────┼──────────────┼──────────────┼───────────────┼──────────────────────
+17                │ 1            │ Item                   │ QUO-2026-001 │ RFQ-2026-001 │ V006          │ MRF-EMERALD-2026-001
+18                │ 1            │ Item                   │ QUO-2026-001 │ RFQ-2026-001 │ V006          │ MRF-EMERALD-2026-001
+```
+
+### Step 2: Backfill Rows 17 & 18 Specifically
+
+#### Option A: From MRF Items (Recommended if MRF items exist)
+
+First, inspect what MRF items are available:
+
+```sql
+SELECT 
+    mi.id, mi.item_name, mi.description, mi.unit, mi.quantity,
+    ROW_NUMBER() OVER (PARTITION BY mi.mrf_id ORDER BY mi.id) AS seq
+FROM mrf_items mi
+WHERE mi.mrf_id = (
+    SELECT m.id FROM m_r_f_s m WHERE m.mrf_id = 'MRF-EMERALD-2026-001' LIMIT 1
+)
+ORDER BY mi.id;
+```
+
+Then execute the backfill (matches position: row 17 → 1st MRF item, row 18 → 2nd MRF item):
+
+```sql
+UPDATE quotation_items qi
+SET 
+    item_name = COALESCE(mi.item_name, qi.item_name),
+    name = COALESCE(mi.item_name, qi.name),
+    description = COALESCE(mi.description, qi.description),
+    unit = COALESCE(mi.unit, qi.unit),
+    updated_at = NOW()
+FROM (
+    SELECT 
+        mi.id, mi.item_name, mi.description, mi.unit, mi.mrf_id,
+        ROW_NUMBER() OVER (PARTITION BY mi.mrf_id ORDER BY mi.id) AS mrf_seq
+    FROM mrf_items mi
+) mi
+JOIN quotations q ON q.id = qi.quotation_id
+JOIN rfqs r ON r.id = q.rfq_id
+WHERE 
+    r.mrf_id = mi.mrf_id
+    AND qi.id IN (17, 18)
+    AND mi.mrf_seq = (qi.id - 16);
+```
+
+#### Option B: From RFQ Items (if RFQ items are linked via rfq_item_id)
+
+```sql
+UPDATE quotation_items qi
+SET 
+    item_name = COALESCE(ri.item_name, qi.item_name),
+    name = COALESCE(ri.item_name, qi.name),
+    description = COALESCE(ri.description, qi.description),
+    unit = COALESCE(ri.unit, qi.unit),
+    updated_at = NOW()
+FROM rfq_items ri
+WHERE 
+    qi.rfq_item_id = ri.id
+    AND qi.id IN (17, 18)
+    AND LOWER(TRIM(qi.item_name)) = 'item';
+```
+
+**Verify the backfill:**
+```sql
+SELECT id, quotation_id, rfq_item_id, item_name, description, unit 
+FROM quotation_items 
+WHERE id IN (17, 18);
+```
+
+### Step 3: Bulk Fix All Contaminated Rows
+
+After fixing the specific rows, apply the same logic to all remaining contaminated rows:
+
+```sql
+-- BULK BACKFILL from MRF items
+UPDATE quotation_items qi
+SET 
+    item_name = COALESCE(mi.item_name, qi.item_name),
+    name = COALESCE(mi.item_name, qi.name),
+    description = COALESCE(mi.description, qi.description),
+    unit = COALESCE(mi.unit, qi.unit),
+    updated_at = NOW()
+FROM (
+    SELECT 
+        mi.id, mi.item_name, mi.description, mi.unit, mi.mrf_id,
+        ROW_NUMBER() OVER (PARTITION BY mi.mrf_id ORDER BY mi.id) AS mrf_seq
+    FROM mrf_items mi
+) mi
+JOIN quotations q ON q.id = qi.quotation_id
+JOIN rfqs r ON r.id = q.rfq_id
+WHERE 
+    r.mrf_id = mi.mrf_id
+    AND (LOWER(TRIM(qi.item_name)) IN ('item', 'product', 'unnamed')
+         OR LOWER(TRIM(COALESCE(qi.name, ''))) IN ('item', 'product', 'unnamed'));
+```
+
+### Step 4: Fallback for Unresolved Rows
+
+If any rows couldn't be fixed by MRF lookup, try matching via rfq_item_id:
+
+```sql
+UPDATE quotation_items qi
+SET 
+    item_name = COALESCE(ri.item_name, qi.item_name),
+    name = COALESCE(ri.item_name, qi.name),
+    updated_at = NOW()
+FROM rfq_items ri
+WHERE 
+    qi.rfq_item_id = ri.id
+    AND (LOWER(TRIM(qi.item_name)) IN ('item', 'product', 'unnamed'));
+```
+
+### Step 5: Final Verification
+
+After all backfills, verify no contaminated rows remain:
+
+```sql
+SELECT COUNT(*) as contaminated_rows
+FROM quotation_items
+WHERE LOWER(TRIM(item_name)) IN ('item', 'product', 'unnamed')
+   OR LOWER(TRIM(COALESCE(name, ''))) IN ('item', 'product', 'unnamed');
+```
+
+**Expected Result:** `0` rows
+
+### Step 6: Summary Report
+
+Generate a report showing fix completion:
+
+```sql
+SELECT 
+    'Total quotation items' AS metric, COUNT(*) AS count
+FROM quotation_items
+UNION ALL
+SELECT 
+    'Items with placeholder names (STILL BROKEN)',
+    COUNT(*)
+FROM quotation_items
+WHERE LOWER(TRIM(item_name)) IN ('item', 'product', 'unnamed')
+UNION ALL
+SELECT 
+    'Items with meaningful names (FIXED)',
+    COUNT(*)
+FROM quotation_items
+WHERE LOWER(TRIM(item_name)) NOT IN ('item', 'product', 'unnamed')
+  AND LENGTH(TRIM(item_name)) > 0;
+```
+
+---
+
+## Acceptance Criteria Checklist
+
+- [x] **Code Fix Applied**: Both QuotationController and RFQWorkflowController pull item names from RFQ items if not explicitly provided
+- [x] **Validation Rules Added**: Both controllers reject generic placeholders (`Item`, `Product`, `Unnamed`, etc.)
+- [x] **SQL Scripts Provided**: Complete backfill scripts in [SQL_QUOTATION_ITEM_BACKFILL.sql](SQL_QUOTATION_ITEM_BACKFILL.sql)
+- [ ] **SQL Backfill Executed**: Run all SQL scripts (Steps 1-5 above)
+- [ ] **Data Verification**: Run final verification query - should return 0 contaminated rows
+- [ ] **RFQ-2026-001 Validation**: Confirm in UI that quotation items show actual laptop names, not "Item"
+- [ ] **New Quotation Test**: Submit a test quotation to verify new submissions don't create "Item" entries
+
+---
+
+## Files Modified
+
+| File | Change | Purpose |
+|------|--------|---------|
+| [app/Http/Controllers/Api/QuotationController.php](app/Http/Controllers/Api/QuotationController.php) | Updated item creation logic + validation rules | Intelligent item name resolution + prevent bad submissions |
+| [app/Http/Controllers/Api/RFQWorkflowController.php](app/Http/Controllers/Api/RFQWorkflowController.php) | Updated item creation logic + validation rules | Intelligent item name resolution + prevent bad submissions |
+| [app/Rules/ValidQuotationItemName.php](app/Rules/ValidQuotationItemName.php) | New file | Custom validation rule for future use |
+| [SQL_QUOTATION_ITEM_BACKFILL.sql](SQL_QUOTATION_ITEM_BACKFILL.sql) | New file | Complete SQL for inspection, backfill, and verification |
+
+---
 
 ## Key Field Names for Frontend
 The responses use both snake_case and camelCase for compatibility:
