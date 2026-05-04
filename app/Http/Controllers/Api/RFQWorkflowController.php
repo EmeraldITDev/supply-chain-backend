@@ -765,7 +765,7 @@ class RFQWorkflowController extends Controller
         if ($request->has('items') && is_array($request->items) && count($request->items) > 0) {
             foreach ($request->items as $itemData) {
                 // Try to get item name from request first
-                $itemName = $itemData['itemName'] ?? $itemData['name'] ?? null;
+                $itemName = $itemData['itemName'] ?? $itemData['item_name'] ?? $itemData['name'] ?? null;
 
                 // If item name not provided, try to get it from the linked RFQ item
                 $rfqItemId = $itemData['rfqItemId'] ?? $itemData['rfq_item_id'] ?? null;
