@@ -623,6 +623,26 @@ class RFQWorkflowController extends Controller
             ], 404);
         }
 
+        // Pre-process FormData requests: decode JSON strings for arrays
+        // When arrays are sent via multipart/form-data, they arrive as JSON strings
+        if (!$request->isJson()) {
+            // Handle items array that may arrive as JSON string from FormData
+            if (is_string($request->input('items'))) {
+                $items = json_decode($request->input('items'), true);
+                if (is_array($items)) {
+                    $request->merge(['items' => $items]);
+                }
+            }
+
+            // Handle attachments that may arrive as JSON string from FormData
+            if (is_string($request->input('attachments'))) {
+                $attachments = json_decode($request->input('attachments'), true);
+                if (is_array($attachments)) {
+                    $request->merge(['attachments' => $attachments]);
+                }
+            }
+        }
+
         // Validate request
         $validator = Validator::make($request->all(), [
             'vendorName' => 'nullable|string|max:255',
