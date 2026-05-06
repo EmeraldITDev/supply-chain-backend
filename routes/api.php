@@ -227,6 +227,7 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // RFQ routes
     Route::get('/rfqs', [RFQController::class, 'index']);
+    Route::get('/rfqs/{id}', [RFQController::class, 'show']);
     Route::post('/rfqs', [RFQController::class, 'store']);
     Route::put('/rfqs/{id}', [RFQController::class, 'update']);
 

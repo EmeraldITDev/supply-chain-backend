@@ -59,6 +59,8 @@ class RFQController extends Controller
         $rfqs = $query->orderBy('created_at', 'desc')->get();
 
         return response()->json($rfqs->map(function($rfq) {
+            $estimatedBudget = $rfq->mrf ? (float) $rfq->mrf->estimated_cost : null;
+
             return [
                 'id' => $rfq->rfq_id,
                 'mrfId' => $rfq->mrf_id ? (string) $rfq->mrf->mrf_id : null,
@@ -68,6 +70,8 @@ class RFQController extends Controller
                 'description' => $rfq->description,
                 'quantity' => $rfq->quantity,
                 'estimatedCost' => (float) $rfq->estimated_cost,
+                'estimated_budget' => $estimatedBudget,
+                'estimatedBudget' => $estimatedBudget,
                 'paymentTerms' => $rfq->payment_terms,
                 'notes' => $rfq->notes,
                 'supportingDocuments' => $rfq->supporting_documents ?? [],
@@ -78,6 +82,57 @@ class RFQController extends Controller
                 'createdAt' => $rfq->created_at->toIso8601String(),
             ];
         }));
+    }
+
+    /**
+     * Get single RFQ
+     */
+    public function show(Request $request, $id)
+    {
+        $rfq = RFQ::where('rfq_id', $id)
+            ->with(['mrf', 'creator', 'vendors', 'items'])
+            ->first();
+
+        if (!$rfq) {
+            return response()->json([
+                'success' => false,
+                'error' => 'RFQ not found',
+                'code' => 'NOT_FOUND'
+            ], 404);
+        }
+
+        $estimatedBudget = $rfq->mrf ? (float) $rfq->mrf->estimated_cost : null;
+
+        return response()->json([
+            'id' => $rfq->rfq_id,
+            'mrfId' => $rfq->mrf_id ? (string) $rfq->mrf->mrf_id : null,
+            'mrfTitle' => $rfq->mrf_title ?? ($rfq->mrf ? $rfq->mrf->title : null),
+            'title' => $rfq->title,
+            'category' => $rfq->category,
+            'description' => $rfq->description,
+            'quantity' => $rfq->quantity,
+            'estimatedCost' => (float) $rfq->estimated_cost,
+            'estimated_budget' => $estimatedBudget,
+            'estimatedBudget' => $estimatedBudget,
+            'paymentTerms' => $rfq->payment_terms,
+            'notes' => $rfq->notes,
+            'supportingDocuments' => $rfq->supporting_documents ?? [],
+            'deadline' => $rfq->deadline?->format('Y-m-d'),
+            'status' => $rfq->status,
+            'workflowState' => $rfq->workflow_state,
+            'vendorIds' => $rfq->vendors->pluck('vendor_id')->toArray(),
+            'items' => $rfq->items->map(function ($item) {
+                return [
+                    'id' => $item->id,
+                    'item_name' => $item->item_name,
+                    'description' => $item->description,
+                    'quantity' => $item->quantity,
+                    'unit' => $item->unit,
+                    'specifications' => $item->specifications,
+                ];
+            }),
+            'createdAt' => $rfq->created_at?->toIso8601String(),
+        ]);
     }
 
     /**
