@@ -153,13 +153,56 @@ class QuotationController extends Controller
 
                     // Attachments - normalize to flat array
                     'attachments' => (function($attachments) {
-                        if (!is_array($attachments) || empty($attachments)) {
+                        if ($attachments === null || $attachments === '' || $attachments === []) {
                             return [];
                         }
-                        return array_values(array_filter(array_merge(...array_map(
-                            fn($a) => is_array($a) ? $a : [$a],
-                            $attachments
-                        ))));
+
+                        // If somehow a single string URL was stored
+                        if (is_string($attachments)) {
+                            return [$attachments];
+                        }
+
+                        if (!is_array($attachments)) {
+                            return [];
+                        }
+
+                        // If a single attachment object was stored as an associative array, wrap it
+                        $isAssoc = array_keys($attachments) !== range(0, count($attachments) - 1);
+                        if ($isAssoc) {
+                            return [$attachments];
+                        }
+
+                        // Otherwise, keep as a list. Do NOT merge associative arrays (that splits fields into "documents").
+                        $out = [];
+                        foreach ($attachments as $a) {
+                            if ($a === null || $a === '') {
+                                continue;
+                            }
+
+                            if (is_string($a)) {
+                                $out[] = $a;
+                                continue;
+                            }
+
+                            if (!is_array($a)) {
+                                continue;
+                            }
+
+                            $aIsAssoc = array_keys($a) !== range(0, count($a) - 1);
+                            if ($aIsAssoc) {
+                                $out[] = $a;
+                                continue;
+                            }
+
+                            // If a nested list of strings is present, flatten just that list
+                            foreach ($a as $inner) {
+                                if ($inner !== null && $inner !== '') {
+                                    $out[] = $inner;
+                                }
+                            }
+                        }
+
+                        return array_values($out);
                     })($quotation->attachments),
 
                     // Items

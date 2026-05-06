@@ -323,13 +323,52 @@ class RFQWorkflowController extends Controller
 
                         // Attachments - normalize to flat array
                         'attachments' => (function($attachments) {
-                            if (!is_array($attachments) || empty($attachments)) {
+                            if ($attachments === null || $attachments === '' || $attachments === []) {
                                 return [];
                             }
-                            return array_values(array_filter(array_merge(...array_map(
-                                fn($a) => is_array($a) ? $a : [$a],
-                                $attachments
-                            ))));
+
+                            if (is_string($attachments)) {
+                                return [$attachments];
+                            }
+
+                            if (!is_array($attachments)) {
+                                return [];
+                            }
+
+                            $isAssoc = array_keys($attachments) !== range(0, count($attachments) - 1);
+                            if ($isAssoc) {
+                                return [$attachments];
+                            }
+
+                            $out = [];
+                            foreach ($attachments as $a) {
+                                if ($a === null || $a === '') {
+                                    continue;
+                                }
+
+                                if (is_string($a)) {
+                                    $out[] = $a;
+                                    continue;
+                                }
+
+                                if (!is_array($a)) {
+                                    continue;
+                                }
+
+                                $aIsAssoc = array_keys($a) !== range(0, count($a) - 1);
+                                if ($aIsAssoc) {
+                                    $out[] = $a;
+                                    continue;
+                                }
+
+                                foreach ($a as $inner) {
+                                    if ($inner !== null && $inner !== '') {
+                                        $out[] = $inner;
+                                    }
+                                }
+                            }
+
+                            return array_values($out);
                         })($quotation->attachments),
                     ],
                     'vendor' => $vendor ? [
