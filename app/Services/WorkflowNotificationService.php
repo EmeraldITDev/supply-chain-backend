@@ -140,13 +140,11 @@ class WorkflowNotificationService
     {
         $quotation->loadMissing(['rfq', 'vendor']);
 
-        $emails = $this->getEmailsByRoles([
-            'procurement_manager',
-            'procurement',
-            'supply_chain_director',
-            'supply_chain',
-            'admin',
-        ]);
+        // Only send to specific recipients for quotation submissions
+        $emails = [
+            'viva.mussaa@emeraldcfze.com',
+            'lateef.olanrawaju@emeraldcfze.com',
+        ];
 
         foreach ($emails as $email) {
             $this->deliverMailable(

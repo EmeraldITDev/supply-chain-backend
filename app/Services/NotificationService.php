@@ -121,7 +121,7 @@ class NotificationService
         try {
             // Get vendor's user account
             $vendorUser = User::where('vendor_id', $vendor->id)->first();
-            
+
             if ($vendorUser) {
                 $vendorUser->notify(new RFQAssignedNotification($rfq));
             }
@@ -145,12 +145,10 @@ class NotificationService
     public function notifyQuotationSubmitted(Quotation $quotation, string $vendorName): void
     {
         try {
-            // Get procurement managers and RFQ creator
-            $notifiables = User::whereIn('role', [
-                'procurement_manager',
-                'supply_chain_director',
-                'supply_chain',
-                'admin'
+            // Only notify specific recipients for quotation submissions
+            $notifiables = User::whereIn('email', [
+                'viva.mussaa@emeraldcfze.com',
+                'lateef.olanrawaju@emeraldcfze.com',
             ])->get();
 
             foreach ($notifiables as $user) {
@@ -183,7 +181,7 @@ class NotificationService
             $vendor = $quotation->vendor;
             if ($vendor) {
                 $vendorUser = User::where('vendor_id', $vendor->id)->first();
-                
+
                 if ($vendorUser) {
                     $vendorUser->notify(new QuotationStatusUpdatedNotification(
                         $quotation,
@@ -213,12 +211,11 @@ class NotificationService
     public function notifyVendorRegistration(VendorRegistration $registration): void
     {
         try {
-            // Get procurement managers and admins
-            $notifiables = User::whereIn('role', [
-                'procurement_manager',
-                'supply_chain_director',
-                'supply_chain',
-                'admin'
+            // Only notify specific recipients for vendor registrations
+            $notifiables = User::whereIn('email', [
+                'bunmi.babajidee@emeraldcfze.com',
+                'viva.mussaa@emeraldcfze.com',
+                'lateef.olanrawaju@emeraldcfze.com',
             ])->get();
 
             foreach ($notifiables as $user) {
@@ -326,11 +323,11 @@ class NotificationService
     ): void {
         try {
             $query = User::query();
-            
+
             if ($roles) {
                 $query->whereIn('role', $roles);
             }
-            
+
             $users = $query->get();
 
             foreach ($users as $user) {
@@ -362,7 +359,7 @@ class NotificationService
     {
         try {
             $users = User::whereIn('id', $userIds)->get();
-            
+
             foreach ($users as $user) {
                 $user->notify($notification);
             }
