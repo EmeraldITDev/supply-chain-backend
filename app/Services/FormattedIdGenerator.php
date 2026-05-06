@@ -68,13 +68,8 @@ class FormattedIdGenerator
             return 'EMERALD';
         }
 
-        $rawLower = strtolower($raw);
-        if ($rawLower === 'emerald') {
-            return 'EMERALD';
-        }
-
-        // Spec only calls out EMERALD and NONEMERALD.
-        return 'NONEMERALD';
+        // Keep the real contract name in IDs (human-readable), sanitized.
+        return $this->sanitizeSegment($raw, 'EMERALD');
     }
 
     private function lookupDepartmentCode(?string $departmentName): string
@@ -93,14 +88,19 @@ class FormattedIdGenerator
                 return $this->normalizeLookupKey($r->department_name) === $normalized;
             });
 
-        return $row ? strtoupper($row->code) : 'GEN';
+        if ($row) {
+            return $this->sanitizeSegment((string) $row->code, 'GEN');
+        }
+
+        // Smarter fallback: derive short code from provided label.
+        return $this->inferCodeFromLabel($departmentName, 2, 4, 'GEN');
     }
 
     private function lookupCategoryCode(string $type, ?string $categoryName): string
     {
         $categoryName = trim((string) $categoryName);
         if ($categoryName === '') {
-            return 'GEN';
+            return 'OTH';
         }
 
         $normalized = $this->normalizeLookupKey($categoryName);
@@ -113,14 +113,56 @@ class FormattedIdGenerator
                 return $this->normalizeLookupKey($r->category_name) === $normalized;
             });
 
-        return $row ? strtoupper($row->code) : 'GEN';
+        if ($row) {
+            return $this->sanitizeSegment((string) $row->code, 'OTH');
+        }
+
+        // Smarter fallback: derive concise category abbreviation.
+        return $this->inferCodeFromLabel($categoryName, 3, 4, 'OTH');
     }
 
     private function normalizeLookupKey(string $value): string
     {
         $value = Str::of($value)->lower()->trim();
+        $value = (string) preg_replace('/[^a-z0-9\s]/', ' ', (string) $value);
         $value = (string) preg_replace('/\s+/', ' ', (string) $value);
         return $value;
+    }
+
+    private function inferCodeFromLabel(string $label, int $minLen, int $maxLen, string $fallback): string
+    {
+        $normalized = $this->normalizeLookupKey($label);
+        if ($normalized === '') {
+            return $fallback;
+        }
+
+        $words = array_values(array_filter(explode(' ', $normalized)));
+        if (count($words) >= 2) {
+            $acronym = '';
+            foreach ($words as $word) {
+                $acronym .= strtoupper(substr($word, 0, 1));
+            }
+            if (strlen($acronym) >= $minLen) {
+                return substr($acronym, 0, $maxLen);
+            }
+        }
+
+        $flat = strtoupper(preg_replace('/[^A-Z0-9]/', '', strtoupper($normalized)) ?? '');
+        if ($flat === '') {
+            return $fallback;
+        }
+
+        return substr($flat, 0, $maxLen);
+    }
+
+    private function sanitizeSegment(string $raw, string $fallback): string
+    {
+        $segment = strtoupper(preg_replace('/[^A-Z0-9]/', '', strtoupper(trim($raw))) ?? '');
+        if ($segment === '') {
+            return $fallback;
+        }
+
+        return substr($segment, 0, 12);
     }
 }
 
