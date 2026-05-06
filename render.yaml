@@ -21,4 +21,6 @@ services:
         value: https://emerald-supply-chain.vercel.app
       - key: DOCUMENTS_DISK
         value: public
+      - key: QUOTATION_ATTACHMENTS_DISK
+        value: s3
 

@@ -28,18 +28,23 @@
             <p><strong>Submitted At:</strong> {{ optional($quotation->submitted_at)->format('Y-m-d H:i') }}</p>
         </div>
 
-        @if($quotation->attachments && count($quotation->attachments) > 0)
+        @php($attachmentsList = $attachments ?? ($quotation->attachments ?? []))
+        @if($attachmentsList && count($attachmentsList) > 0)
         <div class="card" style="border-left-color: #059669;">
             <strong style="color: #059669;">📎 Supporting Documents</strong>
             <ul style="margin: 12px 0; padding-left: 20px;">
-                @foreach($quotation->attachments as $attachment)
+                @foreach($attachmentsList as $attachment)
                 <li style="margin: 8px 0;">
                     @if(is_array($attachment))
                         @php
-                            $url = $attachment['url'] ?? $attachment['file_url'] ?? $attachment['url'] ?? $attachment;
+                            $url = $attachment['url'] ?? $attachment['file_share_url'] ?? $attachment['file_url'] ?? null;
                             $name = $attachment['name'] ?? $attachment['file_name'] ?? 'Document';
                         @endphp
-                        <a href="{{ $url }}" style="color: #1d4ed8; text-decoration: none;">{{ $name }}</a>
+                        @if($url)
+                            <a href="{{ $url }}" style="color: #1d4ed8; text-decoration: none;">{{ $name }}</a>
+                        @else
+                            {{ $name }}
+                        @endif
                     @else
                         <a href="{{ $attachment }}" style="color: #1d4ed8; text-decoration: none;">Supporting Document</a>
                     @endif

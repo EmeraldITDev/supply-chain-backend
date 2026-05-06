@@ -11,6 +11,7 @@ use App\Models\QuotationItem;
 use App\Models\Vendor;
 use App\Services\NotificationService;
 use App\Services\EmailService;
+use App\Services\QuotationAttachmentService;
 use App\Services\WorkflowNotificationService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
@@ -698,24 +699,26 @@ class RFQWorkflowController extends Controller
             }
         }
 
-        // Normalize attachments to ensure flat array of strings
-       // Handle file uploads and normalize attachments
+        // Handle file uploads:
+        // - Store on configured disk (S3 in production)
+        // - Persist metadata + storage key (file_path) in DB
+        // - Generate signed URLs on-demand in API responses
         $uploadedAttachments = [];
 
         if ($request->hasFile('attachments')) {
             $files = $request->file('attachments');
-            if (!is_array($files)) $files = [$files];
-            foreach ($files as $file) {
-                $path = $file->store('quotation-attachments', 'public');
-                $uploadedAttachments[] = [
-                    'url' => asset('storage/' . $path),
-                    'name' => $file->getClientOriginalName(),
-                    'size' => $file->getSize(),
-                    'type' => $file->getMimeType(),
-                ];
+            if (!is_array($files)) {
+                $files = [$files];
             }
+
+            $attachmentService = app(QuotationAttachmentService::class);
+            $uploadedAttachments = $attachmentService->storeUploadedAttachments($files, [
+                'rfq_id' => $rfq->rfq_id,
+                'vendor_name' => $vendor->name ?? $vendor->vendor_id,
+                'vendor_id' => $vendor->vendor_id,
+            ]);
         } elseif ($request->has('attachments') && is_array($request->attachments)) {
-            // Fallback: pre-uploaded URLs passed as JSON
+            // Backward compatibility: pre-uploaded URLs passed as JSON
             $uploadedAttachments = $request->attachments;
         }
 
@@ -966,7 +969,7 @@ class RFQWorkflowController extends Controller
                         'specifications' => $item->specifications,
                     ];
                 }),
-                'attachments' => $quotation->attachments ?? [],
+                'attachments' => app(QuotationAttachmentService::class)->hydrateAttachments($quotation->attachments ?? []),
             ]
         ], 201);
     }

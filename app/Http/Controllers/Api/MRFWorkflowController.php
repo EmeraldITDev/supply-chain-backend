@@ -16,6 +16,7 @@ use App\Services\WorkflowNotificationService;
 use App\Services\WorkflowStateService;
 use App\Services\PermissionService;
 use App\Services\PurchaseOrderPdfService;
+use App\Services\QuotationAttachmentService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\Storage;
@@ -477,7 +478,7 @@ class MRFWorkflowController extends Controller
                 'notes' => $quotation->notes,
                 'scopeOfWork' => $quotation->notes, // Scope of work is in notes field
                 'specifications' => $quotation->notes, // Specifications may be in notes or items
-                'attachments' => (function($attachments) {
+                'attachments' => app(QuotationAttachmentService::class)->hydrateAttachments((function($attachments) {
                     if ($attachments === null || $attachments === '' || $attachments === []) {
                         return [];
                     }
@@ -524,7 +525,7 @@ class MRFWorkflowController extends Controller
                     }
 
                     return array_values($out);
-                })($quotation->attachments), // All uploaded documents
+                })($quotation->attachments)), // All uploaded documents
                 'submittedAt' => $quotation->submitted_at ? $quotation->submitted_at->toIso8601String() : null,
                 'status' => $quotation->status,
                 'reviewStatus' => $quotation->review_status ?? 'pending',

@@ -30,6 +30,18 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Quotation Attachments Disk
+    |--------------------------------------------------------------------------
+    |
+    | Storage disk used for vendor quotation supporting documents.
+    | In production, this should be 's3' for persistence.
+    |
+    */
+
+    'quotation_attachments_disk' => env('QUOTATION_ATTACHMENTS_DISK', 's3'),
+
+    /*
+    |--------------------------------------------------------------------------
     | Filesystem Disks
     |--------------------------------------------------------------------------
     |

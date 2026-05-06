@@ -3,6 +3,7 @@
 namespace App\Mail;
 
 use App\Models\Quotation;
+use App\Services\QuotationAttachmentService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Mail\Mailable;
@@ -22,9 +23,14 @@ class QuotationSubmittedMail extends Mailable implements ShouldQueue
 
     public function build(): self
     {
+        $attachments = app(QuotationAttachmentService::class)->hydrateAttachments($this->quotation->attachments ?? []);
+
         return $this
             ->subject('Quotation Submitted - ' . $this->quotation->quotation_id)
             ->view('emails.quotation-submitted')
-            ->with('vendorPortalUrl', $this->vendorPortalUrl);
+            ->with([
+                'vendorPortalUrl' => $this->vendorPortalUrl,
+                'attachments' => $attachments,
+            ]);
     }
 }

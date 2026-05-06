@@ -13,6 +13,7 @@ use App\Models\Quotation;
 use App\Services\NotificationService;
 use App\Services\VendorApprovalService;
 use App\Services\VendorDocumentService;
+use App\Services\QuotationAttachmentService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Storage;
@@ -1600,7 +1601,7 @@ class VendorController extends Controller
                 'rejectionReason' => $quotation->rejection_reason,
                 'revisionNotes' => $quotation->revision_notes,
                 'approvalRemarks' => $quotation->approval_remarks,
-                'attachments' => (function($attachments) {
+                'attachments' => app(QuotationAttachmentService::class)->hydrateAttachments((function($attachments) {
                     if ($attachments === null || $attachments === '' || $attachments === []) {
                         return [];
                     }
@@ -1647,7 +1648,7 @@ class VendorController extends Controller
                     }
 
                     return array_values($out);
-                })($quotation->attachments),
+                })($quotation->attachments)),
                 'submittedAt' => $formatDate($quotation->submitted_at),
                 'reviewedAt' => $formatDate($quotation->reviewed_at),
                 'approvedAt' => $formatDate($quotation->approved_at),

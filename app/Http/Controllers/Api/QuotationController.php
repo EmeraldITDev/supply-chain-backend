@@ -8,6 +8,7 @@ use App\Models\Quotation;
 use App\Models\QuotationItem;
 use App\Models\RFQ;
 use App\Models\Vendor;
+use App\Services\QuotationAttachmentService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
 
@@ -152,7 +153,7 @@ class QuotationController extends Controller
                     'approval_remarks' => $quotation->approval_remarks ?? null,
 
                     // Attachments - normalize to flat array
-                    'attachments' => (function($attachments) {
+                    'attachments' => app(QuotationAttachmentService::class)->hydrateAttachments((function($attachments) {
                         if ($attachments === null || $attachments === '' || $attachments === []) {
                             return [];
                         }
@@ -203,7 +204,7 @@ class QuotationController extends Controller
                         }
 
                         return array_values($out);
-                    })($quotation->attachments),
+                    })($quotation->attachments)),
 
                     // Items
                     'items' => $quotation->items->map(function($item) {

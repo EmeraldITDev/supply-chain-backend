@@ -10,6 +10,7 @@ use App\Services\WorkflowNotificationService;
 use App\Services\WorkflowStateService;
 use App\Services\PermissionService;
 use App\Services\PurchaseOrderPdfService;
+use App\Services\QuotationAttachmentService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
@@ -555,7 +556,7 @@ class MRFController extends Controller
                     'validityDays' => $quotation->validity_days,
                     'warrantyPeriod' => $quotation->warranty_period,
                     'notes' => $quotation->notes,
-                    'attachments' => (function($attachments) {
+                    'attachments' => app(QuotationAttachmentService::class)->hydrateAttachments((function($attachments) {
                         if ($attachments === null || $attachments === '' || $attachments === []) {
                             return [];
                         }
@@ -602,7 +603,7 @@ class MRFController extends Controller
                         }
 
                         return array_values($out);
-                    })($quotation->attachments),
+                    })($quotation->attachments)),
                     'status' => $quotation->status,
                     'reviewStatus' => $quotation->review_status ?? 'pending',
                     'submittedAt' => $quotation->submitted_at ? $quotation->submitted_at->toIso8601String() : null,
@@ -714,7 +715,7 @@ class MRFController extends Controller
                         'notes' => $selectedQuotation->notes,
                         'scopeOfWork' => $selectedQuotation->notes, // Scope of work
                         'specifications' => $selectedQuotation->notes, // Specifications
-                        'attachments' => (function($attachments) {
+                        'attachments' => app(QuotationAttachmentService::class)->hydrateAttachments((function($attachments) {
                             if ($attachments === null || $attachments === '' || $attachments === []) {
                                 return [];
                             }
@@ -761,7 +762,7 @@ class MRFController extends Controller
                             }
 
                             return array_values($out);
-                        })($selectedQuotation->attachments), // All uploaded documents
+                        })($selectedQuotation->attachments)), // All uploaded documents
                         'items' => $selectedQuotation->items->map(function ($item) {
                             return [
                                 'id' => $item->id,
