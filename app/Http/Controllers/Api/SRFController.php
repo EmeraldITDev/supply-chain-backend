@@ -25,10 +25,14 @@ class SRFController extends Controller
 
     private function findSrfByAnyId(string $id)
     {
-        return SRF::where('formatted_id', $id)
-            ->orWhere('srf_id', $id)
-            ->orWhere('id', $id)
-            ->first();
+        return SRF::where(function ($query) use ($id) {
+            $query->where('formatted_id', $id)
+                ->orWhere('srf_id', $id);
+
+            if (is_numeric($id)) {
+                $query->orWhere('id', (int) $id);
+            }
+        })->first();
     }
 
     /**

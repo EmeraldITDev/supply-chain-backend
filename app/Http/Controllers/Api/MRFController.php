@@ -44,10 +44,14 @@ class MRFController extends Controller
 
     private function findMrfByAnyId(string $id)
     {
-        return MRF::where('formatted_id', $id)
-            ->orWhere('mrf_id', $id)
-            ->orWhere('id', $id)
-            ->first();
+        return MRF::where(function ($query) use ($id) {
+            $query->where('formatted_id', $id)
+                ->orWhere('mrf_id', $id);
+
+            if (is_numeric($id)) {
+                $query->orWhere('id', (int) $id);
+            }
+        })->first();
     }
 
     /**
@@ -387,9 +391,14 @@ class MRFController extends Controller
      */
     public function show($id)
     {
-        $mrf = MRF::where('formatted_id', $id)
-            ->orWhere('mrf_id', $id)
-            ->orWhere('id', $id)
+        $mrf = MRF::where(function ($query) use ($id) {
+            $query->where('formatted_id', $id)
+                ->orWhere('mrf_id', $id);
+
+            if (is_numeric((string) $id)) {
+                $query->orWhere('id', (int) $id);
+            }
+        })
             ->with(['requester', 'directorApprover'])
             ->first();
 
@@ -493,9 +502,14 @@ class MRFController extends Controller
             ], 403);
         }
 
-        $mrf = MRF::where('formatted_id', $id)
-            ->orWhere('mrf_id', $id)
-            ->orWhere('id', $id)
+        $mrf = MRF::where(function ($query) use ($id) {
+            $query->where('formatted_id', $id)
+                ->orWhere('mrf_id', $id);
+
+            if (is_numeric((string) $id)) {
+                $query->orWhere('id', (int) $id);
+            }
+        })
             ->with([
                 'requester',
                 'executiveApprover',
@@ -834,9 +848,14 @@ class MRFController extends Controller
      */
     public function getProgressTracker(Request $request, $id)
     {
-        $mrf = MRF::where('formatted_id', $id)
-            ->orWhere('mrf_id', $id)
-            ->orWhere('id', $id)
+        $mrf = MRF::where(function ($query) use ($id) {
+            $query->where('formatted_id', $id)
+                ->orWhere('mrf_id', $id);
+
+            if (is_numeric((string) $id)) {
+                $query->orWhere('id', (int) $id);
+            }
+        })
             ->with(['requester', 'selectedVendor', 'rfqs'])
             ->first();
 

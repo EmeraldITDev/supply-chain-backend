@@ -30,10 +30,14 @@ class GRNController extends Controller
 
     private function findMrfByAnyId(string $id)
     {
-        return MRF::where('formatted_id', $id)
-            ->orWhere('mrf_id', $id)
-            ->orWhere('id', $id)
-            ->first();
+        return MRF::where(function ($query) use ($id) {
+            $query->where('formatted_id', $id)
+                ->orWhere('mrf_id', $id);
+
+            if (is_numeric($id)) {
+                $query->orWhere('id', (int) $id);
+            }
+        })->first();
     }
 
     /**

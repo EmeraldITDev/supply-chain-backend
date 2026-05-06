@@ -28,10 +28,14 @@ class RFQController extends Controller
 
     private function findRfqByAnyId(string $id)
     {
-        return RFQ::where('formatted_id', $id)
-            ->orWhere('rfq_id', $id)
-            ->orWhere('id', $id)
-            ->first();
+        return RFQ::where(function ($query) use ($id) {
+            $query->where('formatted_id', $id)
+                ->orWhere('rfq_id', $id);
+
+            if (is_numeric($id)) {
+                $query->orWhere('id', (int) $id);
+            }
+        })->first();
     }
 
     /**
@@ -113,9 +117,14 @@ class RFQController extends Controller
      */
     public function show(Request $request, $id)
     {
-        $rfq = RFQ::where('formatted_id', $id)
-            ->orWhere('rfq_id', $id)
-            ->orWhere('id', $id)
+        $rfq = RFQ::where(function ($query) use ($id) {
+            $query->where('formatted_id', $id)
+                ->orWhere('rfq_id', $id);
+
+            if (is_numeric((string) $id)) {
+                $query->orWhere('id', (int) $id);
+            }
+        })
             ->with(['mrf', 'creator', 'vendors', 'items'])
             ->first();
 
@@ -209,9 +218,14 @@ class RFQController extends Controller
         $mrfTitle = null;
         $mrfCategory = null;
         if ($request->mrfId) {
-            $mrf = MRF::where('formatted_id', $request->mrfId)
-                ->orWhere('mrf_id', $request->mrfId)
-                ->orWhere('id', $request->mrfId)
+            $mrf = MRF::where(function ($query) use ($request) {
+                $query->where('formatted_id', $request->mrfId)
+                    ->orWhere('mrf_id', $request->mrfId);
+
+                if (is_numeric((string) $request->mrfId)) {
+                    $query->orWhere('id', (int) $request->mrfId);
+                }
+            })
                 ->first();
             $mrfTitle = $mrf ? $mrf->title : null;
             $mrfCategory = $mrf ? $mrf->category : null;
