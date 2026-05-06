@@ -321,8 +321,16 @@ class RFQWorkflowController extends Controller
                         'notes' => $quotation->notes ?? null,
                         'remarks' => $quotation->approval_remarks ?? $quotation->notes ?? null,
 
-                        // Attachments
-                        'attachments' => $quotation->attachments ?? [],
+                        // Attachments - normalize to flat array
+                        'attachments' => (function($attachments) {
+                            if (!is_array($attachments) || empty($attachments)) {
+                                return [];
+                            }
+                            return array_values(array_filter(array_merge(...array_map(
+                                fn($a) => is_array($a) ? $a : [$a],
+                                $attachments
+                            ))));
+                        })($quotation->attachments),
                     ],
                     'vendor' => $vendor ? [
                         'id' => $vendor->vendor_id,
@@ -641,6 +649,16 @@ class RFQWorkflowController extends Controller
                     $request->merge(['attachments' => $attachments]);
                 }
             }
+        }
+
+        // Normalize attachments to ensure flat array of strings
+        if ($request->has('attachments') && is_array($request->attachments)) {
+            $attachments = $request->attachments;
+            $attachments = array_values(array_filter(array_merge(...array_map(
+                fn($a) => is_array($a) ? $a : [$a],
+                $attachments
+            ))));
+            $request->merge(['attachments' => $attachments]);
         }
 
         // Validate request

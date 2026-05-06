@@ -555,7 +555,15 @@ class MRFController extends Controller
                     'validityDays' => $quotation->validity_days,
                     'warrantyPeriod' => $quotation->warranty_period,
                     'notes' => $quotation->notes,
-                    'attachments' => $quotation->attachments ?? [],
+                    'attachments' => (function($attachments) {
+                        if (!is_array($attachments) || empty($attachments)) {
+                            return [];
+                        }
+                        return array_values(array_filter(array_merge(...array_map(
+                            fn($a) => is_array($a) ? $a : [$a],
+                            $attachments
+                        ))));
+                    })($quotation->attachments),
                     'status' => $quotation->status,
                     'reviewStatus' => $quotation->review_status ?? 'pending',
                     'submittedAt' => $quotation->submitted_at ? $quotation->submitted_at->toIso8601String() : null,
@@ -667,7 +675,15 @@ class MRFController extends Controller
                         'notes' => $selectedQuotation->notes,
                         'scopeOfWork' => $selectedQuotation->notes, // Scope of work
                         'specifications' => $selectedQuotation->notes, // Specifications
-                        'attachments' => $selectedQuotation->attachments ?? [], // All uploaded documents
+                        'attachments' => (function($attachments) {
+                            if (!is_array($attachments) || empty($attachments)) {
+                                return [];
+                            }
+                            return array_values(array_filter(array_merge(...array_map(
+                                fn($a) => is_array($a) ? $a : [$a],
+                                $attachments
+                            ))));
+                        })($selectedQuotation->attachments), // All uploaded documents
                         'items' => $selectedQuotation->items->map(function ($item) {
                             return [
                                 'id' => $item->id,

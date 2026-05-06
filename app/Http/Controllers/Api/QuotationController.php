@@ -151,8 +151,16 @@ class QuotationController extends Controller
                     'approvalRemarks' => $quotation->approval_remarks ?? null,
                     'approval_remarks' => $quotation->approval_remarks ?? null,
 
-                    // Attachments
-                    'attachments' => $quotation->attachments ?? [],
+                    // Attachments - normalize to flat array
+                    'attachments' => (function($attachments) {
+                        if (!is_array($attachments) || empty($attachments)) {
+                            return [];
+                        }
+                        return array_values(array_filter(array_merge(...array_map(
+                            fn($a) => is_array($a) ? $a : [$a],
+                            $attachments
+                        ))));
+                    })($quotation->attachments),
 
                     // Items
                     'items' => $quotation->items->map(function($item) {

@@ -477,7 +477,15 @@ class MRFWorkflowController extends Controller
                 'notes' => $quotation->notes,
                 'scopeOfWork' => $quotation->notes, // Scope of work is in notes field
                 'specifications' => $quotation->notes, // Specifications may be in notes or items
-                'attachments' => $quotation->attachments ?? [], // All uploaded documents
+                'attachments' => (function($attachments) {
+                    if (!is_array($attachments) || empty($attachments)) {
+                        return [];
+                    }
+                    return array_values(array_filter(array_merge(...array_map(
+                        fn($a) => is_array($a) ? $a : [$a],
+                        $attachments
+                    ))));
+                })($quotation->attachments), // All uploaded documents
                 'submittedAt' => $quotation->submitted_at ? $quotation->submitted_at->toIso8601String() : null,
                 'status' => $quotation->status,
                 'reviewStatus' => $quotation->review_status ?? 'pending',

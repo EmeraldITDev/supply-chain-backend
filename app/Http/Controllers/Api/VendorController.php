@@ -1600,7 +1600,15 @@ class VendorController extends Controller
                 'rejectionReason' => $quotation->rejection_reason,
                 'revisionNotes' => $quotation->revision_notes,
                 'approvalRemarks' => $quotation->approval_remarks,
-                'attachments' => $quotation->attachments ?? [],
+                'attachments' => (function($attachments) {
+                    if (!is_array($attachments) || empty($attachments)) {
+                        return [];
+                    }
+                    return array_values(array_filter(array_merge(...array_map(
+                        fn($a) => is_array($a) ? $a : [$a],
+                        $attachments
+                    ))));
+                })($quotation->attachments),
                 'submittedAt' => $formatDate($quotation->submitted_at),
                 'reviewedAt' => $formatDate($quotation->reviewed_at),
                 'approvedAt' => $formatDate($quotation->approved_at),
