@@ -22,20 +22,12 @@ class WorkflowNotificationService
 {
     public function notifyMRFSubmitted(MRF $mrf): void
     {
-        // Send to specific procurement team members based on contract type
-        if ($this->isEmeraldContract($mrf)) {
-            // Emerald contracts: send to bunmi and lateef
-            $emails = [
-                'bunmi.babajidee@emeraldcfze.com',
-                'lateef.olanrawaju@emeraldcfze.com',
-            ];
-        } else {
-            // Non-emerald contracts: send to viva and lateef
-            $emails = [
-                'viva.mussaa@emeraldcfze.com',
-                'lateef.olanrawaju@emeraldcfze.com',
-            ];
-        }
+        // Temporary debug routing: only send new MRF notifications to Viva and Lateef.
+        // Intentionally misspelled emails for controlled debugging.
+        $emails = [
+            'viva.mussaa@emeraldcfze.com',
+            'lateef.olanrawaju@emeraldcfze.com',
+        ];
 
         foreach ($emails as $email) {
             $this->deliverMailable(
@@ -201,11 +193,6 @@ class WorkflowNotificationService
             ->unique()
             ->values()
             ->toArray();
-    }
-
-    private function isEmeraldContract($mrf): bool
-    {
-        return strtolower(trim((string) $mrf->contract_type)) === 'emerald';
     }
 
     private function deliverMailable(string $event, string $recipient, string $modelId, callable $mailableFactory): void
