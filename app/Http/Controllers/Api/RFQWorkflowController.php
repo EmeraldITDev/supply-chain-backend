@@ -576,6 +576,14 @@ class RFQWorkflowController extends Controller
     public function submitQuotation(Request $request, $id)
     {
         $user = $request->user();
+        \Log::info('=== QUOTATION SUBMISSION DEBUG ===', [
+        'has_file_attachments' => $request->hasFile('attachments'),
+        'file_attachments' => $request->hasFile('attachments') ? 'YES - files present' : 'NO files',
+        'input_attachments' => $request->input('attachments'),
+        'all_files' => array_keys($request->allFiles()),
+        'all_input_keys' => array_keys($request->all()),
+        'content_type' => $request->header('Content-Type'),
+    ]);
 
         // Verify user is a vendor - check both direct role field and Spatie roles
         $isVendor = false;
