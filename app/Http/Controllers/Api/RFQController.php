@@ -59,7 +59,11 @@ class RFQController extends Controller
         $rfqs = $query->orderBy('created_at', 'desc')->get();
 
         return response()->json($rfqs->map(function($rfq) {
-            $estimatedBudget = $rfq->mrf ? (float) $rfq->mrf->estimated_cost : null;
+            $mrfEstimatedCost = $rfq->mrf ? (float) $rfq->mrf->estimated_cost : null;
+            $rfqEstimatedCost = $rfq->estimated_cost !== null ? (float) $rfq->estimated_cost : null;
+            $estimatedBudget = ($mrfEstimatedCost !== null && $mrfEstimatedCost > 0)
+                ? $mrfEstimatedCost
+                : $rfqEstimatedCost;
 
             return [
                 'id' => $rfq->rfq_id,
@@ -101,7 +105,11 @@ class RFQController extends Controller
             ], 404);
         }
 
-        $estimatedBudget = $rfq->mrf ? (float) $rfq->mrf->estimated_cost : null;
+        $mrfEstimatedCost = $rfq->mrf ? (float) $rfq->mrf->estimated_cost : null;
+        $rfqEstimatedCost = $rfq->estimated_cost !== null ? (float) $rfq->estimated_cost : null;
+        $estimatedBudget = ($mrfEstimatedCost !== null && $mrfEstimatedCost > 0)
+            ? $mrfEstimatedCost
+            : $rfqEstimatedCost;
 
         return response()->json([
             'id' => $rfq->rfq_id,

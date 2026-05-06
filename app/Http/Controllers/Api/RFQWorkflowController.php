@@ -412,7 +412,11 @@ class RFQWorkflowController extends Controller
 
         // Get MRF with all relationships
         $mrf = $rfq->mrf;
-        $estimatedBudget = $mrf ? (float) $mrf->estimated_cost : null;
+        $mrfEstimatedCost = $mrf ? (float) $mrf->estimated_cost : null;
+        $rfqEstimatedCost = $rfq->estimated_cost !== null ? (float) $rfq->estimated_cost : null;
+        $estimatedBudget = ($mrfEstimatedCost !== null && $mrfEstimatedCost > 0)
+            ? $mrfEstimatedCost
+            : $rfqEstimatedCost;
 
         return response()->json([
             'success' => true,
