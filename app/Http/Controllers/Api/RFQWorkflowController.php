@@ -756,7 +756,7 @@ class RFQWorkflowController extends Controller
                     'validity_days' => $validityDays,
                     'warranty_period' => $request->warrantyPeriod,
                     'notes' => $request->notes,
-                    'attachments' => $request->attachments,
+                    'attachments' => $uploadedAttachments,
                     'status' => 'Pending',
                     'review_status' => 'pending', // Reset to pending
                     'revision_notes' => null, // Clear revision notes
@@ -777,6 +777,26 @@ class RFQWorkflowController extends Controller
             // Create new quotation
             // Provide default value for validity_days if not provided (default is 30 days)
             $validityDays = $request->validityDays ?? 30;
+
+            // Handle actual file uploads in attachments
+            $uploadedAttachments = [];
+            // Case 1: Files uploaded directly via FormData file fields
+            if ($request->hasFile('attachments')) {
+                $files = $request->file('attachments');
+                if (!is_array($files)) $files = [$files];
+                foreach ($files as $file) {
+                    $path = $file->store('quotation-attachments', 'public');
+                    $uploadedAttachments[] = asset('storage/' . $path);
+                }
+            }
+
+            // Case 2: URLs already passed as JSON string (pre-uploaded)
+            if (empty($uploadedAttachments) && $request->has('attachments')) {
+                $uploadedAttachments = $request->attachments ?? [];
+            }
+
+            // Merge resolved attachments back into request
+            $request->merge(['attachments' => $uploadedAttachments]);
 
             $quotation = Quotation::create([
                 'quotation_id' => Quotation::generateQuotationId(),
@@ -894,6 +914,7 @@ class RFQWorkflowController extends Controller
                 'deliveryDate' => $quotation->delivery_date ? $quotation->delivery_date->format('Y-m-d') : null,
                 'status' => $quotation->status,
                 'reviewStatus' => $quotation->review_status,
+                'attachments' => $quotation->attachments ?? [],
                 'items' => $quotation->items->map(function($item) {
                     return [
                         'id' => $item->id,
