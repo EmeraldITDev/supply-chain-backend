@@ -19,7 +19,7 @@
     <div class="content">
         <p>A Purchase Order has been generated for a material request.</p>
         <div class="card">
-            <p><strong>MRF ID:</strong> {{ $mrf->mrf_id }}</p>
+            <p><strong>MRF ID:</strong> {{ $mrf->formatted_id ?? $mrf->mrf_id }}</p>
             <p><strong>PO Number:</strong> {{ $mrf->po_number ?? 'Pending assignment' }}</p>
             <p><strong>Title:</strong> {{ $mrf->title }}</p>
             <p><strong>Status:</strong> {{ $mrf->status }}</p>

@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\MRF;
 use App\Models\Activity;
 use App\Services\NotificationService;
+use App\Services\FormattedIdGenerator;
 use App\Services\WorkflowNotificationService;
 use App\Services\WorkflowStateService;
 use App\Services\PermissionService;
@@ -25,17 +26,28 @@ class MRFController extends Controller
     protected WorkflowNotificationService $workflowNotificationService;
     protected WorkflowStateService $workflowService;
     protected PermissionService $permissionService;
+    protected FormattedIdGenerator $formattedIdGenerator;
 
     public function __construct(
         NotificationService $notificationService,
         WorkflowNotificationService $workflowNotificationService,
         WorkflowStateService $workflowService,
-        PermissionService $permissionService
+        PermissionService $permissionService,
+        FormattedIdGenerator $formattedIdGenerator
     ) {
         $this->notificationService = $notificationService;
         $this->workflowNotificationService = $workflowNotificationService;
         $this->workflowService = $workflowService;
         $this->permissionService = $permissionService;
+        $this->formattedIdGenerator = $formattedIdGenerator;
+    }
+
+    private function findMrfByAnyId(string $id)
+    {
+        return MRF::where('formatted_id', $id)
+            ->orWhere('mrf_id', $id)
+            ->orWhere('id', $id)
+            ->first();
     }
 
     /**
@@ -226,6 +238,10 @@ class MRFController extends Controller
 
             return [
                 'id' => $mrf->mrf_id,
+                'formattedId' => $mrf->formatted_id,
+                'formatted_id' => $mrf->formatted_id,
+                'legacyId' => $mrf->mrf_id,
+                'legacy_id' => $mrf->mrf_id,
                 'title' => $mrf->title,
                 'category' => $mrf->category,
                 'contractType' => $mrf->contract_type,
@@ -348,7 +364,7 @@ class MRFController extends Controller
     public function getAvailableActions(Request $request, $id)
     {
         $user = $request->user();
-        $mrf = MRF::where('mrf_id', $id)->first();
+        $mrf = $this->findMrfByAnyId((string) $id);
 
         if (!$mrf) {
             return response()->json([
@@ -371,7 +387,11 @@ class MRFController extends Controller
      */
     public function show($id)
     {
-        $mrf = MRF::where('mrf_id', $id)->with(['requester', 'directorApprover'])->first();
+        $mrf = MRF::where('formatted_id', $id)
+            ->orWhere('mrf_id', $id)
+            ->orWhere('id', $id)
+            ->with(['requester', 'directorApprover'])
+            ->first();
 
         if (!$mrf) {
             return response()->json([
@@ -385,6 +405,10 @@ class MRFController extends Controller
 
         return response()->json([
             'id' => $mrf->mrf_id,
+            'formattedId' => $mrf->formatted_id,
+            'formatted_id' => $mrf->formatted_id,
+            'legacyId' => $mrf->mrf_id,
+            'legacy_id' => $mrf->mrf_id,
             'title' => $mrf->title,
             'category' => $mrf->category,
             'contractType' => $mrf->contract_type,
@@ -469,7 +493,9 @@ class MRFController extends Controller
             ], 403);
         }
 
-        $mrf = MRF::where('mrf_id', $id)
+        $mrf = MRF::where('formatted_id', $id)
+            ->orWhere('mrf_id', $id)
+            ->orWhere('id', $id)
             ->with([
                 'requester',
                 'executiveApprover',
@@ -616,6 +642,10 @@ class MRFController extends Controller
             'data' => [
                 'mrf' => [
                     'id' => $mrf->mrf_id,
+                    'formattedId' => $mrf->formatted_id,
+                    'formatted_id' => $mrf->formatted_id,
+                    'legacyId' => $mrf->mrf_id,
+                    'legacy_id' => $mrf->mrf_id,
                     'title' => $mrf->title,
                     'category' => $mrf->category,
                     'contractType' => $mrf->contract_type,
@@ -804,7 +834,9 @@ class MRFController extends Controller
      */
     public function getProgressTracker(Request $request, $id)
     {
-        $mrf = MRF::where('mrf_id', $id)
+        $mrf = MRF::where('formatted_id', $id)
+            ->orWhere('mrf_id', $id)
+            ->orWhere('id', $id)
             ->with(['requester', 'selectedVendor', 'rfqs'])
             ->first();
 
@@ -912,6 +944,8 @@ class MRFController extends Controller
             'success' => true,
             'data' => [
                 'mrfId' => $mrf->mrf_id,
+                'formattedId' => $mrf->formatted_id,
+                'formatted_id' => $mrf->formatted_id,
                 'title' => $mrf->title,
                 'currentStep' => collect($steps)->where('status', 'pending')->first()['step'] ??
                                  (collect($steps)->where('status', 'completed')->last()['step'] ?? 1),
@@ -977,8 +1011,16 @@ class MRFController extends Controller
                 ], 401);
             }
 
-            // Generate MRF ID with contract type
+            // Generate legacy MRF ID (kept for backward compatibility / existing routes)
             $mrfId = MRF::generateMRFId($request->contractType);
+            $createdAt = now();
+
+            $formattedId = $this->formattedIdGenerator->generate('MRF', [
+                'contract_type' => $request->contractType,
+                'department' => $request->department ?? $user->department ?? null,
+                'category' => $request->category ?? null,
+                'created_at' => $createdAt,
+            ]);
 
             // Handle PFI upload if provided
             $pfiUrl = null;
@@ -1039,6 +1081,7 @@ class MRFController extends Controller
             try {
             $mrf = MRF::create([
                 'mrf_id' => $mrfId,
+                'formatted_id' => $formattedId,
                 'title' => $request->title,
                 'category' => $request->category,
                 'contract_type' => $request->contractType,
@@ -1050,7 +1093,7 @@ class MRFController extends Controller
                 'requester_id' => $user->id,
                 'requester_name' => $user->name,
                 'department' => $request->department,
-                'date' => now(),
+                'date' => $createdAt,
                 'status' => 'pending',
                 'current_stage' => $initialStage,
                     'workflow_state' => $initialWorkflowState,
@@ -1128,6 +1171,10 @@ class MRFController extends Controller
                 'success' => true,
                 'data' => [
                 'id' => $mrf->mrf_id,
+                'formattedId' => $mrf->formatted_id,
+                'formatted_id' => $mrf->formatted_id,
+                'legacyId' => $mrf->mrf_id,
+                'legacy_id' => $mrf->mrf_id,
                 'title' => $mrf->title,
                 'category' => $mrf->category,
                     'contractType' => $mrf->contract_type,
@@ -1177,7 +1224,7 @@ class MRFController extends Controller
     public function update(Request $request, $id)
     {
         $user = $request->user();
-        $mrf = MRF::where('mrf_id', $id)->first();
+        $mrf = $this->findMrfByAnyId((string) $id);
 
         if (!$mrf) {
             return response()->json([
@@ -1279,7 +1326,7 @@ class MRFController extends Controller
             ], 403);
         }
 
-        $mrf = MRF::where('mrf_id', $id)->first();
+        $mrf = $this->findMrfByAnyId((string) $id);
 
         if (!$mrf) {
             return response()->json([
@@ -1367,7 +1414,7 @@ class MRFController extends Controller
             ], 403);
         }
 
-        $mrf = MRF::where('mrf_id', $id)->first();
+        $mrf = $this->findMrfByAnyId((string) $id);
 
         if (!$mrf) {
             return response()->json([
@@ -1436,7 +1483,7 @@ class MRFController extends Controller
             ], 403);
         }
 
-        $mrf = MRF::where('mrf_id', $id)->first();
+        $mrf = $this->findMrfByAnyId((string) $id);
 
         if (!$mrf) {
             return response()->json([
@@ -1539,7 +1586,7 @@ class MRFController extends Controller
             ], 403);
         }
 
-        $mrf = MRF::where('mrf_id', $id)->first();
+        $mrf = $this->findMrfByAnyId((string) $id);
 
         if (!$mrf) {
             return response()->json([
@@ -1636,7 +1683,7 @@ class MRFController extends Controller
             ], 403);
         }
 
-        $mrf = MRF::where('mrf_id', $id)->first();
+        $mrf = $this->findMrfByAnyId((string) $id);
 
         if (!$mrf) {
             return response()->json([
@@ -1707,7 +1754,7 @@ class MRFController extends Controller
     public function destroy(Request $request, $id)
     {
         $user = $request->user();
-        $mrf = MRF::where('mrf_id', $id)->first();
+        $mrf = $this->findMrfByAnyId((string) $id);
 
         if (!$mrf) {
             return response()->json([
@@ -1868,7 +1915,7 @@ class MRFController extends Controller
      */
     private function streamUnsignedPOPdfResponse(string $id, bool $asAttachment)
     {
-        $mrf = MRF::where('mrf_id', $id)->first();
+        $mrf = $this->findMrfByAnyId((string) $id);
 
         if (!$mrf) {
             return response()->json([
@@ -1888,7 +1935,8 @@ class MRFController extends Controller
 
         try {
             $pdfContent = $this->generatePOPDFFromMRF($mrf);
-            $filename = "PO_{$mrf->po_number}.pdf";
+            $filenameBase = $mrf->formatted_id ?: $mrf->po_number;
+            $filename = "PO-{$filenameBase}.pdf";
             $disposition = $asAttachment ? 'attachment' : 'inline';
 
             return response($pdfContent, 200)
@@ -2124,7 +2172,7 @@ class MRFController extends Controller
      */
     public function downloadSignedPO(Request $request, $id)
     {
-        $mrf = MRF::where('mrf_id', $id)->first();
+        $mrf = $this->findMrfByAnyId((string) $id);
 
         if (!$mrf) {
             return response()->json([
@@ -2323,6 +2371,7 @@ class MRFController extends Controller
             'invoice_submission_cc' => $mrf->invoice_submission_cc ?? 'douglas.anuforo@emeraldcfze.com',
             'special_terms' => $mrf->po_special_terms,
             'mrf_department' => $mrf->department,
+            'mrf_display_id' => $mrf->formatted_id ?: $mrf->mrf_id,
         ]);
 
         // Generate PDF using dompdf

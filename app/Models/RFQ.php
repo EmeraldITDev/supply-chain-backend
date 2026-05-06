@@ -13,6 +13,7 @@ class RFQ extends Model
 
     protected $fillable = [
         'rfq_id',
+        'formatted_id',
         'mrf_id',
         'mrf_title',
         'title',

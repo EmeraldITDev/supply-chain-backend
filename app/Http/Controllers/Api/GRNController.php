@@ -28,6 +28,14 @@ class GRNController extends Controller
         $this->notificationService = $notificationService;
     }
 
+    private function findMrfByAnyId(string $id)
+    {
+        return MRF::where('formatted_id', $id)
+            ->orWhere('mrf_id', $id)
+            ->orWhere('id', $id)
+            ->first();
+    }
+
     /**
      * Get the storage disk for documents
      */
@@ -69,7 +77,7 @@ class GRNController extends Controller
     public function requestGRN(Request $request, $id)
     {
         $user = $request->user();
-        $mrf = MRF::where('mrf_id', $id)->first();
+        $mrf = $this->findMrfByAnyId((string) $id);
 
         if (!$mrf) {
             return response()->json([
@@ -137,7 +145,7 @@ class GRNController extends Controller
     public function completeGRN(Request $request, $id)
     {
         $user = $request->user();
-        $mrf = MRF::where('mrf_id', $id)->first();
+        $mrf = $this->findMrfByAnyId((string) $id);
 
         if (!$mrf) {
             return response()->json([

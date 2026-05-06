@@ -178,7 +178,8 @@ class PurchaseOrderPdfService
         if (!empty($quotation['validity_days'])) {
             $additionalParts[] = 'Validity: ' . $quotation['validity_days'] . ' days';
         }
-        $additionalParts[] = 'MRF: ' . ($mrf['id'] ?? '') . ' — ' . ($mrf['title'] ?? '');
+        $mrfDisplayId = (string) (($mrf['formatted_id'] ?? $mrf['formattedId'] ?? $mrf['id'] ?? '') ?: '');
+        $additionalParts[] = 'MRF: ' . $mrfDisplayId . ' — ' . ($mrf['title'] ?? '');
         $additionalParts[] = 'Payment shall be made according to the payment terms above. Goods must be delivered as per specifications with proper documentation.';
 
         return View::make('pdf.purchase-order', $this->baseViewVars(
@@ -268,6 +269,9 @@ class PurchaseOrderPdfService
     private function buildAdditionalNotesMrf(array $data): string
     {
         $parts = [];
+        if (!empty($data['mrf_display_id'])) {
+            $parts[] = 'MRF: ' . (string) $data['mrf_display_id'];
+        }
         if (!empty($data['invoice_submission_email'])) {
             $cc = !empty($data['invoice_submission_cc']) ? ' cc: ' . $data['invoice_submission_cc'] : '';
             $parts[] = 'Invoice submission: ' . $data['invoice_submission_email'] . $cc;

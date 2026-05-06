@@ -21,7 +21,7 @@
 
     <p>A new Material Request Form has been submitted.</p>
 
-    <p><strong>MRF ID:</strong> {{ $mrf->mrf_id }}</p>
+    <p><strong>MRF ID:</strong> {{ $mrf->formatted_id ?? $mrf->mrf_id }}</p>
     <p><strong>Title:</strong> {{ $mrf->title }}</p>
     <p><strong>Category:</strong> {{ $mrf->category }}</p>
     <p><strong>Contract Type:</strong> {{ $mrf->contract_type }}</p>

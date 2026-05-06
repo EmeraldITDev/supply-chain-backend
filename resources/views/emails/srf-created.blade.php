@@ -21,7 +21,7 @@
 
         <p>A new Store Requisition Form has been submitted.</p>
 
-        <p><strong>SRF ID:</strong> {{ $srf->srf_id }}</p>
+        <p><strong>SRF ID:</strong> {{ $srf->formatted_id ?? $srf->srf_id }}</p>
         <p><strong>Title:</strong> {{ $srf->title ?? 'N/A' }}</p>
         <p><strong>Department:</strong> {{ $srf->department ?? 'N/A' }}</p>
         <p><strong>Submitted By:</strong> {{ $srf->requester_name ?? 'N/A' }}</p>

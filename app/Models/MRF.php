@@ -14,6 +14,7 @@ class MRF extends Model
 
     protected $fillable = [
         'mrf_id',
+        'formatted_id',
         'title',
         'category',
         'contract_type',

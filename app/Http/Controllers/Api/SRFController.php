@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\SRF;
+use App\Services\FormattedIdGenerator;
 use App\Services\WorkflowNotificationService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
@@ -11,10 +12,23 @@ use Illuminate\Support\Facades\Validator;
 class SRFController extends Controller
 {
     protected WorkflowNotificationService $workflowNotificationService;
+    protected FormattedIdGenerator $formattedIdGenerator;
 
-    public function __construct(WorkflowNotificationService $workflowNotificationService)
+    public function __construct(
+        WorkflowNotificationService $workflowNotificationService,
+        FormattedIdGenerator $formattedIdGenerator
+    )
     {
         $this->workflowNotificationService = $workflowNotificationService;
+        $this->formattedIdGenerator = $formattedIdGenerator;
+    }
+
+    private function findSrfByAnyId(string $id)
+    {
+        return SRF::where('formatted_id', $id)
+            ->orWhere('srf_id', $id)
+            ->orWhere('id', $id)
+            ->first();
     }
 
     /**
@@ -59,8 +73,14 @@ class SRFController extends Controller
         return response()->json($srfs->map(function($srf) {
             return [
                 'id' => $srf->srf_id,
+                'formattedId' => $srf->formatted_id,
+                'formatted_id' => $srf->formatted_id,
+                'legacyId' => $srf->srf_id,
+                'legacy_id' => $srf->srf_id,
                 'title' => $srf->title,
                 'serviceType' => $srf->service_type,
+                'contractType' => $srf->contract_type,
+                'department' => $srf->department,
                 'urgency' => $srf->urgency,
                 'description' => $srf->description,
                 'duration' => $srf->duration,
@@ -102,6 +122,8 @@ class SRFController extends Controller
         $validator = Validator::make($request->all(), [
             'title' => 'required|string|max:255',
             'serviceType' => 'required|string|max:255',
+            'contractType' => 'nullable|string|max:255',
+            'department' => 'nullable|string|max:255',
             'urgency' => 'required|in:Low,Medium,High,Critical',
             'description' => 'required|string',
             'duration' => 'required|string',
@@ -125,6 +147,17 @@ class SRFController extends Controller
         $invoiceUrl = null;
         $invoiceShareUrl = null;
         $srfId = SRF::generateSRFId();
+        $createdAt = now();
+
+        $contractType = $request->contractType ?? 'EMERALD';
+        $department = $request->department ?? $user->department ?? null;
+
+        $formattedId = $this->formattedIdGenerator->generate('SRF', [
+            'contract_type' => $contractType,
+            'department' => $department,
+            'category' => $request->serviceType,
+            'created_at' => $createdAt,
+        ]);
 
         if ($request->hasFile('invoice')) {
             $invoiceFile = $request->file('invoice');
@@ -165,8 +198,10 @@ class SRFController extends Controller
 
         $srf = SRF::create([
             'srf_id' => $srfId,
+            'formatted_id' => $formattedId,
             'title' => $request->title,
             'service_type' => $request->serviceType,
+            'contract_type' => $contractType,
             'urgency' => $request->urgency,
             'description' => $request->description,
             'duration' => $request->duration,
@@ -174,7 +209,8 @@ class SRFController extends Controller
             'justification' => $request->justification,
             'requester_id' => $user->id,
             'requester_name' => $user->name,
-            'date' => now(),
+            'department' => $department,
+            'date' => $createdAt,
             'status' => 'Pending',
             'current_stage' => 'procurement',
             'approval_history' => [],
@@ -194,8 +230,14 @@ class SRFController extends Controller
 
         return response()->json([
             'id' => $srf->srf_id,
+            'formattedId' => $srf->formatted_id,
+            'formatted_id' => $srf->formatted_id,
+            'legacyId' => $srf->srf_id,
+            'legacy_id' => $srf->srf_id,
             'title' => $srf->title,
             'serviceType' => $srf->service_type,
+            'contractType' => $srf->contract_type,
+            'department' => $srf->department,
             'urgency' => $srf->urgency,
             'description' => $srf->description,
             'duration' => $srf->duration,
@@ -214,7 +256,7 @@ class SRFController extends Controller
      */
     public function update(Request $request, $id)
     {
-        $srf = SRF::where('srf_id', $id)->first();
+        $srf = $this->findSrfByAnyId((string) $id);
 
         if (!$srf) {
             return response()->json([
@@ -277,8 +319,14 @@ class SRFController extends Controller
 
         return response()->json([
             'id' => $srf->srf_id,
+            'formattedId' => $srf->formatted_id,
+            'formatted_id' => $srf->formatted_id,
+            'legacyId' => $srf->srf_id,
+            'legacy_id' => $srf->srf_id,
             'title' => $srf->title,
             'serviceType' => $srf->service_type,
+            'contractType' => $srf->contract_type,
+            'department' => $srf->department,
             'urgency' => $srf->urgency,
             'description' => $srf->description,
             'duration' => $srf->duration,

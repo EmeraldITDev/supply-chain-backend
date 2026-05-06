@@ -11,8 +11,10 @@ class SRF extends Model
 
     protected $fillable = [
         'srf_id',
+        'formatted_id',
         'title',
         'service_type',
+        'contract_type',
         'urgency',
         'description',
         'duration',
@@ -20,6 +22,7 @@ class SRF extends Model
         'justification',
         'requester_id',
         'requester_name',
+        'department',
         'date',
         'status',
         'current_stage',

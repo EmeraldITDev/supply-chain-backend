@@ -21,7 +21,7 @@
         <p>A vendor has submitted a quotation that requires procurement review.</p>
         <div class="card">
             <p><strong>Quotation ID:</strong> {{ $quotation->quotation_id }}</p>
-            <p><strong>RFQ ID:</strong> {{ optional($quotation->rfq)->rfq_id }}</p>
+            <p><strong>RFQ ID:</strong> {{ optional($quotation->rfq)->formatted_id ?? optional($quotation->rfq)->rfq_id }}</p>
             <p><strong>Vendor:</strong> {{ $quotation->vendor_name ?? optional($quotation->vendor)->name }}</p>
             <p><strong>Total Amount:</strong> {{ $quotation->currency ?? 'NGN' }} {{ number_format((float) $quotation->total_amount, 2) }}</p>
             <p><strong>Status:</strong> {{ $quotation->status }}</p>

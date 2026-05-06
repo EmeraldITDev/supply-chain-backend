@@ -21,7 +21,7 @@
 
         <p>Your Material Request Form has been rejected.</p>
 
-        <p><strong>MRF ID:</strong> {{ $mrf->mrf_id }}</p>
+        <p><strong>MRF ID:</strong> {{ $mrf->formatted_id ?? $mrf->mrf_id }}</p>
         <p><strong>Title:</strong> {{ $mrf->title }}</p>
         <p><strong>Status:</strong> {{ ucfirst($mrf->status) }}</p>
 

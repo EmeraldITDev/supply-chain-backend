@@ -41,7 +41,7 @@ class WorkflowNotificationService
             $this->deliverMailable(
                 event: 'mrf_created',
                 recipient: $email,
-                modelId: $mrf->mrf_id,
+                modelId: $mrf->formatted_id ?: $mrf->mrf_id,
                 mailableFactory: static fn () => new MRFCreatedMail($mrf)
             );
         }
@@ -60,7 +60,7 @@ class WorkflowNotificationService
             $this->deliverMailable(
                 event: 'srf_created',
                 recipient: $email,
-                modelId: $srf->srf_id,
+                modelId: $srf->formatted_id ?: $srf->srf_id,
                 mailableFactory: static fn () => new SRFCreatedMail($srf)
             );
         }
@@ -80,7 +80,7 @@ class WorkflowNotificationService
             $this->deliverMailable(
                 event: 'mrf_approved',
                 recipient: $email,
-                modelId: $mrf->mrf_id,
+                modelId: $mrf->formatted_id ?: $mrf->mrf_id,
                 mailableFactory: static fn () => new MRFApprovedMail($mrf)
             );
         }
@@ -100,7 +100,7 @@ class WorkflowNotificationService
             $this->deliverMailable(
                 event: 'mrf_rejected',
                 recipient: $email,
-                modelId: $mrf->mrf_id,
+                modelId: $mrf->formatted_id ?: $mrf->mrf_id,
                 mailableFactory: static fn () => new MRFRejectedMail($mrf, $remarks)
             );
         }
@@ -120,7 +120,7 @@ class WorkflowNotificationService
                 $this->deliverMailable(
                     event: 'rfq_sent',
                     recipient: $email,
-                    modelId: $rfq->rfq_id,
+                    modelId: $rfq->formatted_id ?: $rfq->rfq_id,
                     mailableFactory: static fn () => new RFQSentMail($rfq, $vendor)
                 );
             }
@@ -148,7 +148,7 @@ class WorkflowNotificationService
             $this->deliverMailable(
                 event: 'po_generated',
                 recipient: $email,
-                modelId: $mrf->mrf_id,
+                modelId: $mrf->formatted_id ?: $mrf->mrf_id,
                 mailableFactory: static fn () => new POGeneratedMail($mrf)
             );
         }

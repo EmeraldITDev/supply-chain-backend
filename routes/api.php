@@ -11,6 +11,8 @@ use App\Http\Controllers\Api\RFQController;
 use App\Http\Controllers\Api\QuotationController;
 use App\Http\Controllers\Api\VendorController;
 use App\Http\Controllers\Api\NotificationController;
+use App\Http\Controllers\Api\SearchController;
+use App\Http\Controllers\Api\Admin\CodeMappingsController;
 use App\Http\Controllers\Api\V1\Logistics\AuthController as LogisticsAuthController;
 use App\Http\Controllers\Api\V1\Logistics\VendorController as LogisticsVendorController;
 use App\Http\Controllers\Api\V1\Logistics\TripController as LogisticsTripController;
@@ -284,6 +286,17 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::delete('/notifications/{id}', [NotificationController::class, 'destroy']);
     Route::delete('/notifications', [NotificationController::class, 'destroyAll']);
     Route::post('/notifications/announcement', [NotificationController::class, 'sendAnnouncement']);
+
+    // Global search (supports formatted_id + legacy ids)
+    Route::get('/search', [SearchController::class, 'search']);
+
+    // Admin mappings (optional; avoids redeploy for new codes)
+    Route::middleware('role:admin')->group(function () {
+        Route::get('/admin/department-codes', [CodeMappingsController::class, 'listDepartmentCodes']);
+        Route::post('/admin/department-codes', [CodeMappingsController::class, 'createDepartmentCode']);
+        Route::get('/admin/category-codes', [CodeMappingsController::class, 'listCategoryCodes']);
+        Route::post('/admin/category-codes', [CodeMappingsController::class, 'createCategoryCode']);
+    });
 });
 
 // Public vendor registration

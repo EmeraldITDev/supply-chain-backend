@@ -7,6 +7,7 @@ use App\Models\Activity;
 use App\Models\RFQ;
 use App\Models\MRF;
 use App\Models\Vendor;
+use App\Services\FormattedIdGenerator;
 use App\Services\WorkflowNotificationService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
@@ -14,10 +15,23 @@ use Illuminate\Support\Facades\Validator;
 class RFQController extends Controller
 {
     protected WorkflowNotificationService $workflowNotificationService;
+    protected FormattedIdGenerator $formattedIdGenerator;
 
-    public function __construct(WorkflowNotificationService $workflowNotificationService)
+    public function __construct(
+        WorkflowNotificationService $workflowNotificationService,
+        FormattedIdGenerator $formattedIdGenerator
+    )
     {
         $this->workflowNotificationService = $workflowNotificationService;
+        $this->formattedIdGenerator = $formattedIdGenerator;
+    }
+
+    private function findRfqByAnyId(string $id)
+    {
+        return RFQ::where('formatted_id', $id)
+            ->orWhere('rfq_id', $id)
+            ->orWhere('id', $id)
+            ->first();
     }
 
     /**
@@ -67,7 +81,13 @@ class RFQController extends Controller
 
             return [
                 'id' => $rfq->rfq_id,
+                'formattedId' => $rfq->formatted_id,
+                'formatted_id' => $rfq->formatted_id,
+                'legacyId' => $rfq->rfq_id,
+                'legacy_id' => $rfq->rfq_id,
                 'mrfId' => $rfq->mrf_id ? (string) $rfq->mrf->mrf_id : null,
+                'mrfFormattedId' => $rfq->mrf?->formatted_id,
+                'mrf_formatted_id' => $rfq->mrf?->formatted_id,
                 'mrfTitle' => $rfq->mrf_title ?? ($rfq->mrf ? $rfq->mrf->title : null),
                 'title' => $rfq->title,
                 'category' => $rfq->category,
@@ -93,7 +113,9 @@ class RFQController extends Controller
      */
     public function show(Request $request, $id)
     {
-        $rfq = RFQ::where('rfq_id', $id)
+        $rfq = RFQ::where('formatted_id', $id)
+            ->orWhere('rfq_id', $id)
+            ->orWhere('id', $id)
             ->with(['mrf', 'creator', 'vendors', 'items'])
             ->first();
 
@@ -113,7 +135,13 @@ class RFQController extends Controller
 
         return response()->json([
             'id' => $rfq->rfq_id,
+            'formattedId' => $rfq->formatted_id,
+            'formatted_id' => $rfq->formatted_id,
+            'legacyId' => $rfq->rfq_id,
+            'legacy_id' => $rfq->rfq_id,
             'mrfId' => $rfq->mrf_id ? (string) $rfq->mrf->mrf_id : null,
+            'mrfFormattedId' => $rfq->mrf?->formatted_id,
+            'mrf_formatted_id' => $rfq->mrf?->formatted_id,
             'mrfTitle' => $rfq->mrf_title ?? ($rfq->mrf ? $rfq->mrf->title : null),
             'title' => $rfq->title,
             'category' => $rfq->category,
@@ -181,7 +209,10 @@ class RFQController extends Controller
         $mrfTitle = null;
         $mrfCategory = null;
         if ($request->mrfId) {
-            $mrf = MRF::where('mrf_id', $request->mrfId)->first();
+            $mrf = MRF::where('formatted_id', $request->mrfId)
+                ->orWhere('mrf_id', $request->mrfId)
+                ->orWhere('id', $request->mrfId)
+                ->first();
             $mrfTitle = $mrf ? $mrf->title : null;
             $mrfCategory = $mrf ? $mrf->category : null;
         }
@@ -243,8 +274,18 @@ class RFQController extends Controller
             }
         }
 
+        $createdAt = now();
+
+        $formattedId = $this->formattedIdGenerator->generate('RFQ', [
+            'contract_type' => $mrf?->contract_type,
+            'department' => $mrf?->department ?? $mrf?->requester?->department ?? null,
+            'category' => $category,
+            'created_at' => $createdAt,
+        ]);
+
         $rfq = RFQ::create([
             'rfq_id' => RFQ::generateRFQId(),
+            'formatted_id' => $formattedId,
             'mrf_id' => $mrf ? $mrf->id : null,
             'mrf_title' => $mrfTitle,
             'title' => $rfqTitle,
@@ -259,6 +300,8 @@ class RFQController extends Controller
             'status' => 'Open',
             'workflow_state' => 'open',
             'created_by' => $user->id,
+            'created_at' => $createdAt,
+            'updated_at' => $createdAt,
         ]);
 
         // Attach vendors (syncWithoutDetaching ensures existing vendors are preserved)
@@ -297,7 +340,13 @@ class RFQController extends Controller
 
         return response()->json([
             'id' => $rfq->rfq_id,
+            'formattedId' => $rfq->formatted_id,
+            'formatted_id' => $rfq->formatted_id,
+            'legacyId' => $rfq->rfq_id,
+            'legacy_id' => $rfq->rfq_id,
             'mrfId' => $rfq->mrf_id ? (string) $rfq->mrf->mrf_id : null,
+            'mrfFormattedId' => $rfq->mrf?->formatted_id,
+            'mrf_formatted_id' => $rfq->mrf?->formatted_id,
             'mrfTitle' => $rfq->mrf_title,
             'title' => $rfq->title,
             'category' => $rfq->category,
@@ -320,7 +369,7 @@ class RFQController extends Controller
      */
     public function update(Request $request, $id)
     {
-        $rfq = RFQ::where('rfq_id', $id)->first();
+        $rfq = $this->findRfqByAnyId((string) $id);
 
         if (!$rfq) {
             return response()->json([
