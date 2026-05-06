@@ -22,11 +22,20 @@ class WorkflowNotificationService
 {
     public function notifyMRFSubmitted(MRF $mrf): void
     {
-        $emails = $this->getEmailsByRoles(
-            $this->isEmeraldContract($mrf)
-                ? ['executive']
-                : ['supply_chain_director']
-        );
+        // Send to specific procurement team members based on contract type
+        if ($this->isEmeraldContract($mrf)) {
+            // Emerald contracts: send to bunmi and lateef
+            $emails = [
+                'bunmi.babajidee@emeraldcfze.com',
+                'lateef.olanrawaju@emeraldcfze.com',
+            ];
+        } else {
+            // Non-emerald contracts: send to viva and lateef
+            $emails = [
+                'viva.mussaa@emeraldcfze.com',
+                'lateef.olanrawaju@emeraldcfze.com',
+            ];
+        }
 
         foreach ($emails as $email) {
             $this->deliverMailable(
@@ -40,7 +49,12 @@ class WorkflowNotificationService
 
     public function notifySRFSubmitted(SRF $srf): void
     {
-        $emails = $this->getEmailsByRoles(['supply_chain_director', 'procurement_manager', 'executive']);
+        // Send to specific procurement team members
+        $emails = [
+            'viva.mussaa@emeraldcfze.com',
+            'lateef.olanrawaju@emeraldcfze.com',
+            'bunmi.babajidee@emeraldcfze.com',
+        ];
 
         foreach ($emails as $email) {
             $this->deliverMailable(
@@ -120,7 +134,11 @@ class WorkflowNotificationService
         $emails = collect([
             $mrf->requester?->email ?? null,
             $mrf->selectedVendor?->email ?? null,
-        ])->merge($this->getEmailsByRoles(['procurement_manager', 'procurement']))
+        ])->merge([
+            'viva.mussaa@emeraldcfze.com',
+            'lateef.olanrawaju@emeraldcfze.com',
+            'bunmi.babajidee@emeraldcfze.com',
+        ])
             ->filter()
             ->unique()
             ->values()
