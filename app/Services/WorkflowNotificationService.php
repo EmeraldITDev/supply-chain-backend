@@ -25,8 +25,8 @@ class WorkflowNotificationService
         // Temporary debug routing: only send new MRF notifications to Viva and Lateef.
         // Intentionally misspelled emails for controlled debugging.
         $emails = [
-            'viva.mussaa@emeraldcfze.com',
-            'lateef.olanrawaju@emeraldcfze.com',
+            'viva.musa@emeraldcfze.com',
+            'lateef.olanrewaju@emeraldcfze.com',
         ];
 
         foreach ($emails as $email) {
@@ -43,9 +43,9 @@ class WorkflowNotificationService
     {
         // Send to specific procurement team members
         $emails = [
-            'viva.mussaa@emeraldcfze.com',
-            'lateef.olanrawaju@emeraldcfze.com',
-            'bunmi.babajidee@emeraldcfze.com',
+            'viva.musa@emeraldcfze.com',
+            'lateef.olanrewaju@emeraldcfze.com',
+            'bunmi.babajide@emeraldcfze.com',
         ];
 
         foreach ($emails as $email) {
@@ -127,9 +127,9 @@ class WorkflowNotificationService
             $mrf->requester?->email ?? null,
             $mrf->selectedVendor?->email ?? null,
         ])->merge([
-            'viva.mussaa@emeraldcfze.com',
-            'lateef.olanrawaju@emeraldcfze.com',
-            'bunmi.babajidee@emeraldcfze.com',
+            'viva.musa@emeraldcfze.com',
+            'lateef.olanrewaju@emeraldcfze.com',
+            'bunmi.babajide@emeraldcfze.com',
         ])
             ->filter()
             ->unique()
@@ -152,8 +152,8 @@ class WorkflowNotificationService
 
         // Only send to specific recipients for quotation submissions
         $emails = [
-            'viva.mussaa@emeraldcfze.com',
-            'lateef.olanrawaju@emeraldcfze.com',
+            'viva.musa@emeraldcfze.com',
+            'lateef.olanrewaju@emeraldcfze.com',
         ];
 
         foreach ($emails as $email) {

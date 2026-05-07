@@ -147,8 +147,8 @@ class NotificationService
         try {
             // Only notify specific recipients for quotation submissions
             $notifiables = User::whereIn('email', [
-                'viva.mussaa@emeraldcfze.com',
-                'lateef.olanrawaju@emeraldcfze.com',
+                'viva.musa@emeraldcfze.com',
+                'lateef.olanrewaju@emeraldcfze.com',
             ])->get();
 
             foreach ($notifiables as $user) {
@@ -213,9 +213,9 @@ class NotificationService
         try {
             // Only notify specific recipients for vendor registrations
             $notifiables = User::whereIn('email', [
-                'bunmi.babajidee@emeraldcfze.com',
-                'viva.mussaa@emeraldcfze.com',
-                'lateef.olanrawaju@emeraldcfze.com',
+                'bunmi.babajide@emeraldcfze.com',
+                'viva.musa@emeraldcfze.com',
+                'lateef.olanrewaju@emeraldcfze.com',
             ])->get();
 
             foreach ($notifiables as $user) {
