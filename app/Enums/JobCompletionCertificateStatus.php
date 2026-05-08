@@ -4,7 +4,7 @@ namespace App\Enums;
 
 /**
  * Job Completion Certificate Status Enum
- * 
+ *
  * Defines the valid status values for job completion certificates.
  */
 enum JobCompletionCertificateStatus: string

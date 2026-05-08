@@ -4,7 +4,7 @@ namespace App\Enums;
 
 /**
  * Trip Approval Status Enum
- * 
+ *
  * Defines the valid approval status values for trips with multi-vendor workflow.
  */
 enum TripApprovalStatus: string

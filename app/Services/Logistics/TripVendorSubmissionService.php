@@ -1,0 +1,196 @@
+<?php
+
+namespace App\Services\Logistics;
+
+use App\Models\Logistics\Trip;
+use App\Models\Logistics\TripVendorSubmission;
+use App\Models\Vendor;
+use App\Notifications\VendorInvitedForTripNotification;
+use App\Notifications\VendorRejectedForTripNotification;
+use App\Notifications\VendorSelectedForTripNotification;
+use Illuminate\Database\Eloquent\Collection;
+
+class TripVendorSubmissionService
+{
+    /**
+     * Create vendor submissions for invited vendors
+     */
+    public function createSubmissionsForVendors(Trip $trip, array $vendorIds): Collection
+    {
+        $submissions = collect();
+
+        foreach ($vendorIds as $vendorId) {
+            // Check if submission already exists
+            $existing = $trip->vendorSubmissions()->where('vendor_id', $vendorId)->first();
+            if ($existing) {
+                $submissions->push($existing);
+                continue;
+            }
+
+            // Create new submission
+            $submission = $trip->vendorSubmissions()->create([
+                'vendor_id' => $vendorId,
+                'status' => TripVendorSubmission::STATUS_PENDING,
+            ]);
+
+            $submissions->push($submission);
+
+            // Send invite notification to vendor
+            $vendor = Vendor::find($vendorId);
+            if ($vendor && $vendor->users()->first()) {
+                $vendor->users()->first()->notify(new VendorInvitedForTripNotification($trip, $vendor));
+            }
+        }
+
+        // Mark trip as multi-vendor if more than one vendor
+        if ($submissions->count() > 1) {
+            $trip->update([
+                'multi_vendor' => true,
+                'approval_status' => Trip::STATUS_DRAFT,
+            ]);
+        }
+
+        return $submissions;
+    }
+
+    /**
+     * Submit vendor details and pricing
+     */
+    public function submitVendorDetails(Trip $trip, Vendor $vendor, array $data, int $submittedBy): TripVendorSubmission
+    {
+        $submission = $trip->vendorSubmissions()->where('vendor_id', $vendor->id)->first();
+
+        if (!$submission) {
+            // Create submission if it doesn't exist
+            $submission = $trip->vendorSubmissions()->create(array_merge([
+                'vendor_id' => $vendor->id,
+            ], $data, [
+                'submitted_by' => $submittedBy,
+            ]));
+        } else {
+            // Update existing submission
+            $submission->update(array_merge($data, [
+                'submitted_by' => $submittedBy,
+            ]));
+        }
+
+        $submission->markAsSubmitted($submittedBy);
+
+        return $submission;
+    }
+
+    /**
+     * Get all vendor responses for a trip
+     */
+    public function getVendorResponses(Trip $trip)
+    {
+        return $trip->vendorSubmissions()
+            ->with(['vendor', 'documents'])
+            ->get()
+            ->map(function ($submission) {
+                return [
+                    'id' => $submission->id,
+                    'vendor_id' => $submission->vendor_id,
+                    'vendor_name' => $submission->vendor->name,
+                    'vendor_phone' => $submission->vendor->phone ?? null,
+                    'vendor_email' => $submission->vendor->email ?? null,
+                    'vehicle_make' => $submission->vehicle_make,
+                    'vehicle_model' => $submission->vehicle_model,
+                    'plate_number' => $submission->plate_number,
+                    'driver_name' => $submission->driver_name,
+                    'driver_phone' => $submission->driver_phone,
+                    'driver_license_no' => $submission->driver_license_no,
+                    'quoted_price' => $submission->quoted_price,
+                    'currency' => $submission->currency,
+                    'status' => $submission->status,
+                    'submitted_at' => $submission->submitted_at,
+                    'documents_count' => $submission->documents->count(),
+                ];
+            });
+    }
+
+    /**
+     * Approve a vendor submission
+     */
+    public function approveSubmission(TripVendorSubmission $submission): void
+    {
+        $submission->approve();
+    }
+
+    /**
+     * Reject a vendor submission
+     */
+    public function rejectSubmission(TripVendorSubmission $submission, string $reason): void
+    {
+        $submission->reject($reason);
+
+        // Send rejection notification
+        $vendor = $submission->vendor;
+        if ($vendor && $vendor->users()->first()) {
+            $vendor->users()->first()->notify(new VendorRejectedForTripNotification(
+                $submission->trip,
+                $vendor,
+                $reason
+            ));
+        }
+    }
+
+    /**
+     * Select a vendor for the trip
+     */
+    public function selectVendor(Trip $trip, Vendor $vendor): void
+    {
+        $submission = $trip->vendorSubmissions()->where('vendor_id', $vendor->id)->firstOrFail();
+
+        // Approve the selected vendor's submission
+        $this->approveSubmission($submission);
+
+        // Update trip with selected vendor
+        $trip->update([
+            'selected_vendor_id' => $vendor->id,
+            'vendor_id' => $vendor->id,
+            'approval_status' => 'approved',
+            'status' => Trip::STATUS_VENDOR_ASSIGNED,
+        ]);
+
+        // Reject all other vendors
+        $trip->vendorSubmissions()
+            ->where('vendor_id', '!=', $vendor->id)
+            ->where('status', '!=', TripVendorSubmission::STATUS_REJECTED)
+            ->get()
+            ->each(function ($otherSubmission) {
+                $this->rejectSubmission($otherSubmission, 'Another vendor was selected for this trip');
+            });
+
+        // Send approval notification to selected vendor
+        if ($vendor && $vendor->users()->first()) {
+            $vendor->users()->first()->notify(new VendorSelectedForTripNotification($trip, $vendor));
+        }
+    }
+
+    /**
+     * Check if all required submissions are present
+     */
+    public function allSubmissionsPresent(Trip $trip): bool
+    {
+        if (!$trip->multi_vendor) {
+            return true;
+        }
+
+        return $trip->vendorSubmissions()->count() > 0
+            && $trip->vendorSubmissions()->where('status', TripVendorSubmission::STATUS_PENDING)->count() === 0;
+    }
+
+    /**
+     * Block trip status advancement if submissions not complete
+     */
+    public function canAdvanceStatus(Trip $trip): bool
+    {
+        if (!$trip->multi_vendor) {
+            return true;
+        }
+
+        // Check if a vendor is selected
+        return $trip->selected_vendor_id !== null && $trip->approval_status === 'approved';
+    }
+}

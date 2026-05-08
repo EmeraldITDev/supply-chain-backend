@@ -4,7 +4,7 @@ namespace App\Enums;
 
 /**
  * Trip Vendor Submission Status Enum
- * 
+ *
  * Defines the valid status values for vendor submissions on trips.
  */
 enum TripVendorSubmissionStatus: string
