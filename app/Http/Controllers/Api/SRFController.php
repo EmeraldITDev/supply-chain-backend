@@ -115,6 +115,12 @@ class SRFController extends Controller
                 'error' => 'Only staff members can create Service Request Forms. Please contact your administrator.',
             ], 403);
         }
+        if (!$user->designated_requisition_creator) {
+            return response()->json([
+                'success' => false,
+                'error' => 'You are not authorised to create requisition requests for your department.',
+            ], 403);
+        }
 
         // Normalize urgency to proper case
         if ($request->has('urgency')) {

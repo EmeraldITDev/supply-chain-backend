@@ -80,6 +80,7 @@ class MRF extends Model
         'po_special_terms',
         'invoice_submission_email',
         'invoice_submission_cc',
+        'custom_terms',
         // Payment
         'payment_status',
         'payment_processed_at',
@@ -96,6 +97,7 @@ class MRF extends Model
         'grn_share_url',
         // Vendor selection and invoice
         'selected_vendor_id',
+        'procurement_manager_id',
         'invoice_url',
         'invoice_share_url',
         'invoice_approved_by',
@@ -221,6 +223,16 @@ class MRF extends Model
     public function selectedVendor(): BelongsTo
     {
         return $this->belongsTo(Vendor::class, 'selected_vendor_id');
+    }
+
+    public function procurementManager(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'procurement_manager_id');
+    }
+
+    public function priceComparisons(): HasMany
+    {
+        return $this->hasMany(PriceComparison::class, 'purchase_order_id');
     }
 
     /**

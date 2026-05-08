@@ -5,14 +5,20 @@ namespace App\Http\Controllers\Api\V1\Logistics;
 use App\Http\Requests\Logistics\StoreMaintenanceRequest;
 use App\Http\Requests\Logistics\StoreVehicleRequest;
 use App\Http\Requests\Logistics\UpdateVehicleRequest;
+use App\Models\SRF;
 use App\Models\Logistics\Vehicle;
 use App\Models\Logistics\VehicleMaintenance;
 use App\Services\Logistics\AuditLogger;
+use App\Services\WorkflowNotificationService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Validator;
 
 class FleetController extends ApiController
 {
-    public function __construct(private AuditLogger $auditLogger)
+    public function __construct(
+        private AuditLogger $auditLogger,
+        private WorkflowNotificationService $workflowNotificationService
+    )
     {
     }
 
@@ -252,5 +258,81 @@ class FleetController extends ApiController
             'message' => 'Vehicle deleted successfully',
             'vehicle_id' => $id,
         ]);
+    }
+
+    public function initiateSrf(Request $request, int $id)
+    {
+        $user = $request->user();
+        if (!$user || $user->role !== 'logistics_officer') {
+            return $this->error('Only logistics officers can initiate SRF from fleet maintenance.', 'FORBIDDEN', 403);
+        }
+
+        $vehicle = Vehicle::with('maintenances')->find($id);
+        if (!$vehicle) {
+            return $this->error('Vehicle not found', 'NOT_FOUND', 404);
+        }
+
+        $maintenance = $vehicle->maintenances()
+            ->orderByDesc('performed_at')
+            ->orderByDesc('created_at')
+            ->first();
+
+        $validator = Validator::make($request->all(), [
+            'maintenance_type' => 'nullable|string|max:255',
+            'description' => 'nullable|string',
+            'urgency' => 'nullable|in:Low,Medium,High,Critical',
+        ]);
+        if ($validator->fails()) {
+            return $this->error('Validation failed', 'VALIDATION_ERROR', 422, $validator->errors()->toArray());
+        }
+
+        $maintenanceType = $request->input('maintenance_type', $maintenance?->maintenance_type ?? 'Vehicle Maintenance');
+        $maintenanceDescription = $request->input('description', $maintenance?->description ?? 'Vehicle flagged for maintenance from fleet dashboard.');
+
+        $srf = SRF::create([
+            'srf_id' => SRF::generateSRFId(),
+            'formatted_id' => null,
+            'title' => 'Fleet Maintenance SRF - ' . ($vehicle->plate_number ?? $vehicle->vehicle_code),
+            'service_type' => $maintenanceType,
+            'contract_type' => 'EMERALD',
+            'urgency' => $request->input('urgency', 'Medium'),
+            'description' => trim(sprintf(
+                "Vehicle ID: %s\nPlate Number: %s\nMaintenance Type: %s\nFlagged Description: %s",
+                $vehicle->id,
+                $vehicle->plate_number ?? 'N/A',
+                $maintenanceType,
+                $maintenanceDescription
+            )),
+            'duration' => 'TBD',
+            'estimated_cost' => (float) ($maintenance?->cost ?? 0),
+            'justification' => 'Auto-initiated from Fleet Maintenance dashboard.',
+            'requester_id' => $user->id,
+            'requester_name' => $user->name,
+            'department' => $user->department,
+            'date' => now(),
+            'status' => 'Pending',
+            'current_stage' => 'procurement',
+            'approval_history' => [],
+            'remarks' => 'pending_procurement',
+        ]);
+
+        try {
+            $srf->loadMissing('requester');
+            $this->workflowNotificationService->notifySRFSubmitted($srf);
+        } catch (\Throwable) {
+            // Do not fail SRF creation when notification fails.
+        }
+
+        return $this->success([
+            'srf' => [
+                'id' => $srf->srf_id,
+                'title' => $srf->title,
+                'serviceType' => $srf->service_type,
+                'department' => $srf->department,
+                'status' => 'pending_procurement',
+                'currentStage' => $srf->current_stage,
+                'description' => $srf->description,
+            ],
+        ], 201);
     }
 }

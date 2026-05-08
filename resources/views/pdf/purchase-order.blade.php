@@ -144,6 +144,7 @@
         .approval .lbl { font-weight: bold; margin-bottom: 4px; }
         .approval .val { margin-bottom: 14px; min-height: 14px; }
         .approval .rule { border-bottom: 1px solid #000; min-height: 1px; margin-top: 4px; margin-bottom: 10px; }
+        .signature-img { max-width: 140px; max-height: 60px; display: block; margin-bottom: 8px; }
     </style>
 </head>
 <body>
@@ -255,6 +256,9 @@
 
     <div class="approval">
         <div class="lbl">Approved By</div>
+        @if (!empty($signature_image_url))
+            <img src="{{ $signature_image_url }}" alt="Signature" class="signature-img" />
+        @endif
         <div class="val">{{ $approved_by_name }}</div>
         <div class="lbl">Date</div>
         <div class="val">{{ $approved_by_date }}</div>

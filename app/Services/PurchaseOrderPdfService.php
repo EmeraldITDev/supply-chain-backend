@@ -112,6 +112,7 @@ class PurchaseOrderPdfService
             $tax > 0 || $taxRate > 0,
             $approverName,
             $approverDate,
+            $data['signature_image_url'] ?? null,
         ))->render();
     }
 
@@ -198,6 +199,7 @@ class PurchaseOrderPdfService
             false,
             (string) ($user->name ?? ''),
             $date->format('F j, Y'),
+            $data['signature_image_url'] ?? null,
         ))->render();
     }
 
@@ -222,7 +224,8 @@ class PurchaseOrderPdfService
         string $currency,
         bool $showTaxBreakdown,
         string $approvedByName,
-        string $approvedByDate
+        string $approvedByDate,
+        ?string $signatureImageUrl = null
     ): array {
         $company = $this->normalizeCompany($company);
 
@@ -246,6 +249,7 @@ class PurchaseOrderPdfService
             'show_tax_breakdown' => $showTaxBreakdown,
             'approved_by_name' => $approvedByName,
             'approved_by_date' => $approvedByDate,
+            'signature_image_url' => $signatureImageUrl,
         ];
     }
 

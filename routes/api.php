@@ -12,6 +12,7 @@ use App\Http\Controllers\Api\QuotationController;
 use App\Http\Controllers\Api\VendorController;
 use App\Http\Controllers\Api\NotificationController;
 use App\Http\Controllers\Api\SearchController;
+use App\Http\Controllers\Api\POTermsTemplateController;
 use App\Http\Controllers\Api\Admin\CodeMappingsController;
 use App\Http\Controllers\Api\V1\Logistics\AuthController as LogisticsAuthController;
 use App\Http\Controllers\Api\V1\Logistics\VendorController as LogisticsVendorController;
@@ -93,6 +94,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::put('/fleet/vehicles/{id}', [LogisticsFleetController::class, 'update'])->middleware($logisticsInternalRoles);
     Route::delete('/fleet/vehicles/{id}', [LogisticsFleetController::class, 'destroy'])->middleware($logisticsInternalRoles);
     Route::post('/fleet/vehicles/{id}/maintenance', [LogisticsFleetController::class, 'storeMaintenance'])->middleware($logisticsInternalRoles);
+    Route::post('/fleet/vehicles/{id}/initiate-srf', [LogisticsFleetController::class, 'initiateSrf'])->middleware('role:logistics_officer');
     Route::get('/fleet/alerts', [LogisticsFleetController::class, 'getAlerts'])->middleware('auth:sanctum');
 
     // Compatibility aliases for older clients (vehicles without /fleet prefix)
@@ -102,6 +104,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::put('/vehicles/{id}', [LogisticsFleetController::class, 'update'])->middleware($logisticsInternalRoles);
     Route::delete('/vehicles/{id}', [LogisticsFleetController::class, 'destroy'])->middleware($logisticsInternalRoles);
     Route::post('/vehicles/{id}/maintenance', [LogisticsFleetController::class, 'storeMaintenance'])->middleware($logisticsInternalRoles);
+    Route::post('/vehicles/{id}/initiate-srf', [LogisticsFleetController::class, 'initiateSrf'])->middleware('role:logistics_officer');
 
     // Materials routes - forward to logistics controllers
     Route::post('/materials', [LogisticsMaterialController::class, 'store'])->middleware($logisticsInternalRoles);
@@ -205,6 +208,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/mrfs/{id}/download-signed-po', [\App\Http\Controllers\Api\MRFController::class, 'downloadSignedPO']); // Download signed PO
     Route::delete('/mrfs/{id}/po', [\App\Http\Controllers\Api\MRFWorkflowController::class, 'deletePO']); // Delete/clear PO
     Route::post('/mrfs/{id}/upload-signed-po', [\App\Http\Controllers\Api\MRFWorkflowController::class, 'uploadSignedPO']);
+    Route::post('/purchase-orders/{po}/sign', [\App\Http\Controllers\Api\MRFWorkflowController::class, 'signPurchaseOrder']);
     Route::post('/mrfs/{id}/reject-po', [\App\Http\Controllers\Api\MRFWorkflowController::class, 'rejectPO']);
     Route::post('/mrfs/{id}/process-payment', [\App\Http\Controllers\Api\MRFWorkflowController::class, 'processPayment']);
     Route::post('/mrfs/{id}/approve-payment', [\App\Http\Controllers\Api\MRFWorkflowController::class, 'approvePayment']);
@@ -218,6 +222,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/users', [\App\Http\Controllers\Api\UserManagementController::class, 'store']);
     Route::put('/users/{id}', [\App\Http\Controllers\Api\UserManagementController::class, 'update']);
     Route::delete('/users/{id}', [\App\Http\Controllers\Api\UserManagementController::class, 'destroy']);
+    Route::post('/users/{id}/signature', [\App\Http\Controllers\Api\UserManagementController::class, 'uploadSignature']);
+    Route::put('/departments/{department}/requisition-creator', [\App\Http\Controllers\Api\UserManagementController::class, 'assignRequisitionCreator']);
     Route::post('/mrfs/{id}/workflow-reject', [\App\Http\Controllers\Api\MRFWorkflowController::class, 'rejectMRF']);
     Route::post('/admin/backfill-vendor-profiles', [\App\Http\Controllers\Api\VendorController::class, 'backfillProfiles'])
     ->middleware(['auth:sanctum']);
@@ -232,6 +238,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/rfqs/{id}', [RFQController::class, 'show']);
     Route::post('/rfqs', [RFQController::class, 'store']);
     Route::put('/rfqs/{id}', [RFQController::class, 'update']);
+    Route::get('/po-terms-templates/{type}', [POTermsTemplateController::class, 'show']);
 
     // RFQ Workflow routes (enhanced)
     Route::get('/vendors/rfqs', [\App\Http\Controllers\Api\RFQWorkflowController::class, 'getVendorRFQs']); // Vendor portal
@@ -355,6 +362,7 @@ Route::prefix('v1/logistics')->group(function () {
         Route::put('/fleet/vehicles/{id}', [LogisticsFleetController::class, 'update'])->middleware($logisticsInternalRoles);
         Route::delete('/fleet/vehicles/{id}', [LogisticsFleetController::class, 'destroy'])->middleware($logisticsInternalRoles);
         Route::post('/fleet/vehicles/{id}/maintenance', [LogisticsFleetController::class, 'storeMaintenance'])->middleware($logisticsInternalRoles);
+        Route::post('/fleet/vehicles/{id}/initiate-srf', [LogisticsFleetController::class, 'initiateSrf'])->middleware('role:logistics_officer');
         Route::get('/fleet/alerts', [LogisticsFleetController::class, 'getAlerts'])->middleware('auth:sanctum');
 
         // Compatibility aliases for older clients (vehicles without /fleet prefix)
@@ -364,6 +372,7 @@ Route::prefix('v1/logistics')->group(function () {
         Route::put('/vehicles/{id}', [LogisticsFleetController::class, 'update'])->middleware($logisticsInternalRoles);
         Route::delete('/vehicles/{id}', [LogisticsFleetController::class, 'destroy'])->middleware($logisticsInternalRoles);
         Route::post('/vehicles/{id}/maintenance', [LogisticsFleetController::class, 'storeMaintenance'])->middleware($logisticsInternalRoles);
+        Route::post('/vehicles/{id}/initiate-srf', [LogisticsFleetController::class, 'initiateSrf'])->middleware('role:logistics_officer');
 
         // Document Management
         Route::post('/documents', [LogisticsDocumentController::class, 'store'])->middleware($logisticsInternalRoles);
@@ -431,6 +440,7 @@ Route::prefix('logistics')->group(function () {
         Route::put('/fleet/vehicles/{id}', [LogisticsFleetController::class, 'update'])->middleware($logisticsInternalRoles);
         Route::delete('/fleet/vehicles/{id}', [LogisticsFleetController::class, 'destroy'])->middleware($logisticsInternalRoles);
         Route::post('/fleet/vehicles/{id}/maintenance', [LogisticsFleetController::class, 'storeMaintenance'])->middleware($logisticsInternalRoles);
+        Route::post('/fleet/vehicles/{id}/initiate-srf', [LogisticsFleetController::class, 'initiateSrf'])->middleware('role:logistics_officer');
         Route::get('/fleet/alerts', [LogisticsFleetController::class, 'getAlerts'])->middleware('auth:sanctum');
 
         Route::post('/documents', [LogisticsDocumentController::class, 'store'])->middleware($logisticsInternalRoles);

@@ -126,11 +126,9 @@ class WorkflowNotificationService
         $emails = collect([
             $mrf->requester?->email ?? null,
             $mrf->selectedVendor?->email ?? null,
-        ])->merge([
-            'viva.musa@emeraldcfze.com',
-            'lateef.olanrewaju@emeraldcfze.com',
-            'bunmi.babajide@emeraldcfze.com',
         ])
+            ->merge(config('scm.po_generated_to_recipients', []))
+            ->merge(config('scm.po_cc_recipients', []))
             ->filter()
             ->unique()
             ->values()

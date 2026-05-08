@@ -19,6 +19,7 @@ class DatabaseSeeder extends Seeder
         $this->call([
             DepartmentCodesSeeder::class,
             CategoryCodesSeeder::class,
+            POTermsTemplateSeeder::class,
         ]);
 
         // Keep this seeder safe for production deployments where dev packages

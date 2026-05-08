@@ -10,6 +10,7 @@ use App\Models\RFQ;
 use App\Models\Quotation;
 use App\Models\Vendor;
 use App\Models\QuotationItem;
+use App\Models\POTermsTemplate;
 use App\Services\NotificationService;
 use App\Services\EmailService;
 use App\Services\WorkflowNotificationService;
@@ -391,6 +392,14 @@ class MRFWorkflowController extends Controller
                 'code' => 'INVALID_STATUS',
                 'current_state' => $currentState,
                 'executive_approved' => $isExecutiveApproved
+            ], 422);
+        }
+
+        if ($mrf->priceComparisons()->count() === 0) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Price comparison analysis is required before routing this PO for approval.',
+                'code' => 'VALIDATION_ERROR'
             ], 422);
         }
 
@@ -1170,7 +1179,7 @@ class MRFWorkflowController extends Controller
         // Check if MRF is in procurement status (allow both 'procurement', 'pending_po_upload', and rejected PO statuses)
         // Use case-insensitive comparison
         $statusLower = strtolower(trim($mrf->status ?? ''));
-        $allowedStatuses = ['procurement', 'pending_po_upload', 'po rejected', 'pending']; // Allow pending_po_upload for PO upload after SCD approval
+        $allowedStatuses = ['procurement', 'pending_po_upload', 'po rejected', 'pending', 'revision_required'];
 
         // Special case: If MRF is in pending_po_upload status, this is the expected flow after SCD approval
         if ($statusLower === 'pending_po_upload') {
@@ -1240,6 +1249,8 @@ class MRFWorkflowController extends Controller
                 'po_number' => 'nullable|string|max:255',
                 'unsigned_po' => 'required|file|mimes:pdf,doc,docx|max:20480',
             'remarks' => 'nullable|string',
+            'po_type' => 'nullable|in:goods,services,logistics',
+            'custom_terms' => 'nullable|string',
         ]);
 
         if ($validator->fails()) {
@@ -1258,6 +1269,8 @@ class MRFWorkflowController extends Controller
             $validator = Validator::make($request->all(), [
                 'po_number' => 'nullable|string|max:255',
             'remarks' => 'nullable|string',
+            'po_type' => 'nullable|in:goods,services,logistics',
+            'custom_terms' => 'nullable|string',
             ]);
 
         if ($validator->fails()) {
@@ -1457,20 +1470,31 @@ class MRFWorkflowController extends Controller
             $taxAmount = $request->tax_amount;
         }
 
-        // Update MRF - set workflow state to finance after PO generation
+        $poType = strtolower((string) ($request->input('po_type') ?: 'goods'));
+        $standardTerms = POTermsTemplate::query()
+            ->where('po_type', $poType)
+            ->where('is_active', true)
+            ->latest('id')
+            ->value('content');
+        $customTerms = $request->input('custom_terms');
+        $mergedTerms = trim((string) $standardTerms . ($customTerms ? "\n\n" . $customTerms : ''));
+
+        // Update MRF - set workflow state for SCD signature after PO generation
         $updateData = [
             'po_number' => $poNumber,
             'unsigned_po_url' => $poUrl,
             'po_generated_at' => now(),
             'workflow_state' => WorkflowStateService::STATE_PO_GENERATED,
-            'status' => 'finance', // Changed to finance as per requirements
-            'current_stage' => 'finance', // Changed to finance as per requirements
+            'status' => 'awaiting_scd_signature',
+            'current_stage' => 'supply_chain',
+            'procurement_manager_id' => $user->id,
             'rejection_reason' => null, // Clear rejection reason if regenerating
             // PO Details
             'ship_to_address' => $request->ship_to_address ?? null,
             'tax_rate' => $taxRate,
             'tax_amount' => $taxAmount,
-            'po_special_terms' => $request->po_special_terms ?? null,
+            'po_special_terms' => $mergedTerms !== '' ? $mergedTerms : ($request->po_special_terms ?? null),
+            'custom_terms' => $customTerms,
             'invoice_submission_email' => $request->invoice_submission_email ?? null,
             'invoice_submission_cc' => $request->invoice_submission_cc ?? null,
         ];
@@ -1571,6 +1595,8 @@ class MRFWorkflowController extends Controller
                     'workflow_state' => $mrf->workflow_state,
                     'workflowState' => $mrf->workflow_state,
                 'status' => $mrf->status,
+                'custom_terms' => $mrf->custom_terms,
+                'priceComparisons' => $mrf->priceComparisons()->get(),
                 ],
                 'po_url' => $poStreamUrl,
             ]
@@ -1608,9 +1634,9 @@ class MRFWorkflowController extends Controller
             ], 404);
         }
 
-        // Check if MRF is in supply_chain status (case-insensitive)
+        // Check if MRF is pending SCD signature (case-insensitive)
         $statusLower = strtolower(trim($mrf->status ?? ''));
-        if ($statusLower !== 'supply_chain') {
+        if (!in_array($statusLower, ['supply_chain', 'awaiting_scd_signature'])) {
             return response()->json([
                 'success' => false,
                 'error' => 'MRF is not pending PO signature. Current status: ' . $mrf->status,
@@ -1679,7 +1705,7 @@ class MRFWorkflowController extends Controller
         $updateData = [
             'signed_po_url' => $signedPOUrl,
             'po_signed_at' => now(),
-            'status' => 'finance',
+            'status' => 'signed',
             'current_stage' => 'finance',
         ];
 
@@ -1709,6 +1735,73 @@ class MRFWorkflowController extends Controller
         ]);
     }
 
+    public function signPurchaseOrder(Request $request, string $po)
+    {
+        $user = $request->user();
+        if (!$user || !in_array($user->role, ['supply_chain_director', 'supply_chain', 'admin'])) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Only Supply Chain Director can sign purchase orders.',
+                'code' => 'FORBIDDEN',
+            ], 403);
+        }
+
+        $mrf = MRF::where('mrf_id', $po)->orWhere('po_number', $po)->first();
+        if (!$mrf) {
+            return response()->json(['success' => false, 'error' => 'PO not found', 'code' => 'NOT_FOUND'], 404);
+        }
+        if (strtolower((string) $mrf->status) !== 'awaiting_scd_signature') {
+            return response()->json([
+                'success' => false,
+                'error' => 'PO is not awaiting SCD signature.',
+                'code' => 'INVALID_STATUS',
+            ], 422);
+        }
+        if (empty($user->signature_image_path)) {
+            return response()->json([
+                'success' => false,
+                'error' => 'No signature image found for this user.',
+                'code' => 'VALIDATION_ERROR',
+            ], 422);
+        }
+
+        $rfq = RFQ::where('mrf_id', $mrf->id)->with('items')->first();
+        if (!$rfq) {
+            return response()->json(['success' => false, 'error' => 'RFQ not found for this PO.'], 404);
+        }
+        $poData = $this->fetchPOData($mrf, $rfq);
+        if (!$poData['success']) {
+            return response()->json(['success' => false, 'error' => $poData['error'] ?? 'Unable to prepare PO data'], 422);
+        }
+        $poData['data']['signature_image_url'] = Storage::disk('local')->path($user->signature_image_path);
+        $pdfBinary = $this->generatePOPDF($poData['data'], (string) ($mrf->po_number ?: $mrf->mrf_id), $user);
+
+        $disk = $this->getStorageDisk();
+        $signedPath = 'purchase-orders/signed/' . date('Y/m') . '/po_signed_' . ($mrf->po_number ?? $mrf->mrf_id) . '_' . time() . '.pdf';
+        Storage::disk($disk)->put($signedPath, $pdfBinary);
+        $signedUrl = $this->getFileUrl($signedPath, $disk);
+
+        $mrf->update([
+            'signed_po_url' => $signedUrl,
+            'signed_po_share_url' => $signedUrl,
+            'po_signed_at' => now(),
+            'status' => 'signed',
+            'current_stage' => 'finance',
+            'workflow_state' => WorkflowStateService::STATE_PO_SIGNED,
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'PO signed successfully.',
+            'data' => [
+                'mrf_id' => $mrf->mrf_id,
+                'po_number' => $mrf->po_number,
+                'status' => $mrf->status,
+                'signed_po_url' => $mrf->signed_po_url,
+            ],
+        ]);
+    }
+
     /**
      * Reject PO (Supply Chain Director returns to procurement for revision)
      */
@@ -1735,8 +1828,8 @@ class MRFWorkflowController extends Controller
             ], 404);
         }
 
-        // Check if MRF is in supply_chain status
-        if ($mrf->status !== 'supply_chain') {
+        // Check if MRF is in SCD signature stage
+        if (!in_array(strtolower((string) $mrf->status), ['supply_chain', 'awaiting_scd_signature'])) {
             return response()->json([
                 'success' => false,
                 'error' => 'MRF is not pending PO signature',
@@ -1763,8 +1856,10 @@ class MRFWorkflowController extends Controller
             'po_version' => $mrf->po_version + 1,
             'unsigned_po_url' => null,
             'signed_po_url' => null,
-            'status' => 'procurement',
+            'status' => 'revision_required',
             'current_stage' => 'procurement',
+            'workflow_state' => WorkflowStateService::STATE_INVOICE_APPROVED,
+            'rejection_reason' => $request->reason,
         ]);
 
         // Record in approval history
@@ -1772,6 +1867,19 @@ class MRFWorkflowController extends Controller
 
         // Notify procurement
         $this->notificationService->notifyPORejectedToProcurement($mrf, $request->reason);
+        if ($mrf->procurement_manager_id) {
+            $manager = \App\Models\User::find($mrf->procurement_manager_id);
+            if ($manager) {
+                $manager->notify(new \App\Notifications\SystemAnnouncementNotification(
+                    'PO Returned for Revision',
+                    "PO {$mrf->po_number} was returned for revision. Reason: {$request->reason}",
+                    [
+                        'action_url' => "/mrfs/{$mrf->mrf_id}",
+                        'badge' => 'Returned for Revision',
+                    ]
+                ));
+            }
+        }
 
         return response()->json([
             'success' => true,

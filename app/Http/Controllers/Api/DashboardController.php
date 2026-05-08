@@ -569,7 +569,7 @@ class DashboardController extends Controller
         
         // Procurement managers see all MRFs in procurement stage
         if (in_array($user->role, ['procurement_manager', 'procurement', 'admin'])) {
-            $procurementMRFIds = MRF::whereIn('status', ['procurement', 'pending_po_upload', 'procurement_review'])
+            $procurementMRFIds = MRF::whereIn('status', ['procurement', 'pending_po_upload', 'procurement_review', 'revision_required'])
                 ->orWhere('current_stage', 'procurement')
                 ->pluck('mrf_id')->toArray();
             $relevantMRFIds = array_merge($relevantMRFIds, $procurementMRFIds);
@@ -586,7 +586,7 @@ class DashboardController extends Controller
         
         // Supply Chain Directors see MRFs they need to approve
         if (in_array($user->role, ['supply_chain_director', 'supply_chain', 'admin'])) {
-            $scdMRFIds = MRF::whereIn('status', ['supply_chain', 'vendor_selected', 'vendor_approved'])
+            $scdMRFIds = MRF::whereIn('status', ['supply_chain', 'vendor_selected', 'vendor_approved', 'awaiting_scd_signature'])
                 ->orWhere('current_stage', 'supply_chain')
                 ->pluck('mrf_id')->toArray();
             $relevantMRFIds = array_merge($relevantMRFIds, $scdMRFIds);

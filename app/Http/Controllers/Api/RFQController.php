@@ -97,7 +97,7 @@ class RFQController extends Controller
                 'category' => $rfq->category,
                 'description' => $rfq->description,
                 'quantity' => $rfq->quantity,
-                'estimatedCost' => (float) $rfq->estimated_cost,
+                'estimatedCost' => $rfq->estimated_cost !== null ? (float) $rfq->estimated_cost : null,
                 'estimated_budget' => $estimatedBudget,
                 'estimatedBudget' => $estimatedBudget,
                 'paymentTerms' => $rfq->payment_terms,
@@ -156,7 +156,7 @@ class RFQController extends Controller
             'category' => $rfq->category,
             'description' => $rfq->description,
             'quantity' => $rfq->quantity,
-            'estimatedCost' => (float) $rfq->estimated_cost,
+            'estimatedCost' => $rfq->estimated_cost !== null ? (float) $rfq->estimated_cost : null,
             'estimated_budget' => $estimatedBudget,
             'estimatedBudget' => $estimatedBudget,
             'paymentTerms' => $rfq->payment_terms,
@@ -191,7 +191,7 @@ class RFQController extends Controller
             'category' => 'nullable|string|max:255',
             'description' => 'required|string',
             'quantity' => 'required|string',
-            'estimatedCost' => 'required|numeric|min:0',
+            'estimatedCost' => 'nullable|numeric|min:0',
             'deadline' => 'required|date',
             'vendorIds' => 'required|array|min:1',
             'vendorIds.*' => 'required|string|exists:vendors,vendor_id',
@@ -262,16 +262,9 @@ class RFQController extends Controller
         }
 
         // Handle estimated_cost: cast to float and use MRF's value as fallback if provided value is 0 or empty
-        $estimatedCost = $request->estimatedCost;
-        if (is_string($estimatedCost)) {
-            $estimatedCost = floatval($estimatedCost);
-        }
-        // If estimated cost is 0, null, or empty, fallback to MRF's estimated_cost
-        if (empty($estimatedCost) || $estimatedCost == 0) {
-            $estimatedCost = $mrf && $mrf->estimated_cost ? (float) $mrf->estimated_cost : 0;
-        } else {
-            $estimatedCost = (float) $estimatedCost;
-        }
+        $estimatedCost = $request->has('estimatedCost')
+            ? ($request->estimatedCost !== null ? (float) $request->estimatedCost : null)
+            : ($mrf?->estimated_cost !== null ? (float) $mrf->estimated_cost : null);
 
         // Generate meaningful RFQ title if not provided or generic
         $rfqTitle = $request->title;
@@ -366,7 +359,7 @@ class RFQController extends Controller
             'category' => $rfq->category,
             'description' => $rfq->description,
             'quantity' => $rfq->quantity,
-            'estimatedCost' => (float) $rfq->estimated_cost,
+            'estimatedCost' => $rfq->estimated_cost !== null ? (float) $rfq->estimated_cost : null,
             'paymentTerms' => $rfq->payment_terms,
             'notes' => $rfq->notes,
             'supportingDocuments' => $rfq->supporting_documents ?? [],
@@ -396,7 +389,7 @@ class RFQController extends Controller
         $validator = Validator::make($request->all(), [
             'description' => 'sometimes|required|string',
             'quantity' => 'sometimes|required|string',
-            'estimatedCost' => 'sometimes|required|numeric|min:0',
+            'estimatedCost' => 'sometimes|nullable|numeric|min:0',
             'deadline' => 'sometimes|required|date',
             'status' => 'sometimes|in:Open,Closed,Awarded,Cancelled',
             'vendorIds' => 'sometimes|array|min:1',
@@ -416,8 +409,7 @@ class RFQController extends Controller
         if ($request->has('description')) $updateData['description'] = $request->description;
         if ($request->has('quantity')) $updateData['quantity'] = $request->quantity;
         if ($request->has('estimatedCost')) {
-            // Cast to float to ensure proper numeric storage
-            $updateData['estimated_cost'] = (float) $request->estimatedCost;
+            $updateData['estimated_cost'] = $request->estimatedCost !== null ? (float) $request->estimatedCost : null;
         }
         if ($request->has('deadline')) $updateData['deadline'] = $request->deadline;
         if ($request->has('status')) $updateData['status'] = $request->status;

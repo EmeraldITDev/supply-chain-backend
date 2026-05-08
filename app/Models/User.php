@@ -25,6 +25,8 @@ class User extends Authenticatable
         'password',
         'role',
         'department',
+        'designated_requisition_creator',
+        'signature_image_path',
         'phone',
         'employee_id',
         'vendor_id',
@@ -56,6 +58,7 @@ class User extends Authenticatable
             'password' => 'hashed',
             'password_changed_at' => 'datetime',
             'must_change_password' => 'boolean',
+            'designated_requisition_creator' => 'boolean',
         ];
     }
 

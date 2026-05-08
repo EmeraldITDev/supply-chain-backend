@@ -57,6 +57,8 @@ class UserManagementController extends Controller
                 'email' => $user->email,
                 'role' => $user->role,
                 'department' => $user->department,
+                'designated_requisition_creator' => (bool) $user->designated_requisition_creator,
+                'signature_image_path' => $user->signature_image_path,
                 'is_admin' => $user->is_admin ?? false,
                 'can_manage_users' => $user->can_manage_users ?? false,
                 'created_at' => $user->created_at,
@@ -92,6 +94,7 @@ class UserManagementController extends Controller
             'password' => 'required|string|min:8',
             'is_admin' => 'nullable|boolean',
             'can_manage_users' => 'nullable|boolean',
+            'designated_requisition_creator' => 'nullable|boolean',
         ]);
 
         if ($validator->fails()) {
@@ -120,6 +123,7 @@ class UserManagementController extends Controller
             'password' => Hash::make($request->password),
             'role' => $role,
             'department' => $request->department,
+            'designated_requisition_creator' => (bool) $request->boolean('designated_requisition_creator', false),
             'is_admin' => $isAdmin,
             'can_manage_users' => $canManageUsers,
         ]);
@@ -140,6 +144,8 @@ class UserManagementController extends Controller
                 'email' => $newUser->email,
                 'role' => $newUser->role,
                 'department' => $newUser->department,
+                'designated_requisition_creator' => (bool) $newUser->designated_requisition_creator,
+                'signature_image_path' => $newUser->signature_image_path,
                 'is_admin' => $newUser->is_admin,
                 'can_manage_users' => $newUser->can_manage_users,
             ]
@@ -179,6 +185,7 @@ class UserManagementController extends Controller
             'password' => 'sometimes|string|min:8',
             'is_admin' => 'nullable|boolean',
             'can_manage_users' => 'nullable|boolean',
+            'designated_requisition_creator' => 'nullable|boolean',
         ]);
 
         if ($validator->fails()) {
@@ -226,6 +233,9 @@ class UserManagementController extends Controller
         if ($request->has('can_manage_users')) {
             $updateData['can_manage_users'] = $request->can_manage_users;
         }
+        if ($request->has('designated_requisition_creator')) {
+            $updateData['designated_requisition_creator'] = (bool) $request->designated_requisition_creator;
+        }
 
         $targetUser->update($updateData);
 
@@ -244,9 +254,139 @@ class UserManagementController extends Controller
                 'email' => $targetUser->email,
                 'role' => $targetUser->role,
                 'department' => $targetUser->department,
+                'designated_requisition_creator' => (bool) $targetUser->designated_requisition_creator,
+                'signature_image_path' => $targetUser->signature_image_path,
                 'is_admin' => $targetUser->is_admin,
                 'can_manage_users' => $targetUser->can_manage_users,
             ]
+        ]);
+    }
+
+    public function assignRequisitionCreator(Request $request, string $department)
+    {
+        $user = $request->user();
+        if (!$this->permissionService->canManageUsers($user)) {
+            return response()->json([
+                'success' => false,
+                'error' => 'You do not have permission to assign requisition creators',
+                'code' => 'FORBIDDEN'
+            ], 403);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'user_id' => 'required|integer|exists:users,id',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Validation failed',
+                'errors' => $validator->errors(),
+                'code' => 'VALIDATION_ERROR'
+            ], 422);
+        }
+
+        $targetUser = User::find($request->integer('user_id'));
+        if (!$targetUser || strcasecmp((string) $targetUser->department, (string) $department) !== 0) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Selected user must belong to the requested department.',
+                'code' => 'VALIDATION_ERROR'
+            ], 422);
+        }
+
+        User::whereRaw('LOWER(department) = ?', [strtolower($department)])
+            ->update(['designated_requisition_creator' => false]);
+
+        $targetUser->update(['designated_requisition_creator' => true]);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Designated requisition creator updated.',
+            'data' => [
+                'department' => $department,
+                'designated_creator' => [
+                    'id' => $targetUser->id,
+                    'name' => $targetUser->name,
+                    'email' => $targetUser->email,
+                    'department' => $targetUser->department,
+                    'designated_requisition_creator' => (bool) $targetUser->designated_requisition_creator,
+                ],
+            ],
+        ]);
+    }
+
+    public function uploadSignature(Request $request, int $id)
+    {
+        $actor = $request->user();
+        if (!$actor) {
+            return response()->json(['success' => false, 'error' => 'Unauthorized'], 401);
+        }
+
+        $isAdmin = $this->permissionService->canManageUsers($actor) || $actor->role === 'admin';
+        if (!$isAdmin && $actor->id !== $id) {
+            return response()->json([
+                'success' => false,
+                'error' => 'You are not authorised to upload this signature.',
+            ], 403);
+        }
+
+        $target = User::find($id);
+        if (!$target) {
+            return response()->json(['success' => false, 'error' => 'User not found'], 404);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'signature' => 'nullable|file|image|max:5120',
+            'signature_base64' => 'nullable|string',
+        ]);
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Validation failed',
+                'errors' => $validator->errors(),
+            ], 422);
+        }
+
+        if (!$request->hasFile('signature') && !$request->filled('signature_base64')) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Provide either signature file upload or signature_base64.',
+            ], 422);
+        }
+
+        $disk = 'local';
+        $path = null;
+
+        if ($request->hasFile('signature')) {
+            $file = $request->file('signature');
+            $filename = 'signature_' . $target->id . '_' . time() . '.' . $file->getClientOriginalExtension();
+            $path = 'signatures/' . $filename;
+            \Storage::disk($disk)->putFileAs('signatures', $file, $filename);
+        } else {
+            $raw = (string) $request->input('signature_base64');
+            $payload = preg_replace('/^data:image\/\w+;base64,/', '', $raw) ?: '';
+            $binary = base64_decode($payload, true);
+            if ($binary === false) {
+                return response()->json([
+                    'success' => false,
+                    'error' => 'Invalid base64 signature payload.',
+                ], 422);
+            }
+            $filename = 'signature_' . $target->id . '_' . time() . '.png';
+            $path = 'signatures/' . $filename;
+            \Storage::disk($disk)->put($path, $binary);
+        }
+
+        $target->update(['signature_image_path' => $path]);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Signature uploaded successfully.',
+            'data' => [
+                'user_id' => $target->id,
+                'signature_image_path' => $target->signature_image_path,
+            ],
         ]);
     }
 

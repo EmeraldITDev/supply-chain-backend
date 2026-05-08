@@ -191,7 +191,7 @@ class MRFController extends Controller
     public function index(Request $request)
     {
         try {
-        $query = MRF::with('requester');
+        $query = MRF::with(['requester', 'priceComparisons']);
 
         // Filter by status
         if ($request->has('status')) {
@@ -298,6 +298,21 @@ class MRFController extends Controller
                 'signedPOUrl' => $freshPOUrls['signed_po_url'] ?? $mrf->signed_po_url,
                 'po_generated_at' => $mrf->po_generated_at?->toIso8601String(),
                 'poGeneratedAt' => $mrf->po_generated_at?->toIso8601String(),
+                'custom_terms' => $mrf->custom_terms,
+                'customTerms' => $mrf->custom_terms,
+                'priceComparisons' => $mrf->priceComparisons->map(function($row) {
+                    return [
+                        'id' => $row->id,
+                        'purchase_order_id' => $row->purchase_order_id,
+                        'vendor_id' => $row->vendor_id,
+                        'item_description' => $row->item_description,
+                        'unit_price' => (float) $row->unit_price,
+                        'quantity' => (float) $row->quantity,
+                        'total_price' => (float) $row->total_price,
+                        'is_selected' => (bool) $row->is_selected,
+                        'selection_reason' => $row->selection_reason,
+                    ];
+                })->values(),
             ];
         }));
         } catch (\Illuminate\Database\QueryException $e) {
@@ -399,7 +414,7 @@ class MRFController extends Controller
                 $query->orWhere('id', (int) $id);
             }
         })
-            ->with(['requester', 'directorApprover'])
+            ->with(['requester', 'directorApprover', 'priceComparisons'])
             ->first();
 
         if (!$mrf) {
@@ -475,6 +490,21 @@ class MRFController extends Controller
             'poGeneratedAt' => $mrf->po_generated_at?->toIso8601String(),
             'po_signed_at' => $mrf->po_signed_at?->toIso8601String(),
             'poSignedAt' => $mrf->po_signed_at?->toIso8601String(),
+            'custom_terms' => $mrf->custom_terms,
+            'customTerms' => $mrf->custom_terms,
+            'priceComparisons' => $mrf->priceComparisons->map(function($row) {
+                return [
+                    'id' => $row->id,
+                    'purchase_order_id' => $row->purchase_order_id,
+                    'vendor_id' => $row->vendor_id,
+                    'item_description' => $row->item_description,
+                    'unit_price' => (float) $row->unit_price,
+                    'quantity' => (float) $row->quantity,
+                    'total_price' => (float) $row->total_price,
+                    'is_selected' => (bool) $row->is_selected,
+                    'selection_reason' => $row->selection_reason,
+                ];
+            })->values(),
             // Supporting attachment
             'attachmentUrl' => $mrf->attachment_url,
             'attachmentShareUrl' => $mrf->attachment_share_url,
@@ -986,6 +1016,12 @@ class MRFController extends Controller
             return response()->json([
                 'success' => false,
                 'error' => 'Only staff members can create Material Request Forms. Please contact your administrator.',
+            ], 403);
+        }
+        if (!$user->designated_requisition_creator) {
+            return response()->json([
+                'success' => false,
+                'error' => 'You are not authorised to create requisition requests for your department.',
             ], 403);
         }
 
@@ -2386,8 +2422,8 @@ class MRFController extends Controller
             'total' => $total,
             'currency' => $currency,
             'payment_terms' => $quotation->payment_terms ?? '30days after invoice submission.',
-            'invoice_submission_email' => $mrf->invoice_submission_email ?? 'accountpayables@emeraldcfze.com',
-            'invoice_submission_cc' => $mrf->invoice_submission_cc ?? 'douglas.anuforo@emeraldcfze.com',
+            'invoice_submission_email' => $mrf->invoice_submission_email ?? config('scm.invoice_submission_email'),
+            'invoice_submission_cc' => $mrf->invoice_submission_cc ?? config('scm.invoice_submission_cc'),
             'special_terms' => $mrf->po_special_terms,
             'mrf_department' => $mrf->department,
             'mrf_display_id' => $mrf->formatted_id ?: $mrf->mrf_id,
