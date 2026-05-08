@@ -47,6 +47,9 @@ class Trip extends Model
         'origin',
         'destination',
         'vendor_id',
+        'multi_vendor',
+        'selected_vendor_id',
+        'approval_status',
         'created_by',
         'updated_by',
         'cancelled_by',
@@ -69,6 +72,11 @@ class Trip extends Model
         return $this->belongsTo(Vendor::class, 'vendor_id');
     }
 
+    public function selectedVendor(): BelongsTo
+    {
+        return $this->belongsTo(Vendor::class, 'selected_vendor_id');
+    }
+
     public function creator(): BelongsTo
     {
         return $this->belongsTo(User::class, 'created_by');
@@ -87,5 +95,20 @@ class Trip extends Model
     public function reports(): HasMany
     {
         return $this->hasMany(Report::class, 'trip_id');
+    }
+
+    public function vendorSubmissions(): HasMany
+    {
+        return $this->hasMany(TripVendorSubmission::class, 'trip_id');
+    }
+
+    public function accommodations(): HasMany
+    {
+        return $this->hasMany(AccommodationBooking::class, 'trip_id');
+    }
+
+    public function jobCompletionCertificate()
+    {
+        return $this->hasOne(JobCompletionCertificate::class, 'trip_id');
     }
 }
