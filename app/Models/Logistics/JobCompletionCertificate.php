@@ -33,6 +33,7 @@ class JobCompletionCertificate extends Model
         'approval_remarks',
         'approved_by',
         'approved_at',
+        'reference_number',
         'metadata',
     ];
 
@@ -76,6 +77,14 @@ class JobCompletionCertificate extends Model
     public function documents(): MorphMany
     {
         return $this->morphMany(Document::class, 'documentable');
+    }
+
+    /**
+     * Get all line items for this JCC
+     */
+    public function lineItems()
+    {
+        return $this->hasMany(JCCLineItem::class, 'jcc_id');
     }
 
     /**

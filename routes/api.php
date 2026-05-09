@@ -351,13 +351,44 @@ Route::prefix('v1/logistics')->group(function () {
         Route::put('/journeys/{id}', [LogisticsJourneyController::class, 'update'])->middleware($logisticsInternalRoles);
         Route::post('/journeys/{id}/update-status', [LogisticsJourneyController::class, 'updateStatus'])->middleware('role:vendor,logistics_manager,procurement_manager,supply_chain_director,admin');
 
-        // Materials Management
-        Route::post('/materials', [LogisticsMaterialController::class, 'store'])->middleware($logisticsInternalRoles);
-        Route::get('/materials', [LogisticsMaterialController::class, 'index'])->middleware($logisticsInternalRoles);
-        Route::get('/materials/{id}', [LogisticsMaterialController::class, 'show'])->middleware($logisticsInternalRoles);
-        Route::delete('/materials/{id}', [LogisticsMaterialController::class, 'destroy'])->middleware($logisticsInternalRoles);
-        Route::post('/materials/bulk-upload', [LogisticsMaterialController::class, 'bulkUpload'])->middleware($logisticsInternalRoles);
-        Route::get('/trips/{id}/materials', [LogisticsMaterialController::class, 'listByTrip'])->middleware($logisticsInternalRoles);
+        // Trip Vendor Submission & Multi-Vendor Workflow
+        Route::post('/trips/{tripId}/invite-vendors', [LogisticsTripVendorSubmissionController::class, 'inviteVendors'])->middleware($logisticsInternalRoles);
+        Route::get('/trips/{tripId}/vendor-responses', [LogisticsTripVendorSubmissionController::class, 'getVendorResponses'])->middleware($logisticsInternalRoles);
+        Route::post('/trips/{tripId}/select-vendor', [LogisticsTripVendorSubmissionController::class, 'selectVendor'])->middleware($logisticsInternalRoles);
+        Route::get('/trips/{tripId}/vendor-submission/{submissionId}', [LogisticsTripVendorSubmissionController::class, 'getSubmission'])->middleware($logisticsInternalRoles);
+        Route::post('/trips/{tripId}/route-to-procurement', [LogisticsTripVendorSubmissionController::class, 'routeToProcurement'])->middleware($logisticsInternalRoles);
+        Route::post('/trips/{tripId}/notify-invoice', [LogisticsTripVendorSubmissionController::class, 'notifyInvoiceSubmission'])->middleware($logisticsInternalRoles);
+
+        // Vendor Portal Trip Endpoints
+        Route::get('/vendor-portal/trips', [LogisticsVendorPortalTripController::class, 'indexVendorTrips'])->middleware('role:vendor');
+        Route::post('/vendor-portal/trips/{tripId}/submission', [LogisticsVendorPortalTripController::class, 'submitVendorDetails'])->middleware('role:vendor');
+        Route::post('/vendor-portal/trips/{tripId}/documents', [LogisticsVendorPortalTripController::class, 'uploadDocuments'])->middleware('role:vendor');
+        Route::get('/vendor-portal/trips/{tripId}/submission', [LogisticsVendorPortalTripController::class, 'getVendorSubmission'])->middleware('role:vendor');
+
+        // Accommodation Bookings
+        Route::post('/accommodations', [LogisticsAccommodationBookingController::class, 'store'])->middleware($logisticsInternalRoles);
+        Route::get('/accommodations', [LogisticsAccommodationBookingController::class, 'index'])->middleware($logisticsInternalRoles);
+        Route::get('/accommodations/{id}', [LogisticsAccommodationBookingController::class, 'show'])->middleware($logisticsInternalRoles);
+        Route::put('/accommodations/{id}', [LogisticsAccommodationBookingController::class, 'update'])->middleware($logisticsInternalRoles);
+        Route::delete('/accommodations/{id}', [LogisticsAccommodationBookingController::class, 'destroy'])->middleware($logisticsInternalRoles);
+        Route::get('/trips/{tripId}/accommodations', [LogisticsAccommodationBookingController::class, 'getTripAccommodations'])->middleware($logisticsInternalRoles);
+        Route::post('/accommodations/{id}/add-passenger', [LogisticsAccommodationBookingController::class, 'addPassenger'])->middleware($logisticsInternalRoles);
+        Route::post('/accommodations/{id}/remove-passenger', [LogisticsAccommodationBookingController::class, 'removePassenger'])->middleware($logisticsInternalRoles);
+
+        // Job Completion Certificates
+        Route::post('/trips/{tripId}/jcc', [LogisticsJobCompletionCertificateController::class, 'store'])->middleware($logisticsInternalRoles);
+        Route::get('/trips/{tripId}/jcc', [LogisticsJobCompletionCertificateController::class, 'show'])->middleware($logisticsInternalRoles);
+        Route::put('/trips/{tripId}/jcc', [LogisticsJobCompletionCertificateController::class, 'update'])->middleware($logisticsInternalRoles);
+        Route::post('/trips/{tripId}/jcc/line-items', [LogisticsJobCompletionCertificateController::class, 'addLineItem'])->middleware($logisticsInternalRoles);
+        Route::put('/trips/{tripId}/jcc/line-items/{lineItemId}', [LogisticsJobCompletionCertificateController::class, 'updateLineItem'])->middleware($logisticsInternalRoles);
+        Route::delete('/trips/{tripId}/jcc/line-items/{lineItemId}', [LogisticsJobCompletionCertificateController::class, 'deleteLineItem'])->middleware($logisticsInternalRoles);
+        Route::post('/trips/{tripId}/jcc/prefill', [LogisticsJobCompletionCertificateController::class, 'prefill'])->middleware($logisticsInternalRoles);
+        Route::post('/trips/{tripId}/jcc/submit', [LogisticsJobCompletionCertificateController::class, 'submit'])->middleware($logisticsInternalRoles);
+        Route::post('/trips/{tripId}/jcc/approve', [LogisticsJobCompletionCertificateController::class, 'approve'])->middleware($logisticsInternalRoles);
+        Route::get('/trips/{tripId}/jcc/pdf', [LogisticsJobCompletionCertificateController::class, 'generatePdf'])->middleware($logisticsInternalRoles);
+        Route::get('/trips/{tripId}/jcc/pdf/layout', [LogisticsJobCompletionCertificateController::class, 'getPdfLayout'])->middleware($logisticsInternalRoles);
+        Route::post('/trips/{tripId}/jcc/attachments', [LogisticsJobCompletionCertificateController::class, 'uploadAttachment'])->middleware($logisticsInternalRoles);
+        Route::get('/jcc', [LogisticsJobCompletionCertificateController::class, 'index'])->middleware($logisticsInternalRoles);
 
         // Fleet Management
         Route::post('/fleet/vehicles', [LogisticsFleetController::class, 'store'])->middleware($logisticsInternalRoles);
