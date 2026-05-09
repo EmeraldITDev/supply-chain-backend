@@ -10,7 +10,7 @@ class JCCPdfService
 {
     /**
      * Generate PDF for Job Completion Certificate
-     * 
+     *
      * Layout Structure:
      * - Header: Company logo, title "JOB COMPLETION CERTIFICATE"
      * - Trip Info: Trip code, date, vendor details
@@ -58,7 +58,7 @@ class JCCPdfService
 
     /**
      * Get PDF layout structure metadata
-     * 
+     *
      * This defines the exact layout structure for the physical document
      */
     public function getLayoutStructure(): array

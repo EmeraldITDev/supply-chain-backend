@@ -215,7 +215,7 @@ class JobCompletionCertificateController extends ApiController
 
     /**
      * Prefill JCC with vendor submissions
-     * 
+     *
      * Converts vendor portal submissions into ready-to-use line item suggestions
      */
     public function prefill(Request $request, int $tripId)
@@ -322,7 +322,7 @@ class JobCompletionCertificateController extends ApiController
 
     /**
      * Generate PDF of JCC
-     * 
+     *
      * Returns PDF with explicit layout requirements:
      * - Header: Title and reference number
      * - Trip Info: Code, date, vendor details
@@ -355,7 +355,7 @@ class JobCompletionCertificateController extends ApiController
 
     /**
      * Get PDF layout structure metadata
-     * 
+     *
      * Returns the exact layout specifications for the physical document
      */
     public function getPdfLayout(int $tripId)
