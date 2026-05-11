@@ -60,9 +60,9 @@ return Application::configure(basePath: dirname(__DIR__))
                 if ($origin) {
                     $allowedOrigins = config('cors.allowed_origins', []);
                     $allowedPatterns = config('cors.allowed_origins_patterns', []);
-                    
+
                     $isAllowed = in_array($origin, $allowedOrigins, true);
-                    
+
                     if (!$isAllowed) {
                         foreach ($allowedPatterns as $pattern) {
                             if (preg_match($pattern, $origin)) {
@@ -71,7 +71,7 @@ return Application::configure(basePath: dirname(__DIR__))
                             }
                         }
                     }
-                    
+
                     if ($isAllowed) {
                         $response->headers->set('Access-Control-Allow-Origin', $origin, true);
                         $response->headers->set('Access-Control-Allow-Credentials', 'true', true);
@@ -92,7 +92,7 @@ return Application::configure(basePath: dirname(__DIR__))
                 $e instanceof \Illuminate\Database\QueryException) {
 
                 $statusCode = 503;
-                
+
                 $response = response()->json([
                     'success' => false,
                     'error' => 'Database connection error',
@@ -100,7 +100,7 @@ return Application::configure(basePath: dirname(__DIR__))
                     'message' => 'The server is unable to process your request. Please try again in a few moments.',
                     'timestamp' => now()->toIso8601String(),
                 ], $statusCode)->header('Connection', 'close');
-                
+
                 return $addCorsHeaders($response, $origin);
             }
 
@@ -113,7 +113,7 @@ return Application::configure(basePath: dirname(__DIR__))
                     'errors' => $e->errors(),
                     'timestamp' => now()->toIso8601String(),
                 ], 422);
-                
+
                 return $addCorsHeaders($response, $origin);
             }
 
@@ -125,7 +125,7 @@ return Application::configure(basePath: dirname(__DIR__))
                     'code' => 'UNAUTHENTICATED',
                     'timestamp' => now()->toIso8601String(),
                 ], 401);
-                
+
                 return $addCorsHeaders($response, $origin);
             }
 
@@ -137,7 +137,7 @@ return Application::configure(basePath: dirname(__DIR__))
                     'code' => 'FORBIDDEN',
                     'timestamp' => now()->toIso8601String(),
                 ], 403);
-                
+
                 return $addCorsHeaders($response, $origin);
             }
 
