@@ -40,7 +40,7 @@ return [
 
     'allowed_headers' => ['Accept', 'Accept-Language', 'Content-Language', 'Content-Type', 'Authorization', 'X-Requested-With', 'X-CSRF-Token'],
 
-    'exposed_headers' => [],
+    'exposed_headers' => ['Content-Length', 'Content-Type', 'X-Total-Count', 'X-Page-Number', 'X-Page-Size'],
 
     'max_age' => 86400, // 24 hours - allows browsers to cache preflight requests
 

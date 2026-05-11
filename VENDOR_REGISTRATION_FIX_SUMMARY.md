@@ -113,12 +113,14 @@ try {
 git pull origin main
 ```
 
-### 2. Clear Configuration Cache
+### 2. Clear Configuration Cache (CRITICAL)
 ```bash
 php artisan config:cache
 php artisan config:clear
 php artisan cache:clear
 ```
+
+⚠️ **IMPORTANT:** Must run `config:cache` or CORS changes won't take effect!
 
 ### 3. Migrate (if needed)
 ```bash
@@ -313,3 +315,30 @@ Refer to the logs when reporting issues:
 - Include error messages and status codes
 - Include browser console CORS errors
 - Include network tab request/response details
+
+## 🔗 Related Documentation
+
+- **[CORS_FIX_DEPLOYMENT.md](CORS_FIX_DEPLOYMENT.md)** - Quick deployment guide for CORS changes
+- **[CORS_DEBUGGING_GUIDE.md](CORS_DEBUGGING_GUIDE.md)** - Comprehensive CORS debugging and verification
+- **[test-vendor-registration.sh](test-vendor-registration.sh)** - Automated test suite
+
+## Critical Reminders
+
+⚠️ **CORS requires config:cache to take effect:**
+```bash
+php artisan config:cache  # MUST run this!
+php artisan cache:clear
+```
+
+⚠️ **Middleware order is critical:**
+- HandleCors MUST execute first
+- See bootstrap/app.php lines 14-26
+
+⚠️ **CORS headers must be on ALL responses:**
+- Success responses (200, 201)
+- Error responses (400, 422, 500)
+- Check with curl: `curl -i -H "Origin: https://emerald-supply-chain.vercel.app" ...`
+
+⚠️ **Preflight OPTIONS requests must work:**
+- Test: `curl -i -X OPTIONS -H "Origin: https://emerald-supply-chain.vercel.app" ...`
+- Should return HTTP 204 with CORS headers
