@@ -540,13 +540,6 @@ class VendorController extends Controller
             ], 500);
         }
     }
-                'error' => 'An error occurred during registration. Please try again.',
-                'code' => 'REGISTRATION_ERROR',
-                'message' => config('app.debug') ? $e->getMessage() : 'Internal server error'
-            ], 500);
-        }
-    }
-
     /**
      * Get all vendor registrations (procurement_manager and supply_chain_director only)
      */
