@@ -502,7 +502,7 @@ class VendorController extends Controller
                 // Continue - notification failure shouldn't block registration
             }
 
-            // Prepare response
+          // Prepare response
             $response = [
                 'success' => true,
                 'message' => 'Vendor registration submitted successfully',
@@ -514,11 +514,15 @@ class VendorController extends Controller
                 ]
             ];
 
+            // Log BEFORE returning to ensure timing is captured without interfering with the response stream
             \Log::info('Vendor registration completed successfully', [
-                'request_id' => $requestId,
+                'request_id' => $requestId ?? 'N/A',
                 'registration_id' => $registration->id,
-                'total_time' => round(microtime(true) - $startTime, 3) . 's'
+                'total_time' => isset($startTime) ? (round(microtime(true) - $startTime, 3) . 's') : '0s'
             ]);
+
+            // Explicitly clear any existing output buffers to prevent "empty response" errors
+            if (ob_get_length()) ob_clean();
 
             return response()->json($response, 201);
 
