@@ -23,6 +23,8 @@ use App\Http\Controllers\Api\V1\Logistics\AccommodationBookingController as Logi
 use App\Http\Controllers\Api\V1\Logistics\JobCompletionCertificateController as LogisticsJobCompletionCertificateController;
 use App\Http\Controllers\Api\V1\Logistics\JourneyController as LogisticsJourneyController;
 use App\Http\Controllers\Api\V1\Logistics\MaterialController as LogisticsMaterialController;
+use App\Http\Controllers\Api\V1\Logistics\MaterialMovementController as LogisticsMaterialMovementController;
+use App\Http\Controllers\Api\V1\Logistics\MaterialJCCController as LogisticsMaterialJCCController;
 use App\Http\Controllers\Api\V1\Logistics\FleetController as LogisticsFleetController;
 use App\Http\Controllers\Api\V1\Logistics\FleetDriverController as LogisticsFleetDriverController;
 use App\Http\Controllers\Api\V1\Logistics\FleetVehicleDocumentController as LogisticsFleetVehicleDocumentController;
@@ -163,6 +165,26 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/materials/{id}', [LogisticsMaterialController::class, 'show'])->middleware($logisticsInternalRoles);
     Route::delete('/materials/{id}', [LogisticsMaterialController::class, 'destroy'])->middleware($logisticsInternalRoles);
     Route::post('/materials/bulk-upload', [LogisticsMaterialController::class, 'bulkUpload'])->middleware($logisticsInternalRoles);
+
+    // Material Movements (Logistics Tracking) routes
+    Route::post('/material-movements', [LogisticsMaterialMovementController::class, 'store'])->middleware($logisticsInternalRoles);
+    Route::get('/material-movements', [LogisticsMaterialMovementController::class, 'index'])->middleware($logisticsInternalRoles);
+    Route::get('/material-movements/{id}', [LogisticsMaterialMovementController::class, 'show'])->middleware($logisticsInternalRoles);
+    Route::patch('/material-movements/{id}', [LogisticsMaterialMovementController::class, 'update'])->middleware($logisticsInternalRoles);
+    Route::put('/material-movements/{id}', [LogisticsMaterialMovementController::class, 'update'])->middleware($logisticsInternalRoles);
+    Route::delete('/material-movements/{id}', [LogisticsMaterialMovementController::class, 'destroy'])->middleware($logisticsInternalRoles);
+    Route::post('/material-movements/{id}/mark-in-transit', [LogisticsMaterialMovementController::class, 'markInTransit'])->middleware($logisticsInternalRoles);
+    Route::post('/material-movements/{id}/mark-delivered', [LogisticsMaterialMovementController::class, 'markDelivered'])->middleware($logisticsInternalRoles);
+
+    // Material JCC (Job Completion Certificate) routes
+    Route::post('/material-movements/{materialId}/jcc', [LogisticsMaterialJCCController::class, 'store'])->middleware($logisticsInternalRoles);
+    Route::get('/material-movements/{materialId}/jcc', [LogisticsMaterialJCCController::class, 'show'])->middleware($logisticsInternalRoles);
+    Route::put('/material-movements/{materialId}/jcc', [LogisticsMaterialJCCController::class, 'update'])->middleware($logisticsInternalRoles);
+    Route::patch('/material-movements/{materialId}/jcc', [LogisticsMaterialJCCController::class, 'update'])->middleware($logisticsInternalRoles);
+    Route::post('/material-movements/{materialId}/jcc/submit', [LogisticsMaterialJCCController::class, 'submit'])->middleware($logisticsInternalRoles);
+    Route::post('/material-movements/{materialId}/jcc/approve', [LogisticsMaterialJCCController::class, 'approve'])->middleware($logisticsInternalRoles);
+    Route::get('/material-movements/{materialId}/jcc/pdf', [LogisticsMaterialJCCController::class, 'pdf'])->middleware($logisticsInternalRoles);
+    Route::get('/material-movements/{materialId}/jcc/prefill', [LogisticsMaterialJCCController::class, 'prefill'])->middleware($logisticsInternalRoles);
 
     // Documents routes - forward to logistics controllers
     Route::post('/documents', [LogisticsDocumentController::class, 'store'])->middleware($logisticsInternalRoles);
