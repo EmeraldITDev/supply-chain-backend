@@ -20,8 +20,15 @@ class EnsureCorsHeaders
      *
      * @param  \Closure(\Illuminate\Http\Request): (\Symfony\Component\HttpFoundation\Response)  $next
      */
+
     public function handle(Request $request, Closure $next): Response
     {
+        // Force Laravel to parse multipart body if not already parsed
+        if ($request->getMethod() === 'POST' && empty($request->all())) {
+            $content = $request->getContent();
+            \Log::warning('Request body empty after middleware, content length: ' . strlen($content));
+        }
+
         // Get the origin from the request
         $origin = $request->header('Origin');
 

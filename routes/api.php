@@ -410,6 +410,10 @@ Route::middleware('auth:sanctum')->group(function () {
     });
 });
 
+Route::options('/vendors/register', function() {
+    return response('', 204);
+});
+
 // Public vendor registration
 Route::get('/vendors/categories', [VendorController::class, 'categories']);
 Route::post('/vendors/register', [VendorController::class, 'register']);
