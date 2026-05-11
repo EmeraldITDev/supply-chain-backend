@@ -199,6 +199,15 @@ class VendorController extends Controller
     {
         // Start timer to detect timeouts
         $startTime = microtime(true);
+
+        \Log::info('Raw registration request received', [
+            'content_type' => $request->header('Content-Type'),
+            'input_keys' => array_keys($request->all()),
+            'file_keys' => array_keys($request->allFiles()),
+            'email_direct' => $request->email,
+            'email_input' => $request->input('email'),
+        ]);
+
         $requestId = \Illuminate\Support\Str::uuid();
 
         // Log without sensitive fields (account_number)
@@ -253,7 +262,7 @@ class VendorController extends Controller
             $contactPerson = trim($request->input('contactPerson') ?? $request->input('contact_person') ?? '');
 
             // Guard: Email must be present and valid
-            $rawEmail = $request->email ?? $request->get('email');
+            $rawEmail = $request->input('email');
             if (empty($rawEmail)) {
                 \Log::warning('Email is missing from registration request', [
                     'request_id' => $requestId
