@@ -193,26 +193,48 @@ class VendorController extends Controller
 
     /**
      * Register new vendor (public endpoint)
+     * Improved with comprehensive error handling and null checks
      */
     public function register(Request $request, VendorDocumentService $documentService)
     {
+        // Start timer to detect timeouts
+        $startTime = microtime(true);
+        $requestId = \Illuminate\Support\Str::uuid();
+
         // Log without sensitive fields (account_number)
         $safeKeys = array_diff(array_keys($request->all()), ['account_number']);
         \Log::info('Vendor registration attempt', [
+            'request_id' => $requestId,
             'all_fields' => array_values($safeKeys),
             'email' => $request->email ?? $request->get('email'),
             'has_documents' => $request->hasFile('documents'),
+            'timestamp' => now()->toIso8601String(),
         ]);
-        $payloadForLog = $request->except(['account_number', 'documents']);
-        $payloadForLog['account_number_present'] = $request->filled('account_number');
-        $payloadForLog['documents_present'] = $request->hasFile('documents');
-
-        \Log::info('Vendor registration payload snapshot', $payloadForLog);
 
         try {
+            // Verify database connection before proceeding
+            try {
+                \DB::connection()->getPdo();
+                \Log::info('Database connection verified', ['request_id' => $requestId]);
+            } catch (\Exception $dbError) {
+                \Log::error('Database connection failed', [
+                    'request_id' => $requestId,
+                    'error' => $dbError->getMessage()
+                ]);
+                return response()->json([
+                    'success' => false,
+                    'error' => 'Database connection error. Please try again later.',
+                    'code' => 'DATABASE_ERROR'
+                ], 503);
+            }
+
             // Guard: Ensure request is a single object, not an array of registrations
             $allData = $request->all();
             if (is_array($allData) && isset($allData[0]) && is_array($allData[0])) {
+                \Log::warning('Batch registration attempt received', [
+                    'request_id' => $requestId,
+                    'received_count' => count($allData)
+                ]);
                 return response()->json([
                     'success' => false,
                     'error' => 'Invalid request format: Batch registration not supported. Send one registration at a time.',
@@ -222,50 +244,96 @@ class VendorController extends Controller
                 ], 422);
             }
 
-            // Get form fields - support both camelCase and snake_case
-            $companyName = $request->input('companyName') ?? $request->input('company_name');
-            $category = $request->input('category');
-            $phone = $request->input('phone');
-            $address = $request->input('address');
-            $taxId = $request->input('taxId') ?? $request->input('tax_id');
-            $contactPerson = $request->input('contactPerson') ?? $request->input('contact_person');
+            // Get and guard form fields - support both camelCase and snake_case
+            $companyName = trim($request->input('companyName') ?? $request->input('company_name') ?? '');
+            $category = trim($request->input('category') ?? '');
+            $phone = trim($request->input('phone') ?? '');
+            $address = trim($request->input('address') ?? '');
+            $taxId = trim($request->input('taxId') ?? $request->input('tax_id') ?? '');
+            $contactPerson = trim($request->input('contactPerson') ?? $request->input('contact_person') ?? '');
 
-            // Normalize email (trim and lowercase) for consistent checking
-            $email = strtolower(trim($request->email ?? $request->get('email')));
-
-            // Check if registration with this email already exists (case-insensitive)
-            $existingRegistration = VendorRegistration::whereRaw('LOWER(email) = ?', [strtolower($email)])->first();
-
-            if ($existingRegistration) {
-                // If it's pending, return success (idempotent - same as if they just submitted)
-                if (strtolower($existingRegistration->status) === 'pending') {
-                    return response()->json([
-                        'success' => true,
-                        'message' => 'Vendor registration already submitted and pending approval',
-                        'registration' => [
-                            'id' => $existingRegistration->id,
-                            'companyName' => $existingRegistration->company_name,
-                            'status' => $existingRegistration->status,
-                        ]
-                    ], 200);
-                }
-
-                // If it's approved or rejected, return appropriate message
+            // Guard: Email must be present and valid
+            $rawEmail = $request->email ?? $request->get('email');
+            if (empty($rawEmail)) {
+                \Log::warning('Email is missing from registration request', [
+                    'request_id' => $requestId
+                ]);
                 return response()->json([
                     'success' => false,
-                    'error' => strtolower($existingRegistration->status) === 'approved'
-                        ? 'A vendor registration with this email has already been approved.'
-                        : 'A vendor registration with this email already exists.',
-                    'code' => 'DUPLICATE_EMAIL'
+                    'error' => 'Email is required for registration',
+                    'code' => 'MISSING_EMAIL'
                 ], 422);
             }
 
+            // Normalize email (trim and lowercase) for consistent checking
+            $email = strtolower(trim($rawEmail));
+
+            \Log::info('Email normalized', [
+                'request_id' => $requestId,
+                'email' => $email
+            ]);
+
+            // Check if registration with this email already exists (case-insensitive)
+            try {
+                $existingRegistration = VendorRegistration::whereRaw('LOWER(email) = ?', [strtolower($email)])->first();
+
+                if ($existingRegistration) {
+                    // Guard: Check if status is valid
+                    $status = strtolower(trim($existingRegistration->status ?? 'pending'));
+
+                    if ($status === 'pending') {
+                        \Log::info('Existing pending registration found', [
+                            'request_id' => $requestId,
+                            'email' => $email,
+                            'registration_id' => $existingRegistration->id
+                        ]);
+                        return response()->json([
+                            'success' => true,
+                            'message' => 'Vendor registration already submitted and pending approval',
+                            'registration' => [
+                                'id' => $existingRegistration->id,
+                                'companyName' => $existingRegistration->company_name,
+                                'status' => $existingRegistration->status,
+                            ]
+                        ], 200);
+                    }
+
+                    // If it's approved or rejected, return appropriate message
+                    $message = ($status === 'approved')
+                        ? 'A vendor registration with this email has already been approved.'
+                        : 'A vendor registration with this email already exists.';
+
+                    \Log::warning('Duplicate registration attempt', [
+                        'request_id' => $requestId,
+                        'email' => $email,
+                        'status' => $status
+                    ]);
+
+                    return response()->json([
+                        'success' => false,
+                        'error' => $message,
+                        'code' => 'DUPLICATE_EMAIL'
+                    ], 422);
+                }
+            } catch (\Exception $e) {
+                \Log::error('Error checking for existing registration', [
+                    'request_id' => $requestId,
+                    'error' => $e->getMessage(),
+                    'trace' => $e->getTraceAsString()
+                ]);
+                return response()->json([
+                    'success' => false,
+                    'error' => 'Error during registration check. Please try again.',
+                    'code' => 'REGISTRATION_CHECK_ERROR'
+                ], 500);
+            }
+
             // Financial and country fields (optional, from FormData snake_case)
-            $bankName = $request->input('bank_name');
-            $accountNumber = $request->input('account_number');
-            $accountName = $request->input('account_name');
-            $currency = $request->input('currency');
-            $financialCountryCode = $request->input('financial_country_code');
+            $bankName = trim($request->input('bank_name') ?? '');
+            $accountNumber = $request->input('account_number'); // Don't trim - sensitive data
+            $accountName = trim($request->input('account_name') ?? '');
+            $currency = trim($request->input('currency') ?? '');
+            $financialCountryCode = trim($request->input('financial_country_code') ?? '');
 
             // Prepare validation data with normalized email
             $validationData = [
@@ -276,26 +344,24 @@ class VendorController extends Controller
                 'address' => $address,
                 'taxId' => $taxId,
                 'contactPerson' => $contactPerson,
-                'bank_name' => $bankName,
+                'bank_name' => empty($bankName) ? null : $bankName,
                 'account_number' => $accountNumber,
-                'account_name' => $accountName,
-                'currency' => $currency,
-                'financial_country_code' => $financialCountryCode,
+                'account_name' => empty($accountName) ? null : $accountName,
+                'currency' => empty($currency) ? null : $currency,
+                'financial_country_code' => empty($financialCountryCode) ? null : $financialCountryCode,
             ];
 
-            // Note: We don't use 'unique' rule here because we check manually above
-            // This prevents false positives from case sensitivity or timing issues
+            // Validate input data
             $validator = Validator::make($validationData, [
                 'companyName' => 'required|string|max:255',
                 'category' => 'required|string|max:255',
-                'email' => 'required|email', // Removed unique rule - we check manually above
+                'email' => 'required|email',
                 'phone' => 'nullable|string|max:20',
-                'address' => 'nullable|string',
+                'address' => 'nullable|string|max:1000',
                 'taxId' => 'nullable|string|max:255',
                 'contactPerson' => 'nullable|string|max:255',
                 'documents' => 'nullable|array',
                 'documents.*' => 'file|max:10240', // Max 10MB per file
-                // Financial and country (all optional)
                 'bank_name' => 'nullable|string|max:255',
                 'account_number' => 'nullable|string|max:64',
                 'account_name' => 'nullable|string|max:255',
@@ -304,6 +370,10 @@ class VendorController extends Controller
             ]);
 
             if ($validator->fails()) {
+                \Log::warning('Validation failed', [
+                    'request_id' => $requestId,
+                    'errors' => $validator->errors()->toArray()
+                ]);
                 return response()->json([
                     'success' => false,
                     'error' => 'Validation failed',
@@ -313,173 +383,127 @@ class VendorController extends Controller
             }
 
             \Log::info('Validation passed, creating registration', [
+                'request_id' => $requestId,
                 'company_name' => $companyName,
                 'category' => $category,
                 'email' => $email,
-                'has_financial' => !empty($bankName) || !empty($accountNumber) || !empty($accountName) || !empty($currency) || !empty($financialCountryCode),
+                'has_financial' => !empty($bankName) || !empty($accountNumber) || !empty($accountName) || !empty($currency)
             ]);
 
-            // temporary
-            \Log::info('VENDOR REGISTRATION REQUEST DEBUG', [
-                'annual_revenue' => $request->annual_revenue,
-                'number_of_employees' => $request->number_of_employees,
-                'year_established' => $request->year_established,
-                'all' => $request->all(),
-            ]);
+            // Create the vendor registration with proper error handling
+            try {
+                $registration = VendorRegistration::create([
+                    'company_name' => $companyName,
+                    'category' => $category,
+                    'email' => $email,
+                    'phone' => empty($phone) ? null : $phone,
+                    'address' => empty($address) ? null : $address,
+                    'country_code' => empty($financialCountryCode) ? null : $financialCountryCode,
+                    'bank_name' => empty($bankName) ? null : $bankName,
+                    'account_number' => $accountNumber,
+                    'account_name' => empty($accountName) ? null : $accountName,
+                    'annual_revenue' => $request->annual_revenue,
+                    'number_of_employees' => $request->number_of_employees,
+                    'year_established' => $request->year_established,
+                    'currency' => empty($currency) ? null : $currency,
+                    'tax_id' => empty($taxId) ? null : $taxId,
+                    'contact_person' => empty($contactPerson) ? null : $contactPerson,
+                    'website' => $request->website,
+                    'status' => VendorRegistration::STATUS_PENDING,
+                ]);
 
-            $registration = VendorRegistration::create([
-                'company_name' => $companyName,
-                'category' => $category,
-                'email' => $email, // Use normalized email
-                'phone' => $phone,
-                'address' => $address,
-                'country_code' => $financialCountryCode,
-                'bank_name' => $bankName,
-                'account_number' => $accountNumber,
-                'account_name' => $accountName,
-                'annual_revenue' => $request->annual_revenue,
-                'number_of_employees' => $request->number_of_employees,
-                'year_established' => $request->year_established,
-                'currency' => $currency,
-                'tax_id' => $taxId,
-                'contact_person' => $contactPerson,
-                'website' => $request->website,
-                'status' => VendorRegistration::STATUS_PENDING,
-            ]);
+                \Log::info('Registration created successfully', [
+                    'request_id' => $requestId,
+                    'registration_id' => $registration->id ?? 'unknown',
+                    'elapsed_time' => round(microtime(true) - $startTime, 3) . 's'
+                ]);
+            } catch (\Exception $e) {
+                \Log::error('Error creating vendor registration', [
+                    'request_id' => $requestId,
+                    'error' => $e->getMessage(),
+                    'code' => $e->getCode(),
+                    'trace' => $e->getTraceAsString()
+                ]);
+                return response()->json([
+                    'success' => false,
+                    'error' => 'Failed to create registration. Please try again.',
+                    'code' => 'REGISTRATION_CREATION_ERROR',
+                    'message' => config('app.debug') ? $e->getMessage() : null
+                ], 500);
+            }
 
-            \Log::info('Registration created successfully', [
-                'registration_id' => $registration->id
-            ]);
+            // Guard: Check if registration was created properly
+            if (!$registration || !isset($registration->id)) {
+                \Log::error('Registration created but ID is missing', [
+                    'request_id' => $requestId,
+                    'registration' => $registration
+                ]);
+                return response()->json([
+                    'success' => false,
+                    'error' => 'Registration created but ID is missing',
+                    'code' => 'INVALID_REGISTRATION_ID'
+                ], 500);
+            }
 
             // Handle document uploads if provided
+            $documentCount = 0;
             if ($request->hasFile('documents')) {
                 try {
                     $documents = $request->file('documents');
 
-                    // Normalize to array - file() can return single file or array
+                    // Guard: Normalize to array
                     if (!is_array($documents)) {
                         $documents = [$documents];
                     }
 
-                    // Filter out null values
+                    // Filter out null values and invalid documents
                     $documents = array_filter($documents, function($doc) {
-                        return $doc !== null;
+                        return $doc !== null && $doc !== '';
                     });
 
                     if (!empty($documents)) {
                         \Log::info('Processing document uploads', [
+                            'request_id' => $requestId,
                             'registration_id' => $registration->id,
                             'document_count' => count($documents)
                         ]);
 
                         $documentService->storeDocuments($registration, $documents);
+                        $documentCount = count($documents);
 
                         \Log::info('Documents stored successfully', [
-                            'registration_id' => $registration->id
-                        ]);
-                    } else {
-                        \Log::warning('No valid documents found after filtering', [
-                            'registration_id' => $registration->id
+                            'request_id' => $requestId,
+                            'registration_id' => $registration->id,
+                            'document_count' => $documentCount
                         ]);
                     }
                 } catch (\Exception $e) {
                     \Log::error('Error storing vendor documents', [
+                        'request_id' => $requestId,
                         'registration_id' => $registration->id,
                         'error' => $e->getMessage(),
                         'trace' => $e->getTraceAsString()
                     ]);
                     // Continue with registration even if documents fail
-                    // Documents can be uploaded later or resubmitted
                 }
-            } else {
-                \Log::info('No documents provided in registration', [
-                    'registration_id' => $registration->id,
-                    'has_files' => $request->hasFile('documents'),
-                    'all_files' => $request->allFiles()
-                ]);
             }
 
             // Send notification to procurement managers
             try {
-                $this->notificationService->notifyVendorRegistration($registration);
+                if (isset($this->notificationService)) {
+                    $this->notificationService->notifyVendorRegistration($registration);
+                }
             } catch (\Exception $e) {
                 \Log::error('Error sending vendor registration notification', [
+                    'request_id' => $requestId,
                     'registration_id' => $registration->id,
                     'error' => $e->getMessage()
                 ]);
                 // Continue - notification failure shouldn't block registration
             }
 
-            // Reload registration with documents to include in response
-            $registration->load('documents');
-            $registration->refresh();
-
-            // Format documents for response
-            $documentService = app(VendorDocumentService::class);
-            $formattedDocuments = [];
-            $documentRecords = $registration->documents ?? collect([]);
-
-            foreach ($documentRecords as $doc) {
-                // Guard: Skip if doc is not an object (handle arrays or invalid data)
-                if (is_array($doc) && !($doc instanceof \stdClass)) {
-                    \Log::warning('Document record is array, converting to object', [
-                        'registration_id' => $registration->id,
-                        'doc_keys' => array_keys($doc)
-                    ]);
-                    $doc = (object) $doc;
-                }
-
-                // Additional guard: Ensure doc has required properties
-                if (!isset($doc->id)) {
-                    \Log::warning('Document missing id property, skipping', [
-                        'registration_id' => $registration->id,
-                        'doc' => $doc
-                    ]);
-                    continue;
-                }
-
-                $filePath = $doc->file_path ?? null;
-                $fileUrl = $doc->file_share_url ?? $doc->file_url ?? null;
-
-                if ($filePath && !$fileUrl) {
-                    try {
-                        $fileUrl = $documentService->getDocumentUrl(
-                            $filePath,
-                            $doc->id,
-                            $registration->id,
-                            $registration->status === VendorRegistration::STATUS_APPROVED
-);
-                    } catch (\Exception $e) {
-                        \Log::warning("Failed to generate document URL", [
-                            'error' => $e->getMessage(),
-                            'document_id' => $doc->id
-                        ]);
-                        if ($doc->id) {
-                            $fileUrl = url("/api/vendors/registrations/{$registration->id}/documents/{$doc->id}/download");
-                        }
-                    }
-                }
-
-                $formattedDocuments[] = [
-                    'id' => (string) $doc->id,
-                    'fileName' => $doc->file_name ?? null,
-                    'name' => $doc->file_name ?? null,
-                    'filePath' => $filePath,
-                    'fileUrl' => $fileUrl,
-                    'file_url' => $fileUrl,
-                    'url' => $fileUrl,
-                    'fileSize' => $doc->file_size,
-                    'fileType' => $doc->file_type,
-                    'uploadedAt' => $doc->uploaded_at
-                        ? \Carbon\Carbon::parse($doc->uploaded_at)->toIso8601String()
-                        : now()->toIso8601String(),
-                ];
-            }
-
-            // Get document count for response
-            $documentCount = count($registration->documents ?? []);
-
-            return response()->json([
+            // Prepare response
+            $response = [
                 'success' => true,
                 'message' => 'Vendor registration submitted successfully',
                 'registration' => [
@@ -487,17 +511,35 @@ class VendorController extends Controller
                     'companyName' => $registration->company_name,
                     'status' => $registration->status,
                     'documentCount' => $documentCount,
-                    'documents' => $formattedDocuments,
                 ]
-            ], 201);
-        } catch (\Exception $e) {
-            \Log::error('Vendor registration error', [
+            ];
+
+            \Log::info('Vendor registration completed successfully', [
+                'request_id' => $requestId,
+                'registration_id' => $registration->id,
+                'total_time' => round(microtime(true) - $startTime, 3) . 's'
+            ]);
+
+            return response()->json($response, 201);
+
+        } catch (\Throwable $e) {
+            \Log::error('Unexpected error during vendor registration', [
+                'request_id' => $requestId,
                 'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
+                'code' => $e->getCode(),
+                'trace' => $e->getTraceAsString(),
+                'elapsed_time' => round(microtime(true) - $startTime, 3) . 's'
             ]);
 
             return response()->json([
                 'success' => false,
+                'error' => 'An unexpected error occurred during registration. Please try again or contact support.',
+                'code' => 'UNEXPECTED_ERROR',
+                'message' => config('app.debug') ? $e->getMessage() : null,
+                'request_id' => $requestId
+            ], 500);
+        }
+    }
                 'error' => 'An error occurred during registration. Please try again.',
                 'code' => 'REGISTRATION_ERROR',
                 'message' => config('app.debug') ? $e->getMessage() : 'Internal server error'

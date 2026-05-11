@@ -64,6 +64,37 @@ Route::get('/cors-test', function () {
     ]);
 });
 
+// Health check endpoint - verifies database connectivity and system status
+Route::get('/health', function () {
+    try {
+        // Test database connection
+        \DB::connection()->getPdo();
+        $dbStatus = 'connected';
+        $dbError = null;
+    } catch (\Exception $e) {
+        $dbStatus = 'disconnected';
+        $dbError = $e->getMessage();
+    }
+
+    return response()->json([
+        'success' => $dbStatus === 'connected',
+        'status' => $dbStatus === 'connected' ? 'healthy' : 'unhealthy',
+        'timestamp' => now()->toIso8601String(),
+        'database' => [
+            'status' => $dbStatus,
+            'error' => $dbError,
+            'connection' => config('database.default'),
+        ],
+        'server' => [
+            'uptime' => time() - $_SERVER['REQUEST_TIME'] ?? 0,
+            'memory_usage' => memory_get_usage() / 1024 / 1024 . 'MB',
+            'memory_peak' => memory_get_peak_usage() / 1024 / 1024 . 'MB',
+            'memory_limit' => ini_get('memory_limit'),
+            'max_execution_time' => ini_get('max_execution_time'),
+        ],
+    ], $dbStatus === 'connected' ? 200 : 503);
+});
+
 Route::post('/auth/login', [AuthController::class, 'login']);
 Route::post('/auth/vendor/change-password', [AuthController::class, 'forcePasswordChange']);
 

@@ -17,7 +17,7 @@ return [
 
     'paths' => ['api/*', 'sanctum/csrf-cookie'], // Handle all paths since CORS middleware is global
 
-    'allowed_methods' => ['*'],
+    'allowed_methods' => ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'HEAD'],
 
     'allowed_origins' => array_values(array_unique(array_filter(array_map('trim', array_merge(
         [
@@ -27,6 +27,7 @@ return [
             'http://localhost:5173',
             'https://emerald-supply-chain.vercel.app',
             'https://scm.emeraldcfze.com',
+            'https://supply-chain-backend-hwh6.onrender.com', // Ensure backend can make internal requests
         ],
         env('CORS_ALLOWED_ORIGINS') ? explode(',', env('CORS_ALLOWED_ORIGINS')) : []
     ))))),
@@ -37,7 +38,7 @@ return [
         '#^https://.*\.emeraldcfze\.com$#', // Allow all emeraldcfze.com subdomains
     ],
 
-    'allowed_headers' => ['*'],
+    'allowed_headers' => ['Accept', 'Accept-Language', 'Content-Language', 'Content-Type', 'Authorization', 'X-Requested-With', 'X-CSRF-Token'],
 
     'exposed_headers' => [],
 
