@@ -20,7 +20,9 @@ return Application::configure(basePath: dirname(__DIR__))
 
         // Track user activity for automatic logout after 5 minutes of inactivity
         // This is NOT prepended so it comes after CORS middleware
-        $middleware->use(\App\Http\Middleware\TrackUserActivity::class);
+        $middleware->use([
+            \App\Http\Middleware\TrackUserActivity::class,
+        ]);
 
         $middleware->alias([
             'role' => \App\Http\Middleware\EnsureRole::class,
