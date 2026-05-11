@@ -46,6 +46,8 @@ class StoreTripRequest extends FormRequest
             'origin' => 'required|string|max:255',
             'destination' => 'required|string|max:255',
             'vendor_id' => 'nullable|exists:vendors,id',
+            'vehicle_id' => 'nullable|exists:logistics_vehicles,id',
+            'confirm_vehicle_assignment_override' => 'nullable|boolean',
             'notes' => 'nullable|string',
             'metadata' => 'nullable|array',
         ];

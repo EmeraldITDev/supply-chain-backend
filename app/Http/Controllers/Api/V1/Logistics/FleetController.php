@@ -4,12 +4,15 @@ namespace App\Http\Controllers\Api\V1\Logistics;
 
 use App\Http\Requests\Logistics\StoreMaintenanceRequest;
 use App\Http\Requests\Logistics\StoreVehicleRequest;
+use App\Http\Requests\Logistics\UpdateVehicleMaintenanceRequest;
 use App\Http\Requests\Logistics\UpdateVehicleRequest;
+use App\Http\Requests\Logistics\UpdateVehicleStatusRequest;
 use App\Models\SRF;
 use App\Models\Logistics\Vehicle;
 use App\Models\Logistics\VehicleMaintenance;
 use App\Services\Logistics\AuditLogger;
 use App\Services\WorkflowNotificationService;
+use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
 
@@ -94,8 +97,24 @@ class FleetController extends ApiController
             return $this->error('Vehicle not found', 'NOT_FOUND', 404);
         }
 
+        $payload = $request->validated();
+        if (!empty($payload['interval_months']) && !empty($payload['performed_at']) && empty($payload['next_due_at'])) {
+            $payload['next_due_at'] = Carbon::parse($payload['performed_at'])
+                ->addMonths((int) $payload['interval_months'])
+                ->toDateTimeString();
+        }
+        if (!empty($payload['status'])) {
+            $payload['status'] = strtoupper((string) $payload['status']);
+        } elseif (!empty($payload['next_due_at'])) {
+            $payload['status'] = Carbon::parse($payload['next_due_at'])->greaterThan(Carbon::now())
+                ? VehicleMaintenance::STATUS_SCHEDULED
+                : VehicleMaintenance::STATUS_OVERDUE;
+        } else {
+            $payload['status'] = VehicleMaintenance::STATUS_COMPLETED;
+        }
+
         $maintenance = VehicleMaintenance::create(array_merge(
-            $request->validated(),
+            $payload,
             [
                 'vehicle_id' => $vehicle->id,
                 'performed_by' => $request->user()?->id,
@@ -107,6 +126,112 @@ class FleetController extends ApiController
         return $this->success([
             'maintenance' => $maintenance,
         ], 201);
+    }
+
+    public function listMaintenance(int $vehicleId)
+    {
+        $vehicle = Vehicle::find($vehicleId);
+        if (!$vehicle) {
+            return $this->error('Vehicle not found', 'NOT_FOUND', 404);
+        }
+
+        $records = VehicleMaintenance::query()
+            ->where('vehicle_id', $vehicle->id)
+            ->orderByDesc('next_due_at')
+            ->orderByDesc('id')
+            ->get();
+
+        return $this->success([
+            'vehicle_id' => $vehicle->id,
+            'maintenance' => $records,
+        ]);
+    }
+
+    public function updateMaintenance(UpdateVehicleMaintenanceRequest $request, int $vehicleId, int $scheduleId)
+    {
+        $vehicle = Vehicle::find($vehicleId);
+        if (!$vehicle) {
+            return $this->error('Vehicle not found', 'NOT_FOUND', 404);
+        }
+
+        $maintenance = VehicleMaintenance::query()
+            ->where('vehicle_id', $vehicle->id)
+            ->where('id', $scheduleId)
+            ->first();
+
+        if (!$maintenance) {
+            return $this->error('Maintenance record not found', 'NOT_FOUND', 404);
+        }
+
+        $payload = $request->validated();
+        if (isset($payload['status'])) {
+            $payload['status'] = strtoupper((string) $payload['status']);
+        }
+        if (!empty($payload['interval_months']) && !empty($payload['performed_at']) && empty($payload['next_due_at'])) {
+            $payload['next_due_at'] = Carbon::parse($payload['performed_at'])
+                ->addMonths((int) $payload['interval_months'])
+                ->toDateTimeString();
+        }
+
+        $maintenance->fill($payload)->save();
+
+        $this->auditLogger->log('vehicle_maintenance_updated', $request->user(), 'vehicle', (string) $vehicle->id, $maintenance->toArray(), $request);
+
+        return $this->success([
+            'maintenance' => $maintenance->fresh(),
+        ]);
+    }
+
+    public function upcomingMaintenance(Request $request)
+    {
+        $days = max(1, min(365, (int) $request->get('days', 14)));
+        $until = Carbon::now()->addDays($days)->endOfDay();
+
+        $records = VehicleMaintenance::query()
+            ->with('vehicle')
+            ->where('status', VehicleMaintenance::STATUS_SCHEDULED)
+            ->whereNotNull('next_due_at')
+            ->where('next_due_at', '<=', $until)
+            ->where('next_due_at', '>=', Carbon::now()->startOfDay())
+            ->orderBy('next_due_at')
+            ->get();
+
+        return $this->success([
+            'maintenance' => $records,
+            'days' => $days,
+        ]);
+    }
+
+    public function updateVehicleStatus(UpdateVehicleStatusRequest $request, int $id)
+    {
+        $vehicle = Vehicle::find($id);
+        if (!$vehicle) {
+            return $this->error('Vehicle not found', 'NOT_FOUND', 404);
+        }
+
+        $vehicle->status = $request->status;
+        if ($request->status === Vehicle::STATUS_ACTIVE) {
+            $vehicle->status_inactive_reason = null;
+        }
+        $vehicle->save();
+
+        $this->auditLogger->log(
+            'vehicle_status_override',
+            $request->user(),
+            'vehicle',
+            (string) $vehicle->id,
+            'Manual fleet vehicle status override',
+            [
+                'status' => $vehicle->status,
+                'reason' => $request->reason,
+                'override_by' => $request->input('override_by', $request->user()?->name),
+            ],
+            $request
+        );
+
+        return $this->success([
+            'vehicle' => $vehicle->fresh(),
+        ]);
     }
 
     /**
@@ -148,6 +273,9 @@ class FleetController extends ApiController
         foreach ($vehicles as $vehicle) {
             // Check for expiring documents
             foreach ($vehicle->documents as $document) {
+                if (!$document->is_active) {
+                    continue;
+                }
                 if ($document->expires_at) {
                     $days_until_expiry = $now->diffInDays($document->expires_at);
                     
@@ -197,14 +325,14 @@ class FleetController extends ApiController
             }
 
             // Check vehicle status changes
-            if ($vehicle->status === 'MAINTENANCE' || $vehicle->status === 'OUT_OF_SERVICE') {
+            if (in_array($vehicle->status, [Vehicle::STATUS_UNDER_MAINTENANCE, Vehicle::STATUS_INACTIVE, 'MAINTENANCE', 'OUT_OF_SERVICE'], true)) {
                 $alerts['status_changes'][] = [
                     'id' => $vehicle->id,
                     'vehicle_code' => $vehicle->vehicle_code,
                     'plate_number' => $vehicle->plate_number,
                     'current_status' => $vehicle->status,
                     'updated_at' => $vehicle->updated_at,
-                    'severity' => $vehicle->status === 'OUT_OF_SERVICE' ? 'critical' : 'warning',
+                    'severity' => $vehicle->status === Vehicle::STATUS_INACTIVE || $vehicle->status === 'OUT_OF_SERVICE' ? 'critical' : 'warning',
                 ];
                 
                 $alerts['summary']['warning']++;

@@ -11,11 +11,18 @@ class VehicleMaintenance extends Model
 {
     use HasFactory;
 
+    public const STATUS_SCHEDULED = 'SCHEDULED';
+
+    public const STATUS_COMPLETED = 'COMPLETED';
+
+    public const STATUS_OVERDUE = 'OVERDUE';
+
     protected $table = 'logistics_vehicle_maintenances';
 
     protected $fillable = [
         'vehicle_id',
         'maintenance_type',
+        'interval_months',
         'description',
         'performed_at',
         'next_due_at',
@@ -30,6 +37,7 @@ class VehicleMaintenance extends Model
         'next_due_at' => 'datetime',
         'cost' => 'decimal:2',
         'metadata' => 'array',
+        'interval_months' => 'integer',
     ];
 
     public function vehicle(): BelongsTo

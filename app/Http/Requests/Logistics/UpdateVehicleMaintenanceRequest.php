@@ -2,9 +2,10 @@
 
 namespace App\Http\Requests\Logistics;
 
+use App\Models\Logistics\VehicleMaintenance;
 use Illuminate\Foundation\Http\FormRequest;
 
-class StoreMaintenanceRequest extends FormRequest
+class UpdateVehicleMaintenanceRequest extends FormRequest
 {
     public function authorize(): bool
     {
@@ -14,15 +15,19 @@ class StoreMaintenanceRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'maintenance_type' => 'required|string|max:100',
-            'interval_months' => 'nullable|integer|min:1|max:120',
+            'maintenance_type' => 'sometimes|string|max:100',
             'description' => 'nullable|string',
             'performed_at' => 'nullable|date',
             'last_maintenance_date' => 'nullable|date',
             'next_due_at' => 'nullable|date',
             'next_maintenance_date' => 'nullable|date',
+            'interval_months' => 'nullable|integer|min:1|max:120',
             'cost' => 'nullable|numeric|min:0',
-            'status' => 'nullable|string|in:SCHEDULED,COMPLETED,OVERDUE,scheduled,completed,overdue',
+            'status' => 'nullable|string|in:' . implode(',', [
+                VehicleMaintenance::STATUS_SCHEDULED,
+                VehicleMaintenance::STATUS_COMPLETED,
+                VehicleMaintenance::STATUS_OVERDUE,
+            ]),
             'metadata' => 'nullable|array',
         ];
     }

@@ -76,6 +76,10 @@ class TripVendorSubmissionService
 
         $submission->markAsSubmitted($submittedBy);
 
+        if (!$trip->approval_status || $trip->approval_status === 'draft') {
+            $trip->update(['approval_status' => 'pending_review']);
+        }
+
         return $submission;
     }
 
@@ -142,6 +146,10 @@ class TripVendorSubmissionService
     {
         $submission = $trip->vendorSubmissions()->where('vendor_id', $vendor->id)->firstOrFail();
 
+        if ($submission->status !== TripVendorSubmission::STATUS_SUBMITTED) {
+            throw new \RuntimeException('Vendor must submit trip details before they can be selected.');
+        }
+
         // Approve the selected vendor's submission
         $this->approveSubmission($submission);
 
@@ -192,5 +200,51 @@ class TripVendorSubmissionService
 
         // Check if a vendor is selected
         return $trip->selected_vendor_id !== null && $trip->approval_status === 'approved';
+    }
+
+    /**
+     * Block trip status changes until vendor portal workflow rules are satisfied.
+     */
+    public function statusAdvancementBlockedReason(Trip $trip, string $newStatus): ?string
+    {
+        $gatedStatuses = [
+            Trip::STATUS_VENDOR_ASSIGNED,
+            Trip::STATUS_IN_PROGRESS,
+            Trip::STATUS_COMPLETED,
+            Trip::STATUS_CLOSED,
+        ];
+
+        if (!in_array($newStatus, $gatedStatuses, true)) {
+            return null;
+        }
+
+        if ($trip->multi_vendor) {
+            if (!$trip->selected_vendor_id || $trip->approval_status !== 'approved') {
+                return 'Multi-vendor trip requires an approved vendor selection before advancing status.';
+            }
+
+            return null;
+        }
+
+        $vendorId = $trip->selected_vendor_id ?? $trip->vendor_id;
+        if (!$vendorId) {
+            return null;
+        }
+
+        $submission = $trip->vendorSubmissions()->where('vendor_id', $vendorId)->first();
+        if (!$submission) {
+            return 'A vendor submission record is required before advancing this trip.';
+        }
+        if ($submission->status === TripVendorSubmission::STATUS_PENDING) {
+            return 'The assigned vendor must submit trip details before this trip can advance.';
+        }
+        if ($submission->status === TripVendorSubmission::STATUS_SUBMITTED) {
+            return 'The vendor submission must be approved (e.g. via vendor selection) before this trip can advance.';
+        }
+        if ($submission->status === TripVendorSubmission::STATUS_REJECTED) {
+            return 'The vendor submission was rejected; resolve vendor selection before advancing this trip.';
+        }
+
+        return null;
     }
 }

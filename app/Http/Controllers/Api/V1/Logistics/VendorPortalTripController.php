@@ -26,8 +26,10 @@ class VendorPortalTripController extends ApiController
             return $this->error('User is not a vendor', 'NOT_VENDOR', 403);
         }
 
-        $trips = Trip::whereHas('vendorSubmissions', function ($query) use ($vendor) {
-            $query->where('vendor_id', $vendor->id);
+        $trips = Trip::where(function ($q) use ($vendor) {
+            $q->whereHas('vendorSubmissions', function ($query) use ($vendor) {
+                $query->where('vendor_id', $vendor->id);
+            })->orWhere('vendor_id', $vendor->id);
         })
             ->with(['vendorSubmissions' => function ($query) use ($vendor) {
                 $query->where('vendor_id', $vendor->id);

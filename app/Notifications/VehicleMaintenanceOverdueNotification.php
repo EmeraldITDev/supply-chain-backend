@@ -51,7 +51,8 @@ class VehicleMaintenanceOverdueNotification extends Notification implements Shou
             ->line("Days Overdue: {$this->daysOverdue}")
             ->when($this->maintenance->cost, fn($mail) => $mail->line("Estimated Cost: \${$this->maintenance->cost}"))
             ->action('Schedule Maintenance', url("/logistics/fleet/vehicles/{$vehicle->id}"))
-            ->line('This vehicle maintenance is overdue. Please schedule and complete the maintenance immediately to ensure vehicle safety and compliance.')
+            ->line('Maintenance overdue for this vehicle. The vehicle has been set to Inactive until resolved.')
+            ->line('Please schedule and complete the maintenance immediately to ensure vehicle safety and compliance.')
             ->line('Failure to perform scheduled maintenance may affect warranty and vehicle insurance coverage.');
     }
 

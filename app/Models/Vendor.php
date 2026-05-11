@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use App\Models\User;
 use App\Models\VendorRegistrationDocument;
 
 class Vendor extends Model
@@ -80,6 +81,14 @@ class Vendor extends Model
     public function ratings(): HasMany
     {
         return $this->hasMany(VendorRating::class, 'vendor_id');
+    }
+
+    /**
+     * Portal users linked to this vendor account.
+     */
+    public function users(): HasMany
+    {
+        return $this->hasMany(User::class, 'vendor_id');
     }
 
     /**

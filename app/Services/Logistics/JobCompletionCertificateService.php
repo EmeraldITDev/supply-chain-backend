@@ -26,14 +26,89 @@ class JobCompletionCertificateService
             return $trip->jobCompletionCertificate;
         }
 
-        $jcc = JobCompletionCertificate::create(array_merge([
+        $lineItemsInput = $data['line_items'] ?? [];
+        unset($data['line_items']);
+
+        $vendor = $trip->selectedVendor ?? $trip->vendor;
+        $meta = $trip->metadata ?? [];
+
+        $defaults = [
             'trip_id' => $trip->id,
+            'vendor_id' => $vendor?->id,
             'issued_by' => $issuedBy,
             'status' => JobCompletionCertificate::STATUS_DRAFT,
-            'reference_number' => $this->referenceService->generateReferenceNumber(),
-        ], $data));
+            'reference_number' => $this->referenceService->generateReferenceNumberForVendor($vendor),
+            'po_number' => $data['po_number'] ?? ($meta['po_number'] ?? null),
+            'certification_text' => $data['certification_text'] ?? $this->defaultCertificationParagraph($trip),
+            'service_period_start' => $data['service_period_start'] ?? $trip->scheduled_departure_at?->format('Y-m-d'),
+            'service_period_end' => $data['service_period_end'] ?? $trip->scheduled_arrival_at?->format('Y-m-d'),
+        ];
 
-        return $jcc;
+        $jcc = JobCompletionCertificate::create(array_merge($defaults, $data));
+
+        foreach ($lineItemsInput as $idx => $row) {
+            $details = $row['details'] ?? [];
+            if (!empty($row['service_date'])) {
+                $details['service_date'] = $row['service_date'];
+            }
+            $jcc->lineItems()->create([
+                'line_number' => $row['line_number'] ?? ($idx + 1),
+                'description' => $row['description'],
+                'item_type' => $row['item_type'] ?? JCCLineItem::ITEM_TYPE_VEHICLE,
+                'details' => $details ?: null,
+                'condition' => $row['condition'] ?? JCCLineItem::CONDITION_GOOD,
+                'remarks' => $row['remarks'] ?? null,
+                'reference_number' => $row['reference_number'] ?? $row['trip_reference'] ?? null,
+                'vendor_submission_id' => $row['vendor_submission_id'] ?? null,
+            ]);
+        }
+
+        return $jcc->fresh(['lineItems']);
+    }
+
+    private function defaultCertificationParagraph(Trip $trip): string
+    {
+        return "This is to certify that services for trip {$trip->trip_code} ({$trip->title}) were rendered as described below.";
+    }
+
+    /**
+     * Suggested JCC line items from vendor portal data (no JCC persisted).
+     *
+     * @return array{line_items: array<int, array<string, mixed>>}
+     */
+    public function suggestPrefillLineItems(Trip $trip): array
+    {
+        $query = $trip->vendorSubmissions()
+            ->whereIn('status', [
+                TripVendorSubmission::STATUS_SUBMITTED,
+                TripVendorSubmission::STATUS_APPROVED,
+            ])
+            ->with('vendor');
+
+        if ($trip->selected_vendor_id) {
+            $query->where('vendor_id', $trip->selected_vendor_id);
+        }
+
+        $lineItems = [];
+        $n = 1;
+
+        foreach ($query->get() as $submission) {
+            $lineItems[] = [
+                'serial_number' => $n,
+                'description' => trim("{$submission->vehicle_make} {$submission->vehicle_model}"),
+                'trip_reference' => $trip->trip_code,
+                'service_date' => $trip->scheduled_departure_at?->format('Y-m-d'),
+                'remarks' => $submission->driver_name
+                    ? 'Driver: ' . $submission->driver_name . ($submission->driver_phone ? " ({$submission->driver_phone})" : '')
+                    : null,
+                'vendor_submission_id' => $submission->id,
+                'item_type' => JCCLineItem::ITEM_TYPE_VEHICLE,
+                'reference_number' => $submission->plate_number,
+            ];
+            $n++;
+        }
+
+        return ['line_items' => $lineItems];
     }
 
     /**
@@ -87,8 +162,10 @@ class JobCompletionCertificateService
 
         // Notify relevant stakeholders
         $trip = $jcc->trip;
-        if ($trip->vendor && $trip->vendor->users()->first()) {
-            $trip->vendor->users()->first()->notify(
+        $primaryVendor = $trip->selectedVendor ?? $trip->vendor;
+        $vendorUser = $primaryVendor?->users()->first();
+        if ($vendorUser) {
+            $vendorUser->notify(
                 new JobCompletionCertificateApprovedNotification($trip, $jcc)
             );
         }
@@ -169,9 +246,17 @@ class JobCompletionCertificateService
             throw new \Exception('Trip not found');
         }
 
-        $submissions = $trip->vendorSubmissions()
-            ->where('status', TripVendorSubmission::STATUS_APPROVED)
-            ->get();
+        $query = $trip->vendorSubmissions()
+            ->whereIn('status', [
+                TripVendorSubmission::STATUS_SUBMITTED,
+                TripVendorSubmission::STATUS_APPROVED,
+            ]);
+
+        if ($trip->selected_vendor_id) {
+            $query->where('vendor_id', $trip->selected_vendor_id);
+        }
+
+        $submissions = $query->get();
 
         $createdItems = [];
         foreach ($submissions as $index => $submission) {
@@ -201,6 +286,11 @@ class JobCompletionCertificateService
             'trip_id' => $jcc->trip_id,
             'trip_code' => $jcc->trip->trip_code,
             'trip_title' => $jcc->trip->title,
+            'vendor_id' => $jcc->vendor_id,
+            'po_number' => $jcc->po_number,
+            'certification_text' => $jcc->certification_text,
+            'service_period_start' => $jcc->service_period_start?->format('Y-m-d'),
+            'service_period_end' => $jcc->service_period_end?->format('Y-m-d'),
             'status' => $jcc->status,
             'issued_by' => $jcc->issuedBy?->name,
             'issued_at' => $jcc->issued_at?->format('Y-m-d H:i'),

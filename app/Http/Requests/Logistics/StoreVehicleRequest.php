@@ -56,7 +56,7 @@ class StoreVehicleRequest extends FormRequest
             'color' => 'nullable|string|max:50',
             'fuel_type' => 'nullable|string|max:50',
             'capacity' => 'nullable|numeric|min:0',
-            'status' => 'nullable|string|max:50',
+            'status' => 'nullable|string|in:active,inactive,ACTIVE,INACTIVE,UNDER_MAINTENANCE,under_maintenance',
             'vendor_id' => 'nullable|exists:vendors,id',
             'gps_device_id' => 'nullable|string|max:100',
             'last_service_at' => 'nullable|date',

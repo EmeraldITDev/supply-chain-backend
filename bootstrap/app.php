@@ -36,6 +36,12 @@ return Application::configure(basePath: dirname(__DIR__))
         $schedule->command('documents:mark-expired')->dailyAt('00:00')
             ->name('Update Expired Vendor Documents')
             ->description('Mark vendor registration documents as expired');
+
+        $schedule->command('fleet:check-vehicle-documents')->dailyAt('00:05')
+            ->withoutOverlapping(10);
+
+        $schedule->command('fleet:check-maintenance')->dailyAt('00:10')
+            ->withoutOverlapping(10);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         // Render JSON responses for API errors

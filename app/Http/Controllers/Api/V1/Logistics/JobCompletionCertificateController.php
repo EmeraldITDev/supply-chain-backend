@@ -214,6 +214,24 @@ class JobCompletionCertificateController extends ApiController
     }
 
     /**
+     * Prefill suggestions only (no JCC required) — for building the line-item table before save.
+     */
+    public function prefillSuggestions(int $tripId)
+    {
+        $trip = Trip::find($tripId);
+
+        if (!$trip) {
+            return $this->error('Trip not found', 'NOT_FOUND', 404);
+        }
+
+        try {
+            return $this->success($this->jccService->suggestPrefillLineItems($trip));
+        } catch (\Exception $e) {
+            return $this->error('Failed to build prefill suggestions: ' . $e->getMessage(), 'PREFILL_FAILED', 400);
+        }
+    }
+
+    /**
      * Prefill JCC with vendor submissions
      *
      * Converts vendor portal submissions into ready-to-use line item suggestions

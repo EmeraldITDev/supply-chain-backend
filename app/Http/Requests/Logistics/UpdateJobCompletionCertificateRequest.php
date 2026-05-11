@@ -17,6 +17,10 @@ class UpdateJobCompletionCertificateRequest extends FormRequest
             'remarks' => 'nullable|string',
             'delivery_confirmed' => 'nullable|boolean',
             'condition_of_goods' => 'nullable|string',
+            'certification_text' => 'nullable|string',
+            'po_number' => 'nullable|string|max:100',
+            'service_period_start' => 'nullable|date',
+            'service_period_end' => 'nullable|date',
         ];
     }
 

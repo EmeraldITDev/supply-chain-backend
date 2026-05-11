@@ -7,12 +7,17 @@ use App\Http\Requests\Logistics\BulkUploadTripsRequest;
 use App\Http\Requests\Logistics\StoreTripRequest;
 use App\Http\Requests\Logistics\UpdateTripRequest;
 use App\Models\Logistics\Trip;
+use App\Models\Logistics\Vehicle;
 use App\Models\Vendor;
 use App\Notifications\VendorAssignedToTripNotification;
 use App\Services\Logistics\AuditLogger;
 use App\Services\Logistics\IdempotencyService;
 use App\Services\Logistics\TripService;
+use App\Services\Logistics\TripVendorSubmissionService;
+use App\Models\Logistics\TripVendorSubmission;
+use App\Services\Logistics\FleetVehicleAssignmentGuard;
 use App\Services\Logistics\UploadService;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 
@@ -33,6 +38,9 @@ class TripController extends ApiController
         }
 
         $data = $request->validated();
+        if ($response = $this->resolveFleetVehicleForTrip($data)) {
+            return $response;
+        }
         $data['trip_code'] = $data['trip_code'] ?? 'TRIP-' . now()->format('Ymd') . '-' . Str::upper(Str::random(6));
         $data['status'] = $data['status'] ?? Trip::STATUS_DRAFT;
         $data['trip_type'] = $data['trip_type'] ?? Trip::TYPE_PERSONNEL;
@@ -82,7 +90,7 @@ class TripController extends ApiController
 
     public function show(int $id)
     {
-        $trip = Trip::with(['vendor', 'journeys', 'materials'])->find($id);
+        $trip = Trip::with(['vendor', 'vehicle', 'journeys', 'materials'])->find($id);
 
         if (!$trip) {
             return $this->error('Trip not found', 'NOT_FOUND', 404);
@@ -103,8 +111,18 @@ class TripController extends ApiController
 
         $data = $request->validated();
 
-        if (isset($data['status']) && !$this->tripService->canTransition($trip->status, $data['status'])) {
-            return $this->error('Invalid status transition', 'INVALID_TRANSITION', 422);
+        if ($response = $this->resolveFleetVehicleForTrip($data)) {
+            return $response;
+        }
+
+        if (isset($data['status'])) {
+            $blockReason = app(TripVendorSubmissionService::class)->statusAdvancementBlockedReason($trip, $data['status']);
+            if ($blockReason !== null) {
+                return $this->error($blockReason, 'VENDOR_SUBMISSION_REQUIRED', 422);
+            }
+            if (!$this->tripService->canTransition($trip->status, $data['status'])) {
+                return $this->error('Invalid status transition', 'INVALID_TRANSITION', 422);
+            }
         }
 
         $data['updated_by'] = $request->user()?->id;
@@ -125,6 +143,46 @@ class TripController extends ApiController
         ]);
     }
 
+    /**
+     * @param  array<string, mixed>  $data
+     */
+    private function resolveFleetVehicleForTrip(array &$data): ?JsonResponse
+    {
+        if (!array_key_exists('vehicle_id', $data)) {
+            return null;
+        }
+
+        $vehicleId = $data['vehicle_id'];
+        $confirmed = (bool) ($data['confirm_vehicle_assignment_override'] ?? false);
+        unset($data['confirm_vehicle_assignment_override']);
+
+        if ($vehicleId === null) {
+            return null;
+        }
+
+        $vehicle = Vehicle::find($vehicleId);
+        if (!$vehicle) {
+            return $this->error('Vehicle not found', 'NOT_FOUND', 404);
+        }
+
+        $guard = app(FleetVehicleAssignmentGuard::class)->evaluate($vehicle);
+
+        if ($guard['hard_block']) {
+            return $this->error($guard['message'] ?? 'Vehicle cannot be assigned', 'VEHICLE_INACTIVE', 422);
+        }
+
+        if ($guard['warning'] && !$confirmed) {
+            return response()->json([
+                'success' => false,
+                'warning' => true,
+                'message' => $guard['message'],
+                'allow_override' => $guard['allow_override'],
+            ], 422);
+        }
+
+        return null;
+    }
+
     public function assignVendor(AssignVendorRequest $request, int $id)
     {
         $trip = Trip::find($id);
@@ -133,8 +191,8 @@ class TripController extends ApiController
             return $this->error('Trip not found', 'NOT_FOUND', 404);
         }
 
-        if (!$this->tripService->canTransition($trip->status, Trip::STATUS_VENDOR_ASSIGNED)) {
-            return $this->error('Invalid status transition', 'INVALID_TRANSITION', 422);
+        if (!in_array($trip->status, [Trip::STATUS_DRAFT, Trip::STATUS_SCHEDULED], true)) {
+            return $this->error('Trip must be draft or scheduled to assign a vendor', 'INVALID_STATUS', 422);
         }
 
         $vendor = Vendor::find($request->vendor_id);
@@ -143,8 +201,16 @@ class TripController extends ApiController
         }
 
         $trip->vendor_id = $request->vendor_id;
-        $trip->status = Trip::STATUS_VENDOR_ASSIGNED;
+        $trip->status = Trip::STATUS_DRAFT;
+        if (empty($trip->approval_status)) {
+            $trip->approval_status = 'draft';
+        }
         $trip->save();
+
+        $trip->vendorSubmissions()->firstOrCreate(
+            ['vendor_id' => $vendor->id],
+            ['status' => TripVendorSubmission::STATUS_PENDING]
+        );
 
         // Send notification to vendor
         try {

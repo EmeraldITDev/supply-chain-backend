@@ -3,6 +3,7 @@
 namespace App\Models\Logistics;
 
 use App\Models\User;
+use App\Models\Vendor;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -23,6 +24,7 @@ class JobCompletionCertificate extends Model
 
     protected $fillable = [
         'trip_id',
+        'vendor_id',
         'issued_by',
         'issued_at',
         'remarks',
@@ -34,6 +36,10 @@ class JobCompletionCertificate extends Model
         'approved_by',
         'approved_at',
         'reference_number',
+        'po_number',
+        'certification_text',
+        'service_period_start',
+        'service_period_end',
         'metadata',
     ];
 
@@ -43,6 +49,8 @@ class JobCompletionCertificate extends Model
         'delivery_confirmed' => 'boolean',
         'attachments' => 'array',
         'metadata' => 'array',
+        'service_period_start' => 'date',
+        'service_period_end' => 'date',
     ];
 
     protected static function boot()
@@ -59,6 +67,11 @@ class JobCompletionCertificate extends Model
     public function trip(): BelongsTo
     {
         return $this->belongsTo(Trip::class, 'trip_id');
+    }
+
+    public function vendor(): BelongsTo
+    {
+        return $this->belongsTo(Vendor::class, 'vendor_id');
     }
 
     public function issuedBy(): BelongsTo

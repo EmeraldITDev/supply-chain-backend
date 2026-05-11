@@ -7,6 +7,7 @@ use App\Http\Requests\Logistics\SelectVendorRequest;
 use App\Models\Logistics\Trip;
 use App\Models\Logistics\TripVendorSubmission;
 use App\Models\Vendor;
+use App\Notifications\VendorTripInvoiceReminderNotification;
 use App\Services\Logistics\TripVendorSubmissionService;
 use Illuminate\Http\Request;
 
@@ -122,6 +123,64 @@ class TripVendorSubmissionController extends ApiController
     }
 
     /**
+     * List all vendor submissions for a trip (internal / approvers).
+     */
+    public function listTripSubmissions(Request $request, int $tripId)
+    {
+        $trip = Trip::find($tripId);
+
+        if (!$trip) {
+            return $this->error('Trip not found', 'NOT_FOUND', 404);
+        }
+
+        $submissions = $trip->vendorSubmissions()
+            ->with(['vendor', 'documents', 'submittedBy'])
+            ->get()
+            ->map(function (TripVendorSubmission $submission) use ($trip) {
+                return [
+                    'id' => $submission->id,
+                    'trip_id' => $submission->trip_id,
+                    'trip_code' => $trip->trip_code,
+                    'vendor_id' => $submission->vendor_id,
+                    'vendor_name' => $submission->vendor->name,
+                    'vendor_contact' => [
+                        'email' => $submission->vendor->email,
+                        'phone' => $submission->vendor->phone,
+                    ],
+                    'vehicle_details' => [
+                        'make' => $submission->vehicle_make,
+                        'model' => $submission->vehicle_model,
+                        'plate_number' => $submission->plate_number,
+                    ],
+                    'driver_details' => [
+                        'name' => $submission->driver_name,
+                        'phone' => $submission->driver_phone,
+                        'license_no' => $submission->driver_license_no,
+                    ],
+                    'security_info' => $submission->security_info,
+                    'quoted_price' => $submission->quoted_price,
+                    'currency' => $submission->currency,
+                    'status' => $submission->status,
+                    'submitted_at' => $submission->submitted_at,
+                    'submitted_by' => $submission->submittedBy?->name,
+                    'documents' => $submission->documents->map(function ($doc) {
+                        return [
+                            'id' => $doc->id,
+                            'document_type' => $doc->document_type,
+                            'file_name' => $doc->file_name,
+                            'size' => $doc->size,
+                        ];
+                    }),
+                ];
+            });
+
+        return $this->success([
+            'trip_id' => $trip->id,
+            'submissions' => $submissions,
+        ]);
+    }
+
+    /**
      * Get submission details (internal endpoint for approvers)
      */
     public function getSubmission(Request $request, int $tripId, int $submissionId)
@@ -202,17 +261,23 @@ class TripVendorSubmissionController extends ApiController
         }
 
         try {
-            // TODO: Implement PO generation logic (creates linked PO requisition in Procurement module)
-            // For now, we'll just update the trip status
+            $metadata = $trip->metadata ?? [];
+            $metadata['procurement_routed_at'] = now()->toIso8601String();
+            $metadata['po_requisition_status'] = 'pending';
 
             $trip->update([
                 'status' => Trip::STATUS_VENDOR_ASSIGNED,
+                'metadata' => $metadata,
             ]);
 
             return $this->success([
                 'message' => 'Trip routed to procurement successfully',
                 'trip_id' => $trip->id,
                 'trip_status' => $trip->status,
+                'procurement' => [
+                    'requisition_status' => 'pending',
+                    'note' => 'Link this trip to Procurement PO workflow when the MRF integration is available.',
+                ],
             ]);
         } catch (\Exception $e) {
             return $this->error('Failed to route trip to procurement: ' . $e->getMessage(), 'ROUTE_FAILED', 400);
@@ -235,13 +300,17 @@ class TripVendorSubmissionController extends ApiController
         }
 
         try {
-            // TODO: Send notification to vendor to submit invoice
-            // This would use the NotificationService to send an email/portal notification
+            $vendor = $trip->selectedVendor;
+            $notifiable = $vendor->users()->first();
+            if ($notifiable) {
+                $notifiable->notify(new VendorTripInvoiceReminderNotification($trip, $vendor));
+            }
 
             return $this->success([
                 'message' => 'Invoice submission notification sent to vendor',
                 'vendor_id' => $trip->selectedVendor->id,
                 'vendor_name' => $trip->selectedVendor->name,
+                'notified_user' => (bool) $notifiable,
             ]);
         } catch (\Exception $e) {
             return $this->error('Failed to notify vendor: ' . $e->getMessage(), 'NOTIFICATION_FAILED', 400);

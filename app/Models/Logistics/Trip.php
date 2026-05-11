@@ -47,6 +47,7 @@ class Trip extends Model
         'origin',
         'destination',
         'vendor_id',
+        'vehicle_id',
         'multi_vendor',
         'selected_vendor_id',
         'approval_status',
@@ -70,6 +71,11 @@ class Trip extends Model
     public function vendor(): BelongsTo
     {
         return $this->belongsTo(Vendor::class, 'vendor_id');
+    }
+
+    public function vehicle(): BelongsTo
+    {
+        return $this->belongsTo(Vehicle::class, 'vehicle_id');
     }
 
     public function selectedVendor(): BelongsTo

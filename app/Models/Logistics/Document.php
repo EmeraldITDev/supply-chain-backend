@@ -25,6 +25,7 @@ class Document extends Model
         'expires_at',
         'issued_at',
         'uploaded_by',
+        'is_active',
         'metadata',
     ];
 
@@ -32,6 +33,7 @@ class Document extends Model
         'expires_at' => 'datetime',
         'issued_at' => 'datetime',
         'metadata' => 'array',
+        'is_active' => 'boolean',
     ];
 
     public function documentable(): MorphTo
