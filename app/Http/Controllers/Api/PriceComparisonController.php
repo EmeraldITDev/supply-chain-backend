@@ -57,6 +57,10 @@ class PriceComparisonController extends Controller
             ], 404);
         }
 
+        if ($mrf->priceComparisons()->count() === 0) {
+            $mrf->syncPriceComparisonsFromQuotations();
+        }
+
         $rows = $mrf->priceComparisons()
             ->with('vendor:id,vendor_id,name')
             ->orderByDesc('is_selected')

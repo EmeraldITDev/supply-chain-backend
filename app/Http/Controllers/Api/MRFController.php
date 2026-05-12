@@ -428,6 +428,11 @@ class MRFController extends Controller
             ], 404);
         }
 
+        if ($mrf->priceComparisons->isEmpty()) {
+            $mrf->syncPriceComparisonsFromQuotations();
+            $mrf->load('priceComparisons');
+        }
+
         $freshPOUrls = $this->generateFreshPOUrls($mrf);
 
         return response()->json([
@@ -582,6 +587,11 @@ class MRFController extends Controller
                 'code' => 'NOT_FOUND'
             ], 404);
         }
+
+        if ($mrf->priceComparisons()->count() === 0) {
+            $mrf->syncPriceComparisonsFromQuotations();
+        }
+        $mrf->load(['priceComparisons.vendor']);
 
         // Get all RFQs for this MRF
         $rfqs = $mrf->rfqs;
@@ -889,6 +899,21 @@ class MRFController extends Controller
                     'highestBid' => $allQuotations->max('totalAmount'),
                     'averageBid' => $allQuotations->avg('totalAmount'),
                 ],
+                'priceComparisons' => $mrf->priceComparisons->map(function ($row) {
+                    return [
+                        'id' => $row->id,
+                        'purchase_order_id' => $row->purchase_order_id,
+                        'vendor_id' => $row->vendor?->vendor_id ?? $row->vendor_id,
+                        'vendor_internal_id' => $row->vendor_id,
+                        'vendor_name' => $row->vendor?->name,
+                        'item_description' => $row->item_description,
+                        'unit_price' => (float) $row->unit_price,
+                        'quantity' => (float) $row->quantity,
+                        'total_price' => (float) $row->total_price,
+                        'is_selected' => (bool) $row->is_selected,
+                        'selection_reason' => $row->selection_reason,
+                    ];
+                })->values(),
             ],
         ]);
     }

@@ -196,6 +196,16 @@ class MRF extends Model
     }
 
     /**
+     * User linked from director_approved_by when that column stores a user id.
+     * If the column stores a plain name string, this relation resolves to null
+     * and API consumers fall back to the raw string.
+     */
+    public function directorApprover(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'director_approved_by');
+    }
+
+    /**
      * Get user who rejected this MRF
      */
     public function rejector(): BelongsTo
@@ -248,7 +258,7 @@ class MRF extends Model
         }
 
         $quotations = $this->quotations()
-            ->with('vendor')
+            ->with(['vendor', 'items'])
             ->orderByDesc('created_at')
             ->get()
             ->unique('vendor_id')
@@ -261,6 +271,11 @@ class MRF extends Model
             }
 
             $total = (float) ($quotation->total_amount ?? $quotation->price ?? 0);
+            if ($total <= 0 && $quotation->relationLoaded('items')) {
+                $total = (float) $quotation->items->sum('total_price');
+            } elseif ($total <= 0) {
+                $total = (float) $quotation->items()->sum('total_price');
+            }
             if ($total <= 0) {
                 continue;
             }
