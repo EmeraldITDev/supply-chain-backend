@@ -11,7 +11,7 @@ return new class extends Migration
         if (!Schema::hasTable('po_terms_templates')) {
             Schema::create('po_terms_templates', function (Blueprint $table) {
                 $table->id();
-                $table->enum('po_type', ['goods', 'services', 'logistics']);
+                $table->enum('po_type', ['goods', 'services', 'logistics', 'rfq']);
                 $table->longText('content');
                 $table->boolean('is_active')->default(true);
                 $table->timestamps();
