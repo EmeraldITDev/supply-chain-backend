@@ -261,11 +261,25 @@ class VendorController extends Controller
             $taxId = trim($request->input('taxId') ?? $request->input('tax_id') ?? '');
             $contactPerson = trim($request->input('contactPerson') ?? $request->input('contact_person') ?? '');
 
+            // DEBUG: Log all possible ways to access email
+            \Log::info('Email access debugging', [
+                'request_id' => $requestId,
+                'input_email' => $request->input('email'),
+                'get_email' => $request->get('email'),
+                'email_direct' => $request->email,
+                'post_email' => $request->post('email'),
+                'all_data' => $request->all(),
+                'raw_body_length' => strlen($request->getContent()),
+            ]);
+
             // Guard: Email must be present and valid
-            $rawEmail = $request->input('email');
+            $rawEmail = $request->input('email') ?? $request->get('email') ?? $request->post('email');
             if (empty($rawEmail)) {
                 \Log::warning('Email is missing from registration request', [
-                    'request_id' => $requestId
+                    'request_id' => $requestId,
+                    'tried_input' => $request->input('email'),
+                    'tried_get' => $request->get('email'),
+                    'tried_post' => $request->post('email'),
                 ]);
                 return response()->json([
                     'success' => false,
