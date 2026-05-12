@@ -40,9 +40,8 @@ class EnsureCorsHeaders
         \Log::info('EnsureCorsHeaders middleware executing', [
             'origin' => $origin,
             'method' => $request->getMethod(),
-            'path' => $request->getPath(),
+            'path' => $request->path(),
             'allowed_origins' => $allowedOrigins,
-            'headers' => $request->headers->all(),
         ]);
 
         // Check if origin is allowed
