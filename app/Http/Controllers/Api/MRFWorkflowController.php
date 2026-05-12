@@ -362,7 +362,14 @@ class MRFWorkflowController extends Controller
             ], 403);
         }
 
-        $mrf = MRF::where('mrf_id', $id)->first();
+        $mrf = MRF::query()
+            ->where(function ($q) use ($id) {
+                $q->where('mrf_id', $id)->orWhere('formatted_id', $id);
+                if ($id !== '' && is_numeric($id)) {
+                    $q->orWhere('id', (int) $id);
+                }
+            })
+            ->first();
 
         if (!$mrf) {
             return response()->json([
@@ -396,9 +403,13 @@ class MRFWorkflowController extends Controller
         }
 
         if ($mrf->priceComparisons()->count() === 0) {
+            $mrf->syncPriceComparisonsFromQuotations();
+        }
+
+        if ($mrf->priceComparisons()->count() === 0) {
             return response()->json([
                 'success' => false,
-                'error' => 'Price comparison analysis is required before routing this PO for approval.',
+                'error' => 'No price comparison data is available. Ensure this MRF has RFQ quotations from vendors, or save a price comparison in the comparison step first.',
                 'code' => 'VALIDATION_ERROR'
             ], 422);
         }
@@ -455,6 +466,14 @@ class MRFWorkflowController extends Controller
             'status' => 'vendor_selected',
             'current_stage' => 'supply_chain_review',
         ]);
+
+        if ($mrf->priceComparisons()->exists()) {
+            $mrf->priceComparisons()->update(['is_selected' => false, 'selection_reason' => null]);
+            $mrf->priceComparisons()->where('vendor_id', $vendor->id)->update([
+                'is_selected' => true,
+                'selection_reason' => $request->remarks,
+            ]);
+        }
 
         // Update RFQ workflow state to supply_chain_review
         if ($rfq) {

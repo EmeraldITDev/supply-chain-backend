@@ -238,6 +238,55 @@ class MRF extends Model
     }
 
     /**
+     * If procurement never used the price-comparison API, build rows from
+     * RFQ quotations (one per vendor, latest quote) so vendor selection can proceed.
+     */
+    public function syncPriceComparisonsFromQuotations(): int
+    {
+        if ($this->priceComparisons()->exists()) {
+            return $this->priceComparisons()->count();
+        }
+
+        $quotations = $this->quotations()
+            ->with('vendor')
+            ->orderByDesc('created_at')
+            ->get()
+            ->unique('vendor_id')
+            ->values();
+
+        $created = 0;
+        foreach ($quotations as $quotation) {
+            if (empty($quotation->vendor_id)) {
+                continue;
+            }
+
+            $total = (float) ($quotation->total_amount ?? $quotation->price ?? 0);
+            if ($total <= 0) {
+                continue;
+            }
+
+            $label = trim((string) ($this->title ?: 'RFQ quotation'));
+            $vendorName = trim((string) ($quotation->vendor?->name ?? ''));
+
+            PriceComparison::create([
+                'purchase_order_id' => $this->id,
+                'vendor_id' => (int) $quotation->vendor_id,
+                'item_description' => $vendorName !== ''
+                    ? "{$label} ({$vendorName})"
+                    : $label,
+                'unit_price' => $total,
+                'quantity' => 1,
+                'total_price' => $total,
+                'is_selected' => false,
+                'selection_reason' => null,
+            ]);
+            $created++;
+        }
+
+        return $created;
+    }
+
+    /**
      * Get selected quotation through RFQ
      */
     public function selectedQuotation()
