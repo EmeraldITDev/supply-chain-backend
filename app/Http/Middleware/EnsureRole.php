@@ -4,6 +4,7 @@ namespace App\Http\Middleware;
 
 use Closure;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 use Symfony\Component\HttpFoundation\Response;
 
 class EnsureRole
@@ -37,14 +38,35 @@ class EnsureRole
         $hasRole = count(array_intersect($userRoleKeys, $roleList)) > 0;
 
         if (!$hasRole && method_exists($user, 'hasAnyRole')) {
-            $hasRole = $user->hasAnyRole($roleList);
+            try {
+                $hasRole = $user->hasAnyRole($roleList);
+            } catch (\Throwable $e) {
+                Log::warning('EnsureRole hasAnyRole threw', [
+                    'user_id' => $user->id ?? null,
+                    'error' => $e->getMessage(),
+                ]);
+            }
         }
 
         if (!$hasRole) {
+            Log::warning('EnsureRole denying request', [
+                'path' => $request->path(),
+                'user_id' => $user->id ?? null,
+                'user_role_column' => $user->role ?? null,
+                'user_role_keys' => $userRoleKeys,
+                'required_role_list' => $roleList,
+                'raw_roles_param' => $roles,
+            ]);
+
             return response()->json([
                 'success' => false,
                 'error' => 'Insufficient permissions',
-                'code' => 'FORBIDDEN'
+                'code' => 'FORBIDDEN',
+                'debug' => [
+                    'user_role_column' => $user->role ?? null,
+                    'user_role_keys' => $userRoleKeys,
+                    'required_role_list' => $roleList,
+                ],
             ], 403);
         }
 
