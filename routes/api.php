@@ -95,6 +95,16 @@ Route::get('/health', function () {
     ], $dbStatus === 'connected' ? 200 : 503);
 });
 
+// CORS preflight test endpoint
+Route::options('/vendors/register', function () {
+    return response('', 204)
+        ->header('Access-Control-Allow-Origin', request('Origin') ?: '*')
+        ->header('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS, HEAD')
+        ->header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With')
+        ->header('Access-Control-Allow-Credentials', 'true')
+        ->header('Access-Control-Max-Age', '86400');
+});
+
 Route::post('/auth/login', [AuthController::class, 'login']);
 Route::post('/auth/vendor/change-password', [AuthController::class, 'forcePasswordChange']);
 
