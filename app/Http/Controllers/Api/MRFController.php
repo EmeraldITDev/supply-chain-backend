@@ -1042,17 +1042,20 @@ class MRFController extends Controller
 
         // Roles that are allowed to author MRF requests directly. Logistics
         // Manager and Logistics Officer can create MRFs for their own
-        // department (e.g. fleet parts, workshop consumables). The
-        // designated_requisition_creator flag still gates non-logistics
+        // department (e.g. fleet parts, workshop consumables). Procurement
+        // Manager can originate MRFs when driving PO / procurement workflows.
+        // The designated_requisition_creator flag still gates non-logistics
         // employees.
         $logisticsAuthors = ['logistics_manager', 'logistics_officer'];
-        $isLogisticsAuthor = in_array($user->role, $logisticsAuthors, true);
+        $procurementAuthors = ['procurement_manager', 'procurement'];
+        $privilegedAuthors = array_merge($logisticsAuthors, $procurementAuthors);
+        $isPrivilegedAuthor = in_array($user->role, $privilegedAuthors, true);
         $isDepartmentEmployee = $user->role === 'employee';
 
-        if (!$isLogisticsAuthor && !$isDepartmentEmployee) {
+        if (!$isPrivilegedAuthor && !$isDepartmentEmployee) {
             return response()->json([
                 'success' => false,
-                'error' => 'Only designated staff or logistics managers can create Material Request Forms.',
+                'error' => 'Only designated staff, logistics managers, or procurement managers can create Material Request Forms.',
             ], 403);
         }
 
