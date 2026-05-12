@@ -144,6 +144,7 @@ class FleetController extends ApiController
         return $this->success([
             'vehicle_id' => $vehicle->id,
             'maintenance' => $records,
+            'maintenance_records' => $records,
         ]);
     }
 
@@ -241,8 +242,7 @@ class FleetController extends ApiController
      */
     public function getAlerts(Request $request)
     {
-        $userId = $request->user()?->id;
-        $days_threshold = $request->get('days_threshold', 30); // Alert if expiring within 30 days by default
+        $days_threshold = max(1, min(365, (int) $request->get('days_threshold', 30)));
 
         // Get all vehicles accessible to user
         $query = Vehicle::with(['maintenances', 'documents']);
@@ -268,20 +268,21 @@ class FleetController extends ApiController
         ];
 
         $now = now();
-        $threshold_date = $now->clone()->addDays($days_threshold);
+        $today = $now->copy()->startOfDay();
 
         foreach ($vehicles as $vehicle) {
             // Check for expiring documents
             foreach ($vehicle->documents as $document) {
-                if (!$document->is_active) {
+                if ($document->is_active === false) {
                     continue;
                 }
                 if ($document->expires_at) {
-                    $days_until_expiry = $now->diffInDays($document->expires_at);
-                    
+                    // Signed days: negative = already expired, positive = days until expiry
+                    $days_until_expiry = (int) $today->diffInDays($document->expires_at->copy()->startOfDay(), false);
+
                     if ($days_until_expiry <= $days_threshold) {
                         $severity = $days_until_expiry < 0 ? 'critical' : ($days_until_expiry <= 7 ? 'warning' : 'info');
-                        
+
                         $alerts['expiring_documents'][] = [
                             'id' => $document->id,
                             'vehicle_id' => $vehicle->id,
@@ -294,7 +295,7 @@ class FleetController extends ApiController
                             'severity' => $severity,
                             'expired' => $days_until_expiry < 0,
                         ];
-                        
+
                         $alerts['summary'][$severity]++;
                         $alerts['summary']['total_alerts']++;
                     }
@@ -304,8 +305,10 @@ class FleetController extends ApiController
             // Check for overdue maintenance
             foreach ($vehicle->maintenances as $maintenance) {
                 if ($maintenance->next_due_at && $maintenance->next_due_at < $now) {
-                    $days_overdue = $maintenance->next_due_at->diffInDays($now);
-                    
+                    $days_overdue = (int) $maintenance->next_due_at->diffInDays($now);
+
+                    $maintSeverity = $days_overdue > 30 ? 'critical' : 'warning';
+
                     $alerts['overdue_maintenance'][] = [
                         'id' => $maintenance->id,
                         'vehicle_id' => $vehicle->id,
@@ -315,27 +318,29 @@ class FleetController extends ApiController
                         'description' => $maintenance->description,
                         'next_due_at' => $maintenance->next_due_at,
                         'days_overdue' => $days_overdue,
-                        'severity' => $days_overdue > 30 ? 'critical' : 'warning',
+                        'severity' => $maintSeverity,
                         'status' => $maintenance->status,
                     ];
-                    
-                    $alerts['summary']['critical']++;
+
+                    $alerts['summary'][$maintSeverity]++;
                     $alerts['summary']['total_alerts']++;
                 }
             }
 
             // Check vehicle status changes
             if (in_array($vehicle->status, [Vehicle::STATUS_UNDER_MAINTENANCE, Vehicle::STATUS_INACTIVE, 'MAINTENANCE', 'OUT_OF_SERVICE'], true)) {
+                $statusSeverity = $vehicle->status === Vehicle::STATUS_INACTIVE || $vehicle->status === 'OUT_OF_SERVICE' ? 'critical' : 'warning';
+
                 $alerts['status_changes'][] = [
                     'id' => $vehicle->id,
                     'vehicle_code' => $vehicle->vehicle_code,
                     'plate_number' => $vehicle->plate_number,
                     'current_status' => $vehicle->status,
                     'updated_at' => $vehicle->updated_at,
-                    'severity' => $vehicle->status === Vehicle::STATUS_INACTIVE || $vehicle->status === 'OUT_OF_SERVICE' ? 'critical' : 'warning',
+                    'severity' => $statusSeverity,
                 ];
-                
-                $alerts['summary']['warning']++;
+
+                $alerts['summary'][$statusSeverity]++;
                 $alerts['summary']['total_alerts']++;
             }
         }
@@ -343,8 +348,10 @@ class FleetController extends ApiController
         // Sort alerts by severity and date
         usort($alerts['expiring_documents'], function ($a, $b) {
             $severity_order = ['critical' => 0, 'warning' => 1, 'info' => 2];
-            if ($severity_order[$a['severity']] !== $severity_order[$b['severity']]) {
-                return $severity_order[$a['severity']] <=> $severity_order[$b['severity']];
+            $sa = $severity_order[$a['severity']] ?? 2;
+            $sb = $severity_order[$b['severity']] ?? 2;
+            if ($sa !== $sb) {
+                return $sa <=> $sb;
             }
             return $a['days_until_expiry'] <=> $b['days_until_expiry'];
         });

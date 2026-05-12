@@ -53,7 +53,15 @@ class Vehicle extends Model
         'year' => 'integer',
     ];
 
-    protected $appends = ['ownership_type'];
+    protected $appends = ['ownership_type', 'cargo_capacity'];
+
+    /**
+     * Frontend expects `cargo_capacity`; DB column is `capacity`.
+     */
+    public function getCargoCapacityAttribute(): mixed
+    {
+        return $this->capacity;
+    }
 
     protected static function booted(): void
     {

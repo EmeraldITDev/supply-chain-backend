@@ -29,6 +29,7 @@ use App\Http\Controllers\Api\V1\Logistics\MaterialJCCController as LogisticsMate
 use App\Http\Controllers\Api\V1\Logistics\FleetController as LogisticsFleetController;
 use App\Http\Controllers\Api\V1\Logistics\FleetDriverController as LogisticsFleetDriverController;
 use App\Http\Controllers\Api\V1\Logistics\FleetVehicleDocumentController as LogisticsFleetVehicleDocumentController;
+use App\Http\Controllers\Api\V1\Logistics\LogisticsDashboardController;
 use App\Http\Controllers\Api\V1\Logistics\DocumentController as LogisticsDocumentController;
 use App\Http\Controllers\Api\V1\Logistics\NotificationController as LogisticsNotificationController;
 use App\Http\Controllers\Api\V1\Logistics\ReportController as LogisticsReportController;
@@ -447,6 +448,7 @@ Route::prefix('v1/logistics')->group(function () {
     Route::middleware('auth:sanctum')->group(function () use ($logisticsInternalRoles) {
         Route::get('/auth/me', [LogisticsAuthController::class, 'me']);
         Route::post('/auth/vendor-invite', [LogisticsAuthController::class, 'vendorInvite'])->middleware($logisticsInternalRoles);
+        Route::get('/dashboard/stats', [LogisticsDashboardController::class, 'stats'])->middleware($logisticsInternalRoles);
 
         // Vendor Management
         Route::post('/vendors', [LogisticsVendorController::class, 'store'])->middleware($logisticsInternalRoles);
@@ -575,6 +577,7 @@ Route::prefix('logistics')->group(function () {
     Route::middleware('auth:sanctum')->group(function () use ($logisticsInternalRoles) {
         Route::get('/auth/me', [LogisticsAuthController::class, 'me']);
         Route::post('/auth/vendor-invite', [LogisticsAuthController::class, 'vendorInvite'])->middleware($logisticsInternalRoles);
+        Route::get('/dashboard/stats', [LogisticsDashboardController::class, 'stats'])->middleware($logisticsInternalRoles);
 
         Route::post('/vendors', [LogisticsVendorController::class, 'store'])->middleware($logisticsInternalRoles);
         Route::get('/vendors', [LogisticsVendorController::class, 'index'])->middleware($logisticsInternalRoles);

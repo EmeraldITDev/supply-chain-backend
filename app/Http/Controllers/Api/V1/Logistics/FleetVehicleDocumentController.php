@@ -33,17 +33,33 @@ class FleetVehicleDocumentController extends ApiController
             ->where('is_active', true)
             ->update(['is_active' => false]);
 
-        $path = $request->file('file')->store('logistics/documents', $this->storageDisk());
+        $uploaded = $request->file('file')
+            ?? $request->file('document')
+            ?? $request->file('attachment')
+            ?? $request->file('upload');
+
+        if (!$uploaded) {
+            return $this->error('A file upload is required.', 'VALIDATION_ERROR', 422, [
+                'file' => ['Please attach a PDF or image file.'],
+            ]);
+        }
+
+        $path = $uploaded->store('logistics/documents', $this->storageDisk());
+
+        $expiresAt = null;
+        if ($request->filled('expiry_date')) {
+            $expiresAt = Carbon::parse($request->expiry_date)->startOfDay();
+        }
 
         $document = Document::create([
             'documentable_type' => Vehicle::class,
             'documentable_id' => $vehicle->id,
             'document_type' => $request->document_type,
             'file_path' => $path,
-            'file_name' => $request->file('file')->getClientOriginalName(),
-            'mime_type' => $request->file('file')->getMimeType(),
-            'size' => $request->file('file')->getSize(),
-            'expires_at' => Carbon::parse($request->expiry_date)->startOfDay(),
+            'file_name' => $uploaded->getClientOriginalName(),
+            'mime_type' => $uploaded->getMimeType(),
+            'size' => $uploaded->getSize(),
+            'expires_at' => $expiresAt,
             'uploaded_by' => $request->user()?->id,
             'is_active' => true,
             'metadata' => [],
@@ -80,9 +96,16 @@ class FleetVehicleDocumentController extends ApiController
             ];
         }
 
+        $flat = Document::query()
+            ->where('documentable_type', Vehicle::class)
+            ->where('documentable_id', $vehicle->id)
+            ->orderByDesc('created_at')
+            ->get();
+
         return $this->success([
             'vehicle_id' => $vehicle->id,
             'documents_by_type' => $grouped,
+            'documents' => $flat,
         ]);
     }
 
