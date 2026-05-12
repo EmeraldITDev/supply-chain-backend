@@ -49,6 +49,12 @@ class EnsureRole
         }
 
         if (!$hasRole) {
+            $route = $request->route();
+            $routeAction = $route ? ($route->getActionName() ?? null) : null;
+            $routeName = $route ? ($route->getName() ?? null) : null;
+            $routeUri = $route ? $route->uri() : null;
+            $routeMiddleware = $route ? $route->gatherMiddleware() : [];
+
             Log::warning('EnsureRole denying request', [
                 'path' => $request->path(),
                 'user_id' => $user->id ?? null,
@@ -56,6 +62,10 @@ class EnsureRole
                 'user_role_keys' => $userRoleKeys,
                 'required_role_list' => $roleList,
                 'raw_roles_param' => $roles,
+                'route_uri' => $routeUri,
+                'route_action' => $routeAction,
+                'route_name' => $routeName,
+                'route_middleware' => $routeMiddleware,
             ]);
 
             return response()->json([
@@ -66,6 +76,10 @@ class EnsureRole
                     'user_role_column' => $user->role ?? null,
                     'user_role_keys' => $userRoleKeys,
                     'required_role_list' => $roleList,
+                    'raw_roles_param' => $roles,
+                    'route_uri' => $routeUri,
+                    'route_action' => $routeAction,
+                    'route_middleware' => $routeMiddleware,
                 ],
             ], 403);
         }
