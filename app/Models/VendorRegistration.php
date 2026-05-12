@@ -57,7 +57,7 @@ class VendorRegistration extends Model
         'documents' => 'array',
         'created_at' => 'datetime',
         'updated_at' => 'datetime',
-        'approved_at' => 'datetime',
+        'annual_revenue' => 'string',
     ];
 
     /**

@@ -381,13 +381,10 @@ class VendorController extends Controller
             $rawYearEstablished = $request->input('yearEstablished', $request->input('year_established'));
             $rawWebsite = trim((string) ($request->input('website') ?? ''));
 
-            // Normalise annual revenue: accept numeric strings and remove commas/currency symbols
+            // Annual revenue is stored as a string (ranges, currency text, bands, etc.)
             $annualRevenue = null;
-            if ($rawAnnualRevenue !== null && $rawAnnualRevenue !== '') {
-                $cleaned = preg_replace('/[^0-9.\-]/', '', (string) $rawAnnualRevenue);
-                if ($cleaned !== '' && is_numeric($cleaned)) {
-                    $annualRevenue = (float) $cleaned;
-                }
+            if ($rawAnnualRevenue !== null && trim((string) $rawAnnualRevenue) !== '') {
+                $annualRevenue = trim((string) $rawAnnualRevenue);
             }
 
             // Number of employees may be a numeric string or a range like "11-50"; keep as string
@@ -454,7 +451,7 @@ class VendorController extends Controller
                 'account_name' => 'nullable|string|max:255',
                 'currency' => 'nullable|string|size:3',
                 'financial_country_code' => 'nullable|string|size:2',
-                'annual_revenue' => 'nullable|numeric|min:0',
+                'annual_revenue' => 'nullable|string|max:255',
                 'number_of_employees' => 'nullable|string|max:50',
                 'year_established' => 'nullable|integer|min:1800|max:' . date('Y'),
                 'website' => 'nullable|url|max:255',

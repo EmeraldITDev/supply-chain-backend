@@ -40,6 +40,7 @@ class Vendor extends Model
     protected $casts = [
         'rating' => 'decimal:2',
         'total_orders' => 'integer',
+        'annual_revenue' => 'string',
     ];
 
     /**
