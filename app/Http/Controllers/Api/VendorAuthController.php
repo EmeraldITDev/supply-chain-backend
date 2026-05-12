@@ -161,23 +161,7 @@ class VendorAuthController extends Controller
             $user = $request->user();
             $currentToken = $request->user()->currentAccessToken();
 
-            // Get vendor record - use vendor_id from users table
-            $vendor = null;
-
-            // Method 1: Try vendor relationship
-            if ($user->vendor_id && method_exists($user, 'vendor')) {
-                $vendor = $user->vendor;
-            }
-
-            // Method 2: Find vendor by vendor_id if relationship didn't work
-            if (!$vendor && $user->vendor_id) {
-                $vendor = Vendor::find($user->vendor_id);
-            }
-
-            // Method 3: Try finding vendor by email as last resort
-            if (!$vendor) {
-                $vendor = Vendor::where('email', $user->email)->first();
-            }
+            $vendor = Vendor::forPortalUser($user);
 
             if (!$vendor) {
                 return response()->json([
@@ -230,8 +214,7 @@ class VendorAuthController extends Controller
             ], 403);
         }
 
-        // Get the vendor record
-        $vendor = Vendor::find($user->vendor_id);
+        $vendor = Vendor::forPortalUser($user);
 
         if (!$vendor) {
             return response()->json([
@@ -307,8 +290,7 @@ class VendorAuthController extends Controller
             ], 403);
         }
 
-        // Get the vendor record
-        $vendor = Vendor::find($user->vendor_id);
+        $vendor = Vendor::forPortalUser($user);
 
         if (!$vendor) {
             return response()->json([

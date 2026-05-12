@@ -6,6 +6,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Notifications\Notifiable;
+use Illuminate\Support\Facades\Log;
 use App\Models\User;
 use App\Models\VendorRegistrationDocument;
 
@@ -120,5 +121,74 @@ class Vendor extends Model
         }
 
         return "V{$newNumber}";
+    }
+
+    /**
+     * Resolve the vendors row for a portal login (role vendor). Uses
+     * users.vendor_id when set; otherwise matches approved/active vendor by
+     * user email or contact_person_email and persists vendor_id when found.
+     */
+    public static function forPortalUser(?User $user): ?Vendor
+    {
+        if (!$user) {
+            return null;
+        }
+
+        $user->loadMissing('vendor');
+        if ($user->vendor) {
+            return $user->vendor;
+        }
+
+        if ($user->vendor_id) {
+            $byId = self::find($user->vendor_id);
+            if ($byId) {
+                return $byId;
+            }
+        }
+
+        $actsAsVendor = $user->role !== null && strcasecmp((string) $user->role, 'vendor') === 0;
+        if (!$actsAsVendor && method_exists($user, 'hasRole')) {
+            try {
+                $actsAsVendor = $user->hasRole('vendor');
+            } catch (\Throwable $e) {
+                $actsAsVendor = false;
+            }
+        }
+        if (!$actsAsVendor) {
+            return null;
+        }
+
+        $email = trim((string) $user->email);
+        if ($email === '') {
+            return null;
+        }
+
+        $normalized = mb_strtolower($email);
+
+        $candidates = self::query()
+            ->where(function ($q) use ($normalized) {
+                $q->whereRaw('LOWER(TRIM(email)) = ?', [$normalized])
+                    ->orWhereRaw('LOWER(TRIM(COALESCE(contact_person_email, \'\'))) = ?', [$normalized]);
+            })
+            ->orderBy('id')
+            ->get();
+
+        $resolved = $candidates->first(function (Vendor $v) {
+            return in_array(strtolower(trim((string) ($v->status ?? ''))), ['approved', 'active'], true);
+        });
+
+        if ($resolved && $user->vendor_id === null) {
+            try {
+                $user->forceFill(['vendor_id' => $resolved->id])->saveQuietly();
+            } catch (\Throwable $e) {
+                Log::warning('Vendor::forPortalUser could not persist users.vendor_id', [
+                    'user_id' => $user->id,
+                    'vendor_id' => $resolved->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+
+        return $resolved;
     }
 }

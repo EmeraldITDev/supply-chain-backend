@@ -43,12 +43,7 @@ class RFQWorkflowController extends Controller
         $user = $request->user();
 
         // Verify user is a vendor - check both direct role field and Spatie roles
-        $isVendor = false;
-        if ($user->role === 'vendor') {
-            $isVendor = true;
-        } elseif (method_exists($user, 'hasRole') && $user->hasRole('vendor')) {
-            $isVendor = true;
-        }
+        $isVendor = $this->vendorUserActsAsVendor($user);
 
         if (!$isVendor) {
             return response()->json([
@@ -58,23 +53,7 @@ class RFQWorkflowController extends Controller
             ], 403);
         }
 
-        // Get vendor from authenticated user - try multiple methods
-        $vendor = null;
-
-        // Method 1: Try vendor relationship
-        if ($user->vendor_id && method_exists($user, 'vendor')) {
-            $vendor = $user->vendor;
-        }
-
-        // Method 2: Find vendor by vendor_id if relationship didn't work
-        if (!$vendor && $user->vendor_id) {
-            $vendor = Vendor::find($user->vendor_id);
-        }
-
-        // Method 3: Try finding vendor by email as last resort
-        if (!$vendor) {
-            $vendor = Vendor::where('email', $user->email)->first();
-        }
+        $vendor = Vendor::forPortalUser($user);
 
         if (!$vendor) {
             return response()->json([
@@ -169,7 +148,7 @@ class RFQWorkflowController extends Controller
         $user = $request->user();
 
         // Verify user is a vendor
-        if ($user->role !== 'vendor') {
+        if (!$this->vendorUserActsAsVendor($user)) {
             return response()->json([
                 'success' => false,
                 'error' => 'Only vendors can access this endpoint',
@@ -177,8 +156,7 @@ class RFQWorkflowController extends Controller
             ], 403);
         }
 
-        // Get vendor from authenticated user
-        $vendor = $user->vendor ?? Vendor::find($user->vendor_id);
+        $vendor = Vendor::forPortalUser($user);
 
         if (!$vendor) {
             return response()->json([
@@ -188,7 +166,7 @@ class RFQWorkflowController extends Controller
             ], 404);
         }
 
-        $rfq = RFQ::where('rfq_id', $id)->first();
+        $rfq = $this->findRfqByRouteId((string) $id);
 
         if (!$rfq) {
             return response()->json([
@@ -210,22 +188,29 @@ class RFQWorkflowController extends Controller
     }
 
     /**
-     * Get all quotations for an RFQ (comparison view for procurement)
+     * Get quotations for an RFQ (procurement: all bids; invited vendor: own bids only).
      */
     public function getQuotationsForRFQ(Request $request, $id)
     {
         $user = $request->user();
+        $routeId = (string) $id;
 
-        // Check role (procurement only)
-        if (!in_array($user->role, ['procurement_manager', 'procurement', 'admin'])) {
+        $isProcurement = $this->userCanViewQuotationComparison($user);
+        $quotationScopeVendorId = null;
+
+        if ($isProcurement) {
+            // Full quotation list
+        } elseif ($this->vendorUserActsAsVendor($user) && ($portalVendor = Vendor::forPortalUser($user))) {
+            $quotationScopeVendorId = $portalVendor->id;
+        } else {
             return response()->json([
                 'success' => false,
-                'error' => 'Only procurement managers can view quotation comparisons',
+                'error' => 'You do not have permission to view these quotations',
                 'code' => 'FORBIDDEN'
             ], 403);
         }
 
-        $rfq = RFQ::where('rfq_id', $id)->with(['items', 'mrf.executiveApprover', 'mrf.chairmanApprover'])->first();
+        $rfq = $this->findRfqByRouteId($routeId);
 
         if (!$rfq) {
             return response()->json([
@@ -235,10 +220,23 @@ class RFQWorkflowController extends Controller
             ], 404);
         }
 
+        if ($quotationScopeVendorId !== null) {
+            if (!$rfq->vendors()->where('vendors.id', $quotationScopeVendorId)->exists()) {
+                return response()->json([
+                    'success' => false,
+                    'error' => 'You are not invited to this RFQ',
+                    'code' => 'FORBIDDEN'
+                ], 403);
+            }
+        }
+
         // Get all quotations with items and vendor details
         // Exclude rejected quotations from active view (they remain accessible for historical tracking via RFQ Management)
         // Rejected quotations should not be selectable or forwarded for approval
         $quotations = Quotation::where('rfq_id', $rfq->id)
+            ->when($quotationScopeVendorId !== null, function ($q) use ($quotationScopeVendorId) {
+                $q->where('vendor_id', $quotationScopeVendorId);
+            })
             ->where(function($query) {
                 $query->where('status', '!=', 'Rejected')
                     ->where(function($q) {
@@ -633,12 +631,7 @@ class RFQWorkflowController extends Controller
     ]);
 
         // Verify user is a vendor - check both direct role field and Spatie roles
-        $isVendor = false;
-        if ($user->role === 'vendor') {
-            $isVendor = true;
-        } elseif (method_exists($user, 'hasRole') && $user->hasRole('vendor')) {
-            $isVendor = true;
-        }
+        $isVendor = $this->vendorUserActsAsVendor($user);
 
         if (!$isVendor) {
             $response = [
@@ -661,11 +654,7 @@ class RFQWorkflowController extends Controller
         }
 
         // Get vendor from authenticated user
-        $vendor = $user->vendor ?? Vendor::find($user->vendor_id);
-        if (!$vendor) {
-            // Try finding vendor by email as fallback
-            $vendor = Vendor::where('email', $user->email)->first();
-        }
+        $vendor = Vendor::forPortalUser($user);
 
         if (!$vendor) {
             return response()->json([
@@ -676,7 +665,7 @@ class RFQWorkflowController extends Controller
         }
 
         // Find RFQ by RFQ ID (the $id parameter from URL)
-        $rfq = RFQ::where('rfq_id', $id)->first();
+        $rfq = $this->findRfqByRouteId((string) $id);
 
         if (!$rfq) {
             return response()->json([
@@ -1048,5 +1037,52 @@ class RFQWorkflowController extends Controller
                 'status' => $rfq->status,
             ],
         ]);
+    }
+
+    private function vendorUserActsAsVendor(\App\Models\User $user): bool
+    {
+        if ($user->role !== null && strcasecmp((string) $user->role, 'vendor') === 0) {
+            return true;
+        }
+        if (method_exists($user, 'hasRole')) {
+            try {
+                return $user->hasRole('vendor');
+            } catch (\Throwable $e) {
+                return false;
+            }
+        }
+
+        return false;
+    }
+
+    private function userCanViewQuotationComparison(\App\Models\User $user): bool
+    {
+        $roles = ['procurement_manager', 'procurement', 'admin', 'supply_chain_director', 'supply_chain'];
+        $r = strtolower((string) ($user->role ?? ''));
+        if (in_array($r, $roles, true)) {
+            return true;
+        }
+        if (method_exists($user, 'hasAnyRole')) {
+            try {
+                return $user->hasAnyRole(['procurement_manager', 'procurement', 'admin', 'supply_chain_director']);
+            } catch (\Throwable $e) {
+                return false;
+            }
+        }
+
+        return false;
+    }
+
+    private function findRfqByRouteId(string $id): ?RFQ
+    {
+        return RFQ::query()
+            ->where(function ($q) use ($id) {
+                $q->where('rfq_id', $id)->orWhere('formatted_id', $id);
+                if ($id !== '' && ctype_digit($id)) {
+                    $q->orWhere('id', (int) $id);
+                }
+            })
+            ->with(['items', 'mrf.executiveApprover', 'mrf.chairmanApprover'])
+            ->first();
     }
 }
