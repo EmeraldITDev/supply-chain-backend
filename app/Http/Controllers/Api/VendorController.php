@@ -169,6 +169,14 @@ class VendorController extends Controller
             }
         }
 
+        // Fall back to the latest registration for profile fields that may not yet
+        // have been persisted onto the vendor record (e.g. vendors approved before
+        // the business-profile capture was wired up).
+        $annualRevenue      = $vendor->annual_revenue      ?? $registration?->annual_revenue;
+        $numberOfEmployees  = $vendor->number_of_employees ?? $registration?->number_of_employees;
+        $yearEstablished    = $vendor->year_established    ?? $registration?->year_established;
+        $website            = $vendor->website             ?? $registration?->website;
+
         return response()->json([
             'id'            => $vendor->vendor_id,
             'name'          => $vendor->name,
@@ -183,10 +191,13 @@ class VendorController extends Controller
             'contactPerson' => $vendor->contact_person,
             'notes'         => $vendor->notes,
             'documents'     => $documents,
-            'annual_revenue'      => $vendor->annual_revenue,
-            'number_of_employees' => $vendor->number_of_employees,
-            'year_established'    => $vendor->year_established,
-            'website'             => $vendor->website,
+            'annual_revenue'      => $annualRevenue,
+            'annualRevenue'       => $annualRevenue,
+            'number_of_employees' => $numberOfEmployees,
+            'numberOfEmployees'   => $numberOfEmployees,
+            'year_established'    => $yearEstablished,
+            'yearEstablished'     => $yearEstablished,
+            'website'             => $website,
             'created_at'          => $vendor->created_at,
         ]);
     }
@@ -356,7 +367,56 @@ class VendorController extends Controller
             $accountNumber = $request->input('account_number'); // Don't trim - sensitive data
             $accountName = trim($request->input('account_name') ?? '');
             $currency = trim($request->input('currency') ?? '');
-            $financialCountryCode = trim($request->input('financial_country_code') ?? '');
+            // Accept country in any of these keys: financial_country_code, country_code, countryCode
+            $financialCountryCode = trim(
+                $request->input('financial_country_code')
+                ?? $request->input('country_code')
+                ?? $request->input('countryCode')
+                ?? ''
+            );
+
+            // Business profile fields (accept both camelCase and snake_case from the form)
+            $rawAnnualRevenue = $request->input('annualRevenue', $request->input('annual_revenue'));
+            $rawNumberOfEmployees = $request->input('numberOfEmployees', $request->input('number_of_employees'));
+            $rawYearEstablished = $request->input('yearEstablished', $request->input('year_established'));
+            $rawWebsite = trim((string) ($request->input('website') ?? ''));
+
+            // Normalise annual revenue: accept numeric strings and remove commas/currency symbols
+            $annualRevenue = null;
+            if ($rawAnnualRevenue !== null && $rawAnnualRevenue !== '') {
+                $cleaned = preg_replace('/[^0-9.\-]/', '', (string) $rawAnnualRevenue);
+                if ($cleaned !== '' && is_numeric($cleaned)) {
+                    $annualRevenue = (float) $cleaned;
+                }
+            }
+
+            // Number of employees may be a numeric string or a range like "11-50"; keep as string
+            $numberOfEmployees = null;
+            if ($rawNumberOfEmployees !== null && trim((string) $rawNumberOfEmployees) !== '') {
+                $numberOfEmployees = trim((string) $rawNumberOfEmployees);
+            }
+
+            // Year established must be a 4-digit year
+            $yearEstablished = null;
+            if ($rawYearEstablished !== null && $rawYearEstablished !== '') {
+                $yearInt = (int) preg_replace('/[^0-9]/', '', (string) $rawYearEstablished);
+                if ($yearInt >= 1800 && $yearInt <= (int) date('Y')) {
+                    $yearEstablished = $yearInt;
+                }
+            }
+
+            $website = $rawWebsite === '' ? null : $rawWebsite;
+
+            \Log::info('Vendor registration business profile fields parsed', [
+                'request_id' => $requestId,
+                'annual_revenue_raw' => $rawAnnualRevenue,
+                'annual_revenue' => $annualRevenue,
+                'number_of_employees_raw' => $rawNumberOfEmployees,
+                'number_of_employees' => $numberOfEmployees,
+                'year_established_raw' => $rawYearEstablished,
+                'year_established' => $yearEstablished,
+                'website' => $website,
+            ]);
 
             // Prepare validation data with normalized email
             $validationData = [
@@ -372,6 +432,10 @@ class VendorController extends Controller
                 'account_name' => empty($accountName) ? null : $accountName,
                 'currency' => empty($currency) ? null : $currency,
                 'financial_country_code' => empty($financialCountryCode) ? null : $financialCountryCode,
+                'annual_revenue' => $annualRevenue,
+                'number_of_employees' => $numberOfEmployees,
+                'year_established' => $yearEstablished,
+                'website' => $website,
             ];
 
             // Validate input data
@@ -390,6 +454,10 @@ class VendorController extends Controller
                 'account_name' => 'nullable|string|max:255',
                 'currency' => 'nullable|string|size:3',
                 'financial_country_code' => 'nullable|string|size:2',
+                'annual_revenue' => 'nullable|numeric|min:0',
+                'number_of_employees' => 'nullable|string|max:50',
+                'year_established' => 'nullable|integer|min:1800|max:' . date('Y'),
+                'website' => 'nullable|url|max:255',
             ]);
 
             if ($validator->fails()) {
@@ -425,13 +493,13 @@ class VendorController extends Controller
                     'bank_name' => empty($bankName) ? null : $bankName,
                     'account_number' => $accountNumber,
                     'account_name' => empty($accountName) ? null : $accountName,
-                    'annual_revenue' => $request->annual_revenue,
-                    'number_of_employees' => $request->number_of_employees,
-                    'year_established' => $request->year_established,
+                    'annual_revenue' => $annualRevenue,
+                    'number_of_employees' => $numberOfEmployees,
+                    'year_established' => $yearEstablished,
                     'currency' => empty($currency) ? null : $currency,
                     'tax_id' => empty($taxId) ? null : $taxId,
                     'contact_person' => empty($contactPerson) ? null : $contactPerson,
-                    'website' => $request->website,
+                    'website' => $website,
                     'status' => VendorRegistration::STATUS_PENDING,
                 ]);
 
