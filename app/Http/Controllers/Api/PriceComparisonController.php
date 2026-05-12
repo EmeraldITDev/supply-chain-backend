@@ -131,7 +131,7 @@ class PriceComparisonController extends Controller
                     ]);
                 }
 
-                return collect($created);
+                return PriceComparison::newCollection($created);
             });
         } catch (\Throwable $e) {
             Log::error('Failed to persist price comparisons', [
