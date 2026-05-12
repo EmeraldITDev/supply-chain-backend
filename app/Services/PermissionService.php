@@ -215,6 +215,23 @@ class PermissionService
     }
 
     /**
+     * Read-only user directory (e.g. dropdowns, assignments). Broader than
+     * {@see canManageUsers}; does not allow create/update/delete.
+     */
+    public function canListUsersDirectory(User $user): bool
+    {
+        if ($this->canManageUsers($user)) {
+            return true;
+        }
+
+        return in_array($user->role, [
+            'logistics',
+            'logistics_manager',
+            'logistics_officer',
+        ], true);
+    }
+
+    /**
      * Check if user can view document
      */
     public function canViewDocument(User $user, MRF $mrf, string $documentType): bool

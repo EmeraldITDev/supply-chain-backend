@@ -20,16 +20,16 @@ class UserManagementController extends Controller
     }
 
     /**
-     * Get all users (admin only)
+     * Get all users (user management roles + logistics for internal directory).
      */
     public function index(Request $request)
     {
         $user = $request->user();
 
-        if (!$this->permissionService->canManageUsers($user)) {
+        if (!$this->permissionService->canListUsersDirectory($user)) {
             return response()->json([
                 'success' => false,
-                'error' => 'You do not have permission to manage users',
+                'error' => 'You do not have permission to view the user directory',
                 'code' => 'FORBIDDEN'
             ], 403);
         }
