@@ -36,12 +36,22 @@ class EnsureCorsHeaders
         $allowedOrigins = config('cors.allowed_origins', []);
         $allowedPatterns = config('cors.allowed_origins_patterns', []);
 
+        // DEBUG: Log all details
+        \Log::info('EnsureCorsHeaders middleware executing', [
+            'origin' => $origin,
+            'method' => $request->getMethod(),
+            'path' => $request->getPath(),
+            'allowed_origins' => $allowedOrigins,
+            'headers' => $request->headers->all(),
+        ]);
+
         // Check if origin is allowed
         $isAllowed = false;
 
         // Direct origin check
         if ($origin && in_array($origin, $allowedOrigins, true)) {
             $isAllowed = true;
+            \Log::info('Origin matched allowed_origins directly', ['origin' => $origin]);
         }
 
         // Pattern-based origin check
@@ -49,9 +59,14 @@ class EnsureCorsHeaders
             foreach ($allowedPatterns as $pattern) {
                 if (preg_match($pattern, $origin)) {
                     $isAllowed = true;
+                    \Log::info('Origin matched pattern', ['origin' => $origin, 'pattern' => $pattern]);
                     break;
                 }
             }
+        }
+
+        if (!$isAllowed) {
+            \Log::warning('Origin not allowed', ['origin' => $origin, 'allowed_origins' => $allowedOrigins]);
         }
 
         // Handle preflight (OPTIONS) requests
@@ -75,12 +90,22 @@ class EnsureCorsHeaders
 
         // Always add CORS headers if origin is allowed
         if ($isAllowed && $origin) {
+            \Log::info('Adding CORS headers to response', [
+                'origin' => $origin,
+                'status' => $response->getStatusCode(),
+            ]);
             $response->headers->set('Access-Control-Allow-Origin', $origin, true);
             $response->headers->set('Access-Control-Allow-Credentials', 'true', true);
             $response->headers->set('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS, HEAD', true);
             $response->headers->set('Access-Control-Allow-Headers', 'Accept, Accept-Language, Content-Language, Content-Type, Authorization, X-Requested-With, X-CSRF-Token', true);
             $response->headers->set('Access-Control-Max-Age', '86400', true);
             $response->headers->set('Vary', 'Origin', true);
+        } else {
+            \Log::warning('NOT adding CORS headers - conditions not met', [
+                'isAllowed' => $isAllowed,
+                'hasOrigin' => !empty($origin),
+                'origin' => $origin,
+            ]);
         }
 
         return $response;
