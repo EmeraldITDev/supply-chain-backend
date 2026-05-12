@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Activity;
+use App\Models\MRF;
 use App\Models\RFQ;
 use App\Models\RFQItem;
 use App\Models\Quotation;
@@ -501,6 +502,9 @@ class RFQWorkflowController extends Controller
 
         $validator = Validator::make($request->all(), [
             'quotation_id' => 'required|exists:quotations,quotation_id',
+            'remarks' => 'nullable|string|max:2000',
+            'selection_reason' => 'nullable|string|max:2000',
+            'selectionReason' => 'nullable|string|max:2000',
         ]);
 
         if ($validator->fails()) {
@@ -511,6 +515,12 @@ class RFQWorkflowController extends Controller
                 'code' => 'VALIDATION_ERROR'
             ], 422);
         }
+
+        $selectionReasonText = trim((string) ($request->input('selection_reason')
+            ?? $request->input('selectionReason')
+            ?? $request->input('remarks')
+            ?? ''));
+        $selectionReasonText = $selectionReasonText === '' ? null : $selectionReasonText;
 
         // Get the selected quotation
         $selectedQuotation = Quotation::where('quotation_id', $request->quotation_id)
@@ -554,6 +564,22 @@ class RFQWorkflowController extends Controller
                     'reviewed_at' => now(),
                     'rejection_reason' => 'Another vendor was selected',
                 ]);
+
+            if ($rfq->mrf_id) {
+                $mrf = MRF::query()->find($rfq->mrf_id);
+                if ($mrf) {
+                    if ($mrf->priceComparisons()->count() === 0) {
+                        $mrf->syncPriceComparisonsFromQuotations();
+                    }
+                    if ($mrf->priceComparisons()->exists()) {
+                        $mrf->priceComparisons()->update(['is_selected' => false, 'selection_reason' => null]);
+                        $mrf->priceComparisons()->where('vendor_id', $selectedQuotation->vendor_id)->update([
+                            'is_selected' => true,
+                            'selection_reason' => $selectionReasonText,
+                        ]);
+                    }
+                }
+            }
 
             DB::commit();
 
@@ -600,6 +626,8 @@ class RFQWorkflowController extends Controller
                         'id' => $selectedQuotation->quotation_id,
                         'total_amount' => (float) $selectedQuotation->total_amount,
                     ],
+                    'selection_reason' => $selectionReasonText,
+                    'selectionReason' => $selectionReasonText,
                 ],
             ]);
         } catch (\Exception $e) {

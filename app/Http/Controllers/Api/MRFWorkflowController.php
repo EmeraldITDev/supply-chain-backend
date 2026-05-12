@@ -418,7 +418,9 @@ class MRFWorkflowController extends Controller
             'vendor_id' => 'required|exists:vendors,vendor_id',
             'quotation_id' => 'required|exists:quotations,quotation_id',
             'invoice_url' => 'nullable|url',
-            'remarks' => 'nullable|string',
+            'remarks' => 'nullable|string|max:2000',
+            'selection_reason' => 'nullable|string|max:2000',
+            'selectionReason' => 'nullable|string|max:2000',
         ]);
 
         if ($validator->fails()) {
@@ -429,6 +431,12 @@ class MRFWorkflowController extends Controller
                 'code' => 'VALIDATION_ERROR'
             ], 422);
         }
+
+        $selectionReasonText = trim((string) ($request->input('selection_reason')
+            ?? $request->input('selectionReason')
+            ?? $request->input('remarks')
+            ?? ''));
+        $selectionReasonText = $selectionReasonText === '' ? null : $selectionReasonText;
 
         // Get vendor and quotation with all relationships
         $vendor = \App\Models\Vendor::where('vendor_id', $request->vendor_id)->first();
@@ -471,7 +479,7 @@ class MRFWorkflowController extends Controller
             $mrf->priceComparisons()->update(['is_selected' => false, 'selection_reason' => null]);
             $mrf->priceComparisons()->where('vendor_id', $vendor->id)->update([
                 'is_selected' => true,
-                'selection_reason' => $request->remarks,
+                'selection_reason' => $selectionReasonText,
             ]);
         }
 
@@ -487,11 +495,13 @@ class MRFWorkflowController extends Controller
 
         // Record in approval history
         MRFApprovalHistory::record($mrf, 'vendor_selected', 'procurement', $user,
-            "Vendor {$vendor->name} selected and sent for Supply Chain Director approval. " . ($request->remarks ?? ''));
+            "Vendor {$vendor->name} selected and sent for Supply Chain Director approval. " . ($selectionReasonText ?? ''));
 
         // Prepare complete data for notification and response
         // Include ALL quotation details - nothing should be hidden or summarized
         $completeQuotationData = [
+            'selection_reason' => $selectionReasonText,
+            'selectionReason' => $selectionReasonText,
             'quotation' => [
                 'id' => $quotation->quotation_id,
                 'quoteNumber' => $quotation->quote_number,
@@ -663,6 +673,8 @@ class MRFWorkflowController extends Controller
                     'name' => $vendor->name,
                 ],
                 'workflow_state' => $mrf->workflow_state,
+                'selection_reason' => $selectionReasonText,
+                'selectionReason' => $selectionReasonText,
                 'quotation_data' => $completeQuotationData, // Include complete data in response
             ]
         ]);
