@@ -46,7 +46,14 @@ class FleetController extends ApiController
 
     public function index(Request $request)
     {
-        $query = Vehicle::with(['vendor']);
+        $query = Vehicle::with(['vendor'])
+            ->withCount([
+                'documents',
+                'documents as active_documents_count' => function ($q) {
+                    $q->where('is_active', true);
+                },
+                'maintenances',
+            ]);
 
         if ($request->filled('status')) {
             $query->where('status', $request->status);
@@ -61,7 +68,15 @@ class FleetController extends ApiController
 
     public function show(int $id)
     {
-        $vehicle = Vehicle::with('maintenances')->find($id);
+        $vehicle = Vehicle::with(['maintenances', 'vendor'])
+            ->withCount([
+                'documents',
+                'documents as active_documents_count' => function ($q) {
+                    $q->where('is_active', true);
+                },
+                'maintenances',
+            ])
+            ->find($id);
 
         if (!$vehicle) {
             return $this->error('Vehicle not found', 'NOT_FOUND', 404);
@@ -125,6 +140,8 @@ class FleetController extends ApiController
 
         return $this->success([
             'maintenance' => $maintenance,
+            'maintenance_record' => $maintenance,
+            'vehicle_id' => $vehicle->id,
         ], 201);
     }
 
@@ -398,8 +415,17 @@ class FleetController extends ApiController
     public function initiateSrf(Request $request, int $id)
     {
         $user = $request->user();
-        if (!$user || $user->role !== 'logistics_officer') {
-            return $this->error('Only logistics officers can initiate SRF from fleet maintenance.', 'FORBIDDEN', 403);
+        $allowedRoles = ['logistics_officer', 'logistics_manager', 'procurement_manager', 'supply_chain_director', 'admin'];
+        $hasAllowedRole = $user && (
+            in_array($user->role ?? null, $allowedRoles, true)
+            || (method_exists($user, 'hasAnyRole') && $user->hasAnyRole($allowedRoles))
+        );
+        if (!$hasAllowedRole) {
+            return $this->error(
+                'You do not have permission to initiate SRF from fleet maintenance.',
+                'FORBIDDEN',
+                403
+            );
         }
 
         $vehicle = Vehicle::with('maintenances')->find($id);

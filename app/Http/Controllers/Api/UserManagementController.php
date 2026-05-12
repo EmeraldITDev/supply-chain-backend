@@ -72,6 +72,58 @@ class UserManagementController extends Controller
     }
 
     /**
+     * Canonical role keys allowed for create/update.
+     * The frontend may send either canonical keys (`logistics_manager`) or
+     * human labels (`Logistics Manager`); we normalise before validation.
+     */
+    private const ALLOWED_ROLES = [
+        'admin',
+        'employee',
+        'executive',
+        'procurement_manager',
+        'supply_chain_director',
+        'finance',
+        'chairman',
+        'logistics',           // legacy catch-all
+        'logistics_manager',
+        'logistics_officer',
+        'vendor',
+    ];
+
+    /**
+     * Map UI labels / legacy values to canonical role keys.
+     */
+    private function normaliseRole(?string $role): ?string
+    {
+        if ($role === null) {
+            return null;
+        }
+        $trimmed = trim($role);
+        if ($trimmed === '') {
+            return null;
+        }
+        $key = strtolower(str_replace([' ', '-'], ['_', '_'], $trimmed));
+
+        $map = [
+            'logistics_manager' => 'logistics_manager',
+            'logistics_officer' => 'logistics_officer',
+            'logistics' => 'logistics_manager', // legacy → manager (department-wide access)
+            'procurement_manager' => 'procurement_manager',
+            'procurement' => 'procurement_manager',
+            'supply_chain_director' => 'supply_chain_director',
+            'supply_chain' => 'supply_chain_director',
+            'finance_officer' => 'finance',
+            'finance' => 'finance',
+        ];
+
+        if (isset($map[$key])) {
+            return $map[$key];
+        }
+
+        return in_array($key, self::ALLOWED_ROLES, true) ? $key : $trimmed;
+    }
+
+    /**
      * Create new user (admin only)
      */
     public function store(Request $request)
@@ -86,10 +138,14 @@ class UserManagementController extends Controller
             ], 403);
         }
 
+        if ($request->has('role')) {
+            $request->merge(['role' => $this->normaliseRole((string) $request->input('role'))]);
+        }
+
         $validator = Validator::make($request->all(), [
             'name' => 'required|string|max:255',
             'email' => 'required|email|unique:users,email',
-            'role' => 'required|in:admin,employee,executive,procurement_manager,supply_chain_director,finance,chairman,logistics,vendor',
+            'role' => 'required|in:' . implode(',', self::ALLOWED_ROLES),
             'department' => 'nullable|string|max:255',
             'password' => 'required|string|min:8',
             'is_admin' => 'nullable|boolean',
@@ -177,10 +233,14 @@ class UserManagementController extends Controller
             ], 404);
         }
 
+        if ($request->has('role')) {
+            $request->merge(['role' => $this->normaliseRole((string) $request->input('role'))]);
+        }
+
         $validator = Validator::make($request->all(), [
             'name' => 'sometimes|string|max:255',
             'email' => 'sometimes|email|unique:users,email,' . $id,
-            'role' => 'required|in:admin,employee,executive,procurement_manager,supply_chain_director,finance,chairman,logistics,vendor',
+            'role' => 'required|in:' . implode(',', self::ALLOWED_ROLES),
             'department' => 'nullable|string|max:255',
             'password' => 'sometimes|string|min:8',
             'is_admin' => 'nullable|boolean',

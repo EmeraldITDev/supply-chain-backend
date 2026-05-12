@@ -28,7 +28,8 @@ class AuthController extends Controller
             'supply_chain_director',
             'supply_chain', // Added for test users
             'logistics_manager',
-            'logistics', // Added for test users
+            'logistics_officer',
+            'logistics', // Legacy catch-all (treated as logistics_manager elsewhere)
             'finance',
             'finance_officer', // Added for test users
             'executive',

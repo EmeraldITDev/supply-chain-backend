@@ -190,7 +190,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/fleet/drivers/{id}', [LogisticsFleetDriverController::class, 'show'])->middleware($logisticsInternalRoles);
     Route::patch('/fleet/drivers/{id}', [LogisticsFleetDriverController::class, 'update'])->middleware($logisticsInternalRoles);
     Route::post('/fleet/vehicles/{id}/maintenance', [LogisticsFleetController::class, 'storeMaintenance'])->middleware($logisticsInternalRoles);
-    Route::post('/fleet/vehicles/{id}/initiate-srf', [LogisticsFleetController::class, 'initiateSrf'])->middleware('role:logistics_officer');
+    Route::post('/fleet/vehicles/{id}/initiate-srf', [LogisticsFleetController::class, 'initiateSrf'])->middleware('role:logistics_officer,logistics_manager,procurement_manager,supply_chain_director,admin');
     Route::get('/fleet/alerts', [LogisticsFleetController::class, 'getAlerts'])->middleware('auth:sanctum');
 
     // Compatibility aliases for older clients (vehicles without /fleet prefix)
@@ -200,7 +200,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::put('/vehicles/{id}', [LogisticsFleetController::class, 'update'])->middleware($logisticsInternalRoles);
     Route::delete('/vehicles/{id}', [LogisticsFleetController::class, 'destroy'])->middleware($logisticsInternalRoles);
     Route::post('/vehicles/{id}/maintenance', [LogisticsFleetController::class, 'storeMaintenance'])->middleware($logisticsInternalRoles);
-    Route::post('/vehicles/{id}/initiate-srf', [LogisticsFleetController::class, 'initiateSrf'])->middleware('role:logistics_officer');
+    Route::post('/vehicles/{id}/initiate-srf', [LogisticsFleetController::class, 'initiateSrf'])->middleware('role:logistics_officer,logistics_manager,procurement_manager,supply_chain_director,admin');
 
     // Materials routes - forward to logistics controllers
     Route::post('/materials', [LogisticsMaterialController::class, 'store'])->middleware($logisticsInternalRoles);
@@ -534,7 +534,7 @@ Route::prefix('v1/logistics')->group(function () {
         Route::get('/fleet/drivers/{id}', [LogisticsFleetDriverController::class, 'show'])->middleware($logisticsInternalRoles);
         Route::patch('/fleet/drivers/{id}', [LogisticsFleetDriverController::class, 'update'])->middleware($logisticsInternalRoles);
         Route::post('/fleet/vehicles/{id}/maintenance', [LogisticsFleetController::class, 'storeMaintenance'])->middleware($logisticsInternalRoles);
-        Route::post('/fleet/vehicles/{id}/initiate-srf', [LogisticsFleetController::class, 'initiateSrf'])->middleware('role:logistics_officer');
+        Route::post('/fleet/vehicles/{id}/initiate-srf', [LogisticsFleetController::class, 'initiateSrf'])->middleware('role:logistics_officer,logistics_manager,procurement_manager,supply_chain_director,admin');
         Route::get('/fleet/alerts', [LogisticsFleetController::class, 'getAlerts'])->middleware('auth:sanctum');
 
         // Compatibility aliases for older clients (vehicles without /fleet prefix)
@@ -544,7 +544,7 @@ Route::prefix('v1/logistics')->group(function () {
         Route::put('/vehicles/{id}', [LogisticsFleetController::class, 'update'])->middleware($logisticsInternalRoles);
         Route::delete('/vehicles/{id}', [LogisticsFleetController::class, 'destroy'])->middleware($logisticsInternalRoles);
         Route::post('/vehicles/{id}/maintenance', [LogisticsFleetController::class, 'storeMaintenance'])->middleware($logisticsInternalRoles);
-        Route::post('/vehicles/{id}/initiate-srf', [LogisticsFleetController::class, 'initiateSrf'])->middleware('role:logistics_officer');
+        Route::post('/vehicles/{id}/initiate-srf', [LogisticsFleetController::class, 'initiateSrf'])->middleware('role:logistics_officer,logistics_manager,procurement_manager,supply_chain_director,admin');
 
         // Document Management
         Route::post('/documents', [LogisticsDocumentController::class, 'store'])->middleware($logisticsInternalRoles);
@@ -658,7 +658,7 @@ Route::prefix('logistics')->group(function () {
         Route::get('/fleet/drivers/{id}', [LogisticsFleetDriverController::class, 'show'])->middleware($logisticsInternalRoles);
         Route::patch('/fleet/drivers/{id}', [LogisticsFleetDriverController::class, 'update'])->middleware($logisticsInternalRoles);
         Route::post('/fleet/vehicles/{id}/maintenance', [LogisticsFleetController::class, 'storeMaintenance'])->middleware($logisticsInternalRoles);
-        Route::post('/fleet/vehicles/{id}/initiate-srf', [LogisticsFleetController::class, 'initiateSrf'])->middleware('role:logistics_officer');
+        Route::post('/fleet/vehicles/{id}/initiate-srf', [LogisticsFleetController::class, 'initiateSrf'])->middleware('role:logistics_officer,logistics_manager,procurement_manager,supply_chain_director,admin');
         Route::get('/fleet/alerts', [LogisticsFleetController::class, 'getAlerts'])->middleware('auth:sanctum');
 
         Route::post('/documents', [LogisticsDocumentController::class, 'store'])->middleware($logisticsInternalRoles);
