@@ -4,9 +4,11 @@ namespace App\Http\Controllers\Api\V1\Logistics;
 
 use App\Http\Requests\Logistics\StoreVendorSubmissionRequest;
 use App\Models\Logistics\Trip;
-use App\Models\Logistics\TripVendorSubmission;
+use App\Models\User;
+use App\Models\Vendor;
 use App\Services\Logistics\TripVendorSubmissionService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 
 class VendorPortalTripController extends ApiController
 {
@@ -16,11 +18,81 @@ class VendorPortalTripController extends ApiController
     }
 
     /**
+     * Resolve the Vendor row for portal routes. Prefer users.vendor_id; if
+     * missing (e.g. vendor signed in via /api/auth/login without a link),
+     * match an approved vendor by the same email as the authenticated user.
+     */
+    private function resolvePortalVendor(?User $user): ?Vendor
+    {
+        if (!$user) {
+            return null;
+        }
+
+        $user->loadMissing('vendor');
+        if ($user->vendor) {
+            return $user->vendor;
+        }
+
+        if (!$this->userActsAsVendor($user)) {
+            return null;
+        }
+
+        $email = trim((string) $user->email);
+        if ($email === '') {
+            return null;
+        }
+
+        $normalized = mb_strtolower($email);
+
+        $candidates = Vendor::query()
+            ->where(function ($q) use ($normalized) {
+                $q->whereRaw('LOWER(TRIM(email)) = ?', [$normalized])
+                    ->orWhereRaw('LOWER(TRIM(COALESCE(contact_person_email, \'\'))) = ?', [$normalized]);
+            })
+            ->orderBy('id')
+            ->get();
+
+        $resolved = $candidates->first(function (Vendor $v) {
+            return in_array(strtolower(trim((string) ($v->status ?? ''))), ['approved', 'active'], true);
+        });
+
+        if ($resolved && $user->vendor_id === null) {
+            try {
+                $user->forceFill(['vendor_id' => $resolved->id])->saveQuietly();
+            } catch (\Throwable $e) {
+                Log::warning('Could not persist users.vendor_id for vendor portal', [
+                    'user_id' => $user->id,
+                    'vendor_id' => $resolved->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+
+        return $resolved;
+    }
+
+    private function userActsAsVendor(User $user): bool
+    {
+        if ($user->role !== null && strtolower((string) $user->role) === 'vendor') {
+            return true;
+        }
+        if (method_exists($user, 'hasRole')) {
+            try {
+                return $user->hasRole('vendor');
+            } catch (\Throwable $e) {
+                return false;
+            }
+        }
+
+        return false;
+    }
+
+    /**
      * Get all trips assigned to the authenticated vendor
      */
     public function indexVendorTrips(Request $request)
     {
-        $vendor = $request->user()?->vendor;
+        $vendor = $this->resolvePortalVendor($request->user());
 
         if (!$vendor) {
             return $this->error('User is not a vendor', 'NOT_VENDOR', 403);
@@ -46,7 +118,7 @@ class VendorPortalTripController extends ApiController
      */
     public function submitVendorDetails(StoreVendorSubmissionRequest $request, int $tripId)
     {
-        $vendor = $request->user()?->vendor;
+        $vendor = $this->resolvePortalVendor($request->user());
 
         if (!$vendor) {
             return $this->error('User is not a vendor', 'NOT_VENDOR', 403);
@@ -102,7 +174,7 @@ class VendorPortalTripController extends ApiController
      */
     public function uploadDocuments(Request $request, int $tripId)
     {
-        $vendor = $request->user()?->vendor;
+        $vendor = $this->resolvePortalVendor($request->user());
 
         if (!$vendor) {
             return $this->error('User is not a vendor', 'NOT_VENDOR', 403);
@@ -163,7 +235,7 @@ class VendorPortalTripController extends ApiController
      */
     public function getVendorSubmission(Request $request, int $tripId)
     {
-        $vendor = $request->user()?->vendor;
+        $vendor = $this->resolvePortalVendor($request->user());
 
         if (!$vendor) {
             return $this->error('User is not a vendor', 'NOT_VENDOR', 403);
