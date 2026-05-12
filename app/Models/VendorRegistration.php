@@ -77,10 +77,50 @@ class VendorRegistration extends Model
     }
 
     /**
-     * Get documents for this registration
+     * Uploaded files for this registration (vendor_registration_documents table).
+     * Named distinct from the JSON `documents` column to avoid Eloquent shadowing the attribute.
      */
-    public function documents(): HasMany
+    public function registrationDocuments(): HasMany
     {
         return $this->hasMany(VendorRegistrationDocument::class, 'vendor_registration_id');
+    }
+
+    /**
+     * Document metadata for APIs: prefer persisted rows, then JSON column on registrations.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function getDocumentsMetadataList(): array
+    {
+        $fromTable = $this->registrationDocuments()->orderBy('id')->get();
+        if ($fromTable->isNotEmpty()) {
+            return $fromTable->map(function (VendorRegistrationDocument $doc) {
+                return [
+                    'id' => $doc->id,
+                    'file_path' => $doc->file_path,
+                    'file_name' => $doc->file_name,
+                    'file_type' => $doc->file_type,
+                    'file_size' => $doc->file_size,
+                    'file_url' => $doc->file_url,
+                    'file_share_url' => $doc->file_share_url,
+                    'uploaded_at' => $doc->uploaded_at?->toIso8601String(),
+                ];
+            })->all();
+        }
+
+        $raw = $this->attributes['documents'] ?? null;
+        if ($raw === null || $raw === '') {
+            return [];
+        }
+        if (is_string($raw)) {
+            $decoded = json_decode($raw, true);
+
+            return is_array($decoded) ? $decoded : [];
+        }
+        if (is_array($raw)) {
+            return $raw;
+        }
+
+        return [];
     }
 }

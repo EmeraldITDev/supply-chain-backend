@@ -52,7 +52,7 @@ class UpdateExpiredDocuments extends Command
 
             foreach ($registrations as $registration) {
                 // Check if has expired required documents
-                $hasExpiredRequiredDoc = $registration->documents()
+                $hasExpiredRequiredDoc = $registration->registrationDocuments()
                     ->where('is_required', true)
                     ->where('status', 'Expired')
                     ->exists();
@@ -86,7 +86,7 @@ class UpdateExpiredDocuments extends Command
     private function sendExpiredDocumentNotification(VendorRegistration $registration)
     {
         // Get expired required documents for the email
-        $expiredDocs = $registration->documents()
+        $expiredDocs = $registration->registrationDocuments()
             ->where('is_required', true)
             ->where('status', 'Expired')
             ->get();

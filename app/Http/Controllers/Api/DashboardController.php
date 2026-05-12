@@ -288,7 +288,7 @@ class DashboardController extends Controller
 
         // Get vendor's registration information
         $registration = VendorRegistration::where('vendor_id', $vendor->id)
-            ->with(['documents'])
+            ->with(['registrationDocuments'])
             ->first();
 
         // Get RFQs assigned to this vendor
@@ -355,7 +355,7 @@ class DashboardController extends Controller
             ],
             'registration' => $registration ? [
                 'id' => $registration->id,
-                'documents' => $registration->documents,
+                'documents' => $registration->getDocumentsMetadataList(),
             ] : null,
             'stats' => $stats,
             'assignedRFQs' => $assignedRFQs,

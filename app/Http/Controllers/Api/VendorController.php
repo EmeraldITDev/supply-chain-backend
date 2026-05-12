@@ -127,17 +127,20 @@ class VendorController extends Controller
             ], 404);
         }
 
-        // Load documents via the vendor registration since documents belong to registrations
-        $registration = \App\Models\VendorRegistration::where('email', $vendor->email)
-            ->latest()
-            ->first();
+        // Registration that owns KYC docs: prefer FK (survives vendor email changes), then email
+        $registration = \App\Models\VendorRegistration::where('vendor_id', $vendor->id)
+            ->orderByDesc('id')
+            ->first()
+            ?? \App\Models\VendorRegistration::whereRaw('LOWER(email) = ?', [strtolower((string) $vendor->email)])
+                ->orderByDesc('id')
+                ->first();
 
         $documents = [];
-        if ($registration && $registration->documents) {
+        if ($registration) {
             $documentService = app(\App\Services\VendorDocumentService::class);
             $isApproved = $registration->status === \App\Models\VendorRegistration::STATUS_APPROVED;
 
-            foreach ($registration->documents as $doc) {
+            foreach ($registration->getDocumentsMetadataList() as $doc) {
                 $filePath = $doc['file_path'] ?? null;
                 $freshUrl = null;
 
@@ -158,14 +161,14 @@ class VendorController extends Controller
                     }
                 }
 
-               $documents[] = [
-                'file_name'      => $doc['file_name'] ?? null,
-                'file_type'      => $doc['file_type'] ?? null,
-                'file_path'      => $doc['file_path'] ?? null,
-                'file_url'       => $freshUrl,
-                'file_share_url' => $freshUrl,
-                'uploaded_at'    => $doc['uploaded_at'] ?? null,
-            ];
+                $documents[] = [
+                    'file_name'      => $doc['file_name'] ?? null,
+                    'file_type'      => $doc['file_type'] ?? null,
+                    'file_path'      => $doc['file_path'] ?? null,
+                    'file_url'       => $freshUrl,
+                    'file_share_url' => $freshUrl,
+                    'uploaded_at'    => $doc['uploaded_at'] ?? null,
+                ];
             }
         }
 
@@ -656,7 +659,7 @@ class VendorController extends Controller
             ], 403);
         }
 
-        $query = VendorRegistration::with(['vendor', 'approver', 'documents']);
+        $query = VendorRegistration::with(['vendor', 'approver', 'registrationDocuments']);
 
         if ($request->has('status')) {
             $query->where('status', $request->status);
@@ -712,7 +715,7 @@ class VendorController extends Controller
             ], 403);
         }
 
-        $registration = VendorRegistration::with(['vendor', 'approver', 'documents'])->find($id);
+        $registration = VendorRegistration::with(['vendor', 'approver', 'registrationDocuments'])->find($id);
 
         if (!$registration) {
             return response()->json([
@@ -722,44 +725,13 @@ class VendorController extends Controller
             ], 404);
         }
 
-        // Format documents with download URLs using VendorDocumentService
-        // Priority: Use documents relationship (table) first, then fallback to JSON column
+        // Format documents with download URLs (DB rows + JSON fallback via model helper)
         $formattedDocuments = [];
         $documentService = app(VendorDocumentService::class);
 
-        // First, try to get documents from the relationship (more reliable)
-        // Check if documents relationship is loaded (will be a Collection)
-        $documentRecords = null;
-        if ($registration->relationLoaded('documents')) {
-            $documentRecords = ($registration->documents instanceof \Illuminate\Support\Collection) ? $registration->documents : collect(is_array($registration->documents) ? $registration->documents : []);
-        } else {
-            // Try to load the relationship
-            try {
-                $registration->load('documents');
-                $documentRecords = ($registration->documents instanceof \Illuminate\Support\Collection) ? $registration->documents : collect(is_array($registration->documents) ? $registration->documents : []);
-            } catch (\Exception $e) {
-                \Log::warning('Failed to load documents relationship', [
-                    'registration_id' => $registration->id,
-                    'error' => $e->getMessage()
-                ]);
-            }
-        }
-
-        // If no documents in relationship, try JSON column
-        if (!$documentRecords || $documentRecords->isEmpty()) {
-            // Access the JSON column directly (not the relationship)
-            $jsonDocuments = $registration->getAttribute('documents');
-            $documentMetadata = is_array($jsonDocuments) ? $jsonDocuments : [];
-
-            if (!empty($documentMetadata)) {
-                // Convert JSON array to collection-like structure
-                $documentRecords = collect($documentMetadata)->map(function($doc) {
-                    return (object) $doc; // Convert to object for consistency
-                });
-            } else {
-                $documentRecords = collect([]);
-            }
-        }
+        $documentRecords = collect($registration->getDocumentsMetadataList())->map(function ($doc) {
+            return (object) $doc;
+        });
 
         foreach ($documentRecords as $doc) {
             // Handle both Eloquent models and array/object data
@@ -873,9 +845,12 @@ class VendorController extends Controller
         $vendors = Vendor::whereNull('annual_revenue')->get();
 
         foreach ($vendors as $vendor) {
-            $registration = \App\Models\VendorRegistration::where('email', $vendor->email)
-                ->latest()
-                ->first();
+            $registration = \App\Models\VendorRegistration::where('vendor_id', $vendor->id)
+                ->orderByDesc('id')
+                ->first()
+                ?? \App\Models\VendorRegistration::whereRaw('LOWER(email) = ?', [strtolower((string) $vendor->email)])
+                    ->orderByDesc('id')
+                    ->first();
 
             if (!$registration) continue;
 

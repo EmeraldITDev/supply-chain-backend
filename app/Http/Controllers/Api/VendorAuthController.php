@@ -500,20 +500,12 @@ class VendorAuthController extends Controller
     private function formatVendorData(Vendor $vendor): array
     {
         // Get vendor registration if it exists for additional data
-        $registration = $vendor->registrations()->latest()->first();
+        $registration = $vendor->registrations()->orderByDesc('id')->first();
 
-        // 👇 ADD LOG RIGHT HERE
-        \Log::info('VENDOR REGISTRATION DEBUG', [
-            'vendor_id' => $vendor->vendor_id,
-            'registration' => $registration
-        ]);
-
-        // Get documents if they exist
         $documents = null;
-        if ($registration && $registration->documents) {
-            $documents = is_array($registration->documents)
-                ? $registration->documents
-                : json_decode($registration->documents, true);
+        if ($registration) {
+            $list = $registration->getDocumentsMetadataList();
+            $documents = count($list) > 0 ? $list : null;
         }
 
         return [

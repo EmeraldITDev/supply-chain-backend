@@ -542,10 +542,18 @@ class VendorDocumentService
             }
         }
 
-        // Update registration documents JSON column with new paths
+        // Update registration documents JSON column with new paths (read raw JSON; do not use
+        // the registrationDocuments relation name collision that previously shadowed this column).
         if (count($movedDocuments) > 0) {
             $registration->refresh();
-            $documentMetadata = is_array($registration->documents) ? $registration->documents : [];
+            $raw = $registration->getAttributes()['documents'] ?? null;
+            if (is_string($raw)) {
+                $documentMetadata = json_decode($raw, true) ?: [];
+            } elseif (is_array($raw)) {
+                $documentMetadata = $raw;
+            } else {
+                $documentMetadata = [];
+            }
 
             foreach ($documentMetadata as &$doc) {
                 $docRecord = VendorRegistrationDocument::find($doc['id'] ?? null);
