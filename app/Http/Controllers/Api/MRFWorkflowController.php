@@ -1243,6 +1243,22 @@ class MRFWorkflowController extends Controller
         $isFileUpload = $request->hasFile('unsigned_po');
         $isAutoGeneration = $request->has('po_number') && !$isFileUpload;
 
+        // Mode 3: Save as draft — persist PO fields without rendering a PDF
+        // or progressing the workflow. Drafts can be repeatedly overwritten
+        // until the user finalises with save_as_draft=false (or omitted).
+        $saveAsDraft = $request->boolean('save_as_draft', false);
+        if ($saveAsDraft) {
+            if ($isFileUpload) {
+                return response()->json([
+                    'success' => false,
+                    'error' => 'Draft mode does not support file uploads. Omit save_as_draft to upload a signed PO.',
+                    'code' => 'VALIDATION_ERROR',
+                ], 422);
+            }
+
+            return $this->savePOAsDraft($request, $mrf, $user);
+        }
+
         if ($isFileUpload) {
             // Mode 1: File Upload (Existing behavior)
         $validator = Validator::make($request->all(), [
@@ -1484,6 +1500,7 @@ class MRFWorkflowController extends Controller
             'po_number' => $poNumber,
             'unsigned_po_url' => $poUrl,
             'po_generated_at' => now(),
+            'po_draft_saved_at' => null,
             'workflow_state' => WorkflowStateService::STATE_PO_GENERATED,
             'status' => 'awaiting_scd_signature',
             'current_stage' => 'supply_chain',
@@ -2378,6 +2395,116 @@ class MRFWorkflowController extends Controller
                 'code' => 'UPDATE_FAILED'
             ], 500);
         }
+    }
+
+    /**
+     * Persist a PO as a draft on the MRF without progressing the workflow.
+     *
+     * Differs from finalisation in three ways:
+     *  - No PDF is rendered or uploaded.
+     *  - workflow_state, status and current_stage are left untouched.
+     *  - No Finance / SCD notifications are dispatched.
+     *
+     * A subsequent call to generatePO without save_as_draft will finalise
+     * the draft and clear po_draft_saved_at.
+     */
+    private function savePOAsDraft(Request $request, MRF $mrf, $user)
+    {
+        $validator = Validator::make($request->all(), [
+            'po_number' => 'nullable|string|max:255',
+            'po_type' => 'nullable|in:goods,services,logistics',
+            'custom_terms' => 'nullable|string',
+            'po_special_terms' => 'nullable|string',
+            'ship_to_address' => 'nullable|string|max:1000',
+            'tax_rate' => 'nullable|numeric|min:0|max:100',
+            'tax_amount' => 'nullable|numeric|min:0',
+            'invoice_submission_email' => 'nullable|string|max:255',
+            'invoice_submission_cc' => 'nullable|string|max:500',
+            'remarks' => 'nullable|string',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Validation failed',
+                'errors' => $validator->errors(),
+                'code' => 'VALIDATION_ERROR',
+            ], 422);
+        }
+
+        // Optional caller-supplied PO number must remain unique across MRFs.
+        $poNumber = $request->input('po_number');
+        if ($poNumber && MRF::where('po_number', $poNumber)->where('id', '!=', $mrf->id)->exists()) {
+            return response()->json([
+                'success' => false,
+                'error' => 'PO number already exists. Please use a different PO number.',
+                'code' => 'DUPLICATE_PO_NUMBER',
+            ], 422);
+        }
+
+        // Merge standard + custom terms for preview parity with finalisation.
+        $poType = strtolower((string) ($request->input('po_type') ?: 'goods'));
+        $standardTerms = POTermsTemplate::query()
+            ->where('po_type', $poType)
+            ->where('is_active', true)
+            ->latest('id')
+            ->value('content');
+        $customTerms = $request->input('custom_terms');
+        $mergedTerms = trim((string) $standardTerms . ($customTerms ? "\n\n" . $customTerms : ''));
+
+        $taxRate = $request->input('tax_rate', $mrf->tax_rate ?? 0);
+        $taxAmount = $request->has('tax_amount')
+            ? (float) $request->input('tax_amount')
+            : ($mrf->tax_amount ?? 0);
+
+        $mrf->update([
+            'po_number' => $poNumber ?: $mrf->po_number, // preserve any existing number
+            'ship_to_address' => $request->input('ship_to_address', $mrf->ship_to_address),
+            'tax_rate' => $taxRate,
+            'tax_amount' => $taxAmount,
+            'po_special_terms' => $mergedTerms !== '' ? $mergedTerms : ($request->input('po_special_terms') ?? $mrf->po_special_terms),
+            'custom_terms' => $customTerms ?? $mrf->custom_terms,
+            'invoice_submission_email' => $request->input('invoice_submission_email', $mrf->invoice_submission_email),
+            'invoice_submission_cc' => $request->input('invoice_submission_cc', $mrf->invoice_submission_cc),
+            'procurement_manager_id' => $user->id,
+            'po_draft_saved_at' => now(),
+        ]);
+
+        try {
+            MRFApprovalHistory::record($mrf, 'saved_po_draft', 'procurement', $user, 'PO draft saved');
+        } catch (\Throwable $e) {
+            Log::warning('Failed to record PO draft approval history', [
+                'mrf_id' => $mrf->mrf_id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        $mrf->refresh();
+
+        return response()->json([
+            'success' => true,
+            'message' => 'PO draft saved',
+            'data' => [
+                'mrf' => [
+                    'id' => $mrf->mrf_id,
+                    'po_number' => $mrf->po_number,
+                    'poNumber' => $mrf->po_number,
+                    'po_draft_saved_at' => $mrf->po_draft_saved_at?->toIso8601String(),
+                    'poDraftSavedAt' => $mrf->po_draft_saved_at?->toIso8601String(),
+                    'is_po_draft' => true,
+                    'workflow_state' => $mrf->workflow_state,
+                    'status' => $mrf->status,
+                    'current_stage' => $mrf->current_stage,
+                    'ship_to_address' => $mrf->ship_to_address,
+                    'tax_rate' => $mrf->tax_rate,
+                    'tax_amount' => $mrf->tax_amount,
+                    'po_special_terms' => $mrf->po_special_terms,
+                    'custom_terms' => $mrf->custom_terms,
+                    'invoice_submission_email' => $mrf->invoice_submission_email,
+                    'invoice_submission_cc' => $mrf->invoice_submission_cc,
+                ],
+            ],
+        ]);
     }
 
     /**

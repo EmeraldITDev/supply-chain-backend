@@ -73,6 +73,7 @@ class MRF extends Model
         'po_version',
         'po_generated_at',
         'po_signed_at',
+        'po_draft_saved_at',
         // PO Details
         'ship_to_address',
         'tax_rate',
@@ -120,6 +121,7 @@ class MRF extends Model
         'rejected_at' => 'datetime',
         'po_generated_at' => 'datetime',
         'po_signed_at' => 'datetime',
+        'po_draft_saved_at' => 'datetime',
         // Note: tax_rate and tax_amount casts commented out until migration runs
         // Uncomment after running: php artisan migrate (migration: 2026_01_24_180004_add_po_details_to_m_r_f_s_table)
         // 'tax_rate' => 'decimal:2',

@@ -13,6 +13,7 @@ use App\Http\Controllers\Api\VendorController;
 use App\Http\Controllers\Api\NotificationController;
 use App\Http\Controllers\Api\SearchController;
 use App\Http\Controllers\Api\POTermsTemplateController;
+use App\Http\Controllers\Api\PriceComparisonController;
 use App\Http\Controllers\Api\Admin\CodeMappingsController;
 use App\Http\Controllers\Api\V1\Logistics\AuthController as LogisticsAuthController;
 use App\Http\Controllers\Api\V1\Logistics\VendorController as LogisticsVendorController;
@@ -318,6 +319,10 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/mrfs/{id}/approve-vendor-selection', [\App\Http\Controllers\Api\MRFWorkflowController::class, 'approveVendorSelection']);
     Route::post('/mrfs/{id}/reject-vendor-selection', [\App\Http\Controllers\Api\MRFWorkflowController::class, 'rejectVendorSelection']);
     Route::post('/mrfs/{id}/generate-po', [\App\Http\Controllers\Api\MRFWorkflowController::class, 'generatePO']);
+    // Price comparison endpoints (read for SCD+, write for procurement)
+    Route::get('/mrfs/{id}/price-comparisons', [PriceComparisonController::class, 'index']);
+    Route::put('/mrfs/{id}/price-comparisons', [PriceComparisonController::class, 'bulkReplace']);
+    Route::post('/mrfs/{id}/price-comparisons', [PriceComparisonController::class, 'bulkReplace']);
     Route::get('/mrfs/{id}/download-po', [\App\Http\Controllers\Api\MRFController::class, 'downloadPO']); // Download unsigned PO
     Route::get('/mrfs/{id}/download-signed-po', [\App\Http\Controllers\Api\MRFController::class, 'downloadSignedPO']); // Download signed PO
     Route::delete('/mrfs/{id}/po', [\App\Http\Controllers\Api\MRFWorkflowController::class, 'deletePO']); // Delete/clear PO

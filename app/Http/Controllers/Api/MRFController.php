@@ -298,6 +298,9 @@ class MRFController extends Controller
                 'signedPOUrl' => $freshPOUrls['signed_po_url'] ?? $mrf->signed_po_url,
                 'po_generated_at' => $mrf->po_generated_at?->toIso8601String(),
                 'poGeneratedAt' => $mrf->po_generated_at?->toIso8601String(),
+                'po_draft_saved_at' => $mrf->po_draft_saved_at?->toIso8601String(),
+                'poDraftSavedAt' => $mrf->po_draft_saved_at?->toIso8601String(),
+                'is_po_draft' => $mrf->po_draft_saved_at !== null && empty($mrf->unsigned_po_url),
                 'custom_terms' => $mrf->custom_terms,
                 'customTerms' => $mrf->custom_terms,
                 'priceComparisons' => $mrf->priceComparisons->map(function($row) {
@@ -490,6 +493,9 @@ class MRFController extends Controller
             'poGeneratedAt' => $mrf->po_generated_at?->toIso8601String(),
             'po_signed_at' => $mrf->po_signed_at?->toIso8601String(),
             'poSignedAt' => $mrf->po_signed_at?->toIso8601String(),
+            'po_draft_saved_at' => $mrf->po_draft_saved_at?->toIso8601String(),
+            'poDraftSavedAt' => $mrf->po_draft_saved_at?->toIso8601String(),
+            'is_po_draft' => $mrf->po_draft_saved_at !== null && empty($mrf->unsigned_po_url),
             'custom_terms' => $mrf->custom_terms,
             'customTerms' => $mrf->custom_terms,
             'priceComparisons' => $mrf->priceComparisons->map(function($row) {
