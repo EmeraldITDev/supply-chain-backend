@@ -13,8 +13,14 @@ class EnsureRole
      * Handle an incoming request.
      *
      * Usage: ->middleware('role:admin,logistics_manager')
+     *
+     * Laravel passes the comma-separated list as VARIADIC arguments
+     * (`role:a,b,c` → `handle($req, $next, 'a', 'b', 'c')`). The previous
+     * signature accepted only `string $roles`, so PHP silently bound only
+     * the first role and discarded the rest, causing every multi-role
+     * `role:` middleware to behave as `role:<firstRoleOnly>`.
      */
-    public function handle(Request $request, Closure $next, string $roles): Response
+    public function handle(Request $request, Closure $next, string ...$roles): Response
     {
         $user = $request->user();
 
@@ -26,8 +32,15 @@ class EnsureRole
             ], 401);
         }
 
-        $roleList = array_map('trim', explode(',', $roles));
-        $roleList = array_values(array_unique($roleList));
+        // Support both forms: variadic (`role:a,b,c`) and legacy single-string
+        // (`role:a|b|c` or callers passing a pre-joined CSV).
+        $flattened = [];
+        foreach ($roles as $segment) {
+            foreach (explode(',', (string) $segment) as $part) {
+                $flattened[] = trim($part);
+            }
+        }
+        $roleList = array_values(array_unique(array_filter($flattened, static fn ($v) => $v !== '')));
 
         // Legacy DB value `logistics` is treated like `logistics_manager` everywhere else (AuthController, PermissionService).
         if (in_array('logistics_manager', $roleList, true) && !in_array('logistics', $roleList, true)) {
@@ -49,38 +62,18 @@ class EnsureRole
         }
 
         if (!$hasRole) {
-            $route = $request->route();
-            $routeAction = $route ? ($route->getActionName() ?? null) : null;
-            $routeName = $route ? ($route->getName() ?? null) : null;
-            $routeUri = $route ? $route->uri() : null;
-            $routeMiddleware = $route ? $route->gatherMiddleware() : [];
-
             Log::warning('EnsureRole denying request', [
                 'path' => $request->path(),
                 'user_id' => $user->id ?? null,
                 'user_role_column' => $user->role ?? null,
                 'user_role_keys' => $userRoleKeys,
                 'required_role_list' => $roleList,
-                'raw_roles_param' => $roles,
-                'route_uri' => $routeUri,
-                'route_action' => $routeAction,
-                'route_name' => $routeName,
-                'route_middleware' => $routeMiddleware,
             ]);
 
             return response()->json([
                 'success' => false,
                 'error' => 'Insufficient permissions',
                 'code' => 'FORBIDDEN',
-                'debug' => [
-                    'user_role_column' => $user->role ?? null,
-                    'user_role_keys' => $userRoleKeys,
-                    'required_role_list' => $roleList,
-                    'raw_roles_param' => $roles,
-                    'route_uri' => $routeUri,
-                    'route_action' => $routeAction,
-                    'route_middleware' => $routeMiddleware,
-                ],
             ], 403);
         }
 
