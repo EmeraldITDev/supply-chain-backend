@@ -42,6 +42,33 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Signatures Disk
+    |--------------------------------------------------------------------------
+    |
+    | Disk used to persist digital signature images (PNG/JPG uploaded by
+    | Supply Chain Director and other signatories). Defaults to the public
+    | disk so the Settings page can render an immediate preview via the
+    | `/storage` symlink.
+    |
+    */
+
+    'signatures_disk' => env('SIGNATURES_DISK', 'public'),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Logistics Documents Disk
+    |--------------------------------------------------------------------------
+    |
+    | Disk used for logistics-related documents (vehicle papers, maintenance
+    | attachments, trip JCCs, etc.). Defaults to the public disk for local
+    | development and falls back to S3 in production.
+    |
+    */
+
+    'logistics_documents_disk' => env('LOGISTICS_DOCUMENTS_DISK', env('DOCUMENTS_DISK', 'public')),
+
+    /*
+    |--------------------------------------------------------------------------
     | Filesystem Disks
     |--------------------------------------------------------------------------
     |

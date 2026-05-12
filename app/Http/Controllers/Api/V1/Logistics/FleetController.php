@@ -8,12 +8,14 @@ use App\Http\Requests\Logistics\UpdateVehicleMaintenanceRequest;
 use App\Http\Requests\Logistics\UpdateVehicleRequest;
 use App\Http\Requests\Logistics\UpdateVehicleStatusRequest;
 use App\Models\SRF;
+use App\Models\Logistics\Document;
 use App\Models\Logistics\Vehicle;
 use App\Models\Logistics\VehicleMaintenance;
 use App\Services\Logistics\AuditLogger;
 use App\Services\WorkflowNotificationService;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Validator;
 
 class FleetController extends ApiController
@@ -68,7 +70,15 @@ class FleetController extends ApiController
 
     public function show(int $id)
     {
-        $vehicle = Vehicle::with(['maintenances', 'vendor'])
+        $vehicle = Vehicle::with([
+                'vendor',
+                'maintenances' => function ($q) {
+                    $q->orderByDesc('next_due_at')->orderByDesc('id');
+                },
+                'maintenances.documents',
+                'maintenances.performer',
+                'documents',
+            ])
             ->withCount([
                 'documents',
                 'documents as active_documents_count' => function ($q) {
@@ -82,8 +92,59 @@ class FleetController extends ApiController
             return $this->error('Vehicle not found', 'NOT_FOUND', 404);
         }
 
+        // Decorate maintenances with an explicit `documents` array (in case
+        // the morph relation isn't auto-serialised) and include camelCase
+        // aliases the frontend uses.
+        $maintenances = $vehicle->maintenances->map(function ($m) {
+            return [
+                'id' => $m->id,
+                'vehicle_id' => $m->vehicle_id,
+                'maintenance_type' => $m->maintenance_type,
+                'maintenanceType' => $m->maintenance_type,
+                'interval_months' => $m->interval_months,
+                'intervalMonths' => $m->interval_months,
+                'description' => $m->description,
+                'performed_at' => optional($m->performed_at)->toIso8601String(),
+                'performedAt' => optional($m->performed_at)->toIso8601String(),
+                'last_maintenance_date' => optional($m->performed_at)->toIso8601String(),
+                'lastMaintenanceDate' => optional($m->performed_at)->toIso8601String(),
+                'next_due_at' => optional($m->next_due_at)->toIso8601String(),
+                'nextDueAt' => optional($m->next_due_at)->toIso8601String(),
+                'next_maintenance_date' => optional($m->next_due_at)->toIso8601String(),
+                'nextMaintenanceDate' => optional($m->next_due_at)->toIso8601String(),
+                'cost' => $m->cost !== null ? (float) $m->cost : null,
+                'status' => $m->status,
+                'metadata' => $m->metadata,
+                'performed_by' => $m->performer ? [
+                    'id' => $m->performer->id,
+                    'name' => $m->performer->name,
+                ] : null,
+                'documents' => $m->documents->map(function ($d) {
+                    return [
+                        'id' => $d->id,
+                        'document_type' => $d->document_type,
+                        'file_name' => $d->file_name,
+                        'file_path' => $d->file_path,
+                        'mime_type' => $d->mime_type,
+                        'size' => $d->size,
+                        'expires_at' => optional($d->expires_at)->toIso8601String(),
+                        'created_at' => optional($d->created_at)->toIso8601String(),
+                    ];
+                })->values(),
+                'created_at' => optional($m->created_at)->toIso8601String(),
+                'updated_at' => optional($m->updated_at)->toIso8601String(),
+            ];
+        })->values();
+
+        $vehicleArray = $vehicle->toArray();
+        // Replace serialised maintenances with our richer presentation while
+        // keeping both snake_case and camelCase keys for client compatibility.
+        $vehicleArray['maintenances'] = $maintenances;
+        $vehicleArray['maintenance_records'] = $maintenances;
+        $vehicleArray['maintenanceRecords'] = $maintenances;
+
         return $this->success([
-            'vehicle' => $vehicle,
+            'vehicle' => $vehicleArray,
         ]);
     }
 
@@ -136,12 +197,65 @@ class FleetController extends ApiController
             ]
         ));
 
-        $this->auditLogger->log('vehicle_maintenance_created', $request->user(), 'vehicle', (string) $vehicle->id, $maintenance->toArray(), $request);
+        // Inline document attachments — the Maintenance form lets the user
+        // pick one or more files. We attach them to the maintenance record
+        // via the polymorphic documents table so they can later be deleted
+        // via DELETE /api/documents/{id}.
+        $uploaded = [];
+        $files = $request->file('documents', []);
+        if (!is_array($files)) {
+            $files = [$files];
+        }
+        if ($request->hasFile('document')) {
+            $files[] = $request->file('document');
+        }
+        if ($request->hasFile('attachment')) {
+            $files[] = $request->file('attachment');
+        }
+        if ($request->hasFile('file')) {
+            $files[] = $request->file('file');
+        }
+        $files = array_filter($files);
+
+        foreach ($files as $file) {
+            try {
+                $disk = config('filesystems.logistics_documents_disk', config('filesystems.default'));
+                $path = $file->store('logistics/maintenance', $disk);
+                $uploaded[] = Document::create([
+                    'documentable_type' => VehicleMaintenance::class,
+                    'documentable_id' => $maintenance->id,
+                    'document_type' => 'maintenance',
+                    'file_path' => $path,
+                    'file_name' => $file->getClientOriginalName(),
+                    'mime_type' => $file->getMimeType(),
+                    'size' => $file->getSize(),
+                    'uploaded_by' => $request->user()?->id,
+                    'is_active' => true,
+                    'metadata' => [],
+                ]);
+            } catch (\Throwable $e) {
+                \Log::warning('Maintenance document upload failed', [
+                    'maintenance_id' => $maintenance->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+
+        $this->auditLogger->log(
+            'vehicle_maintenance_created',
+            $request->user(),
+            'vehicle',
+            (string) $vehicle->id,
+            "Maintenance record added for vehicle {$vehicle->plate_number}",
+            array_merge($maintenance->toArray(), ['attached_documents' => count($uploaded)]),
+            $request
+        );
 
         return $this->success([
-            'maintenance' => $maintenance,
-            'maintenance_record' => $maintenance,
+            'maintenance' => $maintenance->fresh('documents'),
+            'maintenance_record' => $maintenance->fresh('documents'),
             'vehicle_id' => $vehicle->id,
+            'documents' => $uploaded,
         ], 201);
     }
 
@@ -153,6 +267,7 @@ class FleetController extends ApiController
         }
 
         $records = VehicleMaintenance::query()
+            ->with(['documents', 'performer'])
             ->where('vehicle_id', $vehicle->id)
             ->orderByDesc('next_due_at')
             ->orderByDesc('id')
@@ -428,27 +543,92 @@ class FleetController extends ApiController
             );
         }
 
-        $vehicle = Vehicle::with('maintenances')->find($id);
+        $vehicle = Vehicle::with(['maintenances', 'vendor'])->find($id);
         if (!$vehicle) {
             return $this->error('Vehicle not found', 'NOT_FOUND', 404);
         }
 
-        $maintenance = $vehicle->maintenances()
+        $maintenances = $vehicle->maintenances()
             ->orderByDesc('performed_at')
             ->orderByDesc('created_at')
-            ->first();
+            ->get();
+
+        $latestMaintenance = $maintenances->first();
 
         $validator = Validator::make($request->all(), [
             'maintenance_type' => 'nullable|string|max:255',
             'description' => 'nullable|string',
             'urgency' => 'nullable|in:Low,Medium,High,Critical',
+            'estimated_cost' => 'nullable|numeric|min:0',
+            'duration' => 'nullable|string|max:255',
         ]);
         if ($validator->fails()) {
             return $this->error('Validation failed', 'VALIDATION_ERROR', 422, $validator->errors()->toArray());
         }
 
-        $maintenanceType = $request->input('maintenance_type', $maintenance?->maintenance_type ?? 'Vehicle Maintenance');
-        $maintenanceDescription = $request->input('description', $maintenance?->description ?? 'Vehicle flagged for maintenance from fleet dashboard.');
+        $maintenanceType = $request->input('maintenance_type', $latestMaintenance?->maintenance_type ?? 'Vehicle Maintenance');
+        $maintenanceDescription = $request->input('description', $latestMaintenance?->description ?? 'Vehicle flagged for maintenance from fleet dashboard.');
+
+        $vehicleSnapshot = [
+            'id' => $vehicle->id,
+            'vehicle_code' => $vehicle->vehicle_code,
+            'plate_number' => $vehicle->plate_number,
+            'name' => $vehicle->name,
+            'type' => $vehicle->type,
+            'make' => $vehicle->make ?? $vehicle->make_model,
+            'model' => $vehicle->make_model,
+            'year' => $vehicle->year,
+            'color' => $vehicle->color,
+            'fuel_type' => $vehicle->fuel_type,
+            'capacity' => $vehicle->capacity,
+            'passenger_capacity' => $vehicle->passenger_capacity,
+            'status' => $vehicle->status,
+            'status_inactive_reason' => $vehicle->status_inactive_reason,
+            'last_service_at' => optional($vehicle->last_service_at)->toIso8601String(),
+            'vendor' => $vehicle->vendor ? [
+                'id' => $vehicle->vendor->id,
+                'name' => $vehicle->vendor->name,
+            ] : null,
+        ];
+
+        $maintenanceHistory = $maintenances->map(function ($m) {
+            return [
+                'id' => $m->id,
+                'maintenance_type' => $m->maintenance_type,
+                'description' => $m->description,
+                'interval_months' => $m->interval_months,
+                'performed_at' => optional($m->performed_at)->toIso8601String(),
+                'next_due_at' => optional($m->next_due_at)->toIso8601String(),
+                'cost' => $m->cost !== null ? (float) $m->cost : null,
+                'status' => $m->status,
+                'metadata' => $m->metadata,
+            ];
+        })->values()->all();
+
+        $rfqPrefill = [
+            'title' => sprintf('RFQ — %s (%s)', $maintenanceType, $vehicle->plate_number ?? $vehicle->vehicle_code ?? "Vehicle #{$vehicle->id}"),
+            'scope_of_work' => $maintenanceDescription,
+            'currency' => 'NGN',
+            'estimated_budget' => $request->input('estimated_cost', $latestMaintenance?->cost),
+            'required_specifications' => array_filter([
+                $vehicleSnapshot['make'] ? 'Make: ' . $vehicleSnapshot['make'] : null,
+                $vehicleSnapshot['model'] ? 'Model: ' . $vehicleSnapshot['model'] : null,
+                $vehicleSnapshot['year'] ? 'Year: ' . $vehicleSnapshot['year'] : null,
+                $vehicleSnapshot['plate_number'] ? 'Plate: ' . $vehicleSnapshot['plate_number'] : null,
+                $vehicleSnapshot['fuel_type'] ? 'Fuel: ' . $vehicleSnapshot['fuel_type'] : null,
+            ]),
+            'line_items' => [[
+                'item_name' => $maintenanceType,
+                'description' => $maintenanceDescription,
+                'quantity' => 1,
+                'unit' => 'service',
+            ]],
+        ];
+
+        // New default: SRFs from logistics go through the Supply Chain
+        // Director first (for budget/justification review) before reaching
+        // Procurement. This matches the QA workflow expectation.
+        $initialStage = 'supply_chain_director_review';
 
         $srf = SRF::create([
             'srf_id' => SRF::generateSRFId(),
@@ -458,23 +638,38 @@ class FleetController extends ApiController
             'contract_type' => 'EMERALD',
             'urgency' => $request->input('urgency', 'Medium'),
             'description' => trim(sprintf(
-                "Vehicle ID: %s\nPlate Number: %s\nMaintenance Type: %s\nFlagged Description: %s",
-                $vehicle->id,
+                "Vehicle: %s (%s)\nMake/Model: %s %s %s\nMaintenance Type: %s\nDetails: %s",
                 $vehicle->plate_number ?? 'N/A',
+                $vehicle->vehicle_code ?? 'N/A',
+                $vehicleSnapshot['make'] ?? '',
+                $vehicleSnapshot['model'] ?? '',
+                $vehicleSnapshot['year'] ?? '',
                 $maintenanceType,
                 $maintenanceDescription
             )),
-            'duration' => 'TBD',
-            'estimated_cost' => (float) ($maintenance?->cost ?? 0),
+            'duration' => $request->input('duration', 'TBD'),
+            'estimated_cost' => (float) $request->input('estimated_cost', $latestMaintenance?->cost ?? 0),
             'justification' => 'Auto-initiated from Fleet Maintenance dashboard.',
             'requester_id' => $user->id,
             'requester_name' => $user->name,
-            'department' => $user->department,
+            'department' => $user->department ?? 'Logistics',
             'date' => now(),
             'status' => 'Pending',
-            'current_stage' => 'procurement',
-            'approval_history' => [],
-            'remarks' => 'pending_procurement',
+            'current_stage' => $initialStage,
+            'approval_history' => [[
+                'stage' => 'logistics_initiated',
+                'actor_id' => $user->id,
+                'actor_name' => $user->name,
+                'at' => now()->toIso8601String(),
+                'note' => 'Fleet maintenance SRF auto-generated from dashboard.',
+            ]],
+            'remarks' => 'pending_supply_chain_director_review',
+            'vehicle_id' => $vehicle->id,
+            'maintenance_id' => $latestMaintenance?->id,
+            'vehicle_snapshot' => $vehicleSnapshot,
+            'maintenance_history' => $maintenanceHistory,
+            'rfq_prefill' => $rfqPrefill,
+            'origin' => 'fleet_dashboard',
         ]);
 
         try {
@@ -490,9 +685,14 @@ class FleetController extends ApiController
                 'title' => $srf->title,
                 'serviceType' => $srf->service_type,
                 'department' => $srf->department,
-                'status' => 'pending_procurement',
+                'status' => 'pending_supply_chain_director_review',
                 'currentStage' => $srf->current_stage,
                 'description' => $srf->description,
+                'vehicleId' => $srf->vehicle_id,
+                'maintenanceId' => $srf->maintenance_id,
+                'vehicleSnapshot' => $srf->vehicle_snapshot,
+                'maintenanceHistory' => $srf->maintenance_history,
+                'rfqPrefill' => $srf->rfq_prefill,
             ],
         ], 201);
     }

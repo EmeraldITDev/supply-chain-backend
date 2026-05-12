@@ -200,36 +200,83 @@ class TripController extends ApiController
             return $this->error('Vendor not found', 'NOT_FOUND', 404);
         }
 
-        $trip->vendor_id = $request->vendor_id;
-        $trip->status = Trip::STATUS_DRAFT;
-        if (empty($trip->approval_status)) {
-            $trip->approval_status = 'draft';
-        }
-        $trip->save();
-
-        $trip->vendorSubmissions()->firstOrCreate(
-            ['vendor_id' => $vendor->id],
-            ['status' => TripVendorSubmission::STATUS_PENDING]
-        );
-
-        // Send notification to vendor
         try {
-            if ($vendor->email) {
-                $vendor->notify(new VendorAssignedToTripNotification($trip, $vendor));
+            $trip->vendor_id = $request->vendor_id;
+            $trip->status = Trip::STATUS_DRAFT;
+            if (empty($trip->approval_status)) {
+                $trip->approval_status = 'draft';
             }
-        } catch (\Exception $e) {
-            // Log but don't fail the request if notification fails
-            \Log::warning('Failed to send vendor assignment notification', [
-                'vendor_id' => $vendor->id,
-                'trip_id' => $trip->id,
-                'error' => $e->getMessage()
-            ]);
-        }
+            $trip->save();
 
-        $this->auditLogger->log('trip_vendor_assigned', $request->user(), 'trip', (string) $trip->id, ['vendor_id' => $trip->vendor_id], $request);
+            // Pre-seed a placeholder submission so the vendor portal can list
+            // this trip immediately. Wrapped in its own try/catch because the
+            // submissions table has historically had NOT NULL columns that we
+            // don't have values for at assignment time (vehicle plate/driver
+            // are supplied by the vendor later). A failure here is non-fatal:
+            // the row gets created when the vendor submits.
+            try {
+                $trip->vendorSubmissions()->firstOrCreate(
+                    ['trip_id' => $trip->id, 'vendor_id' => $vendor->id],
+                    ['status' => TripVendorSubmission::STATUS_PENDING]
+                );
+            } catch (\Throwable $submissionException) {
+                \Log::warning('Skipping placeholder vendor submission on assignment', [
+                    'trip_id' => $trip->id,
+                    'vendor_id' => $vendor->id,
+                    'error' => $submissionException->getMessage(),
+                ]);
+            }
+
+            // Send notification to vendor - never block on this. The Vendor
+            // model may not have the Notifiable trait everywhere, and mail
+            // delivery shouldn't bring down the assignment workflow.
+            try {
+                if ($vendor->email && method_exists($vendor, 'notify')) {
+                    $vendor->notify(new VendorAssignedToTripNotification($trip, $vendor));
+                }
+            } catch (\Throwable $notificationException) {
+                \Log::warning('Failed to send vendor assignment notification', [
+                    'vendor_id' => $vendor->id,
+                    'trip_id' => $trip->id,
+                    'error' => $notificationException->getMessage(),
+                ]);
+            }
+
+            try {
+                $this->auditLogger->log(
+                    'trip_vendor_assigned',
+                    $request->user(),
+                    'trip',
+                    (string) $trip->id,
+                    "Vendor #{$vendor->id} ({$vendor->name}) assigned to trip {$trip->trip_code}",
+                    ['vendor_id' => $trip->vendor_id],
+                    $request
+                );
+            } catch (\Throwable $auditException) {
+                \Log::warning('Failed to write audit log for vendor assignment', [
+                    'trip_id' => $trip->id,
+                    'vendor_id' => $vendor->id,
+                    'error' => $auditException->getMessage(),
+                ]);
+            }
+        } catch (\Throwable $e) {
+            \Log::error('Trip vendor assignment failed', [
+                'trip_id' => $id,
+                'vendor_id' => $request->vendor_id,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+
+            return $this->error(
+                'Failed to assign vendor. Please try again.',
+                'ASSIGNMENT_FAILED',
+                500,
+                config('app.debug') ? ['exception' => [$e->getMessage()]] : []
+            );
+        }
 
         return $this->success([
-            'trip' => $trip,
+            'trip' => $trip->fresh(['vendor']),
         ]);
     }
 

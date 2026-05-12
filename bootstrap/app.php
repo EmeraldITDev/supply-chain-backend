@@ -87,12 +87,20 @@ return Application::configure(basePath: dirname(__DIR__))
 
             $origin = $request->header('Origin');
 
-            // Handle connection timeout errors
-            if (str_contains($e->getMessage(), 'Connection refused') ||
-                str_contains($e->getMessage(), 'Connection timeout') ||
-                str_contains($e->getMessage(), 'Lost connection') ||
-                $e instanceof \Illuminate\Database\QueryException) {
+            // Handle connection-level database failures only. We intentionally do
+            // not blanket-treat every QueryException as 503; a constraint or
+            // schema bug should surface as a 500 so the frontend doesn't
+            // tell the user "try again later" when retrying cannot help.
+            $message = $e->getMessage();
+            $isConnectionError = str_contains($message, 'Connection refused')
+                || str_contains($message, 'Connection timeout')
+                || str_contains($message, 'Lost connection')
+                || str_contains($message, 'server has gone away')
+                || str_contains($message, 'No such host is known')
+                || str_contains($message, 'could not translate host name')
+                || ($e instanceof \PDOException && in_array($e->getCode(), ['2002', '2003', '2006', '2013', '08006', '08001', '08004', 'HY000'], true));
 
+            if ($isConnectionError) {
                 $statusCode = 503;
 
                 $response = response()->json([
@@ -102,6 +110,28 @@ return Application::configure(basePath: dirname(__DIR__))
                     'message' => 'The server is unable to process your request. Please try again in a few moments.',
                     'timestamp' => now()->toIso8601String(),
                 ], $statusCode)->header('Connection', 'close');
+
+                return $addCorsHeaders($response, $origin);
+            }
+
+            // Generic query exception (constraint violation, missing column,
+            // etc.) — surface as a 500 with useful debug payload but never
+            // leak the SQL in production.
+            if ($e instanceof \Illuminate\Database\QueryException) {
+                \Log::error('Unhandled query exception', [
+                    'message' => $message,
+                    'sql' => $e->getSql() ?? null,
+                    'bindings' => $e->getBindings() ?? [],
+                    'path' => $request->path(),
+                ]);
+
+                $response = response()->json([
+                    'success' => false,
+                    'error' => 'A database error occurred while processing the request.',
+                    'code' => 'DATABASE_ERROR',
+                    'message' => config('app.debug') ? $message : 'Please try again or contact support if the problem persists.',
+                    'timestamp' => now()->toIso8601String(),
+                ], 500);
 
                 return $addCorsHeaders($response, $origin);
             }

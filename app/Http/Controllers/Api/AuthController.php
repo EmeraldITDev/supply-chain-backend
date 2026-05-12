@@ -7,6 +7,8 @@ use App\Models\User;
 use App\Models\Employee;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\ValidationException;
 
 class AuthController extends Controller
@@ -164,9 +166,14 @@ class AuthController extends Controller
 
         // Get user role (from Spatie or fallback to role field)
         $role = $user->getRoleNames()->first() ?? $user->role ?? 'employee';
-        
+
         // Get department from employee or user
         $department = $user->employee->department ?? $user->department ?? null;
+
+        // Resolve a public URL for the signature image if one is uploaded so
+        // the Settings page can render an instant preview without needing a
+        // separate endpoint.
+        $signatureUrl = $this->buildSignatureUrl($user->signature_image_path);
 
         return response()->json([
             'id' => $user->id,
@@ -178,6 +185,12 @@ class AuthController extends Controller
             'createdAt' => $user->created_at->toIso8601String(),
             'requiresPasswordChange' => $user->must_change_password ?? false,
             'tokenExpiresAt' => $token->expires_at ? $token->expires_at->toIso8601String() : null,
+            'signatureImagePath' => $user->signature_image_path,
+            'signature_image_path' => $user->signature_image_path,
+            'signatureUrl' => $signatureUrl,
+            'signature_url' => $signatureUrl,
+            'hasSignature' => !empty($user->signature_image_path),
+            'has_signature' => !empty($user->signature_image_path),
         ]);
     }
 
@@ -338,6 +351,183 @@ class AuthController extends Controller
         return response()->json([
             'success' => true,
             'message' => 'Password changed successfully. You can now login with your new password.',
+        ]);
+    }
+
+    /**
+     * Disk used for signature uploads. Falls back to the local disk so a
+     * fresh install works without S3 credentials.
+     */
+    private function signatureDisk(): string
+    {
+        return config('filesystems.signatures_disk', env('SIGNATURES_DISK', 'public'));
+    }
+
+    /**
+     * Resolve a previewable URL for a signature stored on disk.
+     */
+    private function buildSignatureUrl(?string $path): ?string
+    {
+        if (empty($path)) {
+            return null;
+        }
+        $disk = $this->signatureDisk();
+        try {
+            if ($disk === 's3') {
+                return Storage::disk($disk)->temporaryUrl($path, now()->addDays(7));
+            }
+            return Storage::disk($disk)->url($path);
+        } catch (\Throwable $e) {
+            return $path;
+        }
+    }
+
+    /**
+     * Self-service signature upload. Anyone who signs Purchase Orders / JCCs
+     * can upload their own image (PNG/JPG/GIF/WEBP, transparent background
+     * recommended) without needing an admin to do it for them.
+     */
+    public function uploadOwnSignature(Request $request)
+    {
+        $user = $request->user();
+        if (!$user) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Authentication required.',
+                'code' => 'UNAUTHENTICATED',
+            ], 401);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'signature' => 'nullable|file|image|max:5120',
+            'file' => 'nullable|file|image|max:5120',
+            'image' => 'nullable|file|image|max:5120',
+            'signature_base64' => 'nullable|string',
+            'image_base64' => 'nullable|string',
+        ]);
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Validation failed',
+                'errors' => $validator->errors(),
+                'code' => 'VALIDATION_ERROR',
+            ], 422);
+        }
+
+        $file = $request->file('signature') ?? $request->file('file') ?? $request->file('image');
+        $base64 = $request->input('signature_base64') ?? $request->input('image_base64');
+
+        if (!$file && empty($base64)) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Provide a signature image file or base64 payload.',
+                'code' => 'VALIDATION_ERROR',
+            ], 422);
+        }
+
+        $disk = $this->signatureDisk();
+        $previous = $user->signature_image_path;
+
+        if ($file) {
+            $filename = sprintf('signature_%d_%d.%s', $user->id, time(), $file->getClientOriginalExtension() ?: 'png');
+            $path = 'signatures/' . $filename;
+            Storage::disk($disk)->putFileAs('signatures', $file, $filename);
+        } else {
+            $payload = preg_replace('/^data:image\/\w+;base64,/', '', (string) $base64) ?: '';
+            $binary = base64_decode($payload, true);
+            if ($binary === false || $binary === '') {
+                return response()->json([
+                    'success' => false,
+                    'error' => 'Invalid base64 signature payload.',
+                    'code' => 'VALIDATION_ERROR',
+                ], 422);
+            }
+            $filename = sprintf('signature_%d_%d.png', $user->id, time());
+            $path = 'signatures/' . $filename;
+            Storage::disk($disk)->put($path, $binary);
+        }
+
+        $user->update(['signature_image_path' => $path]);
+
+        // Best-effort cleanup of the prior signature image.
+        if ($previous && $previous !== $path) {
+            try {
+                Storage::disk($disk)->delete($previous);
+            } catch (\Throwable) {
+                // ignore
+            }
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Signature uploaded successfully.',
+            'data' => [
+                'user_id' => $user->id,
+                'signature_image_path' => $user->signature_image_path,
+                'signatureImagePath' => $user->signature_image_path,
+                'signature_url' => $this->buildSignatureUrl($user->signature_image_path),
+                'signatureUrl' => $this->buildSignatureUrl($user->signature_image_path),
+                'has_signature' => true,
+                'hasSignature' => true,
+            ],
+        ]);
+    }
+
+    /**
+     * Returns a preview URL for the authenticated user's signature, if any.
+     */
+    public function getOwnSignature(Request $request)
+    {
+        $user = $request->user();
+        if (!$user) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Authentication required.',
+                'code' => 'UNAUTHENTICATED',
+            ], 401);
+        }
+
+        return response()->json([
+            'success' => true,
+            'data' => [
+                'user_id' => $user->id,
+                'signature_image_path' => $user->signature_image_path,
+                'signatureImagePath' => $user->signature_image_path,
+                'signature_url' => $this->buildSignatureUrl($user->signature_image_path),
+                'signatureUrl' => $this->buildSignatureUrl($user->signature_image_path),
+                'has_signature' => !empty($user->signature_image_path),
+                'hasSignature' => !empty($user->signature_image_path),
+            ],
+        ]);
+    }
+
+    /**
+     * Clears the authenticated user's signature.
+     */
+    public function deleteOwnSignature(Request $request)
+    {
+        $user = $request->user();
+        if (!$user) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Authentication required.',
+                'code' => 'UNAUTHENTICATED',
+            ], 401);
+        }
+
+        $path = $user->signature_image_path;
+        if ($path) {
+            try {
+                Storage::disk($this->signatureDisk())->delete($path);
+            } catch (\Throwable) {
+                // ignore
+            }
+        }
+        $user->update(['signature_image_path' => null]);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Signature removed.',
         ]);
     }
 }

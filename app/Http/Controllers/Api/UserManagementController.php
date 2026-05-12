@@ -415,12 +415,14 @@ class UserManagementController extends Controller
             ], 422);
         }
 
-        $disk = 'local';
+        // Persist to the signatures disk (defaults to the `public` disk so
+        // the Settings page can render a preview without an admin grant).
+        $disk = config('filesystems.signatures_disk', env('SIGNATURES_DISK', 'public'));
         $path = null;
 
         if ($request->hasFile('signature')) {
             $file = $request->file('signature');
-            $filename = 'signature_' . $target->id . '_' . time() . '.' . $file->getClientOriginalExtension();
+            $filename = 'signature_' . $target->id . '_' . time() . '.' . ($file->getClientOriginalExtension() ?: 'png');
             $path = 'signatures/' . $filename;
             \Storage::disk($disk)->putFileAs('signatures', $file, $filename);
         } else {

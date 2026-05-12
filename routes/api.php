@@ -203,12 +203,15 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/vehicles/{id}/initiate-srf', [LogisticsFleetController::class, 'initiateSrf'])->middleware('role:logistics_officer,logistics_manager,procurement_manager,supply_chain_director,admin');
 
     // Materials routes - forward to logistics controllers
+    // NOTE: specific paths (summary, bulk-upload) must precede the parameterised
+    // /materials/{id} route so they are matched before being treated as IDs.
+    Route::get('/materials/summary', [LogisticsMaterialController::class, 'summary'])->middleware($logisticsInternalRoles);
+    Route::get('/materials-summary', [LogisticsMaterialController::class, 'summary'])->middleware($logisticsInternalRoles);
+    Route::post('/materials/bulk-upload', [LogisticsMaterialController::class, 'bulkUpload'])->middleware($logisticsInternalRoles);
     Route::post('/materials', [LogisticsMaterialController::class, 'store'])->middleware($logisticsInternalRoles);
     Route::get('/materials', [LogisticsMaterialController::class, 'index'])->middleware($logisticsInternalRoles);
-    Route::get('/materials/{id}', [LogisticsMaterialController::class, 'show'])->middleware($logisticsInternalRoles);
-    Route::delete('/materials/{id}', [LogisticsMaterialController::class, 'destroy'])->middleware($logisticsInternalRoles);
-    Route::post('/materials/bulk-upload', [LogisticsMaterialController::class, 'bulkUpload'])->middleware($logisticsInternalRoles);
-    Route::get('/materials-summary', [LogisticsMaterialController::class, 'summary'])->middleware($logisticsInternalRoles);
+    Route::get('/materials/{id}', [LogisticsMaterialController::class, 'show'])->middleware($logisticsInternalRoles)->where('id', '[0-9]+');
+    Route::delete('/materials/{id}', [LogisticsMaterialController::class, 'destroy'])->middleware($logisticsInternalRoles)->where('id', '[0-9]+');
 
     // Material Movements (Logistics Tracking) routes
     Route::post('/material-movements', [LogisticsMaterialMovementController::class, 'store'])->middleware($logisticsInternalRoles);
@@ -250,6 +253,12 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/refresh', [AuthController::class, 'refreshToken']); // Alias for frontend compatibility
     Route::put('/auth/profile', [AuthController::class, 'updateProfile']);
     Route::post('/auth/change-password', [AuthController::class, 'changePassword']);
+    // Self-service signature upload — used by Supply Chain Director (and
+    // anyone else who signs documents) so the Settings page works without an
+    // admin grant.
+    Route::post('/auth/signature', [AuthController::class, 'uploadOwnSignature']);
+    Route::get('/auth/signature', [AuthController::class, 'getOwnSignature']);
+    Route::delete('/auth/signature', [AuthController::class, 'deleteOwnSignature']);
 
     // Session management - keep-alive and status check
     Route::post('/auth/keep-alive', function () {
@@ -351,8 +360,11 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // SRF routes
     Route::get('/srfs', [SRFController::class, 'index']);
+    Route::get('/srfs/{id}', [SRFController::class, 'show']);
     Route::post('/srfs', [SRFController::class, 'store']);
     Route::put('/srfs/{id}', [SRFController::class, 'update']);
+    Route::post('/srfs/{id}/supply-chain-director-approve', [SRFController::class, 'supplyChainDirectorApprove']);
+    Route::post('/srfs/{id}/supply-chain-director-reject', [SRFController::class, 'supplyChainDirectorReject']);
 
     // RFQ routes
     Route::get('/rfqs', [RFQController::class, 'index']);
@@ -636,12 +648,13 @@ Route::prefix('logistics')->group(function () {
         Route::put('/journeys/{id}', [LogisticsJourneyController::class, 'update'])->middleware($logisticsInternalRoles);
         Route::post('/journeys/{id}/update-status', [LogisticsJourneyController::class, 'updateStatus'])->middleware('role:vendor,logistics_officer,logistics_manager,procurement_manager,supply_chain_director,admin');
 
+        Route::get('/materials/summary', [LogisticsMaterialController::class, 'summary'])->middleware($logisticsInternalRoles);
+        Route::get('/materials-summary', [LogisticsMaterialController::class, 'summary'])->middleware($logisticsInternalRoles);
+        Route::post('/materials/bulk-upload', [LogisticsMaterialController::class, 'bulkUpload'])->middleware($logisticsInternalRoles);
         Route::post('/materials', [LogisticsMaterialController::class, 'store'])->middleware($logisticsInternalRoles);
         Route::get('/materials', [LogisticsMaterialController::class, 'index'])->middleware($logisticsInternalRoles);
-        Route::get('/materials/{id}', [LogisticsMaterialController::class, 'show'])->middleware($logisticsInternalRoles);
-        Route::delete('/materials/{id}', [LogisticsMaterialController::class, 'destroy'])->middleware($logisticsInternalRoles);
-        Route::post('/materials/bulk-upload', [LogisticsMaterialController::class, 'bulkUpload'])->middleware($logisticsInternalRoles);
-        Route::get('/materials-summary', [LogisticsMaterialController::class, 'summary'])->middleware($logisticsInternalRoles);
+        Route::get('/materials/{id}', [LogisticsMaterialController::class, 'show'])->middleware($logisticsInternalRoles)->where('id', '[0-9]+');
+        Route::delete('/materials/{id}', [LogisticsMaterialController::class, 'destroy'])->middleware($logisticsInternalRoles)->where('id', '[0-9]+');
         Route::get('/trips/{id}/materials', [LogisticsMaterialController::class, 'listByTrip'])->middleware($logisticsInternalRoles);
 
         Route::post('/fleet/vehicles', [LogisticsFleetController::class, 'store'])->middleware($logisticsInternalRoles);

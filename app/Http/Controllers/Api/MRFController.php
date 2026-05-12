@@ -529,8 +529,23 @@ class MRFController extends Controller
     {
         $user = $request->user();
 
-        // Check role - procurement managers and above
-        if (!in_array($user->role, ['procurement_manager', 'procurement', 'supply_chain_director', 'supply_chain', 'admin'])) {
+        // Roles allowed to view the full procurement timeline (MRF +
+        // quotations + selected vendor). Logistics manager/officer need
+        // this so they can track end-to-end progress of fleet/logistics
+        // requisitions they originated.
+        $allowedRoles = [
+            'procurement_manager',
+            'procurement',
+            'supply_chain_director',
+            'supply_chain',
+            'admin',
+            'logistics_manager',
+            'logistics_officer',
+            'finance',
+            'finance_officer',
+            'executive',
+        ];
+        if (!in_array($user->role, $allowedRoles, true)) {
             return response()->json([
                 'success' => false,
                 'error' => 'Insufficient permissions',
@@ -1016,15 +1031,35 @@ class MRFController extends Controller
      */
     public function store(Request $request)
     {
-        // Only employees can create MRF
         $user = $request->user();
-        if (!$user || $user->role !== 'employee') {
+        if (!$user) {
             return response()->json([
                 'success' => false,
-                'error' => 'Only staff members can create Material Request Forms. Please contact your administrator.',
+                'error' => 'Authentication required.',
+                'code' => 'UNAUTHENTICATED',
+            ], 401);
+        }
+
+        // Roles that are allowed to author MRF requests directly. Logistics
+        // Manager and Logistics Officer can create MRFs for their own
+        // department (e.g. fleet parts, workshop consumables). The
+        // designated_requisition_creator flag still gates non-logistics
+        // employees.
+        $logisticsAuthors = ['logistics_manager', 'logistics_officer'];
+        $isLogisticsAuthor = in_array($user->role, $logisticsAuthors, true);
+        $isDepartmentEmployee = $user->role === 'employee';
+
+        if (!$isLogisticsAuthor && !$isDepartmentEmployee) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Only designated staff or logistics managers can create Material Request Forms.',
             ], 403);
         }
-        if (!$user->designated_requisition_creator) {
+
+        // Department employees still need to be the designated requisition
+        // creator. Logistics authors are department-managed: any logistics
+        // manager/officer may originate an MRF.
+        if ($isDepartmentEmployee && !$user->designated_requisition_creator) {
             return response()->json([
                 'success' => false,
                 'error' => 'You are not authorised to create requisition requests for your department.',

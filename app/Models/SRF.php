@@ -29,13 +29,38 @@ class SRF extends Model
         'approval_history',
         'rejection_reason',
         'remarks',
+        'vehicle_id',
+        'maintenance_id',
+        'vehicle_snapshot',
+        'maintenance_history',
+        'rfq_prefill',
+        'origin',
     ];
 
     protected $casts = [
         'estimated_cost' => 'decimal:2',
         'date' => 'date',
         'approval_history' => 'array',
+        'vehicle_snapshot' => 'array',
+        'maintenance_history' => 'array',
+        'rfq_prefill' => 'array',
     ];
+
+    /**
+     * Optional link back to the fleet vehicle this SRF was initiated for.
+     */
+    public function vehicle(): BelongsTo
+    {
+        return $this->belongsTo(\App\Models\Logistics\Vehicle::class, 'vehicle_id');
+    }
+
+    /**
+     * Optional link to the specific maintenance record that triggered the SRF.
+     */
+    public function maintenance(): BelongsTo
+    {
+        return $this->belongsTo(\App\Models\Logistics\VehicleMaintenance::class, 'maintenance_id');
+    }
 
     /**
      * Get the user who requested this SRF

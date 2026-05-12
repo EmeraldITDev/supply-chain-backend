@@ -5,11 +5,24 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Notifications\Notifiable;
 use App\Models\User;
 use App\Models\VendorRegistrationDocument;
 
 class Vendor extends Model
 {
+    use Notifiable;
+
+    /**
+     * Channel resolvers — the Notifiable trait will dispatch mail to
+     * whichever column we return here. Vendor mail is sent to the primary
+     * `email` column; alerts can be CC'd via additional columns if needed.
+     */
+    public function routeNotificationForMail(): ?string
+    {
+        return $this->email ?: null;
+    }
+
     protected $fillable = [
         'vendor_id',
         'name',

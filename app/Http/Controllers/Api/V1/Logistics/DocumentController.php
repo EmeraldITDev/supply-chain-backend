@@ -7,6 +7,7 @@ use App\Models\Logistics\Document;
 use App\Models\Logistics\Journey;
 use App\Models\Logistics\Trip;
 use App\Models\Logistics\Vehicle;
+use App\Models\Logistics\VehicleMaintenance;
 use App\Models\Vendor;
 use App\Services\Logistics\AuditLogger;
 use Illuminate\Support\Facades\Storage;
@@ -32,6 +33,7 @@ class DocumentController extends ApiController
             'trip' => Trip::find($entityId),
             'journey' => Journey::find($entityId),
             'vehicle' => Vehicle::find($entityId),
+            'maintenance', 'vehicle_maintenance' => VehicleMaintenance::find($entityId),
             default => null,
         };
 
@@ -69,6 +71,7 @@ class DocumentController extends ApiController
             'trip' => Trip::class,
             'journey' => Journey::class,
             'vehicle' => Vehicle::class,
+            'maintenance', 'vehicle_maintenance' => VehicleMaintenance::class,
             default => null,
         };
 
@@ -93,7 +96,19 @@ class DocumentController extends ApiController
             return $this->error('Document not found', 'NOT_FOUND', 404);
         }
 
-        Storage::disk($this->storageDisk())->delete($document->file_path);
+        // Best-effort file removal — if the underlying object is already
+        // missing on the storage backend we still mark the metadata row as
+        // deleted so the UI clears the orphaned entry.
+        try {
+            Storage::disk($this->storageDisk())->delete($document->file_path);
+        } catch (\Throwable $e) {
+            \Log::warning('Failed to remove document file from storage', [
+                'document_id' => $document->id,
+                'file_path' => $document->file_path,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
         $document->delete();
 
         return $this->success(['deleted' => true]);

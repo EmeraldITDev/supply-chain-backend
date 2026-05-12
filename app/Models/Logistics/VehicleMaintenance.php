@@ -6,6 +6,7 @@ use App\Models\User;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\MorphMany;
 
 class VehicleMaintenance extends Model
 {
@@ -48,5 +49,15 @@ class VehicleMaintenance extends Model
     public function performer(): BelongsTo
     {
         return $this->belongsTo(User::class, 'performed_by');
+    }
+
+    /**
+     * Documents attached to this maintenance record (invoices, before/after
+     * photos, certificates of work, etc.). Uses the shared polymorphic
+     * `documents` table.
+     */
+    public function documents(): MorphMany
+    {
+        return $this->morphMany(Document::class, 'documentable');
     }
 }

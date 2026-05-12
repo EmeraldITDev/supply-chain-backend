@@ -14,7 +14,7 @@ class StoreDocumentRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'entity_type' => 'required|string|in:vendor,trip,journey,vehicle',
+            'entity_type' => 'required|string|in:vendor,trip,journey,vehicle,maintenance,vehicle_maintenance',
             'entity_id' => 'required|integer',
             'document_type' => 'required|string|max:100',
             'file' => 'required|file|max:10240',
