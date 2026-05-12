@@ -30,11 +30,13 @@ class Vehicle extends Model
         'name',
         'plate_number',
         'type',
+        'make',
         'make_model',
         'year',
         'color',
         'fuel_type',
         'capacity',
+        'passenger_capacity',
         'status',
         'status_inactive_reason',
         'vendor_id',
@@ -45,6 +47,7 @@ class Vehicle extends Model
 
     protected $casts = [
         'capacity' => 'decimal:2',
+        'passenger_capacity' => 'integer',
         'last_service_at' => 'datetime',
         'metadata' => 'array',
         'year' => 'integer',
