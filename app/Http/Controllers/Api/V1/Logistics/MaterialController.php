@@ -8,6 +8,7 @@ use App\Models\Logistics\Material;
 use App\Services\Logistics\AuditLogger;
 use App\Services\Logistics\UploadService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 class MaterialController extends ApiController
 {
@@ -36,6 +37,29 @@ class MaterialController extends ApiController
 
         return $this->success([
             'materials' => $query->paginate(20),
+        ]);
+    }
+
+    /**
+     * Lightweight aggregate for dashboards (GET /api/materials-summary).
+     */
+    public function summary(Request $request)
+    {
+        $query = Material::query();
+
+        if ($request->filled('trip_id')) {
+            $query->where('trip_id', $request->trip_id);
+        }
+
+        $total = (clone $query)->count();
+        $byStatus = (clone $query)
+            ->select('status', DB::raw('count(*) as count'))
+            ->groupBy('status')
+            ->pluck('count', 'status');
+
+        return $this->success([
+            'total' => $total,
+            'by_status' => $byStatus,
         ]);
     }
 

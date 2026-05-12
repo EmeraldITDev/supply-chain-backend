@@ -26,8 +26,19 @@ class EnsureRole
         }
 
         $roleList = array_map('trim', explode(',', $roles));
-        $hasRole = (isset($user->role) && in_array($user->role, $roleList, true)) ||
-            (method_exists($user, 'hasAnyRole') && $user->hasAnyRole($roleList));
+        $roleList = array_values(array_unique($roleList));
+
+        // Legacy DB value `logistics` is treated like `logistics_manager` everywhere else (AuthController, PermissionService).
+        if (in_array('logistics_manager', $roleList, true) && !in_array('logistics', $roleList, true)) {
+            $roleList[] = 'logistics';
+        }
+
+        $userRoleKeys = $this->collectUserRoleKeys($user);
+        $hasRole = count(array_intersect($userRoleKeys, $roleList)) > 0;
+
+        if (!$hasRole && method_exists($user, 'hasAnyRole')) {
+            $hasRole = $user->hasAnyRole($roleList);
+        }
 
         if (!$hasRole) {
             return response()->json([
@@ -38,5 +49,51 @@ class EnsureRole
         }
 
         return $next($request);
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function collectUserRoleKeys($user): array
+    {
+        $keys = [];
+
+        if (!empty($user->role)) {
+            $keys[] = $user->role;
+            $normalized = $this->normalizeRoleKey($user->role);
+            if ($normalized !== null && $normalized !== $user->role) {
+                $keys[] = $normalized;
+            }
+        }
+
+        if (method_exists($user, 'getRoleNames')) {
+            foreach ($user->getRoleNames() as $name) {
+                $keys[] = (string) $name;
+                $normalized = $this->normalizeRoleKey((string) $name);
+                if ($normalized !== null) {
+                    $keys[] = $normalized;
+                }
+            }
+        }
+
+        return array_values(array_unique(array_filter($keys, static fn ($v) => $v !== '')));
+    }
+
+    private function normalizeRoleKey(string $role): ?string
+    {
+        $trimmed = trim($role);
+        if ($trimmed === '') {
+            return null;
+        }
+
+        $key = strtolower(str_replace([' ', '-'], ['_', '_'], $trimmed));
+
+        return match ($key) {
+            'logistics' => 'logistics_manager',
+            'procurement' => 'procurement_manager',
+            'supply_chain' => 'supply_chain_director',
+            'finance_officer' => 'finance',
+            default => $key,
+        };
     }
 }

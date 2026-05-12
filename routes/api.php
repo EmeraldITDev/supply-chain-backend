@@ -119,7 +119,7 @@ Route::post('/vendors/auth/password-reset', [VendorAuthController::class, 'reque
 // Logistics endpoints at simple /api/ paths
 // ======================================
 Route::middleware('auth:sanctum')->group(function () {
-    $logisticsInternalRoles = 'role:procurement_manager,logistics_manager,supply_chain_director,admin,executive,chairman,finance';
+    $logisticsInternalRoles = 'role:procurement_manager,logistics_manager,logistics_officer,supply_chain_director,admin,executive,chairman,finance';
 
     // Trip routes - forward to logistics controllers
     Route::post('/trips', [LogisticsTripController::class, 'store'])->middleware($logisticsInternalRoles);
@@ -170,7 +170,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/journeys', [LogisticsJourneyController::class, 'store'])->middleware($logisticsInternalRoles);
     Route::get('/journeys/{trip_id}', [LogisticsJourneyController::class, 'listByTrip'])->middleware($logisticsInternalRoles);
     Route::put('/journeys/{id}', [LogisticsJourneyController::class, 'update'])->middleware($logisticsInternalRoles);
-    Route::post('/journeys/{id}/update-status', [LogisticsJourneyController::class, 'updateStatus'])->middleware('role:vendor,logistics_manager,procurement_manager,supply_chain_director,admin');
+    Route::post('/journeys/{id}/update-status', [LogisticsJourneyController::class, 'updateStatus'])->middleware('role:vendor,logistics_officer,logistics_manager,procurement_manager,supply_chain_director,admin');
 
     // Fleet routes - forward to logistics controllers
     Route::post('/fleet/vehicles', [LogisticsFleetController::class, 'store'])->middleware($logisticsInternalRoles);
@@ -208,6 +208,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/materials/{id}', [LogisticsMaterialController::class, 'show'])->middleware($logisticsInternalRoles);
     Route::delete('/materials/{id}', [LogisticsMaterialController::class, 'destroy'])->middleware($logisticsInternalRoles);
     Route::post('/materials/bulk-upload', [LogisticsMaterialController::class, 'bulkUpload'])->middleware($logisticsInternalRoles);
+    Route::get('/materials-summary', [LogisticsMaterialController::class, 'summary'])->middleware($logisticsInternalRoles);
 
     // Material Movements (Logistics Tracking) routes
     Route::post('/material-movements', [LogisticsMaterialMovementController::class, 'store'])->middleware($logisticsInternalRoles);
@@ -398,6 +399,7 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // Dashboard routes
     Route::get('/dashboard/procurement-manager', [DashboardController::class, 'procurementManagerDashboard']);
+    Route::get('/dashboard/logistics-statistics', [LogisticsDashboardController::class, 'stats'])->middleware('role:procurement_manager,logistics_manager,logistics_officer,supply_chain_director,admin,executive,chairman,finance');
     Route::get('/dashboard/supply-chain-director', [DashboardController::class, 'supplyChainDirectorDashboard']);
     Route::get('/dashboard/vendor', [DashboardController::class, 'vendorDashboard']);
     Route::get('/dashboard/finance', [DashboardController::class, 'financeDashboard']);
@@ -438,7 +440,7 @@ Route::post('/vendors/register', [VendorController::class, 'register']);
 // Logistics Module v1 (versioned)
 // ===============================
 Route::prefix('v1/logistics')->group(function () {
-    $logisticsInternalRoles = 'role:procurement_manager,logistics_manager,supply_chain_director,admin,executive,chairman,finance';
+    $logisticsInternalRoles = 'role:procurement_manager,logistics_manager,logistics_officer,supply_chain_director,admin,executive,chairman,finance';
     // Public auth endpoints
     Route::post('/auth/login', [LogisticsAuthController::class, 'login']);
     Route::post('/auth/vendor-accept', [LogisticsAuthController::class, 'vendorAccept']);
@@ -471,7 +473,7 @@ Route::prefix('v1/logistics')->group(function () {
         Route::post('/journeys', [LogisticsJourneyController::class, 'store'])->middleware($logisticsInternalRoles);
         Route::get('/journeys/{trip_id}', [LogisticsJourneyController::class, 'listByTrip'])->middleware($logisticsInternalRoles);
         Route::put('/journeys/{id}', [LogisticsJourneyController::class, 'update'])->middleware($logisticsInternalRoles);
-        Route::post('/journeys/{id}/update-status', [LogisticsJourneyController::class, 'updateStatus'])->middleware('role:vendor,logistics_manager,procurement_manager,supply_chain_director,admin');
+        Route::post('/journeys/{id}/update-status', [LogisticsJourneyController::class, 'updateStatus'])->middleware('role:vendor,logistics_officer,logistics_manager,procurement_manager,supply_chain_director,admin');
 
         // Trip Vendor Submission & Multi-Vendor Workflow
         Route::post('/trips/{tripId}/invite-vendors', [LogisticsTripVendorSubmissionController::class, 'inviteVendors'])->middleware($logisticsInternalRoles);
@@ -567,7 +569,7 @@ Route::prefix('v1/logistics')->group(function () {
 
 // Logistics Module (compatibility aliases for existing frontend)
 Route::prefix('logistics')->group(function () {
-    $logisticsInternalRoles = 'role:procurement_manager,logistics_manager,supply_chain_director,admin,executive,chairman,finance';
+    $logisticsInternalRoles = 'role:procurement_manager,logistics_manager,logistics_officer,supply_chain_director,admin,executive,chairman,finance';
 
     Route::post('/auth/login', [LogisticsAuthController::class, 'login']);
     Route::post('/auth/vendor-accept', [LogisticsAuthController::class, 'vendorAccept']);
@@ -632,13 +634,14 @@ Route::prefix('logistics')->group(function () {
         Route::post('/journeys', [LogisticsJourneyController::class, 'store'])->middleware($logisticsInternalRoles);
         Route::get('/journeys/{trip_id}', [LogisticsJourneyController::class, 'listByTrip'])->middleware($logisticsInternalRoles);
         Route::put('/journeys/{id}', [LogisticsJourneyController::class, 'update'])->middleware($logisticsInternalRoles);
-        Route::post('/journeys/{id}/update-status', [LogisticsJourneyController::class, 'updateStatus'])->middleware('role:vendor,logistics_manager,procurement_manager,supply_chain_director,admin');
+        Route::post('/journeys/{id}/update-status', [LogisticsJourneyController::class, 'updateStatus'])->middleware('role:vendor,logistics_officer,logistics_manager,procurement_manager,supply_chain_director,admin');
 
         Route::post('/materials', [LogisticsMaterialController::class, 'store'])->middleware($logisticsInternalRoles);
         Route::get('/materials', [LogisticsMaterialController::class, 'index'])->middleware($logisticsInternalRoles);
         Route::get('/materials/{id}', [LogisticsMaterialController::class, 'show'])->middleware($logisticsInternalRoles);
         Route::delete('/materials/{id}', [LogisticsMaterialController::class, 'destroy'])->middleware($logisticsInternalRoles);
         Route::post('/materials/bulk-upload', [LogisticsMaterialController::class, 'bulkUpload'])->middleware($logisticsInternalRoles);
+        Route::get('/materials-summary', [LogisticsMaterialController::class, 'summary'])->middleware($logisticsInternalRoles);
         Route::get('/trips/{id}/materials', [LogisticsMaterialController::class, 'listByTrip'])->middleware($logisticsInternalRoles);
 
         Route::post('/fleet/vehicles', [LogisticsFleetController::class, 'store'])->middleware($logisticsInternalRoles);

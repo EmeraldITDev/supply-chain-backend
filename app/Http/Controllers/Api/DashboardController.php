@@ -31,6 +31,8 @@ class DashboardController extends Controller
             'executive',
             'chairman',
             'logistics_manager',
+            'logistics_officer',
+            'logistics',             // legacy; same access intent as logistics_manager
             'admin',
         ];
         
