@@ -35,19 +35,36 @@ class UserSignatureFileController extends Controller
         }
 
         $diskName = config('filesystems.signatures_disk', env('SIGNATURES_DISK', 'public'));
-        $disk = Storage::disk($diskName);
         $path = $user->signature_image_path;
 
-        if (!$disk->exists($path)) {
-            return response()->json(['success' => false, 'error' => 'Signature file missing'], 404);
+        try {
+            $disk = Storage::disk($diskName);
+
+            if (!$disk->fileExists($path)) {
+                return response()->json(['success' => false, 'error' => 'Signature file missing'], 404);
+            }
+
+            // Avoid Storage::response(): it calls size()/readStream() and can 500 on S3 (throw=true)
+            // or yield a null stream when reads fail while exceptions are suppressed.
+            $contents = $disk->get($path);
+            if (! is_string($contents) || $contents === '') {
+                return response()->json(['success' => false, 'error' => 'Signature file unreadable'], 502);
+            }
+
+            $mime = self::guessMime($path);
+
+            return response($contents, 200, [
+                'Content-Type' => $mime,
+                'Cache-Control' => 'private, max-age=3600',
+            ]);
+        } catch (\Throwable $e) {
+            report($e);
+
+            return response()->json([
+                'success' => false,
+                'error' => 'Could not load signature file.',
+            ], 502);
         }
-
-        $mime = self::guessMime($path);
-
-        return $disk->response($path, basename($path), [
-            'Content-Type' => $mime,
-            'Cache-Control' => 'private, max-age=3600',
-        ]);
     }
 
     private static function guessMime(string $path): string

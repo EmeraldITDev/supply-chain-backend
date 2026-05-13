@@ -38,6 +38,13 @@ final class SignatureUrls
             return null;
         }
 
-        return URL::to('/api/users/'.$userId.'/signature-file');
+        $url = URL::to('/api/users/'.$userId.'/signature-file');
+
+        // Belt-and-suspenders if APP_URL was misconfigured as http:// in production.
+        if (app()->environment('production') && str_starts_with($url, 'http://')) {
+            return 'https://'.substr($url, strlen('http://'));
+        }
+
+        return $url;
     }
 }
