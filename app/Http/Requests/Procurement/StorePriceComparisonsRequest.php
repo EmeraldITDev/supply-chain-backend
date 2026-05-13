@@ -8,6 +8,23 @@ use Illuminate\Http\Exceptions\HttpResponseException;
 
 class StorePriceComparisonsRequest extends FormRequest
 {
+    protected function prepareForValidation(): void
+    {
+        $rows = $this->input('rows');
+        if (!is_array($rows)) {
+            return;
+        }
+
+        foreach ($rows as $i => $row) {
+            if (!is_array($row) || !array_key_exists('vendor_id', $row)) {
+                continue;
+            }
+            $rows[$i]['vendor_id'] = trim((string) $row['vendor_id']);
+        }
+
+        $this->merge(['rows' => $rows]);
+    }
+
     public function authorize(): bool
     {
         $user = $this->user();

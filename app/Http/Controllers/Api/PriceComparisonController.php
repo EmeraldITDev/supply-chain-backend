@@ -95,10 +95,17 @@ class PriceComparisonController extends Controller
 
         $rows = $request->validated()['rows'];
 
-        // Resolve vendor string IDs (e.g. VND-001) → numeric vendors.id once
-        $vendorStringIds = collect($rows)->pluck('vendor_id')->unique()->values();
-        $vendorMap = Vendor::whereIn('vendor_id', $vendorStringIds)
-            ->pluck('id', 'vendor_id');
+        // Resolve vendor string IDs (e.g. V005) → numeric vendors.id (trim for stable map keys)
+        $vendorStringIds = collect($rows)
+            ->map(fn (array $r) => trim((string) ($r['vendor_id'] ?? '')))
+            ->filter()
+            ->unique()
+            ->values();
+
+        $vendorMap = Vendor::query()
+            ->whereIn('vendor_id', $vendorStringIds)
+            ->pluck('id', 'vendor_id')
+            ->mapWithKeys(fn ($id, $key) => [trim((string) $key) => (int) $id]);
 
         $missing = $vendorStringIds->diff($vendorMap->keys());
         if ($missing->isNotEmpty()) {
@@ -110,18 +117,26 @@ class PriceComparisonController extends Controller
         }
 
         try {
-            $saved = DB::transaction(function () use ($mrf, $rows, $vendorMap) {
+            $savedIds = DB::transaction(function () use ($mrf, $rows, $vendorMap) {
                 $mrf->priceComparisons()->delete();
 
-                $created = [];
+                $ids = [];
                 foreach ($rows as $row) {
+                    $publicVendorId = trim((string) ($row['vendor_id'] ?? ''));
+                    $internalVendorId = $vendorMap[$publicVendorId] ?? null;
+                    if ($internalVendorId === null) {
+                        throw new \InvalidArgumentException(
+                            'Vendor identifier could not be resolved after validation: ' . $publicVendorId
+                        );
+                    }
+
                     $unitPrice = (float) $row['unit_price'];
                     $quantity = (float) $row['quantity'];
                     $isSelected = filter_var($row['is_selected'] ?? false, FILTER_VALIDATE_BOOLEAN);
 
-                    $created[] = PriceComparison::create([
+                    $model = PriceComparison::create([
                         'purchase_order_id' => $mrf->id,
-                        'vendor_id' => $vendorMap[$row['vendor_id']],
+                        'vendor_id' => $internalVendorId,
                         'item_description' => $row['item_description'],
                         'unit_price' => $unitPrice,
                         'quantity' => $quantity,
@@ -129,14 +144,28 @@ class PriceComparisonController extends Controller
                         'is_selected' => $isSelected,
                         'selection_reason' => $row['selection_reason'] ?? null,
                     ]);
+
+                    $ids[] = $model->id;
                 }
 
-                return PriceComparison::newCollection($created);
+                return $ids;
             });
+        } catch (\InvalidArgumentException $e) {
+            Log::warning('Price comparison save rejected', [
+                'mrf_id' => $mrf->mrf_id,
+                'error' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'error' => $e->getMessage(),
+                'code' => 'VALIDATION_ERROR',
+            ], 422);
         } catch (\Throwable $e) {
             Log::error('Failed to persist price comparisons', [
                 'mrf_id' => $mrf->mrf_id,
                 'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
             ]);
 
             return response()->json([
@@ -146,7 +175,11 @@ class PriceComparisonController extends Controller
             ], 500);
         }
 
-        $saved->load('vendor:id,vendor_id,name');
+        $saved = PriceComparison::query()
+            ->whereIn('id', $savedIds)
+            ->with(['vendor:id,vendor_id,name'])
+            ->orderBy('id')
+            ->get();
 
         return response()->json([
             'success' => true,
