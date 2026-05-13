@@ -11,7 +11,9 @@ use App\Models\SRF;
 use App\Models\Logistics\Document;
 use App\Models\Logistics\Vehicle;
 use App\Models\Logistics\VehicleMaintenance;
+use App\Services\FormattedIdGenerator;
 use App\Services\Logistics\AuditLogger;
+use App\Support\FleetVehicleLookup;
 use App\Services\WorkflowNotificationService;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
@@ -22,9 +24,9 @@ class FleetController extends ApiController
 {
     public function __construct(
         private AuditLogger $auditLogger,
-        private WorkflowNotificationService $workflowNotificationService
-    )
-    {
+        private WorkflowNotificationService $workflowNotificationService,
+        private FormattedIdGenerator $formattedIdGenerator
+    ) {
     }
 
     public function store(StoreVehicleRequest $request)
@@ -68,29 +70,29 @@ class FleetController extends ApiController
         ]);
     }
 
-    public function show(int $id)
+    public function show(string|int $id)
     {
-        $vehicle = Vehicle::with([
-                'vendor',
-                'maintenances' => function ($q) {
-                    $q->orderByDesc('next_due_at')->orderByDesc('id');
-                },
-                'maintenances.documents',
-                'maintenances.performer',
-                'documents',
-            ])
-            ->withCount([
-                'documents',
-                'documents as active_documents_count' => function ($q) {
-                    $q->where('is_active', true);
-                },
-                'maintenances',
-            ])
-            ->find($id);
-
+        $vehicle = FleetVehicleLookup::byRouteKey($id);
         if (!$vehicle) {
             return $this->error('Vehicle not found', 'NOT_FOUND', 404);
         }
+
+        $vehicle->load([
+            'vendor',
+            'maintenances' => function ($q) {
+                $q->orderByDesc('next_due_at')->orderByDesc('id');
+            },
+            'maintenances.documents',
+            'maintenances.performer',
+            'documents',
+        ]);
+        $vehicle->loadCount([
+            'documents',
+            'documents as active_documents_count' => function ($q) {
+                $q->where('is_active', true);
+            },
+            'maintenances',
+        ]);
 
         // Decorate maintenances with an explicit `documents` array (in case
         // the morph relation isn't auto-serialised) and include camelCase
@@ -148,9 +150,9 @@ class FleetController extends ApiController
         ]);
     }
 
-    public function update(UpdateVehicleRequest $request, int $id)
+    public function update(UpdateVehicleRequest $request, string|int $id)
     {
-        $vehicle = Vehicle::find($id);
+        $vehicle = FleetVehicleLookup::byRouteKey($id);
 
         if (!$vehicle) {
             return $this->error('Vehicle not found', 'NOT_FOUND', 404);
@@ -165,9 +167,9 @@ class FleetController extends ApiController
         ]);
     }
 
-    public function storeMaintenance(StoreMaintenanceRequest $request, int $id)
+    public function storeMaintenance(StoreMaintenanceRequest $request, string|int $id)
     {
-        $vehicle = Vehicle::find($id);
+        $vehicle = FleetVehicleLookup::byRouteKey($id);
 
         if (!$vehicle) {
             return $this->error('Vehicle not found', 'NOT_FOUND', 404);
@@ -259,9 +261,9 @@ class FleetController extends ApiController
         ], 201);
     }
 
-    public function listMaintenance(int $vehicleId)
+    public function listMaintenance(string|int $vehicleId)
     {
-        $vehicle = Vehicle::find($vehicleId);
+        $vehicle = FleetVehicleLookup::byRouteKey($vehicleId);
         if (!$vehicle) {
             return $this->error('Vehicle not found', 'NOT_FOUND', 404);
         }
@@ -280,9 +282,9 @@ class FleetController extends ApiController
         ]);
     }
 
-    public function updateMaintenance(UpdateVehicleMaintenanceRequest $request, int $vehicleId, int $scheduleId)
+    public function updateMaintenance(UpdateVehicleMaintenanceRequest $request, string|int $vehicleId, int $scheduleId)
     {
-        $vehicle = Vehicle::find($vehicleId);
+        $vehicle = FleetVehicleLookup::byRouteKey($vehicleId);
         if (!$vehicle) {
             return $this->error('Vehicle not found', 'NOT_FOUND', 404);
         }
@@ -335,9 +337,9 @@ class FleetController extends ApiController
         ]);
     }
 
-    public function updateVehicleStatus(UpdateVehicleStatusRequest $request, int $id)
+    public function updateVehicleStatus(UpdateVehicleStatusRequest $request, string|int $id)
     {
-        $vehicle = Vehicle::find($id);
+        $vehicle = FleetVehicleLookup::byRouteKey($id);
         if (!$vehicle) {
             return $this->error('Vehicle not found', 'NOT_FOUND', 404);
         }
@@ -501,9 +503,9 @@ class FleetController extends ApiController
         ]);
     }
 
-    public function destroy(int $id, Request $request)
+    public function destroy(string|int $id, Request $request)
     {
-        $vehicle = Vehicle::find($id);
+        $vehicle = FleetVehicleLookup::byRouteKey($id);
 
         if (!$vehicle) {
             return $this->error('Vehicle not found', 'NOT_FOUND', 404);
@@ -523,30 +525,23 @@ class FleetController extends ApiController
 
         return $this->success([
             'message' => 'Vehicle deleted successfully',
-            'vehicle_id' => $id,
+            'vehicle_id' => $vehicle->id,
         ]);
     }
 
-    public function initiateSrf(Request $request, int $id)
+    public function initiateSrf(Request $request, string|int $id)
     {
         $user = $request->user();
-        $allowedRoles = ['logistics_officer', 'logistics_manager', 'procurement_manager', 'supply_chain_director', 'admin'];
-        $hasAllowedRole = $user && (
-            in_array($user->role ?? null, $allowedRoles, true)
-            || (method_exists($user, 'hasAnyRole') && $user->hasAnyRole($allowedRoles))
-        );
-        if (!$hasAllowedRole) {
-            return $this->error(
-                'You do not have permission to initiate SRF from fleet maintenance.',
-                'FORBIDDEN',
-                403
-            );
+        if (!$user) {
+            return $this->error('Authentication required.', 'UNAUTHENTICATED', 401);
         }
 
-        $vehicle = Vehicle::with(['maintenances', 'vendor'])->find($id);
+        $vehicle = FleetVehicleLookup::byRouteKey($id);
         if (!$vehicle) {
             return $this->error('Vehicle not found', 'NOT_FOUND', 404);
         }
+
+        $vehicle->load(['maintenances', 'vendor']);
 
         $maintenances = $vehicle->maintenances()
             ->orderByDesc('performed_at')
@@ -625,52 +620,72 @@ class FleetController extends ApiController
             ]],
         ];
 
-        // New default: SRFs from logistics go through the Supply Chain
-        // Director first (for budget/justification review) before reaching
-        // Procurement. This matches the QA workflow expectation.
         $initialStage = 'supply_chain_director_review';
+        $contractType = 'EMERALD';
+        $department = $user->department ?? 'Logistics';
+        $createdAt = now();
 
-        $srf = SRF::create([
-            'srf_id' => SRF::generateSRFId(),
-            'formatted_id' => null,
-            'title' => 'Fleet Maintenance SRF - ' . ($vehicle->plate_number ?? $vehicle->vehicle_code),
-            'service_type' => $maintenanceType,
-            'contract_type' => 'EMERALD',
-            'urgency' => $request->input('urgency', 'Medium'),
-            'description' => trim(sprintf(
-                "Vehicle: %s (%s)\nMake/Model: %s %s %s\nMaintenance Type: %s\nDetails: %s",
-                $vehicle->plate_number ?? 'N/A',
-                $vehicle->vehicle_code ?? 'N/A',
-                $vehicleSnapshot['make'] ?? '',
-                $vehicleSnapshot['model'] ?? '',
-                $vehicleSnapshot['year'] ?? '',
-                $maintenanceType,
-                $maintenanceDescription
-            )),
-            'duration' => $request->input('duration', 'TBD'),
-            'estimated_cost' => (float) $request->input('estimated_cost', $latestMaintenance?->cost ?? 0),
-            'justification' => 'Auto-initiated from Fleet Maintenance dashboard.',
-            'requester_id' => $user->id,
-            'requester_name' => $user->name,
-            'department' => $user->department ?? 'Logistics',
-            'date' => now(),
-            'status' => 'Pending',
-            'current_stage' => $initialStage,
-            'approval_history' => [[
-                'stage' => 'logistics_initiated',
-                'actor_id' => $user->id,
-                'actor_name' => $user->name,
-                'at' => now()->toIso8601String(),
-                'note' => 'Fleet maintenance SRF auto-generated from dashboard.',
-            ]],
-            'remarks' => 'pending_supply_chain_director_review',
-            'vehicle_id' => $vehicle->id,
-            'maintenance_id' => $latestMaintenance?->id,
-            'vehicle_snapshot' => $vehicleSnapshot,
-            'maintenance_history' => $maintenanceHistory,
-            'rfq_prefill' => $rfqPrefill,
-            'origin' => 'fleet_dashboard',
-        ]);
+        try {
+            $formattedId = $this->formattedIdGenerator->generate('SRF', [
+                'contract_type' => $contractType,
+                'department' => $department,
+                'category' => $maintenanceType,
+                'created_at' => $createdAt,
+            ]);
+
+            $srf = SRF::create([
+                'srf_id' => SRF::generateSRFId(),
+                'formatted_id' => $formattedId,
+                'title' => 'Fleet Maintenance SRF - ' . ($vehicle->plate_number ?? $vehicle->vehicle_code),
+                'service_type' => $maintenanceType,
+                'contract_type' => $contractType,
+                'urgency' => $request->input('urgency', 'Medium'),
+                'description' => trim(sprintf(
+                    "Vehicle: %s (%s)\nMake/Model: %s %s %s\nMaintenance Type: %s\nDetails: %s",
+                    $vehicle->plate_number ?? 'N/A',
+                    $vehicle->vehicle_code ?? 'N/A',
+                    $vehicleSnapshot['make'] ?? '',
+                    $vehicleSnapshot['model'] ?? '',
+                    $vehicleSnapshot['year'] ?? '',
+                    $maintenanceType,
+                    $maintenanceDescription
+                )),
+                'duration' => $request->input('duration', 'TBD'),
+                'estimated_cost' => (float) $request->input('estimated_cost', $latestMaintenance?->cost ?? 0),
+                'justification' => 'Auto-initiated from Fleet Maintenance dashboard.',
+                'requester_id' => $user->id,
+                'requester_name' => $user->name,
+                'department' => $department,
+                'date' => $createdAt,
+                'status' => 'Pending',
+                'current_stage' => $initialStage,
+                'approval_history' => [[
+                    'stage' => 'logistics_initiated',
+                    'actor_id' => $user->id,
+                    'actor_name' => $user->name,
+                    'at' => $createdAt->toIso8601String(),
+                    'note' => 'Fleet maintenance SRF auto-generated from dashboard.',
+                ]],
+                'remarks' => 'pending_supply_chain_director_review',
+                'vehicle_id' => $vehicle->id,
+                'maintenance_id' => $latestMaintenance?->id,
+                'vehicle_snapshot' => $vehicleSnapshot,
+                'maintenance_history' => $maintenanceHistory,
+                'rfq_prefill' => $rfqPrefill,
+                'origin' => 'fleet_dashboard',
+            ]);
+        } catch (\Throwable $e) {
+            \Log::error('Fleet initiate SRF: database error', [
+                'vehicle_id' => $vehicle->id,
+                'error' => $e->getMessage(),
+            ]);
+
+            return $this->error(
+                'Could not create the SRF. Ensure database migrations are applied (fleet columns on s_r_f_s).',
+                'SRF_CREATE_FAILED',
+                422
+            );
+        }
 
         try {
             $srf->loadMissing('requester');
@@ -680,12 +695,18 @@ class FleetController extends ApiController
         }
 
         return $this->success([
+            'message' => 'SRF created and queued for Supply Chain Director review.',
+            'srf_id' => $srf->srf_id,
+            'database_id' => $srf->id,
+            'formatted_id' => $srf->formatted_id,
             'srf' => [
                 'id' => $srf->srf_id,
+                'databaseId' => $srf->id,
+                'formattedId' => $srf->formatted_id,
                 'title' => $srf->title,
                 'serviceType' => $srf->service_type,
                 'department' => $srf->department,
-                'status' => 'pending_supply_chain_director_review',
+                'status' => $srf->status,
                 'currentStage' => $srf->current_stage,
                 'description' => $srf->description,
                 'vehicleId' => $srf->vehicle_id,

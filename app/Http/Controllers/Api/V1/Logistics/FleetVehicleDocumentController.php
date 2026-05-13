@@ -6,6 +6,7 @@ use App\Http\Requests\Logistics\StoreVehicleFleetDocumentRequest;
 use App\Models\Logistics\Document;
 use App\Models\Logistics\Vehicle;
 use App\Services\Logistics\AuditLogger;
+use App\Support\FleetVehicleLookup;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Storage;
 
@@ -20,9 +21,9 @@ class FleetVehicleDocumentController extends ApiController
         return config('filesystems.logistics_documents_disk', config('filesystems.default'));
     }
 
-    public function store(StoreVehicleFleetDocumentRequest $request, int $vehicleId)
+    public function store(StoreVehicleFleetDocumentRequest $request, string|int $vehicleId)
     {
-        $vehicle = Vehicle::find($vehicleId);
+        $vehicle = FleetVehicleLookup::byRouteKey($vehicleId);
         if (!$vehicle) {
             return $this->error('Vehicle not found', 'NOT_FOUND', 404);
         }
@@ -73,9 +74,9 @@ class FleetVehicleDocumentController extends ApiController
         ], 201);
     }
 
-    public function index(int $vehicleId)
+    public function index(string|int $vehicleId)
     {
-        $vehicle = Vehicle::find($vehicleId);
+        $vehicle = FleetVehicleLookup::byRouteKey($vehicleId);
         if (!$vehicle) {
             return $this->error('Vehicle not found', 'NOT_FOUND', 404);
         }
@@ -110,9 +111,9 @@ class FleetVehicleDocumentController extends ApiController
         ]);
     }
 
-    public function destroy(int $vehicleId, int $documentId)
+    public function destroy(string|int $vehicleId, int $documentId)
     {
-        $vehicle = Vehicle::find($vehicleId);
+        $vehicle = FleetVehicleLookup::byRouteKey($vehicleId);
         if (!$vehicle) {
             return $this->error('Vehicle not found', 'NOT_FOUND', 404);
         }
