@@ -11,6 +11,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 
 class PriceComparisonController extends Controller
 {
@@ -95,39 +96,24 @@ class PriceComparisonController extends Controller
 
         $rows = $request->validated()['rows'];
 
-        // Resolve vendor string IDs (e.g. V005) → numeric vendors.id (trim for stable map keys)
-        $vendorStringIds = collect($rows)
-            ->map(fn (array $r) => trim((string) ($r['vendor_id'] ?? '')))
-            ->filter()
-            ->unique()
-            ->values();
-
-        $vendorMap = Vendor::query()
-            ->whereIn('vendor_id', $vendorStringIds)
-            ->pluck('id', 'vendor_id')
-            ->mapWithKeys(fn ($id, $key) => [trim((string) $key) => (int) $id]);
-
-        $missing = $vendorStringIds->diff($vendorMap->keys());
-        if ($missing->isNotEmpty()) {
-            return response()->json([
-                'success' => false,
-                'error' => 'Unknown vendor identifier(s): ' . $missing->implode(', '),
-                'code' => 'VALIDATION_ERROR',
-            ], 422);
-        }
-
         try {
-            $savedIds = DB::transaction(function () use ($mrf, $rows, $vendorMap) {
+            $savedIds = DB::transaction(function () use ($mrf, $rows) {
                 $mrf->priceComparisons()->delete();
 
                 $ids = [];
                 foreach ($rows as $row) {
                     $publicVendorId = trim((string) ($row['vendor_id'] ?? ''));
-                    $internalVendorId = $vendorMap[$publicVendorId] ?? null;
-                    if ($internalVendorId === null) {
-                        throw new \InvalidArgumentException(
-                            'Vendor identifier could not be resolved after validation: ' . $publicVendorId
-                        );
+                    if ($publicVendorId !== '') {
+                        $vendor = Vendor::query()->where('vendor_id', $publicVendorId)->first();
+                        if (!$vendor) {
+                            throw new \InvalidArgumentException(
+                                'Vendor not found for code: '.$publicVendorId
+                            );
+                        }
+                        $internalVendorId = $vendor->id;
+                    } else {
+                        $vendor = $this->createManualVendorFromRow($mrf, $row['manual_vendor'] ?? []);
+                        $internalVendorId = $vendor->id;
                     }
 
                     $unitPrice = (float) $row['unit_price'];
@@ -186,6 +172,61 @@ class PriceComparisonController extends Controller
             'message' => 'Price comparison saved',
             'data' => $saved->map(fn (PriceComparison $row) => $this->serializeRow($row))->values(),
         ]);
+    }
+
+    /**
+     * Procurement-entered supplier not yet in the vendor directory (fast-track / urgent buys).
+     *
+     * @param  array<string, mixed>  $manual
+     */
+    private function createManualVendorFromRow(MRF $mrf, array $manual): Vendor
+    {
+        $name = trim((string) ($manual['name'] ?? ''));
+        if ($name === '') {
+            throw new \InvalidArgumentException('manual_vendor.name is required for a new supplier row.');
+        }
+
+        $email = trim((string) ($manual['email'] ?? ''));
+        if ($email !== '' && Vendor::query()->where('email', $email)->exists()) {
+            $existing = Vendor::query()->where('email', $email)->first();
+            Log::info('Price comparison: reusing existing vendor by email', [
+                'mrf_id' => $mrf->mrf_id,
+                'vendor_id' => $existing->vendor_id,
+            ]);
+
+            return $existing;
+        }
+
+        if ($email === '') {
+            $slug = Str::slug($mrf->mrf_id ?? 'mrf', '-');
+            $email = 'manual-'.$slug.'-'.Str::lower(Str::random(10)).'@supplier.placeholder';
+            while (Vendor::query()->where('email', $email)->exists()) {
+                $email = 'manual-'.$slug.'-'.Str::lower(Str::random(10)).'@supplier.placeholder';
+            }
+        }
+
+        $vendor = Vendor::create([
+            'vendor_id' => Vendor::generateVendorId(),
+            'name' => $name,
+            'category' => 'General',
+            'rating' => 0,
+            'total_orders' => 0,
+            'status' => 'Active',
+            'email' => $email,
+            'phone' => ($manual['phone'] ?? null) !== '' ? trim((string) $manual['phone']) : null,
+            'address' => ($manual['address'] ?? null) !== '' ? trim((string) $manual['address']) : null,
+            'contact_person' => ($manual['contact_person'] ?? null) !== '' ? trim((string) $manual['contact_person']) : null,
+            'contact_person_email' => ($manual['contact_person_email'] ?? null) !== '' ? trim((string) $manual['contact_person_email']) : null,
+            'notes' => 'Created from procurement price comparison (manual / fast-track).',
+        ]);
+
+        Log::info('Created vendor from manual price-comparison row', [
+            'mrf_id' => $mrf->mrf_id,
+            'vendor_pk' => $vendor->id,
+            'vendor_id' => $vendor->vendor_id,
+        ]);
+
+        return $vendor;
     }
 
     private function serializeRow(PriceComparison $row): array
