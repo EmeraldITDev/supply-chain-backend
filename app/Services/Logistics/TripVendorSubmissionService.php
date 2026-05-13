@@ -9,6 +9,7 @@ use App\Notifications\VendorInvitedForTripNotification;
 use App\Notifications\VendorRejectedForTripNotification;
 use App\Notifications\VendorSelectedForTripNotification;
 use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Support\Facades\Log;
 
 class TripVendorSubmissionService
 {
@@ -21,14 +22,24 @@ class TripVendorSubmissionService
         $notification = new VendorInvitedForTripNotification($trip, $vendor);
 
         $portalUser = $vendor->users()->first();
-        if ($portalUser) {
-            $portalUser->notify($notification);
+        $notifiable = $portalUser ?? ($vendor->email ? $vendor : null);
+        if (!$notifiable) {
+            Log::info('Vendor trip invitation skipped: no portal user and no vendor email', [
+                'trip_id' => $trip->id,
+                'vendor_id' => $vendor->id,
+            ]);
 
             return;
         }
 
-        if ($vendor->email) {
-            $vendor->notify($notification);
+        try {
+            $notifiable->notify($notification);
+        } catch (\Throwable $e) {
+            Log::warning('Vendor trip invitation notification failed (assignment still saved)', [
+                'trip_id' => $trip->id,
+                'vendor_id' => $vendor->id,
+                'error' => $e->getMessage(),
+            ]);
         }
     }
 

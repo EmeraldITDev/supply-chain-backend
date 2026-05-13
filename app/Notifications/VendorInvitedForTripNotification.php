@@ -5,11 +5,14 @@ namespace App\Notifications;
 use App\Models\Logistics\Trip;
 use App\Models\Vendor;
 use Illuminate\Bus\Queueable;
-use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Notifications\Messages\MailMessage;
 use Illuminate\Notifications\Notification;
 
-class VendorInvitedForTripNotification extends Notification implements ShouldQueue
+/**
+ * Sent synchronously during assign-vendor / invite flows so HTTP requests do
+ * not depend on queue workers or fail the whole operation when mail is misconfigured.
+ */
+class VendorInvitedForTripNotification extends Notification
 {
     use Queueable;
 
@@ -17,7 +20,6 @@ class VendorInvitedForTripNotification extends Notification implements ShouldQue
         private Trip $trip,
         private Vendor $vendor
     ) {
-        $this->onQueue('notifications');
     }
 
     public function via(object $notifiable): array

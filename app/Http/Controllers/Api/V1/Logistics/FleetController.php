@@ -320,14 +320,31 @@ class FleetController extends ApiController
     public function upcomingMaintenance(Request $request)
     {
         $days = max(1, min(365, (int) $request->get('days', 14)));
+        $nowStart = Carbon::now()->startOfDay();
         $until = Carbon::now()->addDays($days)->endOfDay();
+
+        // Match status case-insensitively (migration default was lowercase "completed";
+        // some rows may use mixed case). Include overdue rows so the dashboard is not
+        // empty when work was missed but still relevant.
+        $scheduledUpper = VehicleMaintenance::STATUS_SCHEDULED;
+        $overdueUpper = VehicleMaintenance::STATUS_OVERDUE;
 
         $records = VehicleMaintenance::query()
             ->with('vehicle')
-            ->where('status', VehicleMaintenance::STATUS_SCHEDULED)
             ->whereNotNull('next_due_at')
-            ->where('next_due_at', '<=', $until)
-            ->where('next_due_at', '>=', Carbon::now()->startOfDay())
+            ->where(function ($q) use ($nowStart, $until, $scheduledUpper, $overdueUpper) {
+                $q->where(function ($q2) use ($nowStart, $until, $scheduledUpper) {
+                    $q2->whereRaw('UPPER(TRIM(COALESCE(status, \'\'))) = ?', [$scheduledUpper])
+                        ->whereBetween('next_due_at', [$nowStart, $until]);
+                })->orWhere(function ($q3) use ($nowStart, $overdueUpper) {
+                    $q3->whereRaw('UPPER(TRIM(COALESCE(status, \'\'))) = ?', [$overdueUpper])
+                        ->where('next_due_at', '<', $nowStart);
+                })->orWhere(function ($q4) use ($nowStart, $scheduledUpper) {
+                    // Still SCHEDULED in DB but past due (overdue job not run yet)
+                    $q4->whereRaw('UPPER(TRIM(COALESCE(status, \'\'))) = ?', [$scheduledUpper])
+                        ->where('next_due_at', '<', $nowStart);
+                });
+            })
             ->orderBy('next_due_at')
             ->get();
 
