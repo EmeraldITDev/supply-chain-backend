@@ -1821,7 +1821,26 @@ class MRFWorkflowController extends Controller
         if (!$poData['success']) {
             return response()->json(['success' => false, 'error' => $poData['error'] ?? 'Unable to prepare PO data'], 422);
         }
-        $poData['data']['signature_image_url'] = Storage::disk('local')->path($user->signature_image_path);
+        $sigDiskName = config('filesystems.signatures_disk', env('SIGNATURES_DISK', 'public'));
+        $sigDisk = Storage::disk($sigDiskName);
+        $sigPath = $user->signature_image_path;
+        if (!$sigDisk->exists($sigPath)) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Signature file not found on storage.',
+                'code' => 'VALIDATION_ERROR',
+            ], 422);
+        }
+        if ($sigDiskName === 's3') {
+            $tmp = tempnam(sys_get_temp_dir(), 'sig_');
+            if ($tmp === false) {
+                return response()->json(['success' => false, 'error' => 'Could not prepare signature for PDF.'], 500);
+            }
+            file_put_contents($tmp, $sigDisk->get($sigPath));
+            $poData['data']['signature_image_url'] = $tmp;
+        } else {
+            $poData['data']['signature_image_url'] = $sigDisk->path($sigPath);
+        }
         $pdfBinary = $this->generatePOPDF($poData['data'], (string) ($mrf->po_number ?: $mrf->mrf_id), $user);
 
         $disk = $this->getStorageDisk();

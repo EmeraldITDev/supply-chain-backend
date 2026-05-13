@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\User;
 use App\Models\Employee;
+use App\Support\SignatureUrls;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Storage;
@@ -128,6 +129,8 @@ class AuthController extends Controller
         // Check if user must change password
         $requiresPasswordChange = $user->must_change_password ?? false;
 
+        $signatureUrl = SignatureUrls::forUser($user);
+
         return response()->json([
             'user' => [
                 'id' => $user->id,
@@ -137,6 +140,12 @@ class AuthController extends Controller
                 'department' => $department,
                 'employeeId' => $user->employee_id,
                 'createdAt' => $user->created_at->toIso8601String(),
+                'signature_image_path' => $user->signature_image_path,
+                'signatureImagePath' => $user->signature_image_path,
+                'signature_url' => $signatureUrl,
+                'signatureUrl' => $signatureUrl,
+                'has_signature' => !empty($user->signature_image_path),
+                'hasSignature' => !empty($user->signature_image_path),
             ],
             'token' => $token,
             'expiresAt' => $expiresAt->toIso8601String(),
@@ -173,7 +182,7 @@ class AuthController extends Controller
         // Resolve a public URL for the signature image if one is uploaded so
         // the Settings page can render an instant preview without needing a
         // separate endpoint.
-        $signatureUrl = $this->buildSignatureUrl($user->signature_image_path);
+        $signatureUrl = SignatureUrls::forUser($user);
 
         return response()->json([
             'id' => $user->id,
@@ -364,25 +373,6 @@ class AuthController extends Controller
     }
 
     /**
-     * Resolve a previewable URL for a signature stored on disk.
-     */
-    private function buildSignatureUrl(?string $path): ?string
-    {
-        if (empty($path)) {
-            return null;
-        }
-        $disk = $this->signatureDisk();
-        try {
-            if ($disk === 's3') {
-                return Storage::disk($disk)->temporaryUrl($path, now()->addDays(7));
-            }
-            return Storage::disk($disk)->url($path);
-        } catch (\Throwable $e) {
-            return $path;
-        }
-    }
-
-    /**
      * Self-service signature upload. Anyone who signs Purchase Orders / JCCs
      * can upload their own image (PNG/JPG/GIF/WEBP, transparent background
      * recommended) without needing an admin to do it for them.
@@ -465,8 +455,8 @@ class AuthController extends Controller
                 'user_id' => $user->id,
                 'signature_image_path' => $user->signature_image_path,
                 'signatureImagePath' => $user->signature_image_path,
-                'signature_url' => $this->buildSignatureUrl($user->signature_image_path),
-                'signatureUrl' => $this->buildSignatureUrl($user->signature_image_path),
+                'signature_url' => SignatureUrls::forUser($user),
+                'signatureUrl' => SignatureUrls::forUser($user),
                 'has_signature' => true,
                 'hasSignature' => true,
             ],
@@ -493,8 +483,8 @@ class AuthController extends Controller
                 'user_id' => $user->id,
                 'signature_image_path' => $user->signature_image_path,
                 'signatureImagePath' => $user->signature_image_path,
-                'signature_url' => $this->buildSignatureUrl($user->signature_image_path),
-                'signatureUrl' => $this->buildSignatureUrl($user->signature_image_path),
+                'signature_url' => SignatureUrls::forUser($user),
+                'signatureUrl' => SignatureUrls::forUser($user),
                 'has_signature' => !empty($user->signature_image_path),
                 'hasSignature' => !empty($user->signature_image_path),
             ],

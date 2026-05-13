@@ -78,8 +78,8 @@
             font-size: 9.5px;
         }
         .items-table th {
-            background: #e8e8e8;
-            color: #000;
+            background: #0d4f3c;
+            color: #fff;
             border: 1px solid #000;
             padding: 8px 6px;
             font-weight: bold;

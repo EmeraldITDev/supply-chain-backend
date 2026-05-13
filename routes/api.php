@@ -14,6 +14,7 @@ use App\Http\Controllers\Api\NotificationController;
 use App\Http\Controllers\Api\SearchController;
 use App\Http\Controllers\Api\POTermsTemplateController;
 use App\Http\Controllers\Api\PriceComparisonController;
+use App\Http\Controllers\Api\UserSignatureFileController;
 use App\Http\Controllers\Api\Admin\CodeMappingsController;
 use App\Http\Controllers\Api\V1\Logistics\AuthController as LogisticsAuthController;
 use App\Http\Controllers\Api\V1\Logistics\VendorController as LogisticsVendorController;
@@ -259,6 +260,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/auth/signature', [AuthController::class, 'uploadOwnSignature']);
     Route::get('/auth/signature', [AuthController::class, 'getOwnSignature']);
     Route::delete('/auth/signature', [AuthController::class, 'deleteOwnSignature']);
+    Route::get('/users/{user}/signature-file', [UserSignatureFileController::class, 'show']);
 
     // Session management - keep-alive and status check
     Route::post('/auth/keep-alive', function () {

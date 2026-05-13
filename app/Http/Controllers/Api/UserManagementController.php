@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\User;
 use App\Services\PermissionService;
+use App\Support\SignatureUrls;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\Hash;
@@ -442,12 +443,20 @@ class UserManagementController extends Controller
 
         $target->update(['signature_image_path' => $path]);
 
+        $target->refresh();
+        $signatureUrl = SignatureUrls::forUser($target);
+
         return response()->json([
             'success' => true,
             'message' => 'Signature uploaded successfully.',
             'data' => [
                 'user_id' => $target->id,
                 'signature_image_path' => $target->signature_image_path,
+                'signatureImagePath' => $target->signature_image_path,
+                'signature_url' => $signatureUrl,
+                'signatureUrl' => $signatureUrl,
+                'has_signature' => true,
+                'hasSignature' => true,
             ],
         ]);
     }
