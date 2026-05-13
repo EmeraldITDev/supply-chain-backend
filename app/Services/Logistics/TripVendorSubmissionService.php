@@ -68,10 +68,17 @@ class TripVendorSubmissionService
                 continue;
             }
 
-            // Create new submission
+            // Create new submission (explicit nulls: strict SQL / some drivers omit
+            // absent columns; columns must be nullable — see relax + raw migrations).
             $submission = $trip->vendorSubmissions()->create([
                 'vendor_id' => $vendorId,
                 'status' => TripVendorSubmission::STATUS_PENDING,
+                'vehicle_make' => null,
+                'vehicle_model' => null,
+                'plate_number' => null,
+                'driver_name' => null,
+                'driver_phone' => null,
+                'driver_license_no' => null,
             ]);
 
             $submissions->push($submission);
