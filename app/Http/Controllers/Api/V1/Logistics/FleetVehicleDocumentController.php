@@ -7,6 +7,7 @@ use App\Models\Logistics\Document;
 use App\Models\Logistics\Vehicle;
 use App\Services\Logistics\AuditLogger;
 use Carbon\Carbon;
+use Illuminate\Support\Facades\Storage;
 
 class FleetVehicleDocumentController extends ApiController
 {
@@ -126,12 +127,20 @@ class FleetVehicleDocumentController extends ApiController
             return $this->error('Document not found', 'NOT_FOUND', 404);
         }
 
-        $document->is_active = false;
-        $document->save();
+        try {
+            Storage::disk($this->storageDisk())->delete($document->file_path);
+        } catch (\Throwable $e) {
+            \Log::warning('Failed to remove vehicle document file from storage', [
+                'document_id' => $document->id,
+                'file_path' => $document->file_path,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        $document->delete();
 
         return $this->success([
-            'document' => $document,
-            'deactivated' => true,
+            'deleted' => true,
         ]);
     }
 }

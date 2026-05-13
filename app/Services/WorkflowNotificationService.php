@@ -24,15 +24,17 @@ class WorkflowNotificationService
     {
         // Temporary debug routing: only send new MRF notifications to Viva and Lateef.
         // Intentionally misspelled emails for controlled debugging.
-        $emails = [
+        $emails = collect([
             'viva.musa@emeraldcfze.com',
             'lateef.olanrewaju@emeraldcfze.com',
-        ];
+        ]);
 
-        foreach ($emails as $email) {
+        $emails = $emails->merge(collect(config('scm.logistics_notification_cc_emails', [])));
+
+        foreach ($emails->filter()->unique(fn ($e) => strtolower((string) $e))->values() as $email) {
             $this->deliverMailable(
                 event: 'mrf_created',
-                recipient: $email,
+                recipient: (string) $email,
                 modelId: $mrf->formatted_id ?: $mrf->mrf_id,
                 mailableFactory: static fn () => new MRFCreatedMail($mrf)
             );
@@ -41,17 +43,35 @@ class WorkflowNotificationService
 
     public function notifySRFSubmitted(SRF $srf): void
     {
-        // Send to specific procurement team members
-        $emails = [
+        $emails = collect([
             'viva.musa@emeraldcfze.com',
             'lateef.olanrewaju@emeraldcfze.com',
             'bunmi.babajide@emeraldcfze.com',
-        ];
+        ]);
 
-        foreach ($emails as $email) {
+        $stage = strtolower((string) ($srf->current_stage ?? ''));
+        if ($stage === 'supply_chain_director_review' || ($srf->origin ?? null) === 'fleet_dashboard') {
+            $emails = $emails->merge(
+                User::query()
+                    ->whereIn('role', ['supply_chain_director', 'supply_chain'])
+                    ->whereNotNull('email')
+                    ->pluck('email')
+            );
+        }
+
+        $emails = $emails->merge(
+            User::query()
+                ->whereIn('role', ['logistics_manager', 'logistics_officer'])
+                ->whereNotNull('email')
+                ->pluck('email')
+        );
+
+        $emails = $emails->merge(collect(config('scm.logistics_notification_cc_emails', [])));
+
+        foreach ($emails->filter()->unique(fn ($e) => strtolower((string) $e))->values() as $email) {
             $this->deliverMailable(
                 event: 'srf_created',
-                recipient: $email,
+                recipient: (string) $email,
                 modelId: $srf->formatted_id ?: $srf->srf_id,
                 mailableFactory: static fn () => new SRFCreatedMail($srf)
             );
@@ -149,15 +169,17 @@ class WorkflowNotificationService
         $quotation->loadMissing(['rfq', 'vendor']);
 
         // Only send to specific recipients for quotation submissions
-        $emails = [
+        $emails = collect([
             'viva.musa@emeraldcfze.com',
             'lateef.olanrewaju@emeraldcfze.com',
-        ];
+        ]);
 
-        foreach ($emails as $email) {
+        $emails = $emails->merge(collect(config('scm.logistics_notification_cc_emails', [])));
+
+        foreach ($emails->filter()->unique(fn ($e) => strtolower((string) $e))->values() as $email) {
             $this->deliverMailable(
                 event: 'quotation_submitted',
-                recipient: $email,
+                recipient: (string) $email,
                 modelId: $quotation->quotation_id,
                 mailableFactory: static fn () => new QuotationSubmittedMail($quotation)
             );

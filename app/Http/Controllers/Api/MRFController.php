@@ -5,6 +5,9 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\MRF;
 use App\Models\Activity;
+use App\Models\SRF;
+use App\Models\Logistics\VehicleMaintenance;
+use App\Support\LogisticsMrfRouting;
 use App\Services\NotificationService;
 use App\Services\FormattedIdGenerator;
 use App\Services\WorkflowNotificationService;
@@ -600,6 +603,57 @@ class MRFController extends Controller
         // Get all RFQs for this MRF
         $rfqs = $mrf->rfqs;
 
+        // Fleet / maintenance SRFs referenced from RFQ copy (e.g. "SRF-2026-001")
+        $srfIdMatches = collect();
+        foreach ($rfqs as $rfq) {
+            foreach ([$rfq->title, $rfq->description, $rfq->notes ?? ''] as $text) {
+                if ($text && preg_match_all('/SRF-\d{4}-\d+/i', (string) $text, $m)) {
+                    foreach ($m[0] as $sid) {
+                        $srfIdMatches->push(strtoupper((string) $sid));
+                    }
+                }
+            }
+        }
+        $linkedFleetSrfsPayload = collect();
+        if ($srfIdMatches->isNotEmpty()) {
+            $linkedFleetSrfsPayload = SRF::query()
+                ->whereIn('srf_id', $srfIdMatches->unique()->values()->all())
+                ->with(['vehicle', 'maintenance'])
+                ->get()
+                ->map(function (SRF $srf) {
+                    $live = collect();
+                    if ($srf->vehicle_id) {
+                        $live = VehicleMaintenance::where('vehicle_id', $srf->vehicle_id)
+                            ->orderByDesc('created_at')
+                            ->get()
+                            ->map(function ($m) {
+                                return [
+                                    'id' => $m->id,
+                                    'maintenance_type' => $m->maintenance_type,
+                                    'description' => $m->description,
+                                    'performed_at' => optional($m->performed_at)->toIso8601String(),
+                                    'next_due_at' => optional($m->next_due_at)->toIso8601String(),
+                                    'cost' => $m->cost !== null ? (float) $m->cost : null,
+                                    'status' => $m->status,
+                                ];
+                            })->values();
+                    }
+
+                    return [
+                        'srf_id' => $srf->srf_id,
+                        'formatted_id' => $srf->formatted_id,
+                        'title' => $srf->title,
+                        'current_stage' => $srf->current_stage,
+                        'vehicle_id' => $srf->vehicle_id,
+                        'maintenance_id' => $srf->maintenance_id,
+                        'vehicle_snapshot' => $srf->vehicle_snapshot,
+                        'maintenance_history' => $srf->maintenance_history,
+                        'rfq_prefill' => $srf->rfq_prefill,
+                        'live_maintenance_records' => $live,
+                    ];
+                })->values();
+        }
+
         // Collect all quotations from all RFQs
         // Exclude rejected quotations from active view (they remain accessible for historical tracking)
         $allQuotations = collect();
@@ -918,6 +972,7 @@ class MRFController extends Controller
                         'selection_reason' => $row->selection_reason,
                     ];
                 })->values(),
+                'linkedFleetSrfs' => $linkedFleetSrfsPayload,
             ],
         ]);
     }
@@ -1201,10 +1256,18 @@ class MRFController extends Controller
 
             $normalizedContractType = strtolower(trim((string) $request->contractType));
             $isEmeraldContract = $normalizedContractType === 'emerald';
-            $initialStage = $isEmeraldContract ? 'executive_review' : 'supply_chain_director_review';
-            $initialWorkflowState = $isEmeraldContract
-                ? WorkflowStateService::STATE_EXECUTIVE_REVIEW
-                : WorkflowStateService::STATE_SUPPLY_CHAIN_DIRECTOR_REVIEW;
+            $startAtScd = ! $isEmeraldContract
+                || LogisticsMrfRouting::shouldStartAtSupplyChainDirectorForEmerald(
+                    $user,
+                    $request->department ?? $user->department ?? null,
+                    $request->category,
+                    $request->title,
+                    $request->description
+                );
+            $initialStage = $startAtScd ? 'supply_chain_director_review' : 'executive_review';
+            $initialWorkflowState = $startAtScd
+                ? WorkflowStateService::STATE_SUPPLY_CHAIN_DIRECTOR_REVIEW
+                : WorkflowStateService::STATE_EXECUTIVE_REVIEW;
 
             try {
             $mrf = MRF::create([

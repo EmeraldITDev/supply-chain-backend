@@ -46,18 +46,44 @@ class FleetComplianceNotificationService
      */
     public function logisticsRecipients(): Collection
     {
-        return User::query()
+        $users = User::query()
             ->whereIn('role', ['logistics_officer', 'logistics_manager'])
             ->get();
+
+        $cc = collect(config('scm.logistics_notification_cc_emails', []));
+        foreach ($cc as $email) {
+            if (! is_string($email) || $email === '') {
+                continue;
+            }
+            if ($users->contains(fn (User $u) => strcasecmp((string) $u->email, $email) === 0)) {
+                continue;
+            }
+            $found = User::query()->whereRaw('LOWER(email) = ?', [strtolower($email)])->first();
+            if ($found) {
+                $users->push($found);
+            }
+        }
+
+        return $users->unique('id')->values();
     }
 
     public function notifyRecipients(object $notification): void
     {
         $recipients = $this->logisticsRecipients();
-        if ($recipients->isEmpty()) {
-            return;
+        if ($recipients->isNotEmpty()) {
+            Notification::send($recipients, $notification);
         }
 
-        Notification::send($recipients, $notification);
+        $cc = collect(config('scm.logistics_notification_cc_emails', []));
+        foreach ($cc as $email) {
+            if (! is_string($email) || $email === '') {
+                continue;
+            }
+            if ($recipients->contains(fn (User $u) => strcasecmp((string) $u->email, $email) === 0)) {
+                continue;
+            }
+
+            Notification::route('mail', $email)->notify($notification);
+        }
     }
 }

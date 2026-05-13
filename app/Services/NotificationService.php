@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\User;
 use App\Models\MRF;
+use App\Support\LogisticsMrfRouting;
 use App\Models\RFQ;
 use App\Models\Quotation;
 use App\Models\Vendor;
@@ -31,10 +32,17 @@ class NotificationService
     public function notifyMRFSubmitted(MRF $mrf): void
     {
         try {
+            $mrf->loadMissing('requester');
             $isEmeraldContract = strtolower(trim((string) $mrf->contract_type)) === 'emerald';
             $notifiables = collect();
 
-            if ($isEmeraldContract) {
+            if ($isEmeraldContract && LogisticsMrfRouting::mrfShouldStartAtSupplyChainDirector($mrf)) {
+                $notifiables = User::whereIn('role', [
+                    'supply_chain_director',
+                    'supply_chain',
+                    'admin',
+                ])->get();
+            } elseif ($isEmeraldContract) {
                 // Required first approver for Emerald flow.
                 $namedExecutive = User::where('email', 'bunmi.babajide@emeraldcfze.com')->first();
 

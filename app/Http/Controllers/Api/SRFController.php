@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\SRF;
+use App\Models\Logistics\VehicleMaintenance;
 use App\Services\FormattedIdGenerator;
 use App\Services\WorkflowNotificationService;
 use Illuminate\Http\Request;
@@ -349,6 +350,29 @@ class SRFController extends Controller
         })->values();
 
         $payload['progress'] = $this->buildProgressTimeline($srf);
+
+        $liveMaintenance = collect();
+        if ($srf->vehicle_id) {
+            $liveMaintenance = VehicleMaintenance::where('vehicle_id', $srf->vehicle_id)
+                ->orderByDesc('created_at')
+                ->get()
+                ->map(function ($m) {
+                    return [
+                        'id' => $m->id,
+                        'maintenance_type' => $m->maintenance_type,
+                        'maintenanceType' => $m->maintenance_type,
+                        'description' => $m->description,
+                        'interval_months' => $m->interval_months,
+                        'performed_at' => optional($m->performed_at)->toIso8601String(),
+                        'next_due_at' => optional($m->next_due_at)->toIso8601String(),
+                        'cost' => $m->cost !== null ? (float) $m->cost : null,
+                        'status' => $m->status,
+                        'metadata' => $m->metadata,
+                    ];
+                })->values();
+        }
+        $payload['liveMaintenanceRecords'] = $liveMaintenance;
+        $payload['live_maintenance_records'] = $liveMaintenance;
 
         return response()->json($payload);
     }
