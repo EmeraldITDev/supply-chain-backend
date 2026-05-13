@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\Employee;
 use App\Models\User;
 use App\Models\MRF;
 
@@ -92,22 +93,88 @@ class PermissionService
 
     /**
      * Procurement / admin roles that may generate or upload POs.
+     *
+     * Matches login access patterns: normalized `users.role`, Spatie role names,
+     * `is_admin`, and employee job title "Procurement Manager" (same as AuthController).
      */
     public function userActsAsProcurement(User $user): bool
     {
-        if (in_array($user->role, ['procurement', 'procurement_manager', 'admin'], true)) {
+        if (($user->is_admin ?? false) === true) {
             return true;
+        }
+
+        $allowed = ['procurement', 'procurement_manager', 'admin'];
+
+        foreach ($this->userRoleSlugCandidates($user) as $slug) {
+            if (in_array($slug, $allowed, true)) {
+                return true;
+            }
         }
 
         if (method_exists($user, 'hasAnyRole')) {
             try {
-                return $user->hasAnyRole(['procurement', 'procurement_manager', 'admin']);
+                if ($user->hasAnyRole(['procurement', 'procurement_manager', 'admin'])) {
+                    return true;
+                }
             } catch (\Throwable) {
-                return false;
+                // Spatie guard / cache issues — fall through to job-title check
             }
         }
 
-        return false;
+        return $this->userHasProcurementManagerJobTitle($user);
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function userRoleSlugCandidates(User $user): array
+    {
+        $out = [];
+
+        if (! empty($user->role)) {
+            $out[] = $this->slugifyRoleLabel((string) $user->role);
+        }
+
+        if (method_exists($user, 'getRoleNames')) {
+            try {
+                foreach ($user->getRoleNames() as $name) {
+                    $out[] = $this->slugifyRoleLabel((string) $name);
+                }
+            } catch (\Throwable) {
+            }
+        }
+
+        return array_values(array_unique(array_filter($out, static fn ($s) => $s !== '')));
+    }
+
+    private function slugifyRoleLabel(string $raw): string
+    {
+        $s = strtolower(trim(preg_replace('/[\s\-]+/', '_', trim($raw))));
+
+        return match ($s) {
+            'procurementmanager' => 'procurement_manager',
+            'administrator' => 'admin',
+            default => $s,
+        };
+    }
+
+    private function userHasProcurementManagerJobTitle(User $user): bool
+    {
+        if (! $user->employee_id) {
+            return false;
+        }
+
+        $employee = $user->relationLoaded('employee')
+            ? $user->employee
+            : Employee::query()->find($user->employee_id);
+
+        if (! $employee) {
+            return false;
+        }
+
+        $title = trim((string) ($employee->job_title ?? ''));
+
+        return strcasecmp($title, 'Procurement Manager') === 0;
     }
 
     /**
