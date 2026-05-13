@@ -322,8 +322,18 @@ class VendorAuthController extends Controller
             ], 403);
         }
 
+        // Accept snake_case or camelCase (portal clients vary)
+        $payload = array_merge($request->all(), [
+            'current_password' => $request->input('current_password', $request->input('currentPassword')),
+            'new_password' => $request->input('new_password', $request->input('newPassword')),
+            'new_password_confirmation' => $request->input(
+                'new_password_confirmation',
+                $request->input('newPassword_confirmation')
+            ),
+        ]);
+
         // Validate input
-        $validator = Validator::make($request->all(), [
+        $validator = Validator::make($payload, [
             'current_password' => 'required|string',
             'new_password' => 'required|string|min:8|confirmed',
         ]);
@@ -338,7 +348,7 @@ class VendorAuthController extends Controller
         }
 
         // Verify current password
-        if (!Hash::check($request->current_password, $user->password)) {
+        if (!Hash::check($payload['current_password'], $user->password)) {
             return response()->json([
                 'success' => false,
                 'error' => 'Current password is incorrect',
@@ -348,7 +358,7 @@ class VendorAuthController extends Controller
 
         // Update password
         $user->update([
-            'password' => Hash::make($request->new_password),
+            'password' => Hash::make($payload['new_password']),
             'must_change_password' => false,
             'password_changed_at' => now(),
         ]);
@@ -379,15 +389,8 @@ class VendorAuthController extends Controller
             ], 422);
         }
 
-        // Find user by email
-        $user = User::where('email', $request->email)
-            ->where(function($query) {
-                $query->where('role', 'vendor')
-                      ->orWhereHas('roles', function($q) {
-                          $q->where('name', 'vendor');
-                      });
-            })
-            ->first();
+        // Resolve vendor portal user (same rules as login: vendor row email / contact email → user)
+        $user = User::findVendorPortalUserByEmail($request->email);
 
         // Always return success for security (don't reveal if email exists)
         if (!$user) {

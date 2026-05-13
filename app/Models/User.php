@@ -117,4 +117,57 @@ class User extends Authenticatable
     {
         return $this->belongsTo(Vendor::class, 'vendor_id');
     }
+
+    /**
+     * Resolve the vendor portal User row for an email address used on login /
+     * password reset: matches vendor users by users.email (case-insensitive) or,
+     * like VendorAuthController::login, via an approved/active vendors row
+     * (primary or contact_person_email) linked by vendor_id.
+     */
+    public static function findVendorPortalUserByEmail(string $email): ?self
+    {
+        $normalized = mb_strtolower(trim($email));
+        if ($normalized === '') {
+            return null;
+        }
+
+        $byUserEmail = self::query()
+            ->whereRaw('LOWER(TRIM(email)) = ?', [$normalized])
+            ->where(function ($query) {
+                $query->where('role', 'vendor')
+                    ->orWhereHas('roles', function ($q) {
+                        $q->where('name', 'vendor');
+                    });
+            })
+            ->first();
+
+        if ($byUserEmail) {
+            return $byUserEmail;
+        }
+
+        $vendor = Vendor::query()
+            ->where(function ($q) use ($normalized) {
+                $q->whereRaw('LOWER(TRIM(email)) = ?', [$normalized])
+                    ->orWhereRaw('LOWER(TRIM(COALESCE(contact_person_email, \'\'))) = ?', [$normalized]);
+            })
+            ->orderBy('id')
+            ->get()
+            ->first(function (Vendor $v) {
+                return in_array(strtolower(trim((string) ($v->status ?? ''))), ['approved', 'active'], true);
+            });
+
+        if (!$vendor) {
+            return null;
+        }
+
+        return self::query()
+            ->where('vendor_id', $vendor->id)
+            ->where(function ($query) {
+                $query->where('role', 'vendor')
+                    ->orWhereHas('roles', function ($q) {
+                        $q->where('name', 'vendor');
+                    });
+            })
+            ->first();
+    }
 }

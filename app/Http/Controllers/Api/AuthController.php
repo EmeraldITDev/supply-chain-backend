@@ -328,7 +328,7 @@ class AuthController extends Controller
             'newPassword' => 'required|string|min:8|confirmed',
         ]);
 
-        $user = User::where('email', $request->email)->first();
+        $user = User::findVendorPortalUserByEmail($request->email);
 
         if (!$user) {
             throw ValidationException::withMessages([
