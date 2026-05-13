@@ -13,9 +13,32 @@ use Illuminate\Database\Eloquent\Collection;
 class TripVendorSubmissionService
 {
     /**
-     * Create vendor submissions for invited vendors
+     * Trip quote / RFQ invitation (vendor portal). Prefer the vendor's portal User;
+     * fall back to the vendor record email so notifications still send when no User is linked.
      */
-    public function createSubmissionsForVendors(Trip $trip, array $vendorIds): Collection
+    public function notifyVendorInvitation(Trip $trip, Vendor $vendor): void
+    {
+        $notification = new VendorInvitedForTripNotification($trip, $vendor);
+
+        $portalUser = $vendor->users()->first();
+        if ($portalUser) {
+            $portalUser->notify($notification);
+
+            return;
+        }
+
+        if ($vendor->email) {
+            $vendor->notify($notification);
+        }
+    }
+
+    /**
+     * Create vendor submissions for invited vendors.
+     *
+     * @param  bool  $notifyExisting  When true, resend the quote invitation if a submission row already exists
+     *                               (used when re-assigning from Schedule Trip / Assign Vendor).
+     */
+    public function createSubmissionsForVendors(Trip $trip, array $vendorIds, bool $notifyExisting = false): Collection
     {
         $submissions = collect();
 
@@ -24,6 +47,13 @@ class TripVendorSubmissionService
             $existing = $trip->vendorSubmissions()->where('vendor_id', $vendorId)->first();
             if ($existing) {
                 $submissions->push($existing);
+                if ($notifyExisting) {
+                    $vendor = Vendor::find($vendorId);
+                    if ($vendor) {
+                        $this->notifyVendorInvitation($trip, $vendor);
+                    }
+                }
+
                 continue;
             }
 
@@ -35,10 +65,9 @@ class TripVendorSubmissionService
 
             $submissions->push($submission);
 
-            // Send invite notification to vendor
             $vendor = Vendor::find($vendorId);
-            if ($vendor && $vendor->users()->first()) {
-                $vendor->users()->first()->notify(new VendorInvitedForTripNotification($trip, $vendor));
+            if ($vendor) {
+                $this->notifyVendorInvitation($trip, $vendor);
             }
         }
 

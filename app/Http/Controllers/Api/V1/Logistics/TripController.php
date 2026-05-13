@@ -9,12 +9,10 @@ use App\Http\Requests\Logistics\UpdateTripRequest;
 use App\Models\Logistics\Trip;
 use App\Models\Logistics\Vehicle;
 use App\Models\Vendor;
-use App\Notifications\VendorAssignedToTripNotification;
 use App\Services\Logistics\AuditLogger;
 use App\Services\Logistics\IdempotencyService;
 use App\Services\Logistics\TripService;
 use App\Services\Logistics\TripVendorSubmissionService;
-use App\Models\Logistics\TripVendorSubmission;
 use App\Services\Logistics\FleetVehicleAssignmentGuard;
 use App\Services\Logistics\UploadService;
 use Illuminate\Http\JsonResponse;
@@ -28,6 +26,7 @@ class TripController extends ApiController
         private AuditLogger $auditLogger,
         private IdempotencyService $idempotency,
         private UploadService $uploadService,
+        private TripVendorSubmissionService $submissionService,
     ) {
     }
 
@@ -208,38 +207,29 @@ class TripController extends ApiController
             }
             $trip->save();
 
-            // Pre-seed a placeholder submission so the vendor portal can list
-            // this trip immediately. Wrapped in its own try/catch because the
-            // submissions table has historically had NOT NULL columns that we
-            // don't have values for at assignment time (vehicle plate/driver
-            // are supplied by the vendor later). A failure here is non-fatal:
-            // the row gets created when the vendor submits.
+            // Same workflow as POST /trips/{id}/invite-vendors: create a pending
+            // TripVendorSubmission and send the trip quote (RFQ) email with a
+            // vendor-portal link so responses appear under Compare Vendor Responses.
+            // notifyExisting=true resends the invitation if a submission already existed.
             try {
-                $trip->vendorSubmissions()->firstOrCreate(
-                    ['trip_id' => $trip->id, 'vendor_id' => $vendor->id],
-                    ['status' => TripVendorSubmission::STATUS_PENDING]
+                $this->submissionService->createSubmissionsForVendors(
+                    $trip->fresh(),
+                    [(int) $request->vendor_id],
+                    true
                 );
             } catch (\Throwable $submissionException) {
-                \Log::warning('Skipping placeholder vendor submission on assignment', [
+                \Log::error('Trip vendor invite failed after assignment', [
                     'trip_id' => $trip->id,
                     'vendor_id' => $vendor->id,
                     'error' => $submissionException->getMessage(),
                 ]);
-            }
 
-            // Send notification to vendor - never block on this. The Vendor
-            // model may not have the Notifiable trait everywhere, and mail
-            // delivery shouldn't bring down the assignment workflow.
-            try {
-                if ($vendor->email && method_exists($vendor, 'notify')) {
-                    $vendor->notify(new VendorAssignedToTripNotification($trip, $vendor));
-                }
-            } catch (\Throwable $notificationException) {
-                \Log::warning('Failed to send vendor assignment notification', [
-                    'vendor_id' => $vendor->id,
-                    'trip_id' => $trip->id,
-                    'error' => $notificationException->getMessage(),
-                ]);
+                return $this->error(
+                    'Failed to send vendor invitation. Please try again.',
+                    'INVITATION_FAILED',
+                    500,
+                    config('app.debug') ? ['exception' => [$submissionException->getMessage()]] : []
+                );
             }
 
             try {
