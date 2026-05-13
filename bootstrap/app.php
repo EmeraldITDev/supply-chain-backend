@@ -12,11 +12,17 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware): void {
+        // Behind Render / Cloudflare / Vercel, PHP must trust forwarded proto/host so the request
+        // is treated as HTTPS and cookies / Sanctum state line up with the browser.
+        // Prepend order: last prepend runs outermost (first on the request) — TrustProxies must be last here.
+        $middleware->trustProxies(at: '*');
+
         // CRITICAL: Apply CORS to all requests - MUST be absolutely first before any other middleware
         // Prepend happens in reverse order, so we prepend EnsureCorsHeaders first (to be second),
         // then HandleCors (to be first), then TrackUserActivity gets added normally
         $middleware->prepend(\App\Http\Middleware\EnsureCorsHeaders::class);
         $middleware->prepend(\Illuminate\Http\Middleware\HandleCors::class);
+        $middleware->prepend(\Illuminate\Http\Middleware\TrustProxies::class);
 
         // Track user activity for automatic logout after 5 minutes of inactivity
         // This is NOT prepended so it comes after CORS middleware
