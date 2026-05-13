@@ -1166,13 +1166,16 @@ class MRFWorkflowController extends Controller
             ], 403);
         }
 
-        $mrf = $this->findMrfByAnyId((string) $id, ['items']);
+        $mrf = $this->findMrfForPoRequest($request, (string) $id, ['items']);
 
-        if (!$mrf) {
+        if (! $mrf) {
             return response()->json([
                 'success' => false,
-                'error' => 'MRF not found',
-                'code' => 'NOT_FOUND'
+                'error' => 'MRF not found for the URL id. Confirm the path uses the same identifier as this MRF (mrf_id or formatted_id from the list API). If the UI shows a different MRF than the URL, send that id as mrf_id or formatted_id in the JSON body.',
+                'code' => 'NOT_FOUND',
+                'data' => [
+                    'route_id' => (string) $id,
+                ],
             ], 404);
         }
 
@@ -3018,6 +3021,46 @@ class MRFWorkflowController extends Controller
         }
 
         return $standard . "\n\n" . $custom;
+    }
+
+    /**
+     * Resolve MRF for generate-po: route {id} first, then optional JSON/form body
+     * identifiers (mrf_id, mrfId, formatted_id, formattedId) when the client
+     * accidentally posts a stale path id while the body still carries the
+     * correct MRF the user is editing.
+     */
+    private function findMrfForPoRequest(Request $request, string $routeId, array $with = []): ?MRF
+    {
+        $routeId = trim($routeId);
+        $mrf = $this->findMrfByAnyId($routeId, $with);
+        if ($mrf) {
+            return $mrf;
+        }
+
+        $candidates = [];
+        foreach (['mrf_id', 'mrfId', 'formatted_id', 'formattedId'] as $key) {
+            $v = $request->input($key);
+            if (is_string($v)) {
+                $t = trim($v);
+                if ($t !== '' && strcasecmp($t, $routeId) !== 0) {
+                    $candidates[] = $t;
+                }
+            }
+        }
+
+        foreach (array_unique($candidates) as $candidate) {
+            $found = $this->findMrfByAnyId($candidate, $with);
+            if ($found) {
+                Log::warning('generate-po: resolved MRF via body fallback (route id not found)', [
+                    'route_id' => $routeId,
+                    'resolved_from' => $candidate,
+                ]);
+
+                return $found;
+            }
+        }
+
+        return null;
     }
 
     /**
