@@ -603,7 +603,7 @@ class MRFWorkflowController extends Controller
                 'category' => $mrf->category,
                 'contractType' => $mrf->contract_type,
                 'description' => $mrf->description,
-                'estimatedCost' => (float) $mrf->estimated_cost,
+                'estimatedCost' => $mrf->estimated_cost !== null ? (float) $mrf->estimated_cost : null,
                 'currency' => $mrf->currency ?? 'NGN',
                 'urgency' => $mrf->urgency,
                 'executiveApproved' => (bool) $mrf->executive_approved,

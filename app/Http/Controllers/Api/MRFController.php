@@ -252,7 +252,7 @@ class MRFController extends Controller
                 'urgency' => $mrf->urgency,
                 'description' => $mrf->description,
                 'quantity' => $mrf->quantity,
-                'estimatedCost' => (float) $mrf->estimated_cost,
+                'estimatedCost' => $mrf->estimated_cost !== null ? (float) $mrf->estimated_cost : null,
                 'justification' => $mrf->justification,
                 'requester' => $mrf->requester_name,
                 'requesterId' => (string) $mrf->requester_id,
@@ -447,7 +447,7 @@ class MRFController extends Controller
             'urgency' => $mrf->urgency,
             'description' => $mrf->description,
             'quantity' => $mrf->quantity,
-            'estimatedCost' => (float) $mrf->estimated_cost,
+            'estimatedCost' => $mrf->estimated_cost !== null ? (float) $mrf->estimated_cost : null,
             'justification' => $mrf->justification,
             'requester' => $mrf->requester_name,
             'requesterId' => (string) $mrf->requester_id,
@@ -727,7 +727,7 @@ class MRFController extends Controller
                     'urgency' => $mrf->urgency,
                     'description' => $mrf->description,
                     'quantity' => $mrf->quantity,
-                    'estimatedCost' => (float) $mrf->estimated_cost,
+                    'estimatedCost' => $mrf->estimated_cost !== null ? (float) $mrf->estimated_cost : null,
                     'justification' => $mrf->justification,
                     'requester' => [
                         'id' => $mrf->requester_id,
@@ -1109,7 +1109,7 @@ class MRFController extends Controller
                 'urgency' => 'required|in:Low,Medium,High,Critical',
                 'description' => 'required|string',
                 'quantity' => 'required|string',
-                'estimatedCost' => 'required|numeric|min:0',
+                'estimatedCost' => 'nullable|numeric|min:0',
                 'justification' => 'required|string',
                 'department' => 'nullable|string|max:255',
                 'pfi' => 'nullable|file|mimes:pdf,doc,docx|max:10240', // Optional PFI upload (10MB max)
@@ -1212,7 +1212,9 @@ class MRFController extends Controller
                 'urgency' => $request->urgency,
                 'description' => $request->description,
                 'quantity' => $request->quantity,
-                'estimated_cost' => $request->estimatedCost,
+                'estimated_cost' => $request->input('estimatedCost') !== null && $request->input('estimatedCost') !== ''
+                    ? (float) $request->input('estimatedCost')
+                    : null,
                 'justification' => $request->justification,
                 'requester_id' => $user->id,
                 'requester_name' => $user->name,
@@ -1305,7 +1307,7 @@ class MRFController extends Controller
                 'urgency' => $mrf->urgency,
                 'description' => $mrf->description,
                 'quantity' => $mrf->quantity,
-                'estimatedCost' => (float) $mrf->estimated_cost,
+                'estimatedCost' => $mrf->estimated_cost !== null ? (float) $mrf->estimated_cost : null,
                 'justification' => $mrf->justification,
                 'requester' => $mrf->requester_name,
                 'requesterId' => (string) $mrf->requester_id,
@@ -1380,7 +1382,7 @@ class MRFController extends Controller
             'urgency' => 'sometimes|required|in:Low,Medium,High,Critical',
             'description' => 'sometimes|required|string',
             'quantity' => 'sometimes|required|string',
-            'estimatedCost' => 'sometimes|required|numeric|min:0',
+            'estimatedCost' => 'sometimes|nullable|numeric|min:0',
             'justification' => 'sometimes|required|string',
             'department' => 'sometimes|nullable|string|max:255',
         ]);
@@ -1401,7 +1403,11 @@ class MRFController extends Controller
         if ($request->has('description')) $updateData['description'] = $request->description;
         if ($request->has('quantity')) $updateData['quantity'] = $request->quantity;
         if ($request->has('department')) $updateData['department'] = $request->department;
-        if ($request->has('estimatedCost')) $updateData['estimated_cost'] = $request->estimatedCost;
+        if ($request->has('estimatedCost')) {
+            $updateData['estimated_cost'] = $request->input('estimatedCost') === null || $request->input('estimatedCost') === ''
+                ? null
+                : (float) $request->input('estimatedCost');
+        }
         if ($request->has('justification')) $updateData['justification'] = $request->justification;
 
         // If updating from Rejected, reset status to Pending
@@ -1421,7 +1427,7 @@ class MRFController extends Controller
             'urgency' => $mrf->urgency,
             'description' => $mrf->description,
             'quantity' => $mrf->quantity,
-            'estimatedCost' => (float) $mrf->estimated_cost,
+            'estimatedCost' => $mrf->estimated_cost !== null ? (float) $mrf->estimated_cost : null,
             'justification' => $mrf->justification,
             'requester' => $mrf->requester_name,
             'requesterId' => (string) $mrf->requester_id,
@@ -2190,7 +2196,7 @@ class MRFController extends Controller
             'title' => 'sometimes|string',
             'description' => 'sometimes|string',
             'quantity' => 'sometimes|integer|min:1',
-            'estimated_cost' => 'sometimes|numeric|min:0',
+            'estimated_cost' => 'sometimes|nullable|numeric|min:0',
             'justification' => 'sometimes|string',
             'category' => 'sometimes|string',
         ]);

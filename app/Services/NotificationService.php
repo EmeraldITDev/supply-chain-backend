@@ -387,7 +387,9 @@ class NotificationService
             foreach ($chairmen as $chairman) {
                 $chairman->notify(new SystemAnnouncementNotification(
                     'High-Value MRF Pending Approval',
-                    "MRF {$mrf->mrf_id} requires your approval. Amount: {$mrf->currency} " . number_format($mrf->estimated_cost, 2),
+                    "MRF {$mrf->mrf_id} requires your approval. " . ($mrf->estimated_cost !== null
+                        ? "Amount: {$mrf->currency} " . number_format((float) $mrf->estimated_cost, 2)
+                        : 'Estimated amount not specified.'),
                     "/mrfs/{$mrf->mrf_id}",
                     'high'
                 ));
@@ -517,7 +519,9 @@ class NotificationService
             foreach ($chairmen as $chairman) {
                 $chairman->notify(new SystemAnnouncementNotification(
                     'Payment Pending Approval',
-                    "Payment for PO {$mrf->po_number} (MRF {$mrf->mrf_id}) requires your approval. Amount: {$mrf->currency} " . number_format($mrf->estimated_cost, 2),
+                    "Payment for PO {$mrf->po_number} (MRF {$mrf->mrf_id}) requires your approval. " . ($mrf->estimated_cost !== null
+                        ? "Amount: {$mrf->currency} " . number_format((float) $mrf->estimated_cost, 2)
+                        : 'Amount not specified.'),
                     "/mrfs/{$mrf->mrf_id}",
                     'high'
                 ));
@@ -544,7 +548,9 @@ class NotificationService
             foreach ($executives as $executive) {
                 $executive->notify(new SystemAnnouncementNotification(
                     'MRF Pending Your Approval',
-                    "MRF {$mrf->mrf_id} - {$mrf->title} has been approved by {$approver->name} and requires your approval. Estimated cost: ₦" . number_format($mrf->estimated_cost, 2),
+                    "MRF {$mrf->mrf_id} - {$mrf->title} has been approved by {$approver->name} and requires your approval. " . ($mrf->estimated_cost !== null
+                        ? 'Estimated cost: ₦' . number_format((float) $mrf->estimated_cost, 2)
+                        : 'Estimated cost not specified.'),
                     "/mrfs/{$mrf->mrf_id}",
                     'high'
                 ));
