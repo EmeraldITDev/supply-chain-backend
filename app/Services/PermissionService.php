@@ -252,6 +252,36 @@ class PermissionService
     }
 
     /**
+     * Fast-track PO creation from the Procurement Overview "Purchase Order" tab.
+     *
+     * Bypasses the full MRF approval workflow (executive review, SCD vendor approval,
+     * etc.) so procurement can issue a PO and route it directly to SCD for signature.
+     * Only the bare minimum is enforced: procurement role, MRF exists, PO not yet
+     * signed, and the MRF is not closed/cancelled.
+     */
+    public function canFastTrackPO(User $user, MRF $mrf): bool
+    {
+        if (! $this->userActsAsProcurement($user)) {
+            return false;
+        }
+
+        if (trim((string) ($mrf->signed_po_url ?? '')) !== '') {
+            return false;
+        }
+
+        $statusLower = strtolower(trim((string) ($mrf->status ?? '')));
+        if (in_array($statusLower, ['cancelled', 'closed'], true)) {
+            return false;
+        }
+
+        $stateLower = strtolower(trim((string) ($mrf->workflow_state ?? '')));
+
+        return ! in_array($stateLower, [
+            WorkflowStateService::STATE_CLOSED,
+        ], true);
+    }
+
+    /**
      * Whether procurement may persist PO draft fields (no PDF, no workflow advance).
      * Looser than {@see self::canGeneratePO}: allowed while RFQ is still awaiting SCD
      * so the PO form can be saved incrementally before final generation.

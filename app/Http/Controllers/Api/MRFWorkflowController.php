@@ -1176,6 +1176,8 @@ class MRFWorkflowController extends Controller
             ], 404);
         }
 
+        $fastTrack = $this->resolveFastTrackFlag($request);
+
         $saveAsDraft = $request->boolean('save_as_draft', false);
         if ($saveAsDraft) {
             if ($request->hasFile('unsigned_po')) {
@@ -1186,27 +1188,41 @@ class MRFWorkflowController extends Controller
                 ], 422);
             }
 
-            if (! $this->permissionService->canSavePODraft($user, $mrf)) {
+            $draftAllowed = $fastTrack
+                ? $this->permissionService->canFastTrackPO($user, $mrf)
+                : $this->permissionService->canSavePODraft($user, $mrf);
+
+            if (! $draftAllowed) {
                 return response()->json([
                     'success' => false,
                     'error' => 'Saving a PO draft is not allowed for this MRF at the current stage.',
                     'code' => 'FORBIDDEN',
+                    'data' => [
+                        'fast_track' => $fastTrack,
+                        'mrf_status' => $mrf->status,
+                        'mrf_workflow_state' => $mrf->workflow_state,
+                    ],
                 ], 403);
             }
 
-            return $this->savePOAsDraft($request, $mrf, $user);
+            return $this->savePOAsDraft($request, $mrf, $user, $fastTrack);
         }
 
         // PO generation IS the route-for-approval action; it sets status=awaiting_scd_signature
         // and lets SCD sign. We rely on PermissionService::canGeneratePO for the full gate
         // (procurement role + vendor selected + PO not already signed) instead of re-imposing
         // a strict RFQ.workflow_state==='approved' prerequisite that the UI does not produce.
-        if (! $this->permissionService->canGeneratePO($user, $mrf)) {
+        $generationAllowed = $fastTrack
+            ? $this->permissionService->canFastTrackPO($user, $mrf)
+            : $this->permissionService->canGeneratePO($user, $mrf);
+
+        if (! $generationAllowed) {
             return response()->json([
                 'success' => false,
                 'error' => 'PO generation not allowed for this MRF at the current stage.',
                 'code' => 'FORBIDDEN',
                 'data' => [
+                    'fast_track' => $fastTrack,
                     'mrf_status' => $mrf->status,
                     'mrf_workflow_state' => $mrf->workflow_state,
                 ],
@@ -1259,6 +1275,10 @@ class MRFWorkflowController extends Controller
             'custom_terms' => 'nullable|string',
             'terms_mode' => 'nullable|in:standard,custom,both',
             'po_terms_mode' => 'nullable|in:standard,custom,both',
+            'fast_track' => 'nullable|boolean',
+            'fastTrack' => 'nullable|boolean',
+            'bypass_executive_review' => 'nullable|boolean',
+            'bypassExecutiveReview' => 'nullable|boolean',
         ]);
 
         if ($validator->fails()) {
@@ -1281,6 +1301,10 @@ class MRFWorkflowController extends Controller
             'custom_terms' => 'nullable|string',
             'terms_mode' => 'nullable|in:standard,custom,both',
             'po_terms_mode' => 'nullable|in:standard,custom,both',
+            'fast_track' => 'nullable|boolean',
+            'fastTrack' => 'nullable|boolean',
+            'bypass_executive_review' => 'nullable|boolean',
+            'bypassExecutiveReview' => 'nullable|boolean',
             ]);
 
         if ($validator->fails()) {
@@ -1535,7 +1559,20 @@ class MRFWorkflowController extends Controller
         $remarks = $isRegeneration
             ? "PO regenerated after rejection: {$poNumber}"
             : "PO generated: {$poNumber}";
+        if ($fastTrack) {
+            $remarks .= ' (fast-tracked from Procurement Overview, executive review bypassed)';
+        }
         MRFApprovalHistory::record($mrf, $action, 'procurement', $user, $remarks);
+
+        if ($fastTrack) {
+            Log::info('PO fast-tracked from Procurement Overview', [
+                'mrf_id' => $mrf->mrf_id,
+                'po_number' => $poNumber,
+                'user_id' => $user->id,
+                'previous_workflow_state' => $mrf->getOriginal('workflow_state'),
+                'previous_status' => $mrf->getOriginal('status'),
+            ]);
+        }
 
         // Log activity
         try {
@@ -1582,18 +1619,24 @@ class MRFWorkflowController extends Controller
             ]);
         }
 
-        // Also notify Supply Chain Director (for signature workflow)
+        // Always notify the Supply Chain Director (signature workflow).
         $this->notificationService->notifyPOReadyForSignature($mrf);
-        try {
-            $mrf->loadMissing(['requester', 'selectedVendor']);
-            $this->workflowNotificationService->notifyPOGenerated($mrf);
-        } catch (\Exception $e) {
-            Log::error('Failed to send PO generated email notifications', [
-                'event' => 'po_generated',
-                'recipient' => null,
-                'model_id' => $mrf->mrf_id,
-                'error' => $e->getMessage(),
-            ]);
+
+        // Skip the broader PO-generated email blast for fast-tracked POs to avoid
+        // pinging the executive distribution list on a flow that intentionally
+        // bypasses executive review.
+        if (! $fastTrack) {
+            try {
+                $mrf->loadMissing(['requester', 'selectedVendor']);
+                $this->workflowNotificationService->notifyPOGenerated($mrf);
+            } catch (\Exception $e) {
+                Log::error('Failed to send PO generated email notifications', [
+                    'event' => 'po_generated',
+                    'recipient' => null,
+                    'model_id' => $mrf->mrf_id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
         }
 
         // Refresh MRF to get updated values
@@ -1620,11 +1663,31 @@ class MRFWorkflowController extends Controller
                 'customTerms' => $mrf->custom_terms,
                 'po_terms_mode' => $mrf->po_terms_mode,
                 'poTermsMode' => $mrf->po_terms_mode,
+                'fast_tracked' => $fastTrack,
+                'fastTracked' => $fastTrack,
                 'priceComparisons' => $mrf->priceComparisons()->get(),
                 ],
                 'po_url' => $poStreamUrl,
+                'fast_tracked' => $fastTrack,
             ]
         ]);
+    }
+
+    /**
+     * Reads any of the accepted fast-track flag aliases from the request:
+     * fast_track, fastTrack, bypass_executive_review, bypassExecutiveReview.
+     * Used by the Procurement Overview "Purchase Order" tab to skip MRF
+     * approval workflow gates.
+     */
+    private function resolveFastTrackFlag(Request $request): bool
+    {
+        foreach (['fast_track', 'fastTrack', 'bypass_executive_review', 'bypassExecutiveReview'] as $key) {
+            if ($request->boolean($key)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -2434,7 +2497,7 @@ class MRFWorkflowController extends Controller
      * A subsequent call to generatePO without save_as_draft will finalise
      * the draft and clear po_draft_saved_at.
      */
-    private function savePOAsDraft(Request $request, MRF $mrf, $user)
+    private function savePOAsDraft(Request $request, MRF $mrf, $user, bool $fastTrack = false)
     {
         $validator = Validator::make($request->all(), [
             'po_number' => 'nullable|string|max:255',
@@ -2443,6 +2506,10 @@ class MRFWorkflowController extends Controller
             'po_special_terms' => 'nullable|string',
             'terms_mode' => 'nullable|in:standard,custom,both',
             'po_terms_mode' => 'nullable|in:standard,custom,both',
+            'fast_track' => 'nullable|boolean',
+            'fastTrack' => 'nullable|boolean',
+            'bypass_executive_review' => 'nullable|boolean',
+            'bypassExecutiveReview' => 'nullable|boolean',
             'ship_to_address' => 'nullable|string|max:1000',
             'tax_rate' => 'nullable|numeric|min:0|max:100',
             'tax_amount' => 'nullable|numeric|min:0',
@@ -2514,7 +2581,11 @@ class MRFWorkflowController extends Controller
         ]);
 
         try {
-            MRFApprovalHistory::record($mrf, 'saved_po_draft', 'procurement', $user, 'PO draft saved');
+            $draftRemark = 'PO draft saved';
+            if ($fastTrack) {
+                $draftRemark .= ' (fast-tracked from Procurement Overview, executive review bypassed)';
+            }
+            MRFApprovalHistory::record($mrf, 'saved_po_draft', 'procurement', $user, $draftRemark);
         } catch (\Throwable $e) {
             Log::warning('Failed to record PO draft approval history', [
                 'mrf_id' => $mrf->mrf_id,
@@ -2547,7 +2618,10 @@ class MRFWorkflowController extends Controller
                     'poTermsMode' => $mrf->po_terms_mode,
                     'invoice_submission_email' => $mrf->invoice_submission_email,
                     'invoice_submission_cc' => $mrf->invoice_submission_cc,
+                    'fast_tracked' => $fastTrack,
+                    'fastTracked' => $fastTrack,
                 ],
+                'fast_tracked' => $fastTrack,
             ],
         ]);
     }
