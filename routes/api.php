@@ -115,6 +115,7 @@ Route::post('/auth/vendor/change-password', [AuthController::class, 'forcePasswo
 Route::post('/vendors/auth/login', [VendorAuthController::class, 'login']);
 Route::post('/vendors/auth/password-reset', [VendorAuthController::class, 'requestPasswordReset']);
 Route::post('/vendors/auth/forgot-password', [VendorAuthController::class, 'requestPasswordReset']);
+Route::post('/vendors/auth/request-password-reset', [VendorAuthController::class, 'requestPasswordReset']);
 
 // ======================================
 // Backward-compatibility routes at /api/
