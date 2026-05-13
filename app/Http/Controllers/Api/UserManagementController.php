@@ -462,6 +462,55 @@ class UserManagementController extends Controller
     }
 
     /**
+     * Remove a user's signature image (self or user management).
+     */
+    public function deleteSignature(Request $request, int $id)
+    {
+        $actor = $request->user();
+        if (!$actor) {
+            return response()->json(['success' => false, 'error' => 'Unauthorized'], 401);
+        }
+
+        $isAdmin = $this->permissionService->canManageUsers($actor) || $actor->role === 'admin';
+        if (!$isAdmin && $actor->id !== $id) {
+            return response()->json([
+                'success' => false,
+                'error' => 'You are not authorised to remove this signature.',
+            ], 403);
+        }
+
+        $target = User::find($id);
+        if (!$target) {
+            return response()->json(['success' => false, 'error' => 'User not found'], 404);
+        }
+
+        $disk = config('filesystems.signatures_disk', env('SIGNATURES_DISK', 'public'));
+        $path = $target->signature_image_path;
+        if ($path) {
+            try {
+                \Storage::disk($disk)->delete($path);
+            } catch (\Throwable) {
+                // ignore
+            }
+        }
+        $target->update(['signature_image_path' => null]);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Signature removed.',
+            'data' => [
+                'user_id' => $target->id,
+                'signature_image_path' => null,
+                'signatureImagePath' => null,
+                'signature_url' => null,
+                'signatureUrl' => null,
+                'has_signature' => false,
+                'hasSignature' => false,
+            ],
+        ]);
+    }
+
+    /**
      * Delete user (admin only)
      */
     public function destroy(Request $request, $id)
