@@ -22,6 +22,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Log;
+use Carbon\Carbon;
 use Dompdf\Dompdf;
 use Dompdf\Options;
 
@@ -1180,6 +1181,8 @@ class MRFWorkflowController extends Controller
         }
 
         $fastTrack = $this->resolveFastTrackFlag($request);
+        $allowMissingRfq = $request->boolean('allow_missing_rfq');
+        $rfq = RFQ::where('mrf_id', $mrf->id)->with('items')->first();
 
         $saveAsDraft = $request->boolean('save_as_draft', false);
         if ($saveAsDraft) {
@@ -1191,7 +1194,8 @@ class MRFWorkflowController extends Controller
                 ], 422);
             }
 
-            $draftAllowed = $fastTrack
+            $draftLoose = $fastTrack || ($allowMissingRfq && ! $rfq);
+            $draftAllowed = $draftLoose
                 ? $this->permissionService->canFastTrackPO($user, $mrf)
                 : $this->permissionService->canSavePODraft($user, $mrf);
 
@@ -1202,6 +1206,7 @@ class MRFWorkflowController extends Controller
                     'code' => 'FORBIDDEN',
                     'data' => [
                         'fast_track' => $fastTrack,
+                        'allow_missing_rfq' => $allowMissingRfq,
                         'mrf_status' => $mrf->status,
                         'mrf_workflow_state' => $mrf->workflow_state,
                     ],
@@ -1211,11 +1216,11 @@ class MRFWorkflowController extends Controller
             return $this->savePOAsDraft($request, $mrf, $user, $fastTrack);
         }
 
-        // PO generation IS the route-for-approval action; it sets status=awaiting_scd_signature
-        // and lets SCD sign. We rely on PermissionService::canGeneratePO for the full gate
-        // (procurement role + vendor selected + PO not already signed) instead of re-imposing
-        // a strict RFQ.workflow_state==='approved' prerequisite that the UI does not produce.
-        $generationAllowed = $fastTrack
+        // Final PO generation: normal path uses canGeneratePO (RFQ + workflow).
+        // Fast-track or explicit allow_missing_rfq with no RFQ uses the loose gate and
+        // may build a synthetic PDF dataset from price comparisons / MRF lines.
+        $generationLoose = $fastTrack || ($allowMissingRfq && ! $rfq);
+        $generationAllowed = $generationLoose
             ? $this->permissionService->canFastTrackPO($user, $mrf)
             : $this->permissionService->canGeneratePO($user, $mrf);
 
@@ -1226,19 +1231,11 @@ class MRFWorkflowController extends Controller
                 'code' => 'FORBIDDEN',
                 'data' => [
                     'fast_track' => $fastTrack,
+                    'allow_missing_rfq' => $allowMissingRfq,
                     'mrf_status' => $mrf->status,
                     'mrf_workflow_state' => $mrf->workflow_state,
                 ],
             ], 403);
-        }
-
-        $rfq = \App\Models\RFQ::where('mrf_id', $mrf->id)->with('items')->first();
-        if (! $rfq) {
-            return response()->json([
-                'success' => false,
-                'error' => 'RFQ not found for this MRF. Please create an RFQ first.',
-                'code' => 'NOT_FOUND',
-            ], 404);
         }
 
         $hasExistingPO = ! empty(trim($mrf->po_number ?? '')) || ! empty(trim($mrf->unsigned_po_url ?? ''));
@@ -1282,6 +1279,7 @@ class MRFWorkflowController extends Controller
             'fastTrack' => 'nullable|boolean',
             'bypass_executive_review' => 'nullable|boolean',
             'bypassExecutiveReview' => 'nullable|boolean',
+            'allow_missing_rfq' => 'nullable|boolean',
         ]);
 
         if ($validator->fails()) {
@@ -1308,6 +1306,7 @@ class MRFWorkflowController extends Controller
             'fastTrack' => 'nullable|boolean',
             'bypass_executive_review' => 'nullable|boolean',
             'bypassExecutiveReview' => 'nullable|boolean',
+            'allow_missing_rfq' => 'nullable|boolean',
             ]);
 
         if ($validator->fails()) {
@@ -1393,8 +1392,8 @@ class MRFWorkflowController extends Controller
             }
         } else {
             // Mode 2: Auto-Generation
-            // Fetch all required data for PO generation
-            $poData = $this->fetchPOData($mrf, $rfq);
+            // Fetch all required data for PO generation (RFQ-backed or synthetic)
+            $poData = $this->resolvePoGenerationPayload($mrf, $rfq, $request, $fastTrack, $allowMissingRfq);
 
             if (!$poData['success']) {
             return response()->json([
@@ -1565,6 +1564,9 @@ class MRFWorkflowController extends Controller
         if ($fastTrack) {
             $remarks .= ' (fast-tracked from Procurement Overview, executive review bypassed)';
         }
+        if (! $rfq) {
+            $remarks .= ' (synthetic PO dataset — no RFQ on record; built from price comparison / MRF lines / request defaults)';
+        }
         MRFApprovalHistory::record($mrf, $action, 'procurement', $user, $remarks);
 
         if ($fastTrack) {
@@ -1668,10 +1670,13 @@ class MRFWorkflowController extends Controller
                 'poTermsMode' => $mrf->po_terms_mode,
                 'fast_tracked' => $fastTrack,
                 'fastTracked' => $fastTrack,
+                'synthetic_po' => ! $rfq && ($fastTrack || $allowMissingRfq),
+                'syntheticPo' => ! $rfq && ($fastTrack || $allowMissingRfq),
                 'priceComparisons' => $mrf->priceComparisons()->get(),
                 ],
                 'po_url' => $poStreamUrl,
                 'fast_tracked' => $fastTrack,
+                'synthetic_po' => ! $rfq && ($fastTrack || $allowMissingRfq),
             ]
         ]);
     }
@@ -1856,12 +1861,9 @@ class MRFWorkflowController extends Controller
         }
 
         $rfq = RFQ::where('mrf_id', $mrf->id)->with('items')->first();
-        if (!$rfq) {
-            return response()->json(['success' => false, 'error' => 'RFQ not found for this PO.'], 404);
-        }
-        $poData = $this->fetchPOData($mrf, $rfq);
-        if (!$poData['success']) {
-            return response()->json(['success' => false, 'error' => $poData['error'] ?? 'Unable to prepare PO data'], 422);
+        $poData = $this->resolvePoGenerationPayload($mrf, $rfq, $request, true, true);
+        if (! $poData['success']) {
+            return response()->json(['success' => false, 'error' => $poData['error'] ?? 'Unable to prepare PO data'], $poData['status'] ?? 422);
         }
         $sigDiskName = config('filesystems.signatures_disk', env('SIGNATURES_DISK', 'public'));
         $sigDisk = Storage::disk($sigDiskName);
@@ -2513,6 +2515,7 @@ class MRFWorkflowController extends Controller
             'fastTrack' => 'nullable|boolean',
             'bypass_executive_review' => 'nullable|boolean',
             'bypassExecutiveReview' => 'nullable|boolean',
+            'allow_missing_rfq' => 'nullable|boolean',
             'ship_to_address' => 'nullable|string|max:1000',
             'tax_rate' => 'nullable|numeric|min:0|max:100',
             'tax_amount' => 'nullable|numeric|min:0',
@@ -2671,6 +2674,224 @@ class MRFWorkflowController extends Controller
         }
 
         return $poNumber;
+    }
+
+    /**
+     * Prefer RFQ-backed PO data; when there is no RFQ, build a synthetic payload
+     * only when fast_track or allow_missing_rfq is set (Procurement Overview flows).
+     *
+     * @return array{success: bool, data?: array<string, mixed>, error?: string, code?: string, status?: int}
+     */
+    private function resolvePoGenerationPayload(MRF $mrf, ?RFQ $rfq, Request $request, bool $fastTrack, bool $allowMissingRfq): array
+    {
+        if ($rfq) {
+            return $this->fetchPOData($mrf, $rfq);
+        }
+
+        if ($fastTrack || $allowMissingRfq) {
+            return $this->buildSyntheticPoPayload($mrf, $request);
+        }
+
+        return [
+            'success' => false,
+            'error' => 'RFQ not found for this MRF. Create an RFQ first, or call with fast_track=true or allow_missing_rfq=true to generate from MRF / price comparison data only.',
+            'code' => 'RFQ_NOT_FOUND',
+            'status' => 404,
+        ];
+    }
+
+    /**
+     * Build PO PDF payload without an RFQ or quotation record (Procurement Overview / emergency path).
+     *
+     * @return array{success: bool, data?: array<string, mixed>, error?: string, code?: string, status?: int}
+     */
+    private function buildSyntheticPoPayload(MRF $mrf, Request $request): array
+    {
+        $vendor = null;
+        foreach (['vendor_id', 'synthetic_vendor_id'] as $key) {
+            $vid = $request->input($key);
+            if ($vid !== null && $vid !== '' && is_numeric($vid)) {
+                $vendor = Vendor::query()->find((int) $vid);
+                if ($vendor) {
+                    break;
+                }
+            }
+        }
+        if (! $vendor) {
+            $ext = $request->input('vendor_uuid') ?? $request->input('vendorUuid');
+            if (is_string($ext) && trim($ext) !== '') {
+                $vendor = Vendor::query()->where('vendor_id', trim($ext))->first();
+            }
+        }
+        if (! $vendor && $mrf->selected_vendor_id) {
+            $vendor = Vendor::query()->find($mrf->selected_vendor_id);
+        }
+
+        $rows = $mrf->priceComparisons()->orderByDesc('is_selected')->orderBy('id')->get();
+        if ($vendor && $rows->isNotEmpty()) {
+            $forVendor = $rows->where('vendor_id', $vendor->id)->values();
+            if ($forVendor->isNotEmpty()) {
+                $rows = $forVendor;
+            }
+        } elseif (! $vendor && $rows->isNotEmpty()) {
+            $firstVid = $rows->first()->vendor_id;
+            $vendor = Vendor::query()->find($firstVid);
+            $rows = $rows->where('vendor_id', $firstVid)->values();
+        }
+
+        $items = collect();
+        if ($rows->isNotEmpty()) {
+            $items = $rows->map(function ($r) {
+                $qty = max(1.0, (float) ($r->quantity ?? 1));
+                $unit = (float) ($r->unit_price ?? 0);
+                $total = (float) ($r->total_price ?? ($unit * $qty));
+
+                return (object) [
+                    'item_name' => $r->item_description ?: 'Item',
+                    'description' => '',
+                    'quantity' => $qty,
+                    'unit' => 'unit',
+                    'unit_price' => $unit,
+                    'total_price' => $total,
+                    'specifications' => '',
+                ];
+            });
+        }
+
+        if ($items->isEmpty()) {
+            $mrf->load('items');
+            foreach ($mrf->items as $it) {
+                $items->push((object) [
+                    'item_name' => $it->item_name ?? 'Item',
+                    'description' => $it->description ?? '',
+                    'quantity' => max(1, (int) ($it->quantity ?? 1)),
+                    'unit' => $it->unit ?? 'unit',
+                    'unit_price' => (float) ($it->unit_price ?? 0),
+                    'total_price' => (float) ($it->total_price ?? (($it->unit_price ?? 0) * max(1, $it->quantity ?? 1))),
+                    'specifications' => $it->specifications ?? '',
+                ]);
+            }
+        }
+
+        if ($items->isEmpty()) {
+            $qty = max(1, (int) ($mrf->quantity ?? 1));
+            $est = (float) ($mrf->estimated_cost ?? 0);
+            $unit = $qty > 0 ? $est / $qty : $est;
+            $items->push((object) [
+                'item_name' => $mrf->title ?: 'Goods / services',
+                'description' => (string) ($mrf->description ?? ''),
+                'quantity' => $qty,
+                'unit' => 'unit',
+                'unit_price' => $unit,
+                'total_price' => $est,
+                'specifications' => '',
+            ]);
+        }
+
+        $currency = (string) ($mrf->currency ?? 'NGN');
+        $total = $items->sum(static fn ($o) => (float) ($o->total_price ?? 0));
+
+        $paymentTerms = (string) ($request->input('payment_terms') ?? $request->input('paymentTerms') ?? '30 days after invoice submission.');
+        $validityDays = (int) ($request->input('validity_days', $request->input('validityDays', 30)));
+        $warranty = $request->input('warranty_period', $request->input('warrantyPeriod'));
+
+        $deliveryDate = null;
+        foreach (['delivery_date', 'deliveryDate'] as $dk) {
+            $raw = $request->input($dk);
+            if (is_string($raw) && trim($raw) !== '') {
+                try {
+                    $deliveryDate = Carbon::parse($raw);
+                    break;
+                } catch (\Throwable) {
+                }
+            }
+        }
+
+        $deliveryDays = $request->input('delivery_days', $request->input('deliveryDays'));
+
+        $vendorBlock = $vendor ? [
+            'name' => (string) $vendor->name,
+            'contact_person' => (string) ($vendor->contact_person ?? ''),
+            'email' => (string) ($vendor->email ?? ''),
+            'phone' => (string) ($vendor->phone ?? ''),
+            'address' => (string) ($vendor->address ?? ''),
+            'tax_id' => (string) ($vendor->tax_id ?? ''),
+        ] : [
+            'name' => (string) ($request->input('vendor_name') ?? $request->input('supplier_name') ?? 'Supplier (pending confirmation)'),
+            'contact_person' => '',
+            'email' => (string) ($request->input('vendor_email') ?? ''),
+            'phone' => (string) ($request->input('vendor_phone') ?? ''),
+            'address' => (string) ($request->input('vendor_address') ?? ''),
+            'tax_id' => '',
+        ];
+
+        $companyName = env('COMPANY_NAME', config('app.name', 'Emerald Industrial Co. FZE'));
+        $companyAddress = env('COMPANY_ADDRESS', '');
+        $companyPhone = env('COMPANY_PHONE', '');
+        $companyEmail = env('COMPANY_EMAIL', config('mail.from.address', ''));
+        $companyTaxId = env('COMPANY_TAX_ID', '');
+        $companyWebsite = env('COMPANY_WEBSITE', 'https://emeraldcfze.com/');
+
+        $formattedItems = $items->map(function ($item) {
+            return [
+                'name' => $item->item_name ?? 'Item',
+                'item_name' => $item->item_name ?? 'Item',
+                'description' => $item->description ?? '',
+                'quantity' => $item->quantity ?? 1,
+                'unit' => $item->unit ?? 'unit',
+                'unit_price' => (float) ($item->unit_price ?? 0),
+                'total_price' => (float) ($item->total_price ?? 0),
+                'specifications' => $item->specifications ?? '',
+            ];
+        });
+
+        Log::info('Built synthetic PO payload (no RFQ)', [
+            'mrf_id' => $mrf->mrf_id,
+            'vendor_resolved' => (bool) $vendor,
+            'line_count' => $formattedItems->count(),
+            'total' => $total,
+        ]);
+
+        return [
+            'success' => true,
+            'data' => [
+                'mrf' => [
+                    'id' => $mrf->mrf_id,
+                    'title' => $mrf->title,
+                    'description' => $mrf->description,
+                    'justification' => $mrf->justification,
+                    'requester_name' => $mrf->requester_name,
+                    'department' => $mrf->department,
+                    'estimated_cost' => $mrf->estimated_cost,
+                    'currency' => $currency,
+                    'date' => $mrf->date ?? $mrf->created_at,
+                ],
+                'rfq' => [
+                    'id' => $mrf->mrf_id . '-SYN-RFQ',
+                    'title' => (string) ($mrf->title ?? 'Requisition'),
+                ],
+                'quotation' => [
+                    'id' => 'SYN-QUOTE',
+                    'total_amount' => $total,
+                    'currency' => $currency,
+                    'delivery_days' => $deliveryDays,
+                    'delivery_date' => $deliveryDate,
+                    'payment_terms' => $paymentTerms,
+                    'validity_days' => $validityDays,
+                    'warranty_period' => $warranty,
+                ],
+                'vendor' => $vendorBlock,
+                'items' => $formattedItems->toArray(),
+                'company' => [
+                    'name' => $companyName,
+                    'address' => $companyAddress,
+                    'phone' => $companyPhone,
+                    'email' => $companyEmail,
+                    'tax_id' => $companyTaxId,
+                    'website' => $companyWebsite,
+                ],
+            ],
+        ];
     }
 
     /**
