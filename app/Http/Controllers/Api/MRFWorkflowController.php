@@ -103,7 +103,7 @@ class MRFWorkflowController extends Controller
             ], 403);
         }
 
-        $mrf = MRF::where('mrf_id', $id)->first();
+        $mrf = $this->findMrfByAnyId((string) $id);
 
         if (!$mrf) {
             return response()->json([
@@ -228,7 +228,7 @@ class MRFWorkflowController extends Controller
             ], 403);
         }
 
-        $mrf = MRF::where('mrf_id', $id)->first();
+        $mrf = $this->findMrfByAnyId((string) $id);
 
         if (!$mrf) {
             return response()->json([
@@ -696,7 +696,7 @@ class MRFWorkflowController extends Controller
             ], 403);
         }
 
-        $mrf = MRF::where('mrf_id', $id)->first();
+        $mrf = $this->findMrfByAnyId((string) $id);
 
         if (!$mrf) {
             return response()->json([
@@ -811,7 +811,7 @@ class MRFWorkflowController extends Controller
             ], 403);
         }
 
-        $mrf = MRF::where('mrf_id', $id)->first();
+        $mrf = $this->findMrfByAnyId((string) $id);
 
         if (!$mrf) {
             return response()->json([
@@ -910,7 +910,7 @@ class MRFWorkflowController extends Controller
             ], 403);
         }
 
-        $mrf = MRF::where('mrf_id', $id)->first();
+        $mrf = $this->findMrfByAnyId((string) $id);
 
         if (!$mrf) {
             return response()->json([
@@ -1075,7 +1075,7 @@ class MRFWorkflowController extends Controller
             ], 403);
         }
 
-        $mrf = MRF::where('mrf_id', $id)->first();
+        $mrf = $this->findMrfByAnyId((string) $id);
 
         if (!$mrf) {
             return response()->json([
@@ -1166,7 +1166,7 @@ class MRFWorkflowController extends Controller
             ], 403);
         }
 
-        $mrf = MRF::where('mrf_id', $id)->with('items')->first();
+        $mrf = $this->findMrfByAnyId((string) $id, ['items']);
 
         if (!$mrf) {
             return response()->json([
@@ -1672,7 +1672,7 @@ class MRFWorkflowController extends Controller
             ], 403);
         }
 
-        $mrf = MRF::where('mrf_id', $id)->first();
+        $mrf = $this->findMrfByAnyId((string) $id);
 
         if (!$mrf) {
             return response()->json([
@@ -1866,7 +1866,7 @@ class MRFWorkflowController extends Controller
             ], 403);
         }
 
-        $mrf = MRF::where('mrf_id', $id)->first();
+        $mrf = $this->findMrfByAnyId((string) $id);
 
         if (!$mrf) {
             return response()->json([
@@ -1956,7 +1956,7 @@ class MRFWorkflowController extends Controller
             ], 403);
         }
 
-        $mrf = MRF::where('mrf_id', $id)->first();
+        $mrf = $this->findMrfByAnyId((string) $id);
 
         if (!$mrf) {
             return response()->json([
@@ -2015,7 +2015,7 @@ class MRFWorkflowController extends Controller
             ], 403);
         }
 
-        $mrf = MRF::where('mrf_id', $id)->first();
+        $mrf = $this->findMrfByAnyId((string) $id);
 
         if (!$mrf) {
             return response()->json([
@@ -2077,7 +2077,7 @@ class MRFWorkflowController extends Controller
             ], 403);
         }
 
-        $mrf = MRF::where('mrf_id', $id)->first();
+        $mrf = $this->findMrfByAnyId((string) $id);
 
         if (!$mrf) {
             return response()->json([
@@ -2176,7 +2176,7 @@ class MRFWorkflowController extends Controller
 
         $isAdmin = ($userRole === 'admin');
 
-        $mrf = MRF::where('mrf_id', $id)->first();
+        $mrf = $this->findMrfByAnyId((string) $id);
 
         if (!$mrf) {
             return response()->json([
@@ -2878,5 +2878,24 @@ class MRFWorkflowController extends Controller
         $dompdf->render();
 
         return $dompdf->output();
+    }
+
+    /**
+     * Resolve route {id} to an MRF using legacy mrf_id, formatted_id, or numeric primary key.
+     */
+    private function findMrfByAnyId(string $id, array $with = []): ?MRF
+    {
+        $query = MRF::query()->where(function ($q) use ($id) {
+            $q->where('mrf_id', $id)->orWhere('formatted_id', $id);
+            if ($id !== '' && is_numeric((string) $id)) {
+                $q->orWhere('id', (int) $id);
+            }
+        });
+
+        if ($with !== []) {
+            $query->with($with);
+        }
+
+        return $query->first();
     }
 }
