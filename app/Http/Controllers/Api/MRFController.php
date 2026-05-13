@@ -5,7 +5,9 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\MRF;
 use App\Models\Activity;
+use App\Models\RFQ;
 use App\Models\SRF;
+use App\Models\Vendor;
 use App\Models\Logistics\VehicleMaintenance;
 use App\Support\LogisticsMrfRouting;
 use App\Services\NotificationService;
@@ -2455,15 +2457,76 @@ class MRFController extends Controller
      */
     private function generatePOPDFFromMRF(MRF $mrf): string
     {
-        // Load relationships
         $mrf->load(['requester', 'items']);
 
-        // Get RFQ and quotation data (r_f_q_s.mrf_id is FK to m_r_f_s.id, not the string mrf_id)
-        $rfq = \App\Models\RFQ::where('mrf_id', $mrf->id)->first();
-        if (!$rfq) {
-            throw new \Exception('RFQ not found for this MRF');
+        $rfq = RFQ::where('mrf_id', $mrf->id)->first();
+        if ($rfq) {
+            [$items, $currency, $paymentTerms, $vendorPdf] = $this->resolveUnsignedPoStreamContextFromRfq($mrf, $rfq);
+        } else {
+            [$items, $currency, $paymentTerms, $vendorPdf] = $this->resolveUnsignedPoStreamContextWithoutRfq($mrf);
         }
 
+        if ($items->isEmpty()) {
+            throw new \Exception('No items found for PO generation');
+        }
+
+        $company = [
+            'name'    => env('COMPANY_NAME', 'Emerald Industrial Co. CFZE'),
+            'address' => env('COMPANY_ADDRESS', 'Plot A10, Calabar Free Trade Zone, Calabar, Cross River 540001 NG'),
+            'email'   => env('COMPANY_EMAIL', 'temitope.lawal@emeraldcfze.com'),
+            'phone'   => env('COMPANY_PHONE', ''),
+            'tax_id'  => env('COMPANY_TAX_ID', ''),
+            'website' => env('COMPANY_WEBSITE', 'https://emeraldcfze.com/'),
+        ];
+
+        $shipToAddress = $mrf->ship_to_address ?? config('app.ship_to_address', 'Sapetro Towers, Victoria Island, Lagos, Lagos 100001 NGA');
+
+        $poDate = $mrf->po_generated_at ? \Carbon\Carbon::parse($mrf->po_generated_at)->format('d/m/Y') : now()->format('d/m/Y');
+
+        $subtotal = 0;
+        foreach ($items as $item) {
+            $unitPrice = $item->unit_price ?? ($item->total_price ?? 0) / ($item->quantity ?? 1);
+            $itemTotal = ($unitPrice * ($item->quantity ?? 1));
+            $subtotal += $itemTotal;
+        }
+
+        $taxRate = $mrf->tax_rate ?? 0;
+        $tax = $mrf->tax_amount ?? 0;
+
+        if ($tax == 0 && $taxRate > 0) {
+            $tax = ($subtotal * $taxRate) / 100;
+        }
+
+        $total = $subtotal + $tax;
+
+        $html = app(PurchaseOrderPdfService::class)->htmlFromMrf([
+            'po_number' => $mrf->po_number,
+            'po_date' => $poDate,
+            'company' => $company,
+            'vendor' => $vendorPdf,
+            'ship_to' => $shipToAddress,
+            'items' => $items,
+            'subtotal' => $subtotal,
+            'tax' => $tax,
+            'tax_rate' => $taxRate,
+            'total' => $total,
+            'currency' => $currency,
+            'payment_terms' => $paymentTerms,
+            'invoice_submission_email' => $mrf->invoice_submission_email ?? config('scm.invoice_submission_email'),
+            'invoice_submission_cc' => $mrf->invoice_submission_cc ?? config('scm.invoice_submission_cc'),
+            'special_terms' => $mrf->po_special_terms,
+            'mrf_department' => $mrf->department,
+            'mrf_display_id' => $mrf->formatted_id ?: $mrf->mrf_id,
+        ]);
+
+        return $this->renderPurchaseOrderDompdf($html);
+    }
+
+    /**
+     * @return array{0: \Illuminate\Support\Collection, 1: string, 2: string, 3: array<string, string>}
+     */
+    private function resolveUnsignedPoStreamContextFromRfq(MRF $mrf, RFQ $rfq): array
+    {
         $quotation = null;
         if ($rfq->selected_quotation_id) {
             $quotation = \App\Models\Quotation::where('id', $rfq->selected_quotation_id)
@@ -2485,7 +2548,6 @@ class MRFController extends Controller
 
         $vendor = $quotation->vendor;
 
-        // Get items from quotation_items, RFQ items, or MRF items
         $items = \App\Models\QuotationItem::where('quotation_id', $quotation->id)->get();
 
         if ($items->isEmpty()) {
@@ -2497,81 +2559,129 @@ class MRFController extends Controller
             $items = $mrf->items;
         }
 
-        if ($items->isEmpty()) {
-            throw new \Exception('No items found for PO generation');
-        }
-
-        // Company information (from config or default)
-        $company = [
-            'name'    => env('COMPANY_NAME', 'Emerald Industrial Co. CFZE'),
-            'address' => env('COMPANY_ADDRESS', 'Plot A10, Calabar Free Trade Zone, Calabar, Cross River 540001 NG'),
-            'email'   => env('COMPANY_EMAIL', 'temitope.lawal@emeraldcfze.com'),
-            'phone'   => env('COMPANY_PHONE', ''),
-            'tax_id'  => env('COMPANY_TAX_ID', ''),
-            'website' => env('COMPANY_WEBSITE', 'https://emeraldcfze.com/'),
+        $vendorAddress = (string) ($vendor->address ?? '');
+        $vendorPdf = [
+            'name' => $vendor->vendor_name ?? $vendor->name ?? 'N/A',
+            'address' => $vendorAddress,
+            'contact_person' => $vendor->contact_person ?? '',
+            'phone' => $vendor->phone ?? '',
+            'email' => $vendor->email ?? '',
+            'tax_id' => $vendor->tax_id ?? '',
         ];
 
-        // Ship to address (use MRF field or fallback to config)
-        $shipToAddress = $mrf->ship_to_address ?? config('app.ship_to_address', 'Sapetro Towers, Victoria Island, Lagos, Lagos 100001 NGA');
-
-        // Format date
-        $poDate = $mrf->po_generated_at ? \Carbon\Carbon::parse($mrf->po_generated_at)->format('d/m/Y') : now()->format('d/m/Y');
-
-        // Build vendor address
-        $vendorAddress = '';
-        if (!empty($vendor->address)) {
-            $vendorAddress = $vendor->address;
-        }
-
-        // Calculate totals
-        $subtotal = 0;
         $currency = $quotation->currency ?? 'NGN';
+        $paymentTerms = $quotation->payment_terms ?? '30days after invoice submission.';
 
-        foreach ($items as $item) {
-            $unitPrice = $item->unit_price ?? ($item->total_price ?? 0) / ($item->quantity ?? 1);
-            $itemTotal = ($unitPrice * ($item->quantity ?? 1));
-            $subtotal += $itemTotal;
+        return [$items, $currency, $paymentTerms, $vendorPdf];
+    }
+
+    /**
+     * Same source order as {@see \App\Http\Controllers\Api\MRFWorkflowController::buildSyntheticPoPayload}
+     * so on-the-fly PO PDF matches POs generated with fast_track / allow_missing_rfq.
+     *
+     * @return array{0: \Illuminate\Support\Collection, 1: string, 2: string, 3: array<string, string>}
+     */
+    private function resolveUnsignedPoStreamContextWithoutRfq(MRF $mrf): array
+    {
+        $vendorModel = null;
+        if ($mrf->selected_vendor_id) {
+            $vendorModel = Vendor::query()->find($mrf->selected_vendor_id);
         }
 
-        // Calculate tax (use MRF tax_amount if set, otherwise calculate from tax_rate)
-        $taxRate = $mrf->tax_rate ?? 0;
-        $tax = $mrf->tax_amount ?? 0;
-
-        // If tax_amount is not set but tax_rate is, calculate it
-        if ($tax == 0 && $taxRate > 0) {
-            $tax = ($subtotal * $taxRate) / 100;
+        $rows = $mrf->priceComparisons()->orderByDesc('is_selected')->orderBy('id')->get();
+        if ($vendorModel && $rows->isNotEmpty()) {
+            $forVendor = $rows->where('vendor_id', $vendorModel->id)->values();
+            if ($forVendor->isNotEmpty()) {
+                $rows = $forVendor;
+            }
+        } elseif (! $vendorModel && $rows->isNotEmpty()) {
+            $firstVid = $rows->first()->vendor_id;
+            $vendorModel = Vendor::query()->find($firstVid);
+            $rows = $rows->where('vendor_id', $firstVid)->values();
         }
 
-        $total = $subtotal + $tax;
+        $items = collect();
+        if ($rows->isNotEmpty()) {
+            $items = $rows->map(function ($r) {
+                $qty = max(1.0, (float) ($r->quantity ?? 1));
+                $unit = (float) ($r->unit_price ?? 0);
+                $total = (float) ($r->total_price ?? ($unit * $qty));
 
-        $html = app(PurchaseOrderPdfService::class)->htmlFromMrf([
-            'po_number' => $mrf->po_number,
-            'po_date' => $poDate,
-            'company' => $company,
-            'vendor' => [
-                'name' => $vendor->vendor_name ?? $vendor->name ?? 'N/A',
-                'address' => $vendorAddress,
-                'contact_person' => $vendor->contact_person ?? '',
-                'phone' => $vendor->phone ?? '',
-                'email' => $vendor->email ?? '',
-                'tax_id' => $vendor->tax_id ?? '',
-            ],
-            'ship_to' => $shipToAddress,
-            'items' => $items,
-            'subtotal' => $subtotal,
-            'tax' => $tax,
-            'tax_rate' => $taxRate,
-            'total' => $total,
-            'currency' => $currency,
-            'payment_terms' => $quotation->payment_terms ?? '30days after invoice submission.',
-            'invoice_submission_email' => $mrf->invoice_submission_email ?? config('scm.invoice_submission_email'),
-            'invoice_submission_cc' => $mrf->invoice_submission_cc ?? config('scm.invoice_submission_cc'),
-            'special_terms' => $mrf->po_special_terms,
-            'mrf_department' => $mrf->department,
-            'mrf_display_id' => $mrf->formatted_id ?: $mrf->mrf_id,
+                return (object) [
+                    'item_name' => $r->item_description ?: 'Item',
+                    'description' => '',
+                    'quantity' => $qty,
+                    'unit' => 'unit',
+                    'unit_price' => $unit,
+                    'total_price' => $total,
+                    'specifications' => '',
+                ];
+            });
+        }
+
+        if ($items->isEmpty()) {
+            foreach ($mrf->items as $it) {
+                $items->push((object) [
+                    'item_name' => $it->item_name ?? 'Item',
+                    'description' => $it->description ?? '',
+                    'quantity' => max(1, (int) ($it->quantity ?? 1)),
+                    'unit' => $it->unit ?? 'unit',
+                    'unit_price' => (float) ($it->unit_price ?? 0),
+                    'total_price' => (float) ($it->total_price ?? (($it->unit_price ?? 0) * max(1, $it->quantity ?? 1))),
+                    'specifications' => $it->specifications ?? '',
+                ]);
+            }
+        }
+
+        if ($items->isEmpty()) {
+            $qty = max(1, (int) ($mrf->quantity ?? 1));
+            $est = (float) ($mrf->estimated_cost ?? 0);
+            $unit = $qty > 0 ? $est / $qty : $est;
+            $items->push((object) [
+                'item_name' => $mrf->title ?: 'Goods / services',
+                'description' => (string) ($mrf->description ?? ''),
+                'quantity' => $qty,
+                'unit' => 'unit',
+                'unit_price' => $unit,
+                'total_price' => $est,
+                'specifications' => '',
+            ]);
+        }
+
+        $currency = (string) ($mrf->currency ?? 'NGN');
+        $paymentTerms = '30 days after invoice submission.';
+
+        if ($vendorModel) {
+            $vendorPdf = [
+                'name' => (string) ($vendorModel->vendor_name ?? $vendorModel->name ?? 'N/A'),
+                'address' => (string) ($vendorModel->address ?? ''),
+                'contact_person' => (string) ($vendorModel->contact_person ?? ''),
+                'phone' => (string) ($vendorModel->phone ?? ''),
+                'email' => (string) ($vendorModel->email ?? ''),
+                'tax_id' => (string) ($vendorModel->tax_id ?? ''),
+            ];
+        } else {
+            $vendorPdf = [
+                'name' => 'Supplier (pending confirmation)',
+                'address' => '',
+                'contact_person' => '',
+                'phone' => '',
+                'email' => '',
+                'tax_id' => '',
+            ];
+        }
+
+        Log::info('Unsigned PO PDF: built context without RFQ row', [
+            'mrf_numeric_id' => $mrf->id,
+            'mrf_display_id' => $mrf->mrf_id,
+            'line_count' => $items->count(),
         ]);
 
-        // Generate PDF using dompdf
+        return [$items, $currency, $paymentTerms, $vendorPdf];
+    }
+
+    private function renderPurchaseOrderDompdf(string $html): string
+    {
         $options = new Options();
         $options->set('isHtml5ParserEnabled', true);
         $options->set('isRemoteEnabled', true);
