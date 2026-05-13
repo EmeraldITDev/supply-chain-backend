@@ -1197,88 +1197,42 @@ class MRFWorkflowController extends Controller
             return $this->savePOAsDraft($request, $mrf, $user);
         }
 
-        // Check permissions using PermissionService (includes RFQ approval check)
-        if (!$this->permissionService->canGeneratePO($user, $mrf)) {
+        // PO generation IS the route-for-approval action; it sets status=awaiting_scd_signature
+        // and lets SCD sign. We rely on PermissionService::canGeneratePO for the full gate
+        // (procurement role + vendor selected + PO not already signed) instead of re-imposing
+        // a strict RFQ.workflow_state==='approved' prerequisite that the UI does not produce.
+        if (! $this->permissionService->canGeneratePO($user, $mrf)) {
             return response()->json([
                 'success' => false,
-                'error' => 'PO generation not allowed at this stage. RFQ must be approved by Supply Chain Director first.',
-                'code' => 'FORBIDDEN'
+                'error' => 'PO generation not allowed for this MRF at the current stage.',
+                'code' => 'FORBIDDEN',
+                'data' => [
+                    'mrf_status' => $mrf->status,
+                    'mrf_workflow_state' => $mrf->workflow_state,
+                ],
             ], 403);
         }
 
-        // Verify RFQ is approved - load with items relationship
         $rfq = \App\Models\RFQ::where('mrf_id', $mrf->id)->with('items')->first();
-        if (!$rfq) {
+        if (! $rfq) {
             return response()->json([
                 'success' => false,
                 'error' => 'RFQ not found for this MRF. Please create an RFQ first.',
-                'code' => 'NOT_FOUND'
+                'code' => 'NOT_FOUND',
             ], 404);
         }
 
-        if ($rfq->workflow_state !== 'approved') {
-            return response()->json([
-                'success' => false,
-                'error' => 'RFQ must be approved by Supply Chain Director before generating PO. Current RFQ status: ' . ($rfq->workflow_state ?? 'unknown'),
-                'code' => 'RFQ_NOT_APPROVED',
-                'data' => [
-                    'rfq_id' => $rfq->rfq_id,
-                    'rfq_workflow_state' => $rfq->workflow_state,
-                ]
-            ], 400);
-        }
-
-        // Check if MRF is in procurement status (allow both 'procurement', 'pending_po_upload', and rejected PO statuses)
-        // Use case-insensitive comparison
-        $statusLower = strtolower(trim($mrf->status ?? ''));
-        $allowedStatuses = ['procurement', 'pending_po_upload', 'po rejected', 'pending', 'revision_required'];
-
-        // Special case: If MRF is in pending_po_upload status, this is the expected flow after SCD approval
-        if ($statusLower === 'pending_po_upload') {
-            // Verify RFQ is approved (SCD must have approved)
-            if ($rfq && $rfq->workflow_state !== 'approved') {
-                return response()->json([
-                    'success' => false,
-                    'error' => 'RFQ must be approved by Supply Chain Director before PO can be generated. Current RFQ status: ' . ($rfq->workflow_state ?? 'unknown'),
-                    'code' => 'RFQ_NOT_APPROVED',
-                ], 400);
-            }
-        }
-
-        // Also check if MRF has no PO yet (can always generate first PO)
-        $hasExistingPO = !empty(trim($mrf->po_number ?? '')) || !empty(trim($mrf->unsigned_po_url ?? ''));
-
-        if (!in_array($statusLower, $allowedStatuses) && $hasExistingPO) {
-            // Allow admin to generate PO from any status if no PO exists yet
-            $isAdmin = in_array(strtolower($user->role ?? ''), ['admin']);
-
-            if (!$isAdmin) {
-                return response()->json([
-                    'success' => false,
-                    'error' => 'MRF is not in procurement stage. Current status: ' . $mrf->status,
-                    'code' => 'INVALID_STATUS',
-                    'current_status' => $mrf->status,
-                    'current_stage' => $mrf->current_stage,
-                    'has_existing_po' => $hasExistingPO
-                ], 422);
-            }
-        }
-
-        // Allow PO regeneration if:
-        // 1. MRF was rejected (PO Rejected status), OR
-        // 2. PO already exists but is unsigned (supply_chain status - can regenerate), OR
-        // 3. PO exists but not signed (supply_chain stage)
-        $hasExistingPO = !empty(trim($mrf->po_number ?? '')) || !empty(trim($mrf->unsigned_po_url ?? ''));
-        $hasSignedPO = !empty(trim($mrf->signed_po_url ?? ''));
+        $hasExistingPO = ! empty(trim($mrf->po_number ?? '')) || ! empty(trim($mrf->unsigned_po_url ?? ''));
+        $hasSignedPO = ! empty(trim($mrf->signed_po_url ?? ''));
         $statusLower = strtolower(trim($mrf->status ?? ''));
         $stageLower = strtolower(trim($mrf->current_stage ?? ''));
 
-        $isRegeneration = ($hasExistingPO && $statusLower === 'po rejected') ||
-                         ($hasExistingPO && !$hasSignedPO && ($statusLower === 'supply_chain' || $stageLower === 'supply_chain')) ||
-                         ($hasExistingPO && !$hasSignedPO);
+        $isRegeneration = ($hasExistingPO && $statusLower === 'po rejected')
+            || ($hasExistingPO && ! $hasSignedPO && ($statusLower === 'supply_chain' || $stageLower === 'supply_chain'))
+            || ($hasExistingPO && ! $hasSignedPO);
 
-        // If PO is already signed, don't allow regeneration (unless admin)
-        if ($hasSignedPO && !in_array(strtolower($user->role ?? ''), ['admin'])) {
+        // Once a PO is signed, only admins may regenerate.
+        if ($hasSignedPO && ! in_array(strtolower($user->role ?? ''), ['admin'], true)) {
             return response()->json([
                 'success' => false,
                 'error' => 'Cannot regenerate PO that has already been signed. Please contact an administrator.',
@@ -1286,8 +1240,8 @@ class MRFWorkflowController extends Controller
                 'data' => [
                     'existing_po_number' => $mrf->po_number,
                     'po_url' => $mrf->unsigned_po_url,
-                    'signed_po_url' => $mrf->signed_po_url
-                ]
+                    'signed_po_url' => $mrf->signed_po_url,
+                ],
             ], 422);
         }
 

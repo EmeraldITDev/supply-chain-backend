@@ -178,47 +178,77 @@ class PermissionService
     }
 
     /**
-     * Check if user can generate PO (Procurement only, after RFQ approval by Supply Chain Director)
+     * Check if procurement may generate the PO PDF.
+     *
+     * Generation IS the "route for approval" action — it sets workflow_state=po_generated
+     * and status=awaiting_scd_signature so SCD can sign. We therefore only require:
+     *   - the user acts as procurement,
+     *   - an RFQ exists for this MRF,
+     *   - a vendor/quotation has been chosen (price comparison or selectVendor) OR
+     *     the MRF/RFQ is already in a recognised post-vendor-selection state,
+     *   - the PO has not already been signed.
      */
     public function canGeneratePO(User $user, MRF $mrf): bool
     {
-        if (!$this->userActsAsProcurement($user)) {
+        if (! $this->userActsAsProcurement($user)) {
             return false;
         }
 
         $rfq = \App\Models\RFQ::where('mrf_id', $mrf->id)->first();
-        if (!$rfq || $rfq->workflow_state !== 'approved') {
+        if (! $rfq) {
             return false;
         }
 
-        $currentState = $mrf->workflow_state ?? WorkflowStateService::STATE_MRF_CREATED;
+        if (trim((string) ($mrf->signed_po_url ?? '')) !== '') {
+            return false;
+        }
+
         $statusLower = strtolower(trim((string) ($mrf->status ?? '')));
+        if (in_array($statusLower, ['rejected', 'cancelled', 'closed'], true)) {
+            return false;
+        }
 
-        if ($currentState === WorkflowStateService::STATE_INVOICE_APPROVED) {
+        $currentState = strtolower(trim((string) ($mrf->workflow_state ?? WorkflowStateService::STATE_MRF_CREATED)));
+        if (in_array($currentState, [
+            WorkflowStateService::STATE_SUPPLY_CHAIN_DIRECTOR_REJECTED,
+            WorkflowStateService::STATE_EXECUTIVE_REJECTED,
+            WorkflowStateService::STATE_CLOSED,
+        ], true)) {
+            return false;
+        }
+
+        $allowedWorkflowStates = [
+            WorkflowStateService::STATE_VENDOR_SELECTED,
+            WorkflowStateService::STATE_QUOTATIONS_EVALUATED,
+            WorkflowStateService::STATE_QUOTATIONS_RECEIVED,
+            WorkflowStateService::STATE_RFQ_ISSUED,
+            WorkflowStateService::STATE_PROCUREMENT_REVIEW,
+            WorkflowStateService::STATE_PROCUREMENT_APPROVED,
+            WorkflowStateService::STATE_SUPPLY_CHAIN_DIRECTOR_APPROVED,
+            WorkflowStateService::STATE_INVOICE_APPROVED,
+            WorkflowStateService::STATE_PO_GENERATED,
+            'executive_approved',
+            'supply_chain_director_approved',
+        ];
+
+        if (in_array($currentState, $allowedWorkflowStates, true)) {
             return true;
         }
 
-        // After SCD approves vendor selection, approveVendorSelection sets this status
-        // (workflow should be invoice_approved, but some records only drift on status).
-        if ($statusLower === 'pending_po_upload') {
+        if (in_array($statusLower, [
+            'procurement',
+            'pending_po_upload',
+            'pending',
+            'revision_required',
+            'po rejected',
+            'vendor_selected',
+            'awaiting_scd_signature',
+            'supply_chain',
+        ], true)) {
             return true;
         }
 
-        // Unsigned PO regeneration (workflow moves to po_generated, status awaiting_scd_signature / supply_chain)
-        if ($currentState === WorkflowStateService::STATE_PO_GENERATED) {
-            return true;
-        }
-
-        if (in_array($statusLower, ['awaiting_scd_signature', 'supply_chain'], true)) {
-            return true;
-        }
-
-        // Same statuses MRFWorkflowController::generatePO() accepts before the detailed checks
-        if (in_array($statusLower, ['procurement', 'po rejected', 'pending', 'revision_required'], true)) {
-            return true;
-        }
-
-        return false;
+        return $this->procurementHasPoDraftContext($mrf, $rfq);
     }
 
     /**
