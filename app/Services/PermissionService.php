@@ -245,7 +245,8 @@ class PermissionService
             return true;
         }
 
-        $state = (string) ($mrf->workflow_state ?? '');
+        $state = strtolower(trim((string) ($mrf->workflow_state ?? '')));
+
         $draftWorkflowStates = [
             WorkflowStateService::STATE_SUPPLY_CHAIN_DIRECTOR_APPROVED,
             WorkflowStateService::STATE_PROCUREMENT_REVIEW,
@@ -256,6 +257,9 @@ class PermissionService
             WorkflowStateService::STATE_PROCUREMENT_APPROVED,
             WorkflowStateService::STATE_PO_GENERATED,
             WorkflowStateService::STATE_INVOICE_APPROVED,
+            // Legacy / alternate labels seen in data or migrations
+            'executive_approved',
+            'supply_chain_director_approved',
         ];
 
         if (in_array($state, $draftWorkflowStates, true)) {
@@ -264,7 +268,38 @@ class PermissionService
 
         $statusLower = strtolower(trim((string) ($mrf->status ?? '')));
 
-        return in_array($statusLower, ['procurement', 'pending_po_upload', 'pending', 'revision_required', 'po rejected'], true);
+        if (in_array($statusLower, [
+            'procurement',
+            'pending_po_upload',
+            'pending',
+            'revision_required',
+            'po rejected',
+            'vendor_selected',
+            'supply_chain',
+            'awaiting_scd_signature',
+        ], true)) {
+            return true;
+        }
+
+        // RFQWorkflowController::selectVendor awards on the RFQ but may not sync MRF.workflow_state;
+        // price comparison UI still needs draft saves before SCD approves the RFQ.
+        return $this->procurementHasPoDraftContext($mrf, $rfq);
+    }
+
+    /**
+     * True when procurement has progressed far enough that persisting PO draft fields is meaningful.
+     */
+    private function procurementHasPoDraftContext(MRF $mrf, \App\Models\RFQ $rfq): bool
+    {
+        if (! empty($mrf->selected_vendor_id)) {
+            return true;
+        }
+
+        if (! empty($rfq->selected_quotation_id) || ! empty($rfq->selected_vendor_id)) {
+            return true;
+        }
+
+        return $mrf->priceComparisons()->exists();
     }
 
     /**
