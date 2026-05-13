@@ -303,6 +303,8 @@ class MRFController extends Controller
                 'is_po_draft' => $mrf->po_draft_saved_at !== null && empty($mrf->unsigned_po_url),
                 'custom_terms' => $mrf->custom_terms,
                 'customTerms' => $mrf->custom_terms,
+                'po_terms_mode' => $mrf->po_terms_mode,
+                'poTermsMode' => $mrf->po_terms_mode,
                 'priceComparisons' => $mrf->priceComparisons->map(function($row) {
                     return [
                         'id' => $row->id,
@@ -503,6 +505,8 @@ class MRFController extends Controller
             'is_po_draft' => $mrf->po_draft_saved_at !== null && empty($mrf->unsigned_po_url),
             'custom_terms' => $mrf->custom_terms,
             'customTerms' => $mrf->custom_terms,
+            'po_terms_mode' => $mrf->po_terms_mode,
+            'poTermsMode' => $mrf->po_terms_mode,
             'priceComparisons' => $mrf->priceComparisons->map(function($row) {
                 return [
                     'id' => $row->id,

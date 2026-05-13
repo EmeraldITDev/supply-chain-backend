@@ -82,6 +82,7 @@ class MRF extends Model
         'invoice_submission_email',
         'invoice_submission_cc',
         'custom_terms',
+        'po_terms_mode',
         // Payment
         'payment_status',
         'payment_processed_at',

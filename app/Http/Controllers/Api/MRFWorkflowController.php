@@ -1157,8 +1157,8 @@ class MRFWorkflowController extends Controller
     {
         $user = $request->user();
 
-        // Check role
-        if (!in_array($user->role, ['procurement_manager', 'procurement', 'admin'])) {
+        // Check role (Spatie + users.role column)
+        if (!$this->permissionService->userActsAsProcurement($user)) {
             return response()->json([
                 'success' => false,
                 'error' => 'Only procurement managers can generate POs',
@@ -1298,6 +1298,8 @@ class MRFWorkflowController extends Controller
             'remarks' => 'nullable|string',
             'po_type' => 'nullable|in:goods,services,logistics',
             'custom_terms' => 'nullable|string',
+            'terms_mode' => 'nullable|in:standard,custom,both',
+            'po_terms_mode' => 'nullable|in:standard,custom,both',
         ]);
 
         if ($validator->fails()) {
@@ -1318,6 +1320,8 @@ class MRFWorkflowController extends Controller
             'remarks' => 'nullable|string',
             'po_type' => 'nullable|in:goods,services,logistics',
             'custom_terms' => 'nullable|string',
+            'terms_mode' => 'nullable|in:standard,custom,both',
+            'po_terms_mode' => 'nullable|in:standard,custom,both',
             ]);
 
         if ($validator->fails()) {
@@ -1339,6 +1343,15 @@ class MRFWorkflowController extends Controller
                 'success' => false,
                 'error' => 'PO number already exists. Please use a different PO number.',
                 'code' => 'DUPLICATE_PO_NUMBER'
+            ], 422);
+        }
+
+        $termsMode = $this->normalisePOTermsMode($request);
+        if ($termsMode === 'custom' && trim((string) ($request->input('custom_terms') ?? '')) === '') {
+            return response()->json([
+                'success' => false,
+                'error' => 'When terms_mode is "custom", custom_terms must be provided and non-empty.',
+                'code' => 'VALIDATION_ERROR',
             ], 422);
         }
 
@@ -1524,7 +1537,7 @@ class MRFWorkflowController extends Controller
             ->latest('id')
             ->value('content');
         $customTerms = $request->input('custom_terms');
-        $mergedTerms = trim((string) $standardTerms . ($customTerms ? "\n\n" . $customTerms : ''));
+        $mergedTerms = $this->mergePoSpecialTerms($termsMode, $standardTerms, $customTerms);
 
         // Update MRF - set workflow state for SCD signature after PO generation
         $updateData = [
@@ -1543,6 +1556,7 @@ class MRFWorkflowController extends Controller
             'tax_amount' => $taxAmount,
             'po_special_terms' => $mergedTerms !== '' ? $mergedTerms : ($request->po_special_terms ?? null),
             'custom_terms' => $customTerms,
+            'po_terms_mode' => $termsMode,
             'invoice_submission_email' => $request->invoice_submission_email ?? null,
             'invoice_submission_cc' => $request->invoice_submission_cc ?? null,
         ];
@@ -1644,6 +1658,9 @@ class MRFWorkflowController extends Controller
                     'workflowState' => $mrf->workflow_state,
                 'status' => $mrf->status,
                 'custom_terms' => $mrf->custom_terms,
+                'customTerms' => $mrf->custom_terms,
+                'po_terms_mode' => $mrf->po_terms_mode,
+                'poTermsMode' => $mrf->po_terms_mode,
                 'priceComparisons' => $mrf->priceComparisons()->get(),
                 ],
                 'po_url' => $poStreamUrl,
@@ -2465,6 +2482,8 @@ class MRFWorkflowController extends Controller
             'po_type' => 'nullable|in:goods,services,logistics',
             'custom_terms' => 'nullable|string',
             'po_special_terms' => 'nullable|string',
+            'terms_mode' => 'nullable|in:standard,custom,both',
+            'po_terms_mode' => 'nullable|in:standard,custom,both',
             'ship_to_address' => 'nullable|string|max:1000',
             'tax_rate' => 'nullable|numeric|min:0|max:100',
             'tax_amount' => 'nullable|numeric|min:0',
@@ -2492,6 +2511,18 @@ class MRFWorkflowController extends Controller
             ], 422);
         }
 
+        $termsMode = $this->normalisePOTermsMode($request, $mrf);
+        $customTermsForValidation = $request->has('custom_terms')
+            ? trim((string) ($request->input('custom_terms') ?? ''))
+            : trim((string) ($mrf->custom_terms ?? ''));
+        if ($termsMode === 'custom' && $customTermsForValidation === '') {
+            return response()->json([
+                'success' => false,
+                'error' => 'When terms_mode is "custom", custom_terms must be provided and non-empty.',
+                'code' => 'VALIDATION_ERROR',
+            ], 422);
+        }
+
         // Merge standard + custom terms for preview parity with finalisation.
         $poType = strtolower((string) ($request->input('po_type') ?: 'goods'));
         $standardTerms = POTermsTemplate::query()
@@ -2499,8 +2530,10 @@ class MRFWorkflowController extends Controller
             ->where('is_active', true)
             ->latest('id')
             ->value('content');
-        $customTerms = $request->input('custom_terms');
-        $mergedTerms = trim((string) $standardTerms . ($customTerms ? "\n\n" . $customTerms : ''));
+        $customTerms = $request->has('custom_terms')
+            ? $request->input('custom_terms')
+            : $mrf->custom_terms;
+        $mergedTerms = $this->mergePoSpecialTerms($termsMode, $standardTerms, $customTerms);
 
         $taxRate = $request->input('tax_rate', $mrf->tax_rate ?? 0);
         $taxAmount = $request->has('tax_amount')
@@ -2513,7 +2546,8 @@ class MRFWorkflowController extends Controller
             'tax_rate' => $taxRate,
             'tax_amount' => $taxAmount,
             'po_special_terms' => $mergedTerms !== '' ? $mergedTerms : ($request->input('po_special_terms') ?? $mrf->po_special_terms),
-            'custom_terms' => $customTerms ?? $mrf->custom_terms,
+            'custom_terms' => $request->has('custom_terms') ? $request->input('custom_terms') : $mrf->custom_terms,
+            'po_terms_mode' => $termsMode,
             'invoice_submission_email' => $request->input('invoice_submission_email', $mrf->invoice_submission_email),
             'invoice_submission_cc' => $request->input('invoice_submission_cc', $mrf->invoice_submission_cc),
             'procurement_manager_id' => $user->id,
@@ -2550,6 +2584,8 @@ class MRFWorkflowController extends Controller
                     'tax_amount' => $mrf->tax_amount,
                     'po_special_terms' => $mrf->po_special_terms,
                     'custom_terms' => $mrf->custom_terms,
+                    'po_terms_mode' => $mrf->po_terms_mode,
+                    'poTermsMode' => $mrf->po_terms_mode,
                     'invoice_submission_email' => $mrf->invoice_submission_email,
                     'invoice_submission_cc' => $mrf->invoice_submission_cc,
                 ],
@@ -2897,6 +2933,58 @@ class MRFWorkflowController extends Controller
         $dompdf->render();
 
         return $dompdf->output();
+    }
+
+    /**
+     * How standard vs custom PO terms are combined. Frontend: radio or equivalent
+     * sending terms_mode or po_terms_mode: standard | custom | both (default both).
+     */
+    private function normalisePOTermsMode(Request $request, ?MRF $mrf = null): string
+    {
+        $raw = $request->input('terms_mode');
+        if ($raw === null || $raw === '') {
+            $raw = $request->input('po_terms_mode');
+        }
+        if ($raw !== null && (string) $raw !== '') {
+            $m = strtolower(trim((string) $raw));
+
+            return in_array($m, ['standard', 'custom', 'both'], true) ? $m : 'both';
+        }
+        if ($mrf !== null && $mrf->po_terms_mode) {
+            $m = strtolower(trim((string) $mrf->po_terms_mode));
+
+            return in_array($m, ['standard', 'custom', 'both'], true) ? $m : 'both';
+        }
+
+        return 'both';
+    }
+
+    /**
+     * @param  string|null  $standardTerms  Active template body for po_type
+     * @param  string|null  $customTerms    User additional terms
+     */
+    private function mergePoSpecialTerms(string $mode, ?string $standardTerms, ?string $customTerms): string
+    {
+        $standard = trim((string) ($standardTerms ?? ''));
+        $custom = trim((string) ($customTerms ?? ''));
+        $mode = strtolower($mode);
+        if (! in_array($mode, ['standard', 'custom', 'both'], true)) {
+            $mode = 'both';
+        }
+        if ($mode === 'standard') {
+            return $standard;
+        }
+        if ($mode === 'custom') {
+            return $custom;
+        }
+        if ($standard === '') {
+            return $custom;
+        }
+        if ($custom === '') {
+            return $standard;
+        }
+
+        return $standard . "\n\n" . $custom;
     }
 
     /**

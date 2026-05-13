@@ -91,36 +91,67 @@ class PermissionService
     }
 
     /**
+     * Procurement / admin roles that may generate or upload POs.
+     */
+    public function userActsAsProcurement(User $user): bool
+    {
+        if (in_array($user->role, ['procurement', 'procurement_manager', 'admin'], true)) {
+            return true;
+        }
+
+        if (method_exists($user, 'hasAnyRole')) {
+            try {
+                return $user->hasAnyRole(['procurement', 'procurement_manager', 'admin']);
+            } catch (\Throwable) {
+                return false;
+            }
+        }
+
+        return false;
+    }
+
+    /**
      * Check if user can generate PO (Procurement only, after RFQ approval by Supply Chain Director)
      */
     public function canGeneratePO(User $user, MRF $mrf): bool
     {
-        if (!in_array($user->role, ['procurement', 'procurement_manager', 'admin'])) {
+        if (!$this->userActsAsProcurement($user)) {
+            return false;
+        }
+
+        $rfq = \App\Models\RFQ::where('mrf_id', $mrf->id)->first();
+        if (!$rfq || $rfq->workflow_state !== 'approved') {
             return false;
         }
 
         $currentState = $mrf->workflow_state ?? WorkflowStateService::STATE_MRF_CREATED;
-        
-        // PO generation is only allowed after Supply Chain Director approves vendor selection
-        // This sets the state to invoice_approved
-        if ($currentState !== WorkflowStateService::STATE_INVOICE_APPROVED) {
-            return false;
+        $statusLower = strtolower(trim((string) ($mrf->status ?? '')));
+
+        if ($currentState === WorkflowStateService::STATE_INVOICE_APPROVED) {
+            return true;
         }
-        
-        // Check if RFQ exists and is approved
-        $rfq = \App\Models\RFQ::where('mrf_id', $mrf->id)->first();
-        if (!$rfq) {
-            return false; // No RFQ exists yet
+
+        // After SCD approves vendor selection, approveVendorSelection sets this status
+        // (workflow should be invoice_approved, but some records only drift on status).
+        if ($statusLower === 'pending_po_upload') {
+            return true;
         }
-        
-        // RFQ must be approved by Supply Chain Director
-        if ($rfq->workflow_state !== 'approved') {
-            return false;
+
+        // Unsigned PO regeneration (workflow moves to po_generated, status awaiting_scd_signature / supply_chain)
+        if ($currentState === WorkflowStateService::STATE_PO_GENERATED) {
+            return true;
         }
-        
-        return true;
-        
-        return in_array($currentState, $allowedStates);
+
+        if (in_array($statusLower, ['awaiting_scd_signature', 'supply_chain'], true)) {
+            return true;
+        }
+
+        // Same statuses MRFWorkflowController::generatePO() accepts before the detailed checks
+        if (in_array($statusLower, ['procurement', 'po rejected', 'pending', 'revision_required'], true)) {
+            return true;
+        }
+
+        return false;
     }
 
     /**
