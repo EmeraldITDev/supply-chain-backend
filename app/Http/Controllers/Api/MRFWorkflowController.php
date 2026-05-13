@@ -1176,6 +1176,27 @@ class MRFWorkflowController extends Controller
             ], 404);
         }
 
+        $saveAsDraft = $request->boolean('save_as_draft', false);
+        if ($saveAsDraft) {
+            if ($request->hasFile('unsigned_po')) {
+                return response()->json([
+                    'success' => false,
+                    'error' => 'Draft mode does not support file uploads. Omit save_as_draft to upload a signed PO.',
+                    'code' => 'VALIDATION_ERROR',
+                ], 422);
+            }
+
+            if (! $this->permissionService->canSavePODraft($user, $mrf)) {
+                return response()->json([
+                    'success' => false,
+                    'error' => 'Saving a PO draft is not allowed for this MRF at the current stage.',
+                    'code' => 'FORBIDDEN',
+                ], 403);
+            }
+
+            return $this->savePOAsDraft($request, $mrf, $user);
+        }
+
         // Check permissions using PermissionService (includes RFQ approval check)
         if (!$this->permissionService->canGeneratePO($user, $mrf)) {
             return response()->json([
@@ -1273,22 +1294,6 @@ class MRFWorkflowController extends Controller
         // Check if this is a file upload (Mode 1) or auto-generation (Mode 2)
         $isFileUpload = $request->hasFile('unsigned_po');
         $isAutoGeneration = $request->has('po_number') && !$isFileUpload;
-
-        // Mode 3: Save as draft — persist PO fields without rendering a PDF
-        // or progressing the workflow. Drafts can be repeatedly overwritten
-        // until the user finalises with save_as_draft=false (or omitted).
-        $saveAsDraft = $request->boolean('save_as_draft', false);
-        if ($saveAsDraft) {
-            if ($isFileUpload) {
-                return response()->json([
-                    'success' => false,
-                    'error' => 'Draft mode does not support file uploads. Omit save_as_draft to upload a signed PO.',
-                    'code' => 'VALIDATION_ERROR',
-                ], 422);
-            }
-
-            return $this->savePOAsDraft($request, $mrf, $user);
-        }
 
         if ($isFileUpload) {
             // Mode 1: File Upload (Existing behavior)

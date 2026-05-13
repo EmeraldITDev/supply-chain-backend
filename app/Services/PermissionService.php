@@ -155,6 +155,52 @@ class PermissionService
     }
 
     /**
+     * Whether procurement may persist PO draft fields (no PDF, no workflow advance).
+     * Looser than {@see self::canGeneratePO}: allowed while RFQ is still awaiting SCD
+     * so the PO form can be saved incrementally before final generation.
+     */
+    public function canSavePODraft(User $user, MRF $mrf): bool
+    {
+        if (! $this->userActsAsProcurement($user)) {
+            return false;
+        }
+
+        $rfq = \App\Models\RFQ::where('mrf_id', $mrf->id)->first();
+        if (! $rfq) {
+            return false;
+        }
+
+        if (trim((string) ($mrf->signed_po_url ?? '')) !== '') {
+            return false;
+        }
+
+        if ($this->canGeneratePO($user, $mrf)) {
+            return true;
+        }
+
+        $state = (string) ($mrf->workflow_state ?? '');
+        $draftWorkflowStates = [
+            WorkflowStateService::STATE_SUPPLY_CHAIN_DIRECTOR_APPROVED,
+            WorkflowStateService::STATE_PROCUREMENT_REVIEW,
+            WorkflowStateService::STATE_RFQ_ISSUED,
+            WorkflowStateService::STATE_QUOTATIONS_RECEIVED,
+            WorkflowStateService::STATE_QUOTATIONS_EVALUATED,
+            WorkflowStateService::STATE_VENDOR_SELECTED,
+            WorkflowStateService::STATE_PROCUREMENT_APPROVED,
+            WorkflowStateService::STATE_PO_GENERATED,
+            WorkflowStateService::STATE_INVOICE_APPROVED,
+        ];
+
+        if (in_array($state, $draftWorkflowStates, true)) {
+            return true;
+        }
+
+        $statusLower = strtolower(trim((string) ($mrf->status ?? '')));
+
+        return in_array($statusLower, ['procurement', 'pending_po_upload', 'pending', 'revision_required', 'po rejected'], true);
+    }
+
+    /**
      * Check if user can view invoices (Procurement and Finance)
      */
     public function canViewInvoices(User $user, MRF $mrf): bool
