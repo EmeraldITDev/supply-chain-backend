@@ -143,10 +143,10 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/trips/{tripId}/route-to-procurement', [LogisticsTripVendorSubmissionController::class, 'routeToProcurement'])->middleware($logisticsInternalRoles);
     Route::post('/trips/{tripId}/notify-invoice', [LogisticsTripVendorSubmissionController::class, 'notifyInvoiceSubmission'])->middleware($logisticsInternalRoles);
 
-    Route::get('/vendor-portal/trips', [LogisticsVendorPortalTripController::class, 'indexVendorTrips'])->middleware('role:vendor');
-    Route::post('/vendor-portal/trips/{tripId}/submission', [LogisticsVendorPortalTripController::class, 'submitVendorDetails'])->middleware('role:vendor');
-    Route::post('/vendor-portal/trips/{tripId}/documents', [LogisticsVendorPortalTripController::class, 'uploadDocuments'])->middleware('role:vendor');
-    Route::get('/vendor-portal/trips/{tripId}/submission', [LogisticsVendorPortalTripController::class, 'getVendorSubmission'])->middleware('role:vendor');
+    Route::get('/vendor-portal/trips', [LogisticsVendorPortalTripController::class, 'indexVendorTrips']);
+    Route::post('/vendor-portal/trips/{tripId}/submission', [LogisticsVendorPortalTripController::class, 'submitVendorDetails']);
+    Route::post('/vendor-portal/trips/{tripId}/documents', [LogisticsVendorPortalTripController::class, 'uploadDocuments']);
+    Route::get('/vendor-portal/trips/{tripId}/submission', [LogisticsVendorPortalTripController::class, 'getVendorSubmission']);
 
     Route::post('/logistics/accommodations', [LogisticsAccommodationBookingController::class, 'store'])->middleware($logisticsInternalRoles);
     Route::get('/logistics/accommodations', [LogisticsAccommodationBookingController::class, 'index'])->middleware($logisticsInternalRoles);
@@ -379,6 +379,11 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // RFQ Workflow routes (enhanced)
     Route::get('/vendors/rfqs', [\App\Http\Controllers\Api\RFQWorkflowController::class, 'getVendorRFQs']); // Vendor portal
+    // Assigned trips (logistics) — /vendors/* so clients that only attach Bearer for /api/vendors/* (same as RFQs) authenticate correctly
+    Route::get('/vendors/assigned-trips', [LogisticsVendorPortalTripController::class, 'indexVendorTrips']);
+    Route::post('/vendors/portal/trips/{tripId}/submission', [LogisticsVendorPortalTripController::class, 'submitVendorDetails']);
+    Route::get('/vendors/portal/trips/{tripId}/submission', [LogisticsVendorPortalTripController::class, 'getVendorSubmission']);
+    Route::post('/vendors/portal/trips/{tripId}/documents', [LogisticsVendorPortalTripController::class, 'uploadDocuments']);
     Route::post('/rfqs/{id}/mark-viewed', [\App\Http\Controllers\Api\RFQWorkflowController::class, 'markAsViewed']); // Vendor marks as viewed
     Route::post('/rfqs/{id}/submit-quotation', [\App\Http\Controllers\Api\RFQWorkflowController::class, 'submitQuotation']); // Submit quotation for RFQ
     Route::get('/rfqs/{id}/quotations', [\App\Http\Controllers\Api\RFQWorkflowController::class, 'getQuotationsForRFQ']); // Comparison view
@@ -501,10 +506,10 @@ Route::prefix('v1/logistics')->group(function () {
         Route::post('/trips/{tripId}/notify-invoice', [LogisticsTripVendorSubmissionController::class, 'notifyInvoiceSubmission'])->middleware($logisticsInternalRoles);
 
         // Vendor Portal Trip Endpoints
-        Route::get('/vendor-portal/trips', [LogisticsVendorPortalTripController::class, 'indexVendorTrips'])->middleware('role:vendor');
-        Route::post('/vendor-portal/trips/{tripId}/submission', [LogisticsVendorPortalTripController::class, 'submitVendorDetails'])->middleware('role:vendor');
-        Route::post('/vendor-portal/trips/{tripId}/documents', [LogisticsVendorPortalTripController::class, 'uploadDocuments'])->middleware('role:vendor');
-        Route::get('/vendor-portal/trips/{tripId}/submission', [LogisticsVendorPortalTripController::class, 'getVendorSubmission'])->middleware('role:vendor');
+        Route::get('/vendor-portal/trips', [LogisticsVendorPortalTripController::class, 'indexVendorTrips']);
+        Route::post('/vendor-portal/trips/{tripId}/submission', [LogisticsVendorPortalTripController::class, 'submitVendorDetails']);
+        Route::post('/vendor-portal/trips/{tripId}/documents', [LogisticsVendorPortalTripController::class, 'uploadDocuments']);
+        Route::get('/vendor-portal/trips/{tripId}/submission', [LogisticsVendorPortalTripController::class, 'getVendorSubmission']);
 
         // Accommodation Bookings
         Route::post('/accommodations', [LogisticsAccommodationBookingController::class, 'store'])->middleware($logisticsInternalRoles);
@@ -621,10 +626,10 @@ Route::prefix('logistics')->group(function () {
         Route::post('/trips/{tripId}/route-to-procurement', [LogisticsTripVendorSubmissionController::class, 'routeToProcurement'])->middleware($logisticsInternalRoles);
         Route::post('/trips/{tripId}/notify-invoice', [LogisticsTripVendorSubmissionController::class, 'notifyInvoiceSubmission'])->middleware($logisticsInternalRoles);
 
-        Route::get('/vendor-portal/trips', [LogisticsVendorPortalTripController::class, 'indexVendorTrips'])->middleware('role:vendor');
-        Route::post('/vendor-portal/trips/{tripId}/submission', [LogisticsVendorPortalTripController::class, 'submitVendorDetails'])->middleware('role:vendor');
-        Route::post('/vendor-portal/trips/{tripId}/documents', [LogisticsVendorPortalTripController::class, 'uploadDocuments'])->middleware('role:vendor');
-        Route::get('/vendor-portal/trips/{tripId}/submission', [LogisticsVendorPortalTripController::class, 'getVendorSubmission'])->middleware('role:vendor');
+        Route::get('/vendor-portal/trips', [LogisticsVendorPortalTripController::class, 'indexVendorTrips']);
+        Route::post('/vendor-portal/trips/{tripId}/submission', [LogisticsVendorPortalTripController::class, 'submitVendorDetails']);
+        Route::post('/vendor-portal/trips/{tripId}/documents', [LogisticsVendorPortalTripController::class, 'uploadDocuments']);
+        Route::get('/vendor-portal/trips/{tripId}/submission', [LogisticsVendorPortalTripController::class, 'getVendorSubmission']);
 
         Route::post('/accommodations', [LogisticsAccommodationBookingController::class, 'store'])->middleware($logisticsInternalRoles);
         Route::get('/accommodations', [LogisticsAccommodationBookingController::class, 'index'])->middleware($logisticsInternalRoles);

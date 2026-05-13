@@ -61,6 +61,21 @@ class EnsureRole
             }
         }
 
+        // Vendors linked to a vendors row (users.vendor_id / email) should pass
+        // `role:vendor` even if the users.role string or Spatie roles are out of sync.
+        if (!$hasRole && in_array('vendor', $roleList, true)) {
+            try {
+                if (\App\Models\Vendor::forPortalUser($user) !== null) {
+                    $hasRole = true;
+                }
+            } catch (\Throwable $e) {
+                Log::warning('EnsureRole vendor portal check failed', [
+                    'user_id' => $user->id ?? null,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+
         if (!$hasRole) {
             Log::warning('EnsureRole denying request', [
                 'path' => $request->path(),

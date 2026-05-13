@@ -9,6 +9,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
+use Laravel\Sanctum\PersonalAccessToken;
 
 class VendorAuthController extends Controller
 {
@@ -375,10 +376,12 @@ class VendorAuthController extends Controller
      */
     public function requestPasswordReset(Request $request)
     {
-        // Validate input
-        $validator = Validator::make($request->all(), [
-            'email' => 'required|email',
-        ]);
+        $email = $this->resolvePasswordResetEmail($request);
+
+        $validator = Validator::make(
+            ['email' => $email],
+            ['email' => 'required|email'],
+        );
 
         if ($validator->fails()) {
             return response()->json([
@@ -390,7 +393,7 @@ class VendorAuthController extends Controller
         }
 
         // Resolve vendor portal user (same rules as login: vendor row email / contact email → user)
-        $user = User::findVendorPortalUserByEmail($request->email);
+        $user = User::findVendorPortalUserByEmail($email);
 
         // Always return success for security (don't reveal if email exists)
         if (!$user) {
@@ -457,6 +460,35 @@ class VendorAuthController extends Controller
             'success' => true,
             'message' => 'If the email exists, a password reset link has been sent',
         ], 200);
+    }
+
+    /**
+     * Email for vendor password-reset: body aliases + Bearer token user (settings UI often omits body).
+     */
+    private function resolvePasswordResetEmail(Request $request): ?string
+    {
+        $direct = $request->input('email')
+            ?? $request->input('userEmail')
+            ?? $request->input('user_email')
+            ?? $request->input('Email');
+
+        if (is_string($direct) && trim($direct) !== '') {
+            return trim($direct);
+        }
+
+        $token = $request->bearerToken();
+        if (!$token) {
+            return null;
+        }
+
+        $accessToken = PersonalAccessToken::findToken($token);
+        $tokenable = $accessToken?->tokenable;
+
+        if ($tokenable instanceof User && is_string($tokenable->email) && trim($tokenable->email) !== '') {
+            return trim($tokenable->email);
+        }
+
+        return null;
     }
 
     /**
