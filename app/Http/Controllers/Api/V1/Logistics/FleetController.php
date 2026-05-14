@@ -667,7 +667,10 @@ class FleetController extends ApiController
                     $maintenanceType,
                     $maintenanceDescription
                 )),
-                'duration' => $request->input('duration', 'TBD'),
+                'duration' => $request->input('duration')
+                    ?: ($latestMaintenance?->interval_months
+                        ? sprintf('Recurring every %d month(s) — confirm turnaround with workshop', (int) $latestMaintenance->interval_months)
+                        : 'Single service — confirm lead time with selected vendor'),
                 'estimated_cost' => (float) $request->input('estimated_cost', $latestMaintenance?->cost ?? 0),
                 'justification' => 'Auto-initiated from Fleet Maintenance dashboard.',
                 'requester_id' => $user->id,

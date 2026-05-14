@@ -181,8 +181,8 @@ class DashboardController extends Controller
     {
         $user = $request->user();
 
-        // Check permission
-        $allowedRoles = ['supply_chain_director', 'director', 'admin'];
+        // Check permission (include `supply_chain` — same alias used on SRF/MRF approval routes)
+        $allowedRoles = ['supply_chain_director', 'supply_chain', 'director', 'admin'];
         $hasAllowedRole =
             (isset($user->role) && in_array($user->role, $allowedRoles)) ||
             (method_exists($user, 'hasAnyRole') && $user->hasAnyRole($allowedRoles));
@@ -194,6 +194,29 @@ class DashboardController extends Controller
                 'code' => 'FORBIDDEN'
             ], 403);
         }
+
+        // SRFs waiting on Supply Chain Director (not returned here before — frontends that only read this dashboard never saw them)
+        $srfsAwaitingSupplyChainDirectorApproval = SRF::query()
+            ->where('status', 'Pending')
+            ->where('current_stage', 'supply_chain_director_review')
+            ->with(['requester'])
+            ->orderByDesc('created_at')
+            ->get()
+            ->map(function (SRF $srf) {
+                return [
+                    'id' => $srf->id,
+                    'srfId' => $srf->srf_id,
+                    'formattedId' => $srf->formatted_id,
+                    'title' => $srf->title,
+                    'serviceType' => $srf->service_type,
+                    'requesterName' => $srf->requester_name,
+                    'currentStage' => $srf->current_stage,
+                    'urgency' => $srf->urgency,
+                    'estimatedCost' => $srf->estimated_cost !== null ? (float) $srf->estimated_cost : null,
+                    'createdAt' => $srf->created_at->toIso8601String(),
+                    'submittedDate' => $srf->date ? $srf->date->format('Y-m-d') : null,
+                ];
+            });
 
         // Get all vendor registrations (pending and recent)
         $recentRegistrations = VendorRegistration::with(['vendor', 'approver'])
@@ -225,6 +248,9 @@ class DashboardController extends Controller
             'activeRFQs' => RFQ::where('status', 'Active')->count(),
             'totalQuotations' => Quotation::count(),
             'pendingQuotations' => Quotation::where('status', 'Pending')->count(),
+            'pendingSrfDirectorApprovals' => SRF::where('status', 'Pending')
+                ->where('current_stage', 'supply_chain_director_review')
+                ->count(),
         ];
 
         // Get procurement metrics
@@ -239,6 +265,7 @@ class DashboardController extends Controller
             'stats' => $stats,
             'metrics' => $metrics,
             'recentRegistrations' => $recentRegistrations,
+            'srfsAwaitingSupplyChainDirectorApproval' => $srfsAwaitingSupplyChainDirectorApproval,
         ]);
     }
 

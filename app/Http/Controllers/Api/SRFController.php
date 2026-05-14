@@ -119,6 +119,11 @@ class SRFController extends Controller
             'requester' => $srf->requester_name,
             'requesterId' => (string) $srf->requester_id,
             'date' => $srf->date ? $srf->date->format('Y-m-d') : null,
+            // Use for "submitted at" in the UI — ISO-8601 with offset. Avoid parsing `date` (Y-m-d) as a datetime (midnight UTC shows as wrong local time).
+            'createdAt' => $srf->created_at ? $srf->created_at->toIso8601String() : null,
+            'created_at' => $srf->created_at ? $srf->created_at->toIso8601String() : null,
+            'updatedAt' => $srf->updated_at ? $srf->updated_at->toIso8601String() : null,
+            'updated_at' => $srf->updated_at ? $srf->updated_at->toIso8601String() : null,
             'status' => $srf->status,
             'currentStage' => $srf->current_stage,
             'approvalHistory' => $srf->approval_history ?? [],
