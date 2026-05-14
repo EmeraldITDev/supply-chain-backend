@@ -14,6 +14,7 @@ use App\Services\NotificationService;
 use App\Services\VendorApprovalService;
 use App\Services\VendorDocumentService;
 use App\Services\QuotationAttachmentService;
+use App\Support\VendorCategoryDisplay;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Storage;
@@ -112,6 +113,7 @@ class VendorController extends Controller
                 'id' => $vendor->vendor_id,
                 'name' => $vendor->name,
                 'category' => $vendor->category,
+                'categoryDisplay' => VendorCategoryDisplay::format($vendor->category, $vendor->category_other),
                 'categoryOther' => $vendor->category_other,
                 'category_other' => $vendor->category_other,
                 'rating' => $vendor->rating ? (float) $vendor->rating : 0,
@@ -198,7 +200,8 @@ class VendorController extends Controller
         return response()->json([
             'id'            => $vendor->vendor_id,
             'name'          => $vendor->name,
-            'category'      => $vendor->category,
+            'category'      => VendorCategoryDisplay::format($vendor->category, $categoryOther),
+            'categoryRaw'   => $vendor->category,
             'categoryOther' => $categoryOther,
             'category_other' => $categoryOther,
             'rating'        => $vendor->rating ? (float) $vendor->rating : 0,
@@ -707,6 +710,7 @@ class VendorController extends Controller
                 'id' => (string) $registration->id,
                 'companyName' => $registration->company_name,
                 'category' => $registration->category,
+                'categoryDisplay' => VendorCategoryDisplay::format($registration->category, $registration->category_other),
                 'categoryOther' => $registration->category_other,
                 'category_other' => $registration->category_other,
                 'email' => $registration->email,
@@ -837,6 +841,7 @@ class VendorController extends Controller
             'id' => (string) $registration->id,
             'companyName' => $registration->company_name,
             'category' => $registration->category,
+            'categoryDisplay' => VendorCategoryDisplay::format($registration->category, $registration->category_other),
             'categoryOther' => $registration->category_other,
             'category_other' => $registration->category_other,
             'email' => $registration->email,
@@ -1973,7 +1978,11 @@ class VendorController extends Controller
                     'vendor_registration' => [
                         'id' => $document->vendorRegistration->id,
                         'vendor_name' => $document->vendorRegistration->vendor->name ?? $document->vendorRegistration->applicant->name ?? 'Unknown',
-                        'category' => $document->vendorRegistration->vendor?->category,
+                        'category' => $document->vendorRegistration->vendor?->category ?? $document->vendorRegistration->category,
+                        'categoryDisplay' => VendorCategoryDisplay::format(
+                            $document->vendorRegistration->vendor?->category ?? $document->vendorRegistration->category,
+                            $document->vendorRegistration->vendor?->category_other ?? $document->vendorRegistration->category_other
+                        ),
                         'status' => $document->vendorRegistration->status,
                     ]
                 ];

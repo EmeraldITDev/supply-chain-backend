@@ -10,6 +10,7 @@ use App\Models\RFQ;
 use App\Models\SRF;
 use App\Models\Vendor;
 use App\Models\VendorRegistration;
+use App\Support\VendorCategoryDisplay;
 use Illuminate\Http\Request;
 
 class DashboardController extends Controller
@@ -392,6 +393,7 @@ class DashboardController extends Controller
                 'id' => $vendor->vendor_id,
                 'companyName' => $vendor->name,
                 'category' => $vendor->category,
+                'categoryDisplay' => VendorCategoryDisplay::format($vendor->category, $vendor->category_other),
                 'email' => $vendor->email,
                 'phone' => $vendor->phone,
                 'address' => $vendor->address,

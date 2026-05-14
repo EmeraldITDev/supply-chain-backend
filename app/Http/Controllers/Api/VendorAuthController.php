@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\User;
 use App\Models\Vendor;
+use App\Support\VendorCategoryDisplay;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
@@ -519,6 +520,8 @@ class VendorAuthController extends Controller
         // Get vendor registration if it exists for additional data
         $registration = $vendor->registrations()->orderByDesc('id')->first();
 
+        $categoryOther = $vendor->category_other ?? $registration?->category_other;
+
         $documents = null;
         if ($registration) {
             $list = $registration->getDocumentsMetadataList();
@@ -550,9 +553,10 @@ class VendorAuthController extends Controller
             'countryCode' => $vendor->country_code,
 
             // Business information
-            'category' => $vendor->category,
-            'categoryOther' => $vendor->category_other ?? $registration?->category_other,
-            'category_other' => $vendor->category_other ?? $registration?->category_other,
+            'category' => VendorCategoryDisplay::format($vendor->category, $categoryOther),
+            'categoryRaw' => $vendor->category,
+            'categoryOther' => $categoryOther,
+            'category_other' => $categoryOther,
             'website' => $vendor->website ?? $registration?->website,
             'taxId' => $vendor->tax_id,
             'tax_id' => $vendor->tax_id,
