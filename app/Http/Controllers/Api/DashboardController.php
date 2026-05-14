@@ -203,16 +203,32 @@ class DashboardController extends Controller
             ->orderByDesc('created_at')
             ->get()
             ->map(function (SRF $srf) {
+                $requesterName = $srf->requester_name
+                    ?: ($srf->relationLoaded('requester') && $srf->requester ? $srf->requester->name : null);
+
                 return [
                     'id' => $srf->id,
                     'srfId' => $srf->srf_id,
                     'formattedId' => $srf->formatted_id,
                     'title' => $srf->title,
                     'serviceType' => $srf->service_type,
-                    'requesterName' => $srf->requester_name,
+                    'service_type' => $srf->service_type,
+                    'description' => $srf->description,
+                    'justification' => $srf->justification,
+                    'duration' => $srf->duration,
+                    'department' => $srf->department,
+                    'requesterName' => $requesterName,
+                    'requester_name' => $requesterName,
+                    'requester' => [
+                        'id' => (int) $srf->requester_id,
+                        'name' => $requesterName,
+                        'email' => $srf->requester?->email,
+                    ],
                     'currentStage' => $srf->current_stage,
+                    'current_stage' => $srf->current_stage,
                     'urgency' => $srf->urgency,
                     'estimatedCost' => $srf->estimated_cost !== null ? (float) $srf->estimated_cost : null,
+                    'estimated_cost' => $srf->estimated_cost !== null ? (float) $srf->estimated_cost : null,
                     'createdAt' => $srf->created_at->toIso8601String(),
                     'submittedDate' => $srf->date ? $srf->date->format('Y-m-d') : null,
                 ];

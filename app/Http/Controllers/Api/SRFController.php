@@ -101,6 +101,15 @@ class SRFController extends Controller
      */
     private function presentSrf(SRF $srf): array
     {
+        $requesterName = $srf->requester_name
+            ?: ($srf->relationLoaded('requester') && $srf->requester ? $srf->requester->name : null);
+
+        $requesterObject = [
+            'id' => (int) $srf->requester_id,
+            'name' => $requesterName,
+            'email' => $srf->relationLoaded('requester') && $srf->requester ? $srf->requester->email : null,
+        ];
+
         return [
             'id' => $srf->srf_id,
             'formattedId' => $srf->formatted_id,
@@ -109,15 +118,22 @@ class SRFController extends Controller
             'legacy_id' => $srf->srf_id,
             'title' => $srf->title,
             'serviceType' => $srf->service_type,
+            'service_type' => $srf->service_type,
             'contractType' => $srf->contract_type,
+            'contract_type' => $srf->contract_type,
             'department' => $srf->department,
             'urgency' => $srf->urgency,
             'description' => $srf->description,
             'duration' => $srf->duration,
             'estimatedCost' => (float) $srf->estimated_cost,
+            'estimated_cost' => $srf->estimated_cost !== null ? (float) $srf->estimated_cost : null,
             'justification' => $srf->justification,
-            'requester' => $srf->requester_name,
+            // Plain name (legacy + list views)
+            'requesterName' => $requesterName,
+            'requester_name' => $requesterName,
+            'requester' => $requesterObject,
             'requesterId' => (string) $srf->requester_id,
+            'requester_id' => (string) $srf->requester_id,
             'date' => $srf->date ? $srf->date->format('Y-m-d') : null,
             // Use for "submitted at" in the UI — ISO-8601 with offset. Avoid parsing `date` (Y-m-d) as a datetime (midnight UTC shows as wrong local time).
             'createdAt' => $srf->created_at ? $srf->created_at->toIso8601String() : null,
@@ -126,8 +142,11 @@ class SRFController extends Controller
             'updated_at' => $srf->updated_at ? $srf->updated_at->toIso8601String() : null,
             'status' => $srf->status,
             'currentStage' => $srf->current_stage,
+            'current_stage' => $srf->current_stage,
             'approvalHistory' => $srf->approval_history ?? [],
+            'approval_history' => $srf->approval_history ?? [],
             'rejectionReason' => $srf->rejection_reason,
+            'rejection_reason' => $srf->rejection_reason,
             'remarks' => $srf->remarks,
             'origin' => $srf->origin,
             'vehicleId' => $srf->vehicle_id,
