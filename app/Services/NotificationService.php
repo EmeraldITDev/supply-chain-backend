@@ -214,17 +214,37 @@ class NotificationService
     }
 
     /**
-     * Notify procurement team about new vendor registration
+     * Notify procurement and logistics teams about new vendor registration (database + email).
      */
     public function notifyVendorRegistration(VendorRegistration $registration): void
     {
         try {
-            // Only notify specific recipients for vendor registrations
-            $notifiables = User::whereIn('email', [
+            $hardcodedEmails = collect([
                 'bunmi.babajide@emeraldcfze.com',
                 'viva.musa@emeraldcfze.com',
                 'lateef.olanrewaju@emeraldcfze.com',
-            ])->get();
+            ])->filter();
+
+            $fromHardcoded = User::query()
+                ->whereIn('email', $hardcodedEmails->all())
+                ->whereNotNull('email')
+                ->get();
+
+            $fromRoles = User::query()
+                ->whereIn('role', [
+                    'procurement_manager',
+                    'procurement',
+                    'logistics_manager',
+                    'logistics_officer',
+                ])
+                ->whereNotNull('email')
+                ->where('email', '!=', '')
+                ->get();
+
+            $notifiables = $fromHardcoded
+                ->merge($fromRoles)
+                ->unique('id')
+                ->values();
 
             foreach ($notifiables as $user) {
                 $user->notify(new VendorRegistrationNotification($registration));
@@ -232,7 +252,8 @@ class NotificationService
 
             Log::info('Vendor registration notification sent', [
                 'registration_id' => $registration->id,
-                'vendor_name' => $registration->name
+                'vendor_name' => $registration->company_name,
+                'recipient_count' => $notifiables->count(),
             ]);
         } catch (\Exception $e) {
             Log::error('Failed to send vendor registration notification', [
