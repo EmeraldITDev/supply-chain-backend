@@ -368,6 +368,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/srfs/{id}', [SRFController::class, 'show']);
     Route::post('/srfs', [SRFController::class, 'store']);
     Route::put('/srfs/{id}', [SRFController::class, 'update']);
+    Route::delete('/srfs/{id}', [SRFController::class, 'destroy']);
     Route::post('/srfs/{id}/supply-chain-director-approve', [SRFController::class, 'supplyChainDirectorApprove']);
     Route::post('/srfs/{id}/supply-chain-director-reject', [SRFController::class, 'supplyChainDirectorReject']);
 

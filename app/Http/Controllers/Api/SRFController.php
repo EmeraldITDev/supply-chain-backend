@@ -496,6 +496,102 @@ class SRFController extends Controller
     }
 
     /**
+     * Remove an SRF that has not progressed beyond early procurement stages.
+     */
+    public function destroy(Request $request, $id)
+    {
+        $user = $request->user();
+        if (!$user) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Authentication required.',
+                'code' => 'UNAUTHENTICATED',
+            ], 401);
+        }
+
+        $srf = $this->findSrfByAnyId((string) $id);
+        if (!$srf) {
+            return response()->json([
+                'success' => false,
+                'error' => 'SRF not found',
+                'code' => 'NOT_FOUND',
+            ], 404);
+        }
+
+        $isAdmin = $user->role === 'admin';
+        $statusLower = strtolower(trim((string) $srf->status));
+        $stageLower = strtolower(trim((string) $srf->current_stage));
+
+        if (!$isAdmin) {
+            if (!in_array($statusLower, ['pending', 'rejected'], true)) {
+                return response()->json([
+                    'success' => false,
+                    'error' => 'Only Pending or Rejected SRFs can be deleted.',
+                    'code' => 'INVALID_STATUS',
+                ], 422);
+            }
+
+            $deletableStages = ['supply_chain_director_review', 'procurement', 'rejected'];
+            if (!in_array($stageLower, $deletableStages, true)) {
+                return response()->json([
+                    'success' => false,
+                    'error' => 'This SRF cannot be deleted at its current workflow stage.',
+                    'code' => 'INVALID_STAGE',
+                    'currentStage' => $srf->current_stage,
+                ], 422);
+            }
+
+            $isRequester = (int) $srf->requester_id === (int) $user->id;
+            $logisticsRoles = ['logistics_manager', 'logistics_officer'];
+            $scdRoles = ['supply_chain_director', 'supply_chain'];
+            $procurementRoles = ['procurement_manager', 'procurement'];
+
+            $allowed = false;
+            if ($isRequester) {
+                $allowed = true;
+            } elseif (in_array($user->role, $logisticsRoles, true)) {
+                $allowed = true;
+            } elseif (in_array($user->role, $scdRoles, true)
+                && $stageLower === 'supply_chain_director_review'
+                && $statusLower === 'pending') {
+                $allowed = true;
+            } elseif (in_array($user->role, $procurementRoles, true)
+                && $stageLower === 'procurement'
+                && $statusLower === 'pending') {
+                $allowed = true;
+            }
+
+            if (!$allowed) {
+                return response()->json([
+                    'success' => false,
+                    'error' => 'You are not allowed to delete this SRF.',
+                    'code' => 'FORBIDDEN',
+                ], 403);
+            }
+        }
+
+        try {
+            $srf->delete();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'SRF deleted successfully.',
+            ]);
+        } catch (\Throwable $e) {
+            \Log::error('SRF deletion failed', [
+                'srf_id' => $srf->srf_id,
+                'error' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'error' => 'Failed to delete SRF.',
+                'code' => 'DELETE_FAILED',
+            ], 500);
+        }
+    }
+
+    /**
      * Supply Chain Director approves a fleet-initiated SRF; transitions it
      * from supply_chain_director_review → procurement so the Procurement
      * Manager can take over (issuing RFQs with the pre-filled context).
