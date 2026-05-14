@@ -269,8 +269,15 @@ class SRFController extends Controller
             'department' => $department,
             'date' => $createdAt,
             'status' => 'Pending',
-            'current_stage' => 'procurement',
-            'approval_history' => [],
+            'current_stage' => 'supply_chain_director_review',
+            'approval_history' => [[
+                'stage' => 'submitted',
+                'actor_id' => $user->id,
+                'actor_name' => $user->name,
+                'at' => $createdAt->toIso8601String(),
+                'note' => 'SRF submitted; awaiting Supply Chain Director review.',
+            ]],
+            'remarks' => 'pending_supply_chain_director_review',
             'invoice_url' => $invoiceUrl,
             'invoice_share_url' => $invoiceShareUrl,
         ]);
