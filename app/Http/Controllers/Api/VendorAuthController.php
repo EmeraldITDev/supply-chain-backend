@@ -551,6 +551,8 @@ class VendorAuthController extends Controller
 
             // Business information
             'category' => $vendor->category,
+            'categoryOther' => $vendor->category_other ?? $registration?->category_other,
+            'category_other' => $vendor->category_other ?? $registration?->category_other,
             'website' => $vendor->website ?? $registration?->website,
             'taxId' => $vendor->tax_id,
             'tax_id' => $vendor->tax_id,

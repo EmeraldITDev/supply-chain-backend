@@ -189,7 +189,7 @@ class VendorApprovalService
                 // Use existing vendor
                 $vendor = $existingVendorByEmail;
                 // Update vendor details from registration if needed
-                $vendor->update([
+                $vendorUpdate = [
                     'name' => $registration->company_name,
                     'category' => $registration->category,
                     'phone' => $registration->phone,
@@ -213,11 +213,15 @@ class VendorApprovalService
                     'bank_name' => $registration->bank_name,
                     'account_name' => $registration->account_name,
                     'currency' => $registration->currency,
-                ]);
+                ];
+                if (Schema::hasColumn('vendors', 'category_other')) {
+                    $vendorUpdate['category_other'] = $registration->category_other;
+                }
+                $vendor->update($vendorUpdate);
             } else {
                 // Create new vendor record from registration
                 try {
-                    $vendor = Vendor::create([
+                    $vendorCreate = [
                         'vendor_id' => Vendor::generateVendorId(),
                         'name' => $registration->company_name,
                         'category' => $registration->category,
@@ -245,7 +249,11 @@ class VendorApprovalService
                         'bank_name' => $registration->bank_name,
                         'account_name' => $registration->account_name,
                         'currency' => $registration->currency,
-                    ]);
+                    ];
+                    if (Schema::hasColumn('vendors', 'category_other')) {
+                        $vendorCreate['category_other'] = $registration->category_other;
+                    }
+                    $vendor = Vendor::create($vendorCreate);
                 } catch (\Exception $e) {
                     \Log::error('Failed to create vendor: ' . $e->getMessage(), [
                         'registration_id' => $registration->id,

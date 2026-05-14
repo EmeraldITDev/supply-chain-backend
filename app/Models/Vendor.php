@@ -28,6 +28,7 @@ class Vendor extends Model
         'vendor_id',
         'name',
         'category',
+        'category_other',
         'rating',
         'total_orders',
         'status',

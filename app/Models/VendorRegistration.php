@@ -18,6 +18,7 @@ class VendorRegistration extends Model
     protected $fillable = [
         'company_name',
         'category',
+        'category_other',
         'email',
         'phone',
         'address',

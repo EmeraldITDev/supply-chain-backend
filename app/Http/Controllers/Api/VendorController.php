@@ -35,9 +35,21 @@ class VendorController extends Controller
      */
     public function categories()
     {
+        $slots = config('vendor_registration.compliance_document_slots', []);
+
         return response()->json([
             'success' => true,
             'categories' => VendorCategory::values(),
+            // Optional compliance uploads (HSE, NUPRC, etc.) — all `required: false` so registration never fails for missing files.
+            'complianceDocumentSlots' => $slots,
+            'compliance_document_slots' => $slots,
+            // When category is "Others", clients may send `categoryOther` / `category_other` (optional, max 500 chars).
+            'categoryOtherField' => [
+                'appliesWhenCategory' => VendorCategory::OTHERS->value,
+                'requestKeys' => ['categoryOther', 'category_other'],
+                'maxLength' => 500,
+                'required' => false,
+            ],
         ]);
     }
 
@@ -100,6 +112,8 @@ class VendorController extends Controller
                 'id' => $vendor->vendor_id,
                 'name' => $vendor->name,
                 'category' => $vendor->category,
+                'categoryOther' => $vendor->category_other,
+                'category_other' => $vendor->category_other,
                 'rating' => $vendor->rating ? (float) $vendor->rating : 0,
                 'totalOrders' => $vendor->total_orders,
                 'status' => $vendor->status,
@@ -179,11 +193,14 @@ class VendorController extends Controller
         $numberOfEmployees  = $vendor->number_of_employees ?? $registration?->number_of_employees;
         $yearEstablished    = $vendor->year_established    ?? $registration?->year_established;
         $website            = $vendor->website             ?? $registration?->website;
+        $categoryOther      = $vendor->category_other      ?? $registration?->category_other;
 
         return response()->json([
             'id'            => $vendor->vendor_id,
             'name'          => $vendor->name,
             'category'      => $vendor->category,
+            'categoryOther' => $categoryOther,
+            'category_other' => $categoryOther,
             'rating'        => $vendor->rating ? (float) $vendor->rating : 0,
             'totalOrders'   => $vendor->total_orders,
             'status'        => $vendor->status,
@@ -270,6 +287,17 @@ class VendorController extends Controller
             // Get and guard form fields - support both camelCase and snake_case
             $companyName = trim($request->input('companyName') ?? $request->input('company_name') ?? '');
             $category = trim($request->input('category') ?? '');
+            $categoryOtherRaw = $request->input('categoryOther', $request->input('category_other'));
+            $categoryOther = is_string($categoryOtherRaw) ? trim($categoryOtherRaw) : '';
+            if ($categoryOther === '') {
+                $categoryOther = null;
+            } elseif (strlen($categoryOther) > 500) {
+                $categoryOther = substr($categoryOther, 0, 500);
+            }
+            // Only persist free-text when "Others" is selected (ignore stray input for other categories).
+            if (strcasecmp($category, VendorCategory::OTHERS->value) !== 0) {
+                $categoryOther = null;
+            }
             $phone = trim($request->input('phone') ?? '');
             $address = trim($request->input('address') ?? '');
             $taxId = trim($request->input('taxId') ?? $request->input('tax_id') ?? '');
@@ -422,6 +450,7 @@ class VendorController extends Controller
             $validationData = [
                 'companyName' => $companyName,
                 'category' => $category,
+                'category_other' => $categoryOther,
                 'email' => $email,
                 'phone' => $phone,
                 'address' => $address,
@@ -442,6 +471,7 @@ class VendorController extends Controller
             $validator = Validator::make($validationData, [
                 'companyName' => 'required|string|max:255',
                 'category' => 'required|string|max:255',
+                'category_other' => 'nullable|string|max:500',
                 'email' => 'required|email',
                 'phone' => 'nullable|string|max:20',
                 'address' => 'nullable|string|max:1000',
@@ -483,7 +513,7 @@ class VendorController extends Controller
 
             // Create the vendor registration with proper error handling
             try {
-                $registration = VendorRegistration::create([
+                $registrationPayload = [
                     'company_name' => $companyName,
                     'category' => $category,
                     'email' => $email,
@@ -501,7 +531,12 @@ class VendorController extends Controller
                     'contact_person' => empty($contactPerson) ? null : $contactPerson,
                     'website' => $website,
                     'status' => VendorRegistration::STATUS_PENDING,
-                ]);
+                ];
+                if (\Illuminate\Support\Facades\Schema::hasColumn('vendor_registrations', 'category_other')) {
+                    $registrationPayload['category_other'] = $categoryOther;
+                }
+
+                $registration = VendorRegistration::create($registrationPayload);
 
                 \Log::info('Registration created successfully', [
                     'request_id' => $requestId,
@@ -668,28 +703,31 @@ class VendorController extends Controller
         $registrations = $query->orderBy('created_at', 'desc')->get();
 
         $mappedRegistrations = $registrations->map(function ($registration) {
-        return [
-            'id' => (string) $registration->id,
-            'companyName' => $registration->company_name,
-            'category' => $registration->category,
-            'email' => $registration->email,
-            'phone' => $registration->phone,
-            'address' => $registration->address,
-            'taxId' => $registration->tax_id,
-            'contactPerson' => $registration->contact_person,
-            'status' => $registration->status,
-            'submittedDate' => optional($registration->created_at)?->toIso8601String(),
-            'reviewedDate' => optional($registration->approved_at)?->toIso8601String(),
-            'reviewedBy' => $registration->approver->name ?? null,
-            'reviewNotes' => $registration->approval_remarks,
+            return [
+                'id' => (string) $registration->id,
+                'companyName' => $registration->company_name,
+                'category' => $registration->category,
+                'categoryOther' => $registration->category_other,
+                'category_other' => $registration->category_other,
+                'email' => $registration->email,
+                'phone' => $registration->phone,
+                'address' => $registration->address,
+                'taxId' => $registration->tax_id,
+                'contactPerson' => $registration->contact_person,
+                'status' => $registration->status,
+                'submittedDate' => optional($registration->created_at)?->toIso8601String(),
+                'reviewedDate' => optional($registration->approved_at)?->toIso8601String(),
+                'reviewedBy' => $registration->approver->name ?? null,
+                'reviewNotes' => $registration->approval_remarks,
             ];
         });
 
-            return response()->json([
-                'success' => true,
-                'data' => $mappedRegistrations
-            ]);
-        }
+        return response()->json([
+            'success' => true,
+            'data' => $mappedRegistrations,
+        ]);
+    }
+
     /**
      * Get a single vendor registration by ID
      */
@@ -799,6 +837,8 @@ class VendorController extends Controller
             'id' => (string) $registration->id,
             'companyName' => $registration->company_name,
             'category' => $registration->category,
+            'categoryOther' => $registration->category_other,
+            'category_other' => $registration->category_other,
             'email' => $registration->email,
             'phone' => $registration->phone,
             'address' => $registration->address,
@@ -1805,6 +1845,8 @@ class VendorController extends Controller
             'email' => 'required|email|max:255',
             'company_name' => 'required|string|max:255',
             'category' => 'required|string|max:255',
+            'category_other' => 'nullable|string|max:500',
+            'categoryOther' => 'nullable|string|max:500',
         ]);
 
         if ($validator->fails()) {

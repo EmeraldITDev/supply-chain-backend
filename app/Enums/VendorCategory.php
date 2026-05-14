@@ -22,6 +22,8 @@ enum VendorCategory: string
     case MAINTENANCE = 'Maintenance';
     case IT_SOLUTIONS = 'IT Solutions';
     case CONSULTING = 'Consulting';
+    case ACCOMMODATION_HOTEL = 'Accommodation/Hotel';
+    case OTHERS = 'Others';
 
     /**
      * Get all category values as array
