@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\MRF;
 use App\Models\Activity;
+use App\Models\MRFApprovalHistory;
 use App\Models\RFQ;
 use App\Models\SRF;
 use App\Models\Vendor;
@@ -1257,19 +1258,41 @@ class MRFController extends Controller
             }
 
             $normalizedContractType = strtolower(trim((string) $request->contractType));
-            $isEmeraldContract = $normalizedContractType === 'emerald';
-            $startAtScd = ! $isEmeraldContract
-                || LogisticsMrfRouting::shouldStartAtSupplyChainDirectorForEmerald(
-                    $user,
-                    $request->department ?? $user->department ?? null,
-                    $request->category,
-                    $request->title,
-                    $request->description
-                );
-            $initialStage = $startAtScd ? 'supply_chain_director_review' : 'executive_review';
-            $initialWorkflowState = $startAtScd
-                ? WorkflowStateService::STATE_SUPPLY_CHAIN_DIRECTOR_REVIEW
-                : WorkflowStateService::STATE_EXECUTIVE_REVIEW;
+            
+            // Standard Emerald contract types
+            $standardContractTypes = ['emerald', 'oando', 'dangote', 'heritage'];
+            $isStandardType = in_array($normalizedContractType, $standardContractTypes, true);
+            
+            // Determine routing and routed reason
+            $routedReason = null;
+            if (!$isStandardType) {
+                // Non-standard contract type: route directly to Supply Chain Director
+                $initialStage = 'supply_chain_director_review';
+                $initialWorkflowState = WorkflowStateService::STATE_SUPPLY_CHAIN_DIRECTOR_REVIEW;
+                $routedReason = 'custom_contract_type';
+            } else {
+                // Standard contract type: apply existing routing logic
+                $isEmeraldContract = $normalizedContractType === 'emerald';
+                $startAtScd = ! $isEmeraldContract
+                    || LogisticsMrfRouting::shouldStartAtSupplyChainDirectorForEmerald(
+                        $user,
+                        $request->department ?? $user->department ?? null,
+                        $request->category,
+                        $request->title,
+                        $request->description
+                    );
+                
+                if ($startAtScd) {
+                    $routedReason = 'logistics_exception';
+                } else {
+                    $routedReason = 'standard_contract_type';
+                }
+                
+                $initialStage = $startAtScd ? 'supply_chain_director_review' : 'executive_review';
+                $initialWorkflowState = $startAtScd
+                    ? WorkflowStateService::STATE_SUPPLY_CHAIN_DIRECTOR_REVIEW
+                    : WorkflowStateService::STATE_EXECUTIVE_REVIEW;
+            }
 
             try {
             $mrf = MRF::create([
@@ -1278,6 +1301,7 @@ class MRFController extends Controller
                 'title' => $request->title,
                 'category' => $request->category,
                 'contract_type' => $request->contractType,
+                'routed_reason' => $routedReason,
                 'urgency' => $request->urgency,
                 'description' => $request->description,
                 'quantity' => $request->quantity,
@@ -1339,6 +1363,32 @@ class MRFController extends Controller
                     'mrf_id' => $mrf->mrf_id,
                     'error' => $e->getMessage()
                 ]);
+            }
+
+            // Log routing decision in approval history if custom contract type
+            if (!$isStandardType) {
+                try {
+                    MRFApprovalHistory::create([
+                        'mrf_id' => $mrf->id,
+                        'stage' => 'system',
+                        'action' => 'auto_routed',
+                        'performed_by' => $user->id,
+                        'performer_name' => 'System',
+                        'performer_role' => 'system',
+                        'remarks' => "Auto-routed to Supply Chain Director (non-standard contract type: {$normalizedContractType})"
+                    ]);
+                    
+                    Log::info('MRF auto-routed due to custom contract type', [
+                        'mrf_id' => $mrf->mrf_id,
+                        'contract_type' => $normalizedContractType,
+                        'routed_to' => 'supply_chain_director'
+                    ]);
+                } catch (\Exception $e) {
+                    Log::warning('Failed to log auto-routing in approval history', [
+                        'mrf_id' => $mrf->mrf_id,
+                        'error' => $e->getMessage()
+                    ]);
+                }
             }
 
             // Send notification to Executive
@@ -2279,12 +2329,27 @@ class MRFController extends Controller
 
         $mrf->is_resubmission = true;
 
-        if (strtolower(trim((string) $mrf->contract_type)) === 'emerald') {
-            $mrf->workflow_state = 'executive_review';
-            $mrf->current_stage = 'executive_review';
-        } else {
+        // Apply routing logic based on contract type
+        $normalizedContractType = strtolower(trim((string) $mrf->contract_type));
+        $standardContractTypes = ['emerald', 'oando', 'dangote', 'heritage'];
+        $isStandardType = in_array($normalizedContractType, $standardContractTypes, true);
+        
+        if (!$isStandardType) {
+            // Non-standard contract type: route directly to Supply Chain Director
             $mrf->workflow_state = 'supply_chain_director_review';
             $mrf->current_stage = 'supply_chain_director_review';
+            $mrf->routed_reason = 'custom_contract_type';
+        } else {
+            // Standard contract type: apply existing routing
+            if (strtolower(trim((string) $mrf->contract_type)) === 'emerald') {
+                $mrf->workflow_state = 'executive_review';
+                $mrf->current_stage = 'executive_review';
+                $mrf->routed_reason = 'standard_contract_type';
+            } else {
+                $mrf->workflow_state = 'supply_chain_director_review';
+                $mrf->current_stage = 'supply_chain_director_review';
+                $mrf->routed_reason = 'standard_contract_type';
+            }
         }
 
         $mrf->status = 'pending';

@@ -26,24 +26,40 @@ class NotificationService
     /**
      * Notify first approver(s) about new MRF submission.
      *
-     * Emerald contracts are routed to Executive first (bunmi.babajide@emeraldcfze.com).
-     * Non-Emerald contracts are routed to Supply Chain Director first.
+     * Routing:
+     * - Non-standard contract types → Supply Chain Director only
+     * - Emerald contracts with logistics exception → Supply Chain Director
+     * - Emerald contracts without exception → Executive (bunmi.babajide@emeraldcfze.com)
+     * - Other standard types (oando, dangote, heritage) → Supply Chain Director
      */
     public function notifyMRFSubmitted(MRF $mrf): void
     {
         try {
             $mrf->loadMissing('requester');
-            $isEmeraldContract = strtolower(trim((string) $mrf->contract_type)) === 'emerald';
+            
+            // Normalize and check contract type
+            $normalizedType = strtolower(trim((string) $mrf->contract_type));
+            $standardTypes = ['emerald', 'oando', 'dangote', 'heritage'];
+            $isStandardType = in_array($normalizedType, $standardTypes, true);
+            
             $notifiables = collect();
 
-            if ($isEmeraldContract && LogisticsMrfRouting::mrfShouldStartAtSupplyChainDirector($mrf)) {
+            // Non-standard contract types go directly to Supply Chain Director
+            if (!$isStandardType) {
                 $notifiables = User::whereIn('role', [
                     'supply_chain_director',
                     'supply_chain',
                     'admin',
                 ])->get();
-            } elseif ($isEmeraldContract) {
-                // Required first approver for Emerald flow.
+            } elseif ($normalizedType === 'emerald' && LogisticsMrfRouting::mrfShouldStartAtSupplyChainDirector($mrf)) {
+                // Emerald with logistics exception
+                $notifiables = User::whereIn('role', [
+                    'supply_chain_director',
+                    'supply_chain',
+                    'admin',
+                ])->get();
+            } elseif ($normalizedType === 'emerald') {
+                // Standard Emerald: use named executive approver
                 $namedExecutive = User::where('email', 'bunmi.babajide@emeraldcfze.com')->first();
 
                 if ($namedExecutive) {
@@ -55,6 +71,7 @@ class NotificationService
                     $notifiables = User::whereIn('role', ['executive', 'admin'])->get();
                 }
             } else {
+                // Other standard types (oando, dangote, heritage) go to Supply Chain Director
                 $notifiables = User::whereIn('role', [
                     'supply_chain_director',
                     'supply_chain',

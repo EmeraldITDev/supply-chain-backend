@@ -18,6 +18,7 @@ class MRF extends Model
         'title',
         'category',
         'contract_type',
+        'routed_reason',
         'urgency',
         'description',
         'quantity',
