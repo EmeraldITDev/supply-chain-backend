@@ -16,10 +16,13 @@ class DatabaseSeeder extends Seeder
      */
     public function run(): void
     {
+        // Create roles and permissions first
         $this->call([
+            RolesAndPermissionsSeeder::class,
             DepartmentCodesSeeder::class,
             CategoryCodesSeeder::class,
             POTermsTemplateSeeder::class,
+            SystemUsersSeeder::class,
         ]);
 
         // Keep this seeder safe for production deployments where dev packages
