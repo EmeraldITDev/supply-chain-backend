@@ -407,7 +407,7 @@ class MRFWorkflowController extends Controller
         $validStates = $isEmeraldContract
             ? ['executive_approved', 'procurement_review']
             : ['supply_chain_director_approved', 'procurement_review'];
-        
+
         // High-value custom contract types can also be approved via lazarus_director_approval
         // which updates workflow_state to supply_chain_director_approved for procurement
         if ($isCustomType && $mrf->workflow_state === 'lazarus_director_approval') {
