@@ -1006,6 +1006,24 @@ class MRFController extends Controller
         }
 
         $isEmeraldContract = strtolower(trim((string) $mrf->contract_type)) === 'emerald';
+        $hasRfqs = $mrf->rfqs->isNotEmpty();
+
+        $procurementSourcingCompletedStates = [
+            'quotations_evaluated',
+            'vendor_selected',
+            'invoice_approved',
+            'po_generated',
+            'po_signed',
+            'closed',
+        ];
+        $procurementSourcingActiveStates = [
+            'supply_chain_director_approved',
+            'executive_approved',
+            'procurement_review',
+            'procurement_approved',
+            'rfq_issued',
+            'quotations_received',
+        ];
 
         // Determine step statuses based on workflow state
         $steps = [
@@ -1058,17 +1076,23 @@ class MRFController extends Controller
             [
                 'step' => 3,
                 'name' => 'Procurement Manager Sources Quotations',
-                'status' => in_array($mrf->workflow_state, ['procurement_review', 'procurement_approved', 'rfq_issued', 'quotations_received']) ? 'pending' :
-                           (in_array($mrf->workflow_state, ['quotations_evaluated', 'vendor_selected', 'invoice_approved', 'po_generated', 'po_signed', 'closed']) ? 'completed' : 'not_started'),
+                'status' => in_array($mrf->workflow_state, $procurementSourcingCompletedStates, true)
+                    ? 'completed'
+                    : (
+                        in_array($mrf->workflow_state, $procurementSourcingActiveStates, true) || $hasRfqs
+                            ? 'pending'
+                            : 'not_started'
+                    ),
                 'description' => 'Procurement manager sources and evaluates onboarded vendor quotations',
             ],
             [
                 'step' => 4,
                 'name' => 'RFQ Issued to Vendors',
-                'status' => $mrf->rfqs()->exists() ? 'completed' :
-                           ($mrf->workflow_state === 'rfq_issued' ? 'pending' : 'not_started'),
-                'completedAt' => $mrf->rfqs()->exists() ? $mrf->rfqs()->first()->created_at->toIso8601String() : null,
-                'rfqCount' => $mrf->rfqs()->count(),
+                'status' => $hasRfqs
+                    ? 'completed'
+                    : ($mrf->workflow_state === 'rfq_issued' ? 'pending' : 'not_started'),
+                'completedAt' => $hasRfqs ? $mrf->rfqs->first()->created_at->toIso8601String() : null,
+                'rfqCount' => $mrf->rfqs->count(),
                 'description' => 'Requests for Quotation sent to identified vendors',
             ],
             [
