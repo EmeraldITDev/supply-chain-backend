@@ -186,7 +186,22 @@ class RFQController extends Controller
     public function store(Request $request)
     {
         $validator = Validator::make($request->all(), [
-            'mrfId' => 'required|string|exists:m_r_f_s,mrf_id',
+            'mrfId' => [
+                'required',
+                'string',
+                function ($attribute, $value, $fail) {
+                    $exists = MRF::where(function ($q) use ($value) {
+                        $q->where('mrf_id', $value)->orWhere('formatted_id', $value);
+                        if (is_numeric((string) $value)) {
+                            $q->orWhere('id', (int) $value);
+                        }
+                    })->exists();
+
+                    if (!$exists) {
+                        $fail('The selected mrf id is invalid.');
+                    }
+                }
+            ],
             'title' => 'required|string',
             'category' => 'nullable|string|max:255',
             'description' => 'required|string',
@@ -273,7 +288,7 @@ class RFQController extends Controller
             // Generate title from MRF details: "{Product/Service} – {Contract Type} RFQ"
             $productName = $category ?? $mrfTitle ?? 'Supply';
             $contractType = $mrf && $mrf->contract_type ? ucfirst($mrf->contract_type) : null;
-            
+
             if ($contractType) {
                 $rfqTitle = "{$productName} – {$contractType} RFQ";
             } else {
