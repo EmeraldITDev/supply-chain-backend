@@ -1258,11 +1258,11 @@ class MRFController extends Controller
             }
 
             $normalizedContractType = strtolower(trim((string) $request->contractType));
-            
+
             // Standard Emerald contract types
             $standardContractTypes = ['emerald', 'oando', 'dangote', 'heritage'];
             $isStandardType = in_array($normalizedContractType, $standardContractTypes, true);
-            
+
             // Determine routing and routed reason
             $routedReason = null;
             if (!$isStandardType) {
@@ -1281,13 +1281,13 @@ class MRFController extends Controller
                         $request->title,
                         $request->description
                     );
-                
+
                 if ($startAtScd) {
                     $routedReason = 'logistics_exception';
                 } else {
                     $routedReason = 'standard_contract_type';
                 }
-                
+
                 $initialStage = $startAtScd ? 'supply_chain_director_review' : 'executive_review';
                 $initialWorkflowState = $startAtScd
                     ? WorkflowStateService::STATE_SUPPLY_CHAIN_DIRECTOR_REVIEW
@@ -1377,7 +1377,7 @@ class MRFController extends Controller
                         'performer_role' => 'system',
                         'remarks' => "Auto-routed to Supply Chain Director (non-standard contract type: {$normalizedContractType})"
                     ]);
-                    
+
                     Log::info('MRF auto-routed due to custom contract type', [
                         'mrf_id' => $mrf->mrf_id,
                         'contract_type' => $normalizedContractType,
@@ -2333,7 +2333,7 @@ class MRFController extends Controller
         $normalizedContractType = strtolower(trim((string) $mrf->contract_type));
         $standardContractTypes = ['emerald', 'oando', 'dangote', 'heritage'];
         $isStandardType = in_array($normalizedContractType, $standardContractTypes, true);
-        
+
         if (!$isStandardType) {
             // Non-standard contract type: route directly to Supply Chain Director
             $mrf->workflow_state = 'supply_chain_director_review';

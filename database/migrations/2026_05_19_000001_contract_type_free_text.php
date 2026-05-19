@@ -9,11 +9,11 @@ return new class extends Migration
 {
     /**
      * Run the migrations.
-     * 
+     *
      * Convert contract_type from enum/constrained string to free-text varchar.
      * This allows arbitrary contract type values while maintaining the four
      * Emerald standards (emerald, oando, dangote, heritage) as defaults.
-     * 
+     *
      * Any non-standard contract type will route directly to Supply Chain Director.
      */
     public function up(): void
@@ -21,7 +21,7 @@ return new class extends Migration
         Schema::table('m_r_f_s', function (Blueprint $table) {
             // Drop existing check constraints on contract_type
             DB::statement('ALTER TABLE m_r_f_s DROP CONSTRAINT IF EXISTS m_r_f_s_contract_type_check');
-            
+
             // Modify column to varchar without constraint
             // This allows arbitrary strings while preserving existing data
             $table->string('contract_type', 100)->change()->nullable();
@@ -49,7 +49,7 @@ return new class extends Migration
             if (Schema::hasColumn('m_r_f_s', 'routed_reason')) {
                 $table->dropColumn('routed_reason');
             }
-            
+
             // Restore enum constraint (PostgreSQL enum type would need recreation)
             // For now, just add back the check constraint
             DB::statement("

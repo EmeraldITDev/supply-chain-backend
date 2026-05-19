@@ -36,12 +36,12 @@ class NotificationService
     {
         try {
             $mrf->loadMissing('requester');
-            
+
             // Normalize and check contract type
             $normalizedType = strtolower(trim((string) $mrf->contract_type));
             $standardTypes = ['emerald', 'oando', 'dangote', 'heritage'];
             $isStandardType = in_array($normalizedType, $standardTypes, true);
-            
+
             $notifiables = collect();
 
             // Non-standard contract types go directly to Supply Chain Director
