@@ -322,6 +322,9 @@ Route::middleware('auth:sanctum')->group(function () {
     // NEW: Supply Chain Director is first approver
     Route::post('/mrfs/{id}/supply-chain-director-approve', [\App\Http\Controllers\Api\MRFWorkflowController::class, 'supplyChainDirectorApprove']);
 
+    // NEW: Lazarus Director approval for high-value custom contract types (after Supply Chain Director)
+    Route::post('/mrfs/{id}/lazarus-director-approve', [\App\Http\Controllers\Api\MRFWorkflowController::class, 'lazarusDirectorApprove']);
+
     // Procurement Manager approval (after Supply Chain Director)
     Route::post('/mrfs/{id}/procurement-approve', [\App\Http\Controllers\Api\MRFWorkflowController::class, 'procurementApprove']);
 

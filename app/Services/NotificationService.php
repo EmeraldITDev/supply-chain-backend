@@ -477,6 +477,56 @@ class NotificationService
     }
 
     /**
+     * Notify Lazarus Angbazo (special director) about high-value custom contract type MRF
+     * for final authorization before proceeding to procurement
+     */
+    public function notifyLazarusDirectorApprovalPending(MRF $mrf, User $approver, ?string $remarks = null): void
+    {
+        try {
+            // Find Lazarus.angbazo user
+            $lazarus = User::where('email', 'lazarus.angbazo@emeraldcfze.com')->first();
+
+            if ($lazarus) {
+                $lazarus->notify(new SystemAnnouncementNotification(
+                    'High-Value Custom Contract MRF - Director Approval Required',
+                    "MRF {$mrf->mrf_id} (Contract Type: {$mrf->contract_type}) has been approved by Supply Chain Director {$approver->name} and requires your authorization before proceeding. " .
+                    ($mrf->estimated_cost !== null ? "Amount: ₦" . number_format((float) $mrf->estimated_cost, 2) : "Amount not specified."),
+                    "/mrfs/{$mrf->mrf_id}",
+                    'high'
+                ));
+
+                Log::info('High-value custom MRF sent to Lazarus Angbazo for approval', [
+                    'mrf_id' => $mrf->mrf_id,
+                    'contract_type' => $mrf->contract_type,
+                    'estimated_cost' => $mrf->estimated_cost
+                ]);
+            } else {
+                Log::warning('Lazarus Angbazo user not found by email; skipping notification', [
+                    'mrf_id' => $mrf->mrf_id,
+                    'contract_type' => $mrf->contract_type
+                ]);
+
+                // Fallback: notify supply chain directors if Lazarus not found
+                $supplyChainDirectors = User::whereIn('role', ['supply_chain_director', 'supply_chain', 'admin'])->get();
+                foreach ($supplyChainDirectors as $director) {
+                    $director->notify(new SystemAnnouncementNotification(
+                        'High-Value Custom Contract MRF - Director Approval Required',
+                        "MRF {$mrf->mrf_id} (Custom Contract: {$mrf->contract_type}) requires director-level approval. Amount: ₦" .
+                        number_format((float) ($mrf->estimated_cost ?? 0), 2),
+                        "/mrfs/{$mrf->mrf_id}",
+                        'high'
+                    ));
+                }
+            }
+        } catch (\Exception $e) {
+            Log::error('Failed to send Lazarus director approval notification', [
+                'mrf_id' => $mrf->mrf_id,
+                'error' => $e->getMessage()
+            ]);
+        }
+    }
+
+    /**
      * Notify Supply Chain Director about PO ready for signature
      */
     public function notifyPOReadyForSignature(MRF $mrf): void

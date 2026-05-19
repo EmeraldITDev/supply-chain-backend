@@ -141,22 +141,51 @@ class MRFWorkflowController extends Controller
 
         $isApproved = $request->action === 'approve';
 
+        // Determine next stage based on contract type and value
+        $nextStage = 'procurement_review';
+        $nextWorkflowState = 'supply_chain_director_approved';
+        $isHighValueCustomType = false;
+
+        if ($isApproved) {
+            // Check if custom contract type with value > ₦1M
+            $isCustomType = $mrf->routed_reason === 'custom_contract_type';
+            $estimatedCost = (float) ($mrf->estimated_cost ?? 0);
+            $isHighValue = $estimatedCost > 1000000;
+
+            if ($isCustomType && $isHighValue) {
+                // Route high-value custom contract types to Lazarus.angbazo (special director approval)
+                $nextStage = 'lazarus_director_approval';
+                $nextWorkflowState = 'lazarus_director_approval';
+                $isHighValueCustomType = true;
+            }
+        } else {
+            // On rejection, status stays rejected
+            $nextStage = 'rejected';
+            $nextWorkflowState = 'supply_chain_director_rejected';
+        }
+
         // Update MRF
         $mrf->update([
-            'status' => $isApproved ? 'procurement_review' : 'rejected',
-            'current_stage' => $isApproved ? 'procurement_review' : 'rejected',
-            'workflow_state' => $isApproved ? 'supply_chain_director_approved' : 'supply_chain_director_rejected',
+            'status' => $isApproved ? ($isHighValueCustomType ? 'lazarus_director_approval' : 'procurement_review') : 'rejected',
+            'current_stage' => $nextStage,
+            'workflow_state' => $nextWorkflowState,
             'remarks' => $request->remarks,
             'director_approved_at' => $isApproved ? now() : null,
             'director_approved_by' => $isApproved ? $user->name : null,
             'director_remarks' => $isApproved ? $request->remarks : null,
-            'procurement_review_started_at' => $isApproved ? now() : null,
+            'procurement_review_started_at' => $isApproved && !$isHighValueCustomType ? now() : null,
             'last_action_by_role' => in_array($user->role, ['admin']) ? 'admin' : 'supply_chain_director',
         ]);
 
         try {
             $mrf->load('requester');
-            $this->notificationService->notifyMRFApproved($mrf, $user, $request->remarks);
+
+            // For high-value custom types, notify Lazarus.angbazo directly
+            if ($isApproved && $isHighValueCustomType) {
+                $this->notificationService->notifyLazarusDirectorApprovalPending($mrf, $user, $request->remarks);
+            } else if ($isApproved) {
+                $this->notificationService->notifyMRFApproved($mrf, $user, $request->remarks);
+            }
         } catch (\Exception $e) {
             \Log::error('Failed to send MRF approved notification', [
                 'mrf_id' => $mrf->mrf_id,
@@ -198,8 +227,136 @@ class MRFWorkflowController extends Controller
         return response()->json([
             'success' => true,
             'message' => $isApproved ?
-                'MRF approved and forwarded to Procurement Manager' :
+                ($isHighValueCustomType ? 'MRF approved by Supply Chain Director and forwarded to Director (Lazarus Angbazo) for high-value authorization' : 'MRF approved and forwarded to Procurement Manager') :
                 'MRF rejected',
+            'data' => [
+                'mrfId' => $mrf->mrf_id,
+                'status' => $mrf->status,
+                'workflowState' => $mrf->workflow_state,
+                'currentStage' => $mrf->current_stage,
+                'approvalRecord' => $approvalRecord,
+                'isHighValueCustomType' => $isHighValueCustomType,
+            ]
+        ]);
+    }
+    /**
+     * Procurement Manager approves MRF after Supply Chain Director approval
+     * Issues RFQs to identified vendors
+     *
+     * Updated for new simplified workflow
+     */
+    public function lazarusDirectorApprove(Request $request, $id)
+    {
+        $user = $request->user();
+
+        // Check role - only Lazarus Angbazo or admin can approve at this stage
+        if (!in_array($user->role, ['director', 'admin']) && $user->email !== 'lazarus.angbazo@emeraldcfze.com') {
+            return response()->json([
+                'success' => false,
+                'error' => 'Only Lazarus Angbazo (Director) can approve high-value custom contract MRFs at this stage',
+                'code' => 'FORBIDDEN',
+                'requiredRole' => 'director (Lazarus Angbazo)'
+            ], 403);
+        }
+
+        $mrf = $this->findMrfByAnyId((string) $id);
+
+        if (!$mrf) {
+            return response()->json([
+                'success' => false,
+                'error' => 'MRF not found',
+                'code' => 'NOT_FOUND'
+            ], 404);
+        }
+
+        // Check if MRF is in pending lazarus director review
+        if ($mrf->workflow_state !== 'lazarus_director_approval') {
+            return response()->json([
+                'success' => false,
+                'error' => 'MRF is not awaiting Lazarus Director approval',
+                'code' => 'INVALID_WORKFLOW_STATE',
+                'currentWorkflowState' => $mrf->workflow_state,
+                'expectedState' => 'lazarus_director_approval'
+            ], 422);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'action' => 'required|in:approve,reject',
+            'remarks' => 'nullable|string|max:1000',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Validation failed',
+                'errors' => $validator->errors(),
+                'code' => 'VALIDATION_ERROR'
+            ], 422);
+        }
+
+        $isApproved = $request->action === 'approve';
+
+        // Update MRF - route to procurement_review after Lazarus approval
+        $mrf->update([
+            'status' => $isApproved ? 'procurement_review' : 'rejected',
+            'current_stage' => $isApproved ? 'procurement_review' : 'rejected',
+            'workflow_state' => $isApproved ? 'supply_chain_director_approved' : 'supply_chain_director_rejected',
+            'remarks' => $request->remarks,
+            'director_approved_at' => $isApproved ? now() : null,
+            'director_approved_by' => $isApproved ? $user->name : null,
+            'director_remarks' => $isApproved ? $request->remarks : null,
+            'procurement_review_started_at' => $isApproved ? now() : null,
+            'last_action_by_role' => in_array($user->role, ['admin']) ? 'admin' : 'director',
+        ]);
+
+        try {
+            $mrf->load('requester');
+            if ($isApproved) {
+                $this->notificationService->notifyMRFApproved($mrf, $user, $request->remarks);
+            }
+        } catch (\Exception $e) {
+            \Log::error('Failed to send MRF approval notification after Lazarus approval', [
+                'mrf_id' => $mrf->mrf_id,
+                'error' => $e->getMessage()
+            ]);
+        }
+
+        // Record approval history
+        $approvalRecord = MRFApprovalHistory::create([
+            'mrf_id' => $mrf->id,
+            'stage' => 'lazarus_director',
+            'action' => $isApproved ? 'approved' : 'rejected',
+            'approver_id' => $user->id,
+            'approver_name' => $user->name,
+            'approver_email' => $user->email,
+            'remarks' => $request->remarks,
+            'performer_name' => $user->name,
+            'performer_role' => $user->role,
+            'performed_by' => $user->id
+        ]);
+
+        // Log activity
+        try {
+            Activity::create([
+                'type' => 'mrf_approved',
+                'title' => $isApproved ? 'MRF Approved by Lazarus Director' : 'MRF Rejected by Lazarus Director',
+                'description' => $isApproved ?
+                    "High-value custom contract MRF {$mrf->mrf_id} was approved by Lazarus Director {$user->name} and forwarded to Procurement Manager review" :
+                    "High-value custom contract MRF {$mrf->mrf_id} was rejected by Lazarus Director {$user->name}",
+                'user_id' => $user->id,
+                'user_name' => $user->name,
+                'reference_type' => 'mrf',
+                'reference_id' => $mrf->mrf_id,
+            ]);
+        } catch (\Exception $e) {
+            Log::warning('Failed to log activity', ['error' => $e->getMessage()]);
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => $isApproved ?
+                'High-value custom contract MRF approved by Lazarus Director and forwarded to Procurement Manager' :
+                'MRF rejected by Lazarus Director',
             'data' => [
                 'mrfId' => $mrf->mrf_id,
                 'status' => $mrf->status,
@@ -209,6 +366,7 @@ class MRFWorkflowController extends Controller
             ]
         ]);
     }
+
     /**
      * Procurement Manager approves MRF after Supply Chain Director approval
      * Issues RFQs to identified vendors
@@ -240,13 +398,21 @@ class MRFWorkflowController extends Controller
         }
 
         $isEmeraldContract = strtolower(trim((string) $mrf->contract_type)) === 'emerald';
+        $isCustomType = $mrf->routed_reason === 'custom_contract_type';
 
         // Contract-type driven initial approval gate:
         // - Emerald: procurement can only proceed after executive approval
         // - Non-Emerald: procurement can only proceed after initial SCD approval
+        // - Custom types (high-value): must go through Lazarus director approval first
         $validStates = $isEmeraldContract
             ? ['executive_approved', 'procurement_review']
             : ['supply_chain_director_approved', 'procurement_review'];
+        
+        // High-value custom contract types can also be approved via lazarus_director_approval
+        // which updates workflow_state to supply_chain_director_approved for procurement
+        if ($isCustomType && $mrf->workflow_state === 'lazarus_director_approval') {
+            $validStates[] = 'lazarus_director_approval';
+        }
 
         // Keep compatibility for legacy records that only store "pending" after initial approval.
         if ($mrf->workflow_state === 'pending') {
