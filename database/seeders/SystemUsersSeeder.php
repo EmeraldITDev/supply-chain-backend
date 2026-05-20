@@ -46,6 +46,14 @@ class SystemUsersSeeder extends Seeder
                 'spatie_role' => 'chairman',
                 'description' => 'Chairman - High-value MRF and payment approval rights',
             ],
+            [
+                'name' => 'Joseph Akinyanmi',
+                'email' => 'joseph.akinyanmi@emeraldcfze.com',
+                'password' => 'Emerald@2026',
+                'role' => 'logistics_manager',
+                'spatie_role' => 'logistics_manager',
+                'description' => 'Logistics Manager - Fleet, trips, and logistics operations',
+            ],
         ];
 
         $this->command->info('Creating system users...');

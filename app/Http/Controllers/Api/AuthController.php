@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\User;
 use App\Models\Employee;
 use App\Support\SignatureUrls;
+use App\Support\UserRoleNormalizer;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Storage;
@@ -19,68 +20,7 @@ class AuthController extends Controller
      */
     private function hasSupplyChainAccess(User $user): bool
     {
-        // Check if user is a vendor (vendors have access to vendor portal)
-        if ($user->role === 'vendor' || $user->hasRole('vendor')) {
-            return true;
-        }
-
-        // Allowed roles (check both Spatie roles and direct role field)
-        $allowedRoles = [
-            'procurement_manager',
-            'procurement', // Added for test users
-            'supply_chain_director',
-            'supply_chain', // Added for test users
-            'logistics_manager',
-            'logistics_officer',
-            'logistics', // Legacy catch-all (treated as logistics_manager elsewhere)
-            'finance',
-            'finance_officer', // Added for test users
-            'executive',
-            'chairman',
-            'employee', // Added - regular employees can access to create MRFs
-            'admin', // Added for admin users
-        ];
-
-        // Check direct role field first (for users without Spatie roles)
-        if ($user->role && in_array($user->role, $allowedRoles)) {
-            return true;
-        }
-
-        // Check if user has any of the allowed Spatie roles
-        if ($user->hasAnyRole($allowedRoles)) {
-            return true;
-        }
-
-        // Check employee job_title if user has employee record
-        if ($user->employee_id) {
-            $employee = Employee::find($user->employee_id);
-            if ($employee) {
-                $allowedTitles = [
-                    'Procurement Manager',
-                    'Executive',
-                    'Chairman',
-                    'Supply Chain Director',
-                    'Logistics Manager',
-                ];
-
-                // Exact match
-                if (in_array($employee->job_title, $allowedTitles)) {
-                    return true;
-                }
-
-                // Check if job_title contains "Finance"
-                if (stripos($employee->job_title, 'Finance') !== false) {
-                    return true;
-                }
-
-                // Check department
-                if (in_array(strtolower($employee->department ?? ''), ['supply chain', 'procurement', 'logistics', 'finance'])) {
-                    return true;
-                }
-            }
-        }
-
-        return false;
+        return UserRoleNormalizer::hasSupplyChainLoginAccess($user);
     }
 
     /**
