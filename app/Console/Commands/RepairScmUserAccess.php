@@ -38,6 +38,10 @@ class RepairScmUserAccess extends Command
                     $wouldChange = ($inferred !== null && $inferred !== $user->role)
                         || ($normalized !== null && $normalized !== $user->role);
 
+                    if (UserRoleNormalizer::isVendorAccount($user)) {
+                        continue;
+                    }
+
                     if (! $hadAccess) {
                         $this->line("BLOCKED: {$user->email} role={$user->role} dept={$user->department} inferred={$inferred}");
                         $stillBlocked++;
@@ -54,9 +58,17 @@ class RepairScmUserAccess extends Command
                     $this->info("Repaired: {$user->email} (was: {$beforeRole}, now: {$user->fresh()->role})");
                 }
 
-                if (! UserRoleNormalizer::hasSupplyChainLoginAccess($user->fresh(['employee']))) {
+                $fresh = $user->fresh(['employee']);
+
+                if (UserRoleNormalizer::isVendorAccount($fresh)) {
+                    $this->line("Skipped (vendor portal only): {$fresh->email}");
+
+                    continue;
+                }
+
+                if (! UserRoleNormalizer::hasSupplyChainLoginAccess($fresh)) {
                     $stillBlocked++;
-                    $this->warn("Still blocked after repair: {$user->email} role={$user->role}");
+                    $this->warn("Still blocked after repair: {$fresh->email} role={$fresh->role}");
                 }
             }
         });

@@ -30,10 +30,11 @@ class UserRoleNormalizer
         'staff',
         'regular_staff',
         'admin',
+        'hr_manager',
     ];
 
     /** Spatie roles worth syncing from users.role (excludes generic employee/staff). */
-    private const SPATIE_SYNC_ROLES = [
+    public const SPATIE_SYNC_ROLES = [
         'admin',
         'procurement_manager',
         'supply_chain_director',
@@ -42,6 +43,7 @@ class UserRoleNormalizer
         'finance',
         'executive',
         'chairman',
+        'hr_manager',
         'vendor',
     ];
 

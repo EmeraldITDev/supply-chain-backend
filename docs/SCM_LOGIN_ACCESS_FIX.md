@@ -43,6 +43,10 @@ php artisan migrate --force
 php artisan scm:repair-user-access
 ```
 
+**Note:** Vendor accounts (`role=vendor`) are intentionally blocked from `POST /api/auth/login` — they must use `POST /api/vendors/auth/login`. The repair command will list them as "Skipped (vendor portal only)".
+
+**Note:** If migration `2026_05_20_143500_normalize_user_roles_for_scm_login` failed once with a private-constant error, redeploy the fix and run `php artisan migrate --force` again (failed migrations are not recorded as run).
+
 Dry-run first:
 
 ```bash
@@ -67,4 +71,4 @@ Success returns `token` and `user`. Failure with access message means run repair
 
 ## Canonical roles (internal login)
 
-`procurement_manager`, `supply_chain_director`, `logistics_manager`, `logistics_officer`, `finance`, `executive`, `chairman`, `employee`, `staff`, `admin`, and legacy aliases (`procurement`, `supply_chain`, `logistics`).
+`procurement_manager`, `supply_chain_director`, `logistics_manager`, `logistics_officer`, `finance`, `executive`, `chairman`, `hr_manager`, `employee`, `staff`, `admin`, and legacy aliases (`procurement`, `supply_chain`, `logistics`).

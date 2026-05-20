@@ -20,6 +20,7 @@ return new class extends Migration
         }
 
         Role::firstOrCreate(['name' => 'employee', 'guard_name' => 'web']);
+        Role::firstOrCreate(['name' => 'hr_manager', 'guard_name' => 'web']);
 
         User::query()
             ->with('employee')

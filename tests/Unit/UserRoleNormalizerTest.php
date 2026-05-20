@@ -84,4 +84,16 @@ class UserRoleNormalizerTest extends TestCase
 
         $this->assertSame('logistics_manager', UserRoleNormalizer::inferCanonicalRoleFromProfile($user));
     }
+
+    public function test_hr_manager_grants_scm_login_access(): void
+    {
+        $user = new User(['role' => 'hr_manager']);
+
+        $this->assertTrue(UserRoleNormalizer::hasSupplyChainLoginAccess($user));
+    }
+
+    public function test_spatie_sync_roles_constant_is_public(): void
+    {
+        $this->assertContains('hr_manager', UserRoleNormalizer::SPATIE_SYNC_ROLES);
+    }
 }
