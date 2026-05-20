@@ -42,6 +42,12 @@ class AuthController extends Controller
             ]);
         }
 
+        if (UserRoleNormalizer::isVendorAccount($user)) {
+            throw ValidationException::withMessages([
+                'email' => ['Vendor accounts must sign in through the vendor portal.'],
+            ]);
+        }
+
         // Check if user has supply chain access
         if (!$this->hasSupplyChainAccess($user)) {
             throw ValidationException::withMessages([

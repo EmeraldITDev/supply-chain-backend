@@ -3,50 +3,32 @@
 use App\Models\User;
 use App\Support\UserRoleNormalizer;
 use Illuminate\Database\Migrations\Migration;
-use Illuminate\Support\Facades\DB;
+use Spatie\Permission\Models\Role;
 
 /**
- * Users created with display labels (e.g. "Logistics Manager") were blocked at
- * login because AuthController only matched canonical role keys. Normalize
- * stored roles and ensure the logistics manager account can sign in.
+ * Repair SCM login for users blocked by strict role matching:
+ * - Normalize display labels on users.role (e.g. "Logistics Manager")
+ * - Infer roles from employee / department profile when missing
+ * - Sync Spatie roles from canonical users.role
  */
 return new class extends Migration
 {
     public function up(): void
     {
+        foreach (UserRoleNormalizer::SPATIE_SYNC_ROLES as $roleName) {
+            Role::firstOrCreate(['name' => $roleName, 'guard_name' => 'web']);
+        }
+
+        Role::firstOrCreate(['name' => 'employee', 'guard_name' => 'web']);
+
         User::query()
-            ->whereNotNull('role')
+            ->with('employee')
             ->orderBy('id')
             ->chunkById(100, function ($users): void {
                 foreach ($users as $user) {
-                    $normalized = UserRoleNormalizer::normalize($user->role);
-                    if ($normalized !== null && $normalized !== $user->role) {
-                        DB::table('users')
-                            ->where('id', $user->id)
-                            ->update(['role' => $normalized]);
-                    }
+                    UserRoleNormalizer::repairUserAccess($user);
                 }
             });
-
-        $joseph = User::query()
-            ->where('email', 'joseph.akinyanmi@emeraldcfze.com')
-            ->first();
-
-        if ($joseph === null) {
-            return;
-        }
-
-        DB::table('users')
-            ->where('id', $joseph->id)
-            ->update(['role' => 'logistics_manager']);
-
-        try {
-            if (! $joseph->hasRole('logistics_manager')) {
-                $joseph->assignRole('logistics_manager');
-            }
-        } catch (\Throwable) {
-            // Role row may not exist yet on some environments; seeder creates it.
-        }
     }
 
     public function down(): void

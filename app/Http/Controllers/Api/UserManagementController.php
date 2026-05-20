@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\User;
 use App\Services\PermissionService;
 use App\Support\SignatureUrls;
+use App\Support\UserRoleNormalizer;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\Hash;
@@ -185,6 +186,8 @@ class UserManagementController extends Controller
             'can_manage_users' => $canManageUsers,
         ]);
 
+        UserRoleNormalizer::syncSpatieRole($newUser, $role);
+
         Log::info('User created by admin', [
             'created_by' => $user->id,
             'new_user_id' => $newUser->id,
@@ -299,6 +302,10 @@ class UserManagementController extends Controller
         }
 
         $targetUser->update($updateData);
+
+        if (isset($updateData['role'])) {
+            UserRoleNormalizer::syncSpatieRole($targetUser->fresh(), $updateData['role']);
+        }
 
         Log::info('User updated by admin', [
             'updated_by' => $user->id,
