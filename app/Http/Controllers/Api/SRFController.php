@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\SRF;
 use App\Models\Logistics\VehicleMaintenance;
 use App\Services\FormattedIdGenerator;
+use App\Services\LineItemBudgetService;
 use App\Services\WorkflowNotificationService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
@@ -211,6 +212,11 @@ class SRFController extends Controller
             'estimatedCost' => 'required|numeric|min:0',
             'justification' => 'required|string',
             'invoice' => 'nullable|file|mimes:pdf,doc,docx,xls,xlsx,png,jpg,jpeg|max:10240', // Optional invoice upload (10MB max)
+            'items' => 'nullable|array',
+            'items.*.itemName' => 'required_with:items|string|max:255',
+            'items.*.quantity' => 'nullable|integer|min:1',
+            'items.*.unit' => 'nullable|string|max:50',
+            'items.*.budgetAmount' => 'nullable|numeric|min:0',
         ]);
 
         if ($validator->fails()) {
@@ -306,6 +312,10 @@ class SRFController extends Controller
             'invoice_share_url' => $invoiceShareUrl,
         ]);
 
+        if ($request->filled('items') && is_array($request->items)) {
+            app(LineItemBudgetService::class)->syncSrfItems($srf, $request->items);
+        }
+
         try {
             $srf->loadMissing('requester');
             $this->workflowNotificationService->notifySRFSubmitted($srf);
@@ -335,7 +345,16 @@ class SRFController extends Controller
             ], 404);
         }
 
-        $payload = $this->presentSrf($srf->load(['vehicle', 'maintenance', 'requester']));
+        $srf->load(['vehicle', 'maintenance', 'requester', 'items']);
+        $payload = $this->presentSrf($srf);
+        $payload['items'] = $srf->items->map(fn ($item) => [
+            'id' => $item->id,
+            'itemName' => $item->item_name,
+            'quantity' => $item->quantity,
+            'unit' => $item->unit,
+            'budgetAmount' => $item->budget_amount !== null ? (float) $item->budget_amount : null,
+        ])->values();
+        $payload['profitAndLoss'] = app(LineItemBudgetService::class)->srfProfitAndLoss($srf);
 
         // Best-effort lookup of RFQs / quotations that were spawned from
         // this SRF (the RFQ workflow currently only links to MRFs, so we
@@ -406,6 +425,22 @@ class SRFController extends Controller
         $payload['live_maintenance_records'] = $liveMaintenance;
 
         return response()->json($payload);
+    }
+
+    public function lineItemProfitAndLoss(Request $request, $id)
+    {
+        $srf = $this->findSrfByAnyId((string) $id);
+        if (!$srf) {
+            return response()->json(['success' => false, 'error' => 'SRF not found', 'code' => 'NOT_FOUND'], 404);
+        }
+
+        $srf->load('items');
+
+        return response()->json([
+            'success' => true,
+            'srfId' => $srf->srf_id,
+            'data' => app(LineItemBudgetService::class)->srfProfitAndLoss($srf),
+        ]);
     }
 
     /**

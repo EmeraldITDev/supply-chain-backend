@@ -11,6 +11,7 @@ use App\Models\SRF;
 use App\Models\Vendor;
 use App\Models\Logistics\VehicleMaintenance;
 use App\Support\LogisticsMrfRouting;
+use App\Services\LineItemBudgetService;
 use App\Services\NotificationService;
 use App\Services\FormattedIdGenerator;
 use App\Services\WorkflowNotificationService;
@@ -425,7 +426,7 @@ class MRFController extends Controller
                 $query->orWhere('id', (int) $id);
             }
         })
-            ->with(['requester', 'directorApprover', 'priceComparisons'])
+            ->with(['requester', 'directorApprover', 'priceComparisons', 'items'])
             ->first();
 
         if (!$mrf) {
@@ -442,6 +443,7 @@ class MRFController extends Controller
         }
 
         $freshPOUrls = $this->generateFreshPOUrls($mrf);
+        $profitAndLoss = app(LineItemBudgetService::class)->mrfProfitAndLoss($mrf);
 
         return response()->json([
             'id' => $mrf->mrf_id,
@@ -452,6 +454,7 @@ class MRFController extends Controller
             'title' => $mrf->title,
             'category' => $mrf->category,
             'contractType' => $mrf->contract_type,
+            'routedReason' => $mrf->routed_reason,
             'urgency' => $mrf->urgency,
             'description' => $mrf->description,
             'quantity' => $mrf->quantity,
@@ -533,6 +536,34 @@ class MRFController extends Controller
             'attachment_share_url' => $mrf->attachment_share_url,
             'attachmentName' => $mrf->attachment_name,
             'attachment_name' => $mrf->attachment_name,
+            'items' => $mrf->items->map(fn ($item) => [
+                'id' => $item->id,
+                'itemName' => $item->item_name,
+                'quantity' => $item->quantity,
+                'unit' => $item->unit,
+                'budgetAmount' => $item->budget_amount !== null ? (float) $item->budget_amount : null,
+                'quotedTotal' => $item->quoted_total !== null ? (float) $item->quoted_total : null,
+            ])->values(),
+            'profitAndLoss' => $profitAndLoss,
+        ]);
+    }
+
+    /**
+     * Per-line-item budget vs quoted P&L breakdown.
+     */
+    public function lineItemProfitAndLoss($id)
+    {
+        $mrf = $this->findMrfByAnyId((string) $id);
+        if (!$mrf) {
+            return response()->json(['success' => false, 'error' => 'MRF not found', 'code' => 'NOT_FOUND'], 404);
+        }
+
+        $mrf->load('items');
+
+        return response()->json([
+            'success' => true,
+            'mrfId' => $mrf->mrf_id,
+            'data' => app(LineItemBudgetService::class)->mrfProfitAndLoss($mrf),
         ]);
     }
 
@@ -1200,6 +1231,11 @@ class MRFController extends Controller
                 'department' => 'nullable|string|max:255',
                 'pfi' => 'nullable|file|mimes:pdf,doc,docx|max:10240', // Optional PFI upload (10MB max)
                 'attachment' => 'nullable|file|max:10240', // Max 10MB, any file type
+                'items' => 'nullable|array',
+                'items.*.itemName' => 'required_with:items|string|max:255',
+                'items.*.quantity' => 'nullable|integer|min:1',
+                'items.*.unit' => 'nullable|string|max:50',
+                'items.*.budgetAmount' => 'nullable|numeric|min:0',
             ]);
 
             if ($validator->fails()) {
@@ -1387,6 +1423,10 @@ class MRFController extends Controller
                     'mrf_id' => $mrf->mrf_id,
                     'error' => $e->getMessage()
                 ]);
+            }
+
+            if ($request->filled('items') && is_array($request->items)) {
+                app(LineItemBudgetService::class)->syncMrfItems($mrf, $request->items);
             }
 
             // Log routing decision in approval history if custom contract type

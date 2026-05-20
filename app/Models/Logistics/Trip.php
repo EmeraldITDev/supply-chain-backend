@@ -51,6 +51,12 @@ class Trip extends Model
         'multi_vendor',
         'selected_vendor_id',
         'approval_status',
+        'workflow_stage',
+        'passenger_user_ids',
+        'driver_user_id',
+        'po_number',
+        'unsigned_po_url',
+        'signed_po_url',
         'created_by',
         'updated_by',
         'cancelled_by',
@@ -66,7 +72,16 @@ class Trip extends Model
         'actual_arrival_at' => 'datetime',
         'cancelled_at' => 'datetime',
         'metadata' => 'array',
+        'passenger_user_ids' => 'array',
     ];
+
+    public const WORKFLOW_TRIP_REQUEST = 'trip_request';
+    public const WORKFLOW_LOGISTICS_REVIEW = 'logistics_review';
+    public const WORKFLOW_PROCUREMENT_REVIEW = 'procurement_review';
+    public const WORKFLOW_SCD_APPROVAL = 'scd_approval';
+    public const WORKFLOW_PO_PENDING_SIGN = 'po_pending_sign';
+    public const WORKFLOW_PO_SIGNED = 'po_signed';
+    public const WORKFLOW_COMPLETED = 'completed';
 
     public function vendor(): BelongsTo
     {
@@ -86,6 +101,11 @@ class Trip extends Model
     public function creator(): BelongsTo
     {
         return $this->belongsTo(User::class, 'created_by');
+    }
+
+    public function driver(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'driver_user_id');
     }
 
     public function journeys(): HasMany

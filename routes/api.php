@@ -4,7 +4,11 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\VendorAuthController;
+use App\Http\Controllers\Api\ContractTypeController;
 use App\Http\Controllers\Api\DashboardController;
+use App\Http\Controllers\Api\DashboardKpiController;
+use App\Http\Controllers\Api\EligiblePassengersController;
+use App\Http\Controllers\Api\ProcurementReportController;
 use App\Http\Controllers\Api\MRFController;
 use App\Http\Controllers\Api\SRFController;
 use App\Http\Controllers\Api\RFQController;
@@ -19,6 +23,7 @@ use App\Http\Controllers\Api\Admin\CodeMappingsController;
 use App\Http\Controllers\Api\V1\Logistics\AuthController as LogisticsAuthController;
 use App\Http\Controllers\Api\V1\Logistics\VendorController as LogisticsVendorController;
 use App\Http\Controllers\Api\V1\Logistics\TripController as LogisticsTripController;
+use App\Http\Controllers\Api\V1\Logistics\TripRequestWorkflowController;
 use App\Http\Controllers\Api\V1\Logistics\VendorPortalTripController as LogisticsVendorPortalTripController;
 use App\Http\Controllers\Api\V1\Logistics\TripVendorSubmissionController as LogisticsTripVendorSubmissionController;
 use App\Http\Controllers\Api\V1\Logistics\AccommodationBookingController as LogisticsAccommodationBookingController;
@@ -192,6 +197,14 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/fleet/drivers', [LogisticsFleetDriverController::class, 'index'])->middleware($logisticsInternalRoles);
     Route::get('/fleet/drivers/{id}', [LogisticsFleetDriverController::class, 'show'])->middleware($logisticsInternalRoles);
     Route::patch('/fleet/drivers/{id}', [LogisticsFleetDriverController::class, 'update'])->middleware($logisticsInternalRoles);
+    Route::delete('/fleet/drivers/{id}', [LogisticsFleetDriverController::class, 'destroy'])->middleware($logisticsInternalRoles);
+    Route::post('/fleet/drivers/{id}/assign', [LogisticsFleetDriverController::class, 'assign'])->middleware($logisticsInternalRoles);
+    Route::post('/trip-requests', [TripRequestWorkflowController::class, 'store']);
+    Route::post('/trips/{id}/convert-to-logistics-request', [TripRequestWorkflowController::class, 'convertToLogisticsRequest'])->middleware($logisticsInternalRoles);
+    Route::post('/trips/{id}/procurement-approve-quote', [TripRequestWorkflowController::class, 'procurementApproveQuote'])->middleware($logisticsInternalRoles);
+    Route::post('/trips/{id}/scd-approve', [TripRequestWorkflowController::class, 'scdApprove'])->middleware('role:supply_chain_director,supply_chain,admin');
+    Route::post('/trips/{id}/generate-trip-po', [TripRequestWorkflowController::class, 'generatePo'])->middleware($logisticsInternalRoles);
+    Route::post('/trips/{id}/upload-signed-trip-po', [TripRequestWorkflowController::class, 'uploadSignedPo'])->middleware('role:supply_chain_director,supply_chain,admin');
     Route::post('/fleet/vehicles/{id}/maintenance', [LogisticsFleetController::class, 'storeMaintenance'])->middleware($logisticsInternalRoles);
     Route::post('/fleet/vehicles/{id}/initiate-srf', [LogisticsFleetController::class, 'initiateSrf'])->middleware($logisticsInternalRoles);
     Route::get('/fleet/alerts', [LogisticsFleetController::class, 'getAlerts'])->middleware('auth:sanctum');
@@ -304,11 +317,13 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/vendors/auth/change-password', [VendorAuthController::class, 'changePassword']);
 
     // MRF routes
+    Route::get('/mrfs/contract-types', [ContractTypeController::class, 'index']);
     Route::get('/mrfs', [MRFController::class, 'index']);
     Route::get('/mrfs/{id}', [MRFController::class, 'show']);
     Route::get('/mrfs/{id}/full-details', [MRFController::class, 'getFullDetails']); // Full MRF with all quotations
     Route::get('/mrfs/{id}/progress-tracker', [MRFController::class, 'getProgressTracker']); // Progress tracker
     Route::get('/mrfs/{id}/available-actions', [MRFController::class, 'getAvailableActions']);
+    Route::get('/mrfs/{id}/line-item-pnl', [MRFController::class, 'lineItemProfitAndLoss']);
     Route::post('/mrfs', [MRFController::class, 'store']);
     Route::put('/mrfs/{id}', [MRFController::class, 'update']);
     Route::post('/mrfs/{id}/approve', [MRFController::class, 'approve']); // Legacy
@@ -369,6 +384,7 @@ Route::middleware('auth:sanctum')->group(function () {
     // SRF routes
     Route::get('/srfs', [SRFController::class, 'index']);
     Route::get('/srfs/{id}', [SRFController::class, 'show']);
+    Route::get('/srfs/{id}/line-item-pnl', [SRFController::class, 'lineItemProfitAndLoss']);
     Route::post('/srfs', [SRFController::class, 'store']);
     Route::put('/srfs/{id}', [SRFController::class, 'update']);
     Route::delete('/srfs/{id}', [SRFController::class, 'destroy']);
@@ -424,6 +440,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::put('/vendors/{uuid}', [VendorController::class, 'adminUpdate'])->middleware('role:procurement_manager,supply_chain_director');
 
     // Dashboard routes
+    Route::get('/dashboard/kpis', [DashboardKpiController::class, 'index']);
     Route::get('/dashboard/procurement-manager', [DashboardController::class, 'procurementManagerDashboard']);
     Route::get('/dashboard/logistics-statistics', [LogisticsDashboardController::class, 'stats'])->middleware('role:procurement_manager,logistics_manager,logistics_officer,supply_chain_director,admin,executive,chairman,finance');
     Route::get('/dashboard/supply-chain-director', [DashboardController::class, 'supplyChainDirectorDashboard']);
@@ -441,6 +458,13 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::delete('/notifications/{id}', [NotificationController::class, 'destroy']);
     Route::delete('/notifications', [NotificationController::class, 'destroyAll']);
     Route::post('/notifications/announcement', [NotificationController::class, 'sendAnnouncement']);
+
+    // Procurement reporting
+    Route::get('/reports/procurement', [ProcurementReportController::class, 'index']);
+    Route::get('/reports/procurement/export', [ProcurementReportController::class, 'export']);
+
+    // Eligible passengers / drivers for trip scheduling (excludes vendors & power users)
+    Route::get('/users/eligible-passengers', [EligiblePassengersController::class, 'index']);
 
     // Global search (supports formatted_id + legacy ids)
     Route::get('/search', [SearchController::class, 'search']);
@@ -561,6 +585,14 @@ Route::prefix('v1/logistics')->group(function () {
         Route::get('/fleet/drivers', [LogisticsFleetDriverController::class, 'index'])->middleware($logisticsInternalRoles);
         Route::get('/fleet/drivers/{id}', [LogisticsFleetDriverController::class, 'show'])->middleware($logisticsInternalRoles);
         Route::patch('/fleet/drivers/{id}', [LogisticsFleetDriverController::class, 'update'])->middleware($logisticsInternalRoles);
+        Route::delete('/fleet/drivers/{id}', [LogisticsFleetDriverController::class, 'destroy'])->middleware($logisticsInternalRoles);
+        Route::post('/fleet/drivers/{id}/assign', [LogisticsFleetDriverController::class, 'assign'])->middleware($logisticsInternalRoles);
+        Route::post('/trip-requests', [TripRequestWorkflowController::class, 'store']);
+        Route::post('/trips/{id}/convert-to-logistics-request', [TripRequestWorkflowController::class, 'convertToLogisticsRequest'])->middleware($logisticsInternalRoles);
+        Route::post('/trips/{id}/procurement-approve-quote', [TripRequestWorkflowController::class, 'procurementApproveQuote'])->middleware($logisticsInternalRoles);
+        Route::post('/trips/{id}/scd-approve', [TripRequestWorkflowController::class, 'scdApprove'])->middleware('role:supply_chain_director,supply_chain,admin');
+        Route::post('/trips/{id}/generate-trip-po', [TripRequestWorkflowController::class, 'generatePo'])->middleware($logisticsInternalRoles);
+        Route::post('/trips/{id}/upload-signed-trip-po', [TripRequestWorkflowController::class, 'uploadSignedPo'])->middleware('role:supply_chain_director,supply_chain,admin');
         Route::post('/fleet/vehicles/{id}/maintenance', [LogisticsFleetController::class, 'storeMaintenance'])->middleware($logisticsInternalRoles);
         Route::post('/fleet/vehicles/{id}/initiate-srf', [LogisticsFleetController::class, 'initiateSrf'])->middleware($logisticsInternalRoles);
         Route::get('/fleet/alerts', [LogisticsFleetController::class, 'getAlerts'])->middleware('auth:sanctum');
@@ -687,6 +719,14 @@ Route::prefix('logistics')->group(function () {
         Route::get('/fleet/drivers', [LogisticsFleetDriverController::class, 'index'])->middleware($logisticsInternalRoles);
         Route::get('/fleet/drivers/{id}', [LogisticsFleetDriverController::class, 'show'])->middleware($logisticsInternalRoles);
         Route::patch('/fleet/drivers/{id}', [LogisticsFleetDriverController::class, 'update'])->middleware($logisticsInternalRoles);
+        Route::delete('/fleet/drivers/{id}', [LogisticsFleetDriverController::class, 'destroy'])->middleware($logisticsInternalRoles);
+        Route::post('/fleet/drivers/{id}/assign', [LogisticsFleetDriverController::class, 'assign'])->middleware($logisticsInternalRoles);
+        Route::post('/trip-requests', [TripRequestWorkflowController::class, 'store']);
+        Route::post('/trips/{id}/convert-to-logistics-request', [TripRequestWorkflowController::class, 'convertToLogisticsRequest'])->middleware($logisticsInternalRoles);
+        Route::post('/trips/{id}/procurement-approve-quote', [TripRequestWorkflowController::class, 'procurementApproveQuote'])->middleware($logisticsInternalRoles);
+        Route::post('/trips/{id}/scd-approve', [TripRequestWorkflowController::class, 'scdApprove'])->middleware('role:supply_chain_director,supply_chain,admin');
+        Route::post('/trips/{id}/generate-trip-po', [TripRequestWorkflowController::class, 'generatePo'])->middleware($logisticsInternalRoles);
+        Route::post('/trips/{id}/upload-signed-trip-po', [TripRequestWorkflowController::class, 'uploadSignedPo'])->middleware('role:supply_chain_director,supply_chain,admin');
         Route::post('/fleet/vehicles/{id}/maintenance', [LogisticsFleetController::class, 'storeMaintenance'])->middleware($logisticsInternalRoles);
         Route::post('/fleet/vehicles/{id}/initiate-srf', [LogisticsFleetController::class, 'initiateSrf'])->middleware($logisticsInternalRoles);
         Route::get('/fleet/alerts', [LogisticsFleetController::class, 'getAlerts'])->middleware('auth:sanctum');

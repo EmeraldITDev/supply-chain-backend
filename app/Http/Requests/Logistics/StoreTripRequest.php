@@ -50,6 +50,9 @@ class StoreTripRequest extends FormRequest
             'confirm_vehicle_assignment_override' => 'nullable|boolean',
             'notes' => 'nullable|string',
             'metadata' => 'nullable|array',
+            'passenger_user_ids' => 'nullable|array',
+            'passenger_user_ids.*' => 'integer|exists:users,id',
+            'driver_user_id' => 'nullable|integer|exists:users,id',
         ];
     }
 }
