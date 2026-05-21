@@ -12,6 +12,7 @@ use App\Models\Vendor;
 use App\Models\Logistics\VehicleMaintenance;
 use App\Support\LogisticsMrfRouting;
 use App\Services\LineItemBudgetService;
+use App\Support\RequestLineItemParser;
 use App\Services\NotificationService;
 use App\Services\FormattedIdGenerator;
 use App\Services\WorkflowNotificationService;
@@ -539,10 +540,24 @@ class MRFController extends Controller
             'items' => $mrf->items->map(fn ($item) => [
                 'id' => $item->id,
                 'itemName' => $item->item_name,
+                'item_name' => $item->item_name,
                 'quantity' => $item->quantity,
                 'unit' => $item->unit,
                 'budgetAmount' => $item->budget_amount !== null ? (float) $item->budget_amount : null,
-                'quotedTotal' => $item->quoted_total !== null ? (float) $item->quoted_total : null,
+                'budget_amount' => $item->budget_amount !== null ? (float) $item->budget_amount : null,
+                'quotedAmount' => $item->quoted_amount !== null ? (float) $item->quoted_amount : null,
+                'quoted_amount' => $item->quoted_amount !== null ? (float) $item->quoted_amount : null,
+            ])->values(),
+            'line_items' => $mrf->items->map(fn ($item) => [
+                'id' => $item->id,
+                'itemName' => $item->item_name,
+                'item_name' => $item->item_name,
+                'quantity' => $item->quantity,
+                'unit' => $item->unit,
+                'budgetAmount' => $item->budget_amount !== null ? (float) $item->budget_amount : null,
+                'budget_amount' => $item->budget_amount !== null ? (float) $item->budget_amount : null,
+                'quotedAmount' => $item->quoted_amount !== null ? (float) $item->quoted_amount : null,
+                'quoted_amount' => $item->quoted_amount !== null ? (float) $item->quoted_amount : null,
             ])->values(),
             'profitAndLoss' => $profitAndLoss,
         ]);
@@ -560,10 +575,14 @@ class MRFController extends Controller
 
         $mrf->load('items');
 
+        $pnl = app(LineItemBudgetService::class)->mrfProfitAndLoss($mrf);
+
         return response()->json([
             'success' => true,
             'mrfId' => $mrf->mrf_id,
-            'data' => app(LineItemBudgetService::class)->mrfProfitAndLoss($mrf),
+            'items' => $pnl['items'],
+            'summary' => $pnl['summary'],
+            'data' => $pnl,
         ]);
     }
 
@@ -1212,6 +1231,9 @@ class MRFController extends Controller
         }
 
         try {
+            RequestLineItemParser::mergeIntoRequest($request);
+            $lineItems = RequestLineItemParser::resolve($request);
+
             // Normalize urgency to proper case
             if ($request->has('urgency') && $request->urgency) {
                 $request->merge([
@@ -1219,7 +1241,7 @@ class MRFController extends Controller
                 ]);
             }
 
-            $validator = Validator::make($request->all(), [
+            $validator = Validator::make($request->all(), array_merge([
                 'title' => 'required|string|max:255',
                 'category' => 'required|string|max:255',
                 'contractType' => 'required|string|max:255',
@@ -1231,12 +1253,7 @@ class MRFController extends Controller
                 'department' => 'nullable|string|max:255',
                 'pfi' => 'nullable|file|mimes:pdf,doc,docx|max:10240', // Optional PFI upload (10MB max)
                 'attachment' => 'nullable|file|max:10240', // Max 10MB, any file type
-                'items' => 'nullable|array',
-                'items.*.itemName' => 'required_with:items|string|max:255',
-                'items.*.quantity' => 'nullable|integer|min:1',
-                'items.*.unit' => 'nullable|string|max:50',
-                'items.*.budgetAmount' => 'nullable|numeric|min:0',
-            ]);
+            ], RequestLineItemParser::validationRules()));
 
             if ($validator->fails()) {
                 return response()->json([
@@ -1425,8 +1442,8 @@ class MRFController extends Controller
                 ]);
             }
 
-            if ($request->filled('items') && is_array($request->items)) {
-                app(LineItemBudgetService::class)->syncMrfItems($mrf, $request->items);
+            if ($lineItems !== []) {
+                app(LineItemBudgetService::class)->syncMrfItems($mrf, $lineItems);
             }
 
             // Log routing decision in approval history if custom contract type
@@ -1552,6 +1569,9 @@ class MRFController extends Controller
             ], 403);
         }
 
+        RequestLineItemParser::mergeIntoRequest($request);
+        $lineItems = RequestLineItemParser::resolve($request);
+
         // Normalize urgency to proper case
         if ($request->has('urgency')) {
             $request->merge([
@@ -1559,7 +1579,7 @@ class MRFController extends Controller
             ]);
         }
 
-        $validator = Validator::make($request->all(), [
+        $validator = Validator::make($request->all(), array_merge([
             'title' => 'sometimes|required|string|max:255',
             'category' => 'sometimes|required|string|max:255',
             'urgency' => 'sometimes|required|in:Low,Medium,High,Critical',
@@ -1568,7 +1588,7 @@ class MRFController extends Controller
             'estimatedCost' => 'sometimes|nullable|numeric|min:0',
             'justification' => 'sometimes|required|string',
             'department' => 'sometimes|nullable|string|max:255',
-        ]);
+        ], RequestLineItemParser::validationRules()));
 
         if ($validator->fails()) {
             return response()->json([
@@ -1601,7 +1621,13 @@ class MRFController extends Controller
         }
 
         $mrf->update($updateData);
+
+        if ($request->has('items') || $request->has('line_items')) {
+            app(LineItemBudgetService::class)->syncMrfItems($mrf, $lineItems);
+        }
+
         $mrf->refresh();
+        $mrf->load('items');
 
         return response()->json([
             'id' => $mrf->mrf_id,
@@ -1620,6 +1646,24 @@ class MRFController extends Controller
             'approvalHistory' => $mrf->approval_history ?? [],
             'rejectionReason' => $mrf->rejection_reason,
             'isResubmission' => $mrf->is_resubmission,
+            'items' => $mrf->items->map(fn ($item) => [
+                'id' => $item->id,
+                'itemName' => $item->item_name,
+                'item_name' => $item->item_name,
+                'quantity' => $item->quantity,
+                'unit' => $item->unit,
+                'budgetAmount' => $item->budget_amount !== null ? (float) $item->budget_amount : null,
+                'budget_amount' => $item->budget_amount !== null ? (float) $item->budget_amount : null,
+            ])->values(),
+            'line_items' => $mrf->items->map(fn ($item) => [
+                'id' => $item->id,
+                'itemName' => $item->item_name,
+                'item_name' => $item->item_name,
+                'quantity' => $item->quantity,
+                'unit' => $item->unit,
+                'budgetAmount' => $item->budget_amount !== null ? (float) $item->budget_amount : null,
+                'budget_amount' => $item->budget_amount !== null ? (float) $item->budget_amount : null,
+            ])->values(),
         ]);
     }
 

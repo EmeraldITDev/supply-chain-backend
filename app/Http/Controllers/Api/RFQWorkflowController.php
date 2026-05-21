@@ -568,6 +568,12 @@ class RFQWorkflowController extends Controller
             if ($rfq->mrf_id) {
                 $mrf = MRF::query()->find($rfq->mrf_id);
                 if ($mrf) {
+                    $mrf->update([
+                        'selected_vendor_id' => $selectedQuotation->vendor_id,
+                    ]);
+                    $mrf->load('items');
+                    app(\App\Services\LineItemBudgetService::class)->hydrateMrfQuotedAmounts($mrf, $selectedQuotation);
+
                     if ($mrf->priceComparisons()->count() === 0) {
                         $mrf->syncPriceComparisonsFromQuotations();
                     }

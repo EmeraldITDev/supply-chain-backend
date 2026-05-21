@@ -5,10 +5,9 @@ namespace App\Services;
 use App\Models\MRF;
 use App\Models\MRFItem;
 use App\Models\Quotation;
-use App\Models\QuotationItem;
 use App\Models\SRF;
 use App\Models\SRFItem;
-use Illuminate\Support\Collection;
+use App\Support\RequestLineItemParser;
 
 class LineItemBudgetService
 {
@@ -26,10 +25,10 @@ class LineItemBudgetService
 
         $rows = $items->map(function (MRFItem $item) use ($quotedByName) {
             $budget = (float) ($item->budget_amount ?? 0);
-            $quoted = (float) ($item->quoted_total ?? $quotedByName[strtolower($item->item_name)] ?? 0);
-            $variance = $budget > 0 ? round($budget - $quoted, 2) : 0.0;
+            $quoted = (float) ($item->quoted_amount ?? $quotedByName[strtolower($item->item_name)] ?? 0);
+            $variance = $budget > 0 || $quoted > 0 ? round($budget - $quoted, 2) : 0.0;
 
-            return $this->formatRow($item->id, $item->item_name, $item->quantity, $item->unit, $budget, $quoted, $variance);
+            return $this->formatPnLRow($item->id, $item->item_name, $budget, $quoted, $variance);
         })->all();
 
         return ['items' => $rows, 'summary' => $this->summarize($rows)];
@@ -47,13 +46,93 @@ class LineItemBudgetService
 
         $rows = $items->map(function (SRFItem $item) {
             $budget = (float) ($item->budget_amount ?? 0);
-            $quoted = (float) ($item->quoted_total ?? $item->total_price ?? 0);
-            $variance = $budget > 0 ? round($budget - $quoted, 2) : 0.0;
+            $quoted = (float) ($item->quoted_amount ?? $item->total_price ?? 0);
+            $variance = $budget > 0 || $quoted > 0 ? round($budget - $quoted, 2) : 0.0;
 
-            return $this->formatRow($item->id, $item->item_name, $item->quantity, $item->unit, $budget, $quoted, $variance);
+            return $this->formatPnLRow($item->id, $item->item_name, $budget, $quoted, $variance);
         })->all();
 
         return ['items' => $rows, 'summary' => $this->summarize($rows)];
+    }
+
+    public function hydrateMrfQuotedAmounts(MRF $mrf, Quotation $quotation): void
+    {
+        $quotation->loadMissing('items');
+        $byName = $this->quotationItemsByName($quotation);
+
+        foreach ($mrf->items as $line) {
+            $key = strtolower((string) $line->item_name);
+            if (isset($byName[$key])) {
+                $line->quoted_amount = $byName[$key];
+                $line->save();
+            }
+        }
+    }
+
+    public function hydrateSrfQuotedAmounts(SRF $srf, float $quotedTotal): void
+    {
+        $lines = $srf->items()->get();
+        if ($lines->isEmpty()) {
+            return;
+        }
+
+        if ($lines->count() === 1) {
+            $lines->first()->update(['quoted_amount' => $quotedTotal]);
+
+            return;
+        }
+
+        $perLine = round($quotedTotal / $lines->count(), 2);
+        foreach ($lines as $line) {
+            $line->update(['quoted_amount' => $perLine]);
+        }
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $lineItems  Normalized rows from RequestLineItemParser
+     */
+    public function syncMrfItems(MRF $mrf, array $lineItems): void
+    {
+        $mrf->items()->delete();
+        foreach ($lineItems as $row) {
+            $normalized = RequestLineItemParser::normalizeRow(is_array($row) ? $row : []);
+            $qty = (int) ($normalized['quantity'] ?? 1);
+            $unitPrice = $normalized['unit_price'] ?? null;
+
+            MRFItem::create([
+                'mrf_id' => $mrf->id,
+                'item_name' => $normalized['item_name'],
+                'description' => $normalized['description'] ?? null,
+                'quantity' => $qty,
+                'unit' => $normalized['unit'] ?? 'unit',
+                'unit_price' => $unitPrice,
+                'total_price' => $unitPrice !== null ? $unitPrice * $qty : null,
+                'budget_amount' => $normalized['budget_amount'],
+                'specifications' => $normalized['specifications'] ?? null,
+            ]);
+        }
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $lineItems
+     */
+    public function syncSrfItems(SRF $srf, array $lineItems): void
+    {
+        $srf->items()->delete();
+        foreach ($lineItems as $row) {
+            $normalized = RequestLineItemParser::normalizeRow(is_array($row) ? $row : []);
+            $qty = (int) ($normalized['quantity'] ?? 1);
+
+            SRFItem::create([
+                'srf_id' => $srf->id,
+                'item_name' => $normalized['item_name'],
+                'description' => $normalized['description'] ?? null,
+                'quantity' => $qty,
+                'unit' => $normalized['unit'] ?? 'unit',
+                'budget_amount' => $normalized['budget_amount'],
+                'specifications' => $normalized['specifications'] ?? null,
+            ]);
+        }
     }
 
     /**
@@ -103,26 +182,23 @@ class LineItemBudgetService
     }
 
     /**
+     * Shape expected by frontend LineItemPnLSection.
+     *
      * @return array<string, mixed>
      */
-    private function formatRow(
-        int $id,
-        string $name,
-        int $qty,
-        string $unit,
-        float $budget,
-        float $quoted,
-        float $variance
-    ): array {
+    private function formatPnLRow(int $id, string $name, float $budget, float $quoted, float $variance): array
+    {
         return [
             'id' => $id,
             'itemName' => $name,
-            'quantity' => $qty,
-            'unit' => $unit,
+            'item_name' => $name,
             'budgetAmount' => $budget,
+            'budget_amount' => $budget,
             'quotedAmount' => $quoted,
+            'quoted_amount' => $quoted,
             'variance' => $variance,
             'varianceType' => $variance > 0 ? 'saving' : ($variance < 0 ? 'loss' : 'neutral'),
+            'variance_type' => $variance > 0 ? 'saving' : ($variance < 0 ? 'loss' : 'neutral'),
         ];
     }
 
@@ -133,75 +209,33 @@ class LineItemBudgetService
     {
         $quotations = Quotation::query()
             ->whereHas('rfq', fn ($q) => $q->where('mrf_id', $mrf->id))
-            ->where('status', 'Approved')
             ->with('items')
             ->get();
-
-        if ($quotations->isEmpty()) {
-            $quotations = Quotation::query()
-                ->whereHas('rfq', fn ($q) => $q->where('mrf_id', $mrf->id))
-                ->with('items')
-                ->get();
-        }
 
         $vendorId = $mrf->selected_vendor_id;
         $selected = $vendorId
             ? $quotations->firstWhere('vendor_id', $vendorId)
             : $quotations->where('status', 'Approved')->sortBy('total_amount')->first();
         $selected ??= $quotations->sortBy('total_amount')->first();
+
         if (!$selected) {
             return [];
         }
 
+        return $this->quotationItemsByName($selected);
+    }
+
+    /**
+     * @return array<string, float>
+     */
+    private function quotationItemsByName(Quotation $quotation): array
+    {
         $map = [];
-        foreach ($selected->items as $item) {
+        foreach ($quotation->items as $item) {
             $key = strtolower((string) $item->item_name);
             $map[$key] = ($map[$key] ?? 0) + (float) ($item->total_price ?? 0);
         }
 
         return $map;
-    }
-
-    /**
-     * @param  array<int, array<string, mixed>>  $lineItems
-     */
-    public function syncMrfItems(MRF $mrf, array $lineItems): void
-    {
-        $mrf->items()->delete();
-        foreach ($lineItems as $row) {
-            $qty = (int) ($row['quantity'] ?? 1);
-            $unitPrice = isset($row['unitPrice']) ? (float) $row['unitPrice'] : null;
-            MRFItem::create([
-                'mrf_id' => $mrf->id,
-                'item_name' => $row['itemName'] ?? $row['item_name'] ?? 'Item',
-                'description' => $row['description'] ?? null,
-                'quantity' => $qty,
-                'unit' => $row['unit'] ?? 'unit',
-                'unit_price' => $unitPrice,
-                'total_price' => $unitPrice !== null ? $unitPrice * $qty : null,
-                'budget_amount' => isset($row['budgetAmount']) ? (float) $row['budgetAmount'] : (isset($row['budget_amount']) ? (float) $row['budget_amount'] : null),
-                'specifications' => $row['specifications'] ?? null,
-            ]);
-        }
-    }
-
-    /**
-     * @param  array<int, array<string, mixed>>  $lineItems
-     */
-    public function syncSrfItems(SRF $srf, array $lineItems): void
-    {
-        $srf->items()->delete();
-        foreach ($lineItems as $row) {
-            $qty = (int) ($row['quantity'] ?? 1);
-            SRFItem::create([
-                'srf_id' => $srf->id,
-                'item_name' => $row['itemName'] ?? $row['item_name'] ?? 'Item',
-                'description' => $row['description'] ?? null,
-                'quantity' => $qty,
-                'unit' => $row['unit'] ?? 'unit',
-                'budget_amount' => isset($row['budgetAmount']) ? (float) $row['budgetAmount'] : (isset($row['budget_amount']) ? (float) $row['budget_amount'] : null),
-                'specifications' => $row['specifications'] ?? null,
-            ]);
-        }
     }
 }

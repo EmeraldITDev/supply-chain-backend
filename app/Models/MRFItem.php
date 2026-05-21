@@ -10,7 +10,7 @@ class MRFItem extends Model
 {
     use HasFactory;
 
-    protected $table = 'mrf_items';
+    protected $table = 'mrf_line_items';
 
     protected $fillable = [
         'mrf_id',
@@ -21,7 +21,7 @@ class MRFItem extends Model
         'unit_price',
         'total_price',
         'budget_amount',
-        'quoted_total',
+        'quoted_amount',
         'specifications',
     ];
 
@@ -30,7 +30,7 @@ class MRFItem extends Model
         'unit_price' => 'decimal:2',
         'total_price' => 'decimal:2',
         'budget_amount' => 'decimal:2',
-        'quoted_total' => 'decimal:2',
+        'quoted_amount' => 'decimal:2',
     ];
 
     /**

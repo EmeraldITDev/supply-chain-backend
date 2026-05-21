@@ -660,6 +660,8 @@ class MRFWorkflowController extends Controller
             Log::info('RFQ workflow state updated to supply_chain_review', ['rfq_id' => $rfq->rfq_id, 'mrf_id' => $mrf->mrf_id]);
         }
 
+        app(\App\Services\LineItemBudgetService::class)->hydrateMrfQuotedAmounts($mrf, $quotation);
+
         // Record in approval history
         MRFApprovalHistory::record($mrf, 'vendor_selected', 'procurement', $user,
             "Vendor {$vendor->name} selected and sent for Supply Chain Director approval. " . ($selectionReasonText ?? ''));

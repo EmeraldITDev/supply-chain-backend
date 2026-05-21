@@ -54,8 +54,28 @@ This document is the source of truth for the React/Lovable frontend. **Before wi
 
 ## 2. Budget vs Actuals — MRF/SRF Line Item P&L
 
+### Line items on create/update (POST & PUT)
+
+**Tables:** `mrf_line_items`, `srf_line_items` (`mrf_id`/`srf_id`, `item_name`, `quantity`, `unit`, `budget_amount`, `quoted_amount`).
+
+**Request:** Send line items as **`items` or `line_items`** (both accepted). For **multipart/form-data**, JSON-stringify the array (do not rely on native array serialization).
+
+**Per-line fields (dual-case):** `item_name` / `itemName`, `budget_amount` / `budgetAmount`, `quantity`, `unit`.
+
+**Example (multipart field `items`):**
+```json
+[{"itemName":"Office chairs","quantity":10,"unit":"pcs","budgetAmount":500000}]
+```
+
+**Endpoints:**
+- `POST /api/mrfs` — persist line items on create
+- `PUT /api/mrfs/{id}` — replace line items when array provided
+- `POST /api/srfs` / `PUT /api/srfs/{id}` — same for SRF
+
+**Quoted amounts:** Populated automatically when procurement selects a vendor quotation (`POST /mrfs/{id}/send-vendor-for-approval` or `POST /rfqs/{id}/select-vendor`), matched by **item name** to quotation line items.
+
 ### POST `/api/mrfs` & POST `/api/srfs` (MODIFIED)
-Include `items[]` with **`budgetAmount`** per line (Feature 9 baseline).
+Include `items[]` or `line_items[]` with **`budgetAmount`** / **`budget_amount`** per line (Feature 9 baseline).
 
 ### GET `/api/mrfs/{id}` & GET `/api/srfs/{id}` (MODIFIED)
 **Response additions:**
@@ -99,7 +119,38 @@ Include `items[]` with **`budgetAmount`** per line (Feature 9 baseline).
 ### GET `/api/mrfs/{id}/line-item-pnl` (NEW)
 ### GET `/api/srfs/{id}/line-item-pnl` (NEW)
 
-Same `data` shape as `profitAndLoss` above.
+**Response (LineItemPnLSection):**
+```json
+{
+  "success": true,
+  "mrfId": "MRF-2026-001",
+  "items": [
+    {
+      "id": 1,
+      "itemName": "Office chairs",
+      "item_name": "Office chairs",
+      "budgetAmount": 500000,
+      "budget_amount": 500000,
+      "quotedAmount": 480000,
+      "quoted_amount": 480000,
+      "variance": 20000,
+      "varianceType": "saving",
+      "variance_type": "saving"
+    }
+  ],
+  "summary": {
+    "totalBudget": 500000,
+    "totalQuoted": 480000,
+    "netVariance": 20000,
+    "totalSavings": 20000,
+    "totalLoss": 0,
+    "lineCount": 1
+  },
+  "data": { "items": [], "summary": {} }
+}
+```
+
+Use top-level `items` + `summary` (or `data.items` / `data.summary`).
 
 **Frontend:** On MRF/SRF **detail view**, render a per-line table: Budget | Quoted | Variance (green saving / red loss). Refresh after quotations are approved.
 
@@ -327,8 +378,10 @@ Same as §2: each line item in `items[]` must include `budgetAmount` on create.
 php artisan migrate
 ```
 
-Migration: `2026_05_20_160000_scm_platform_feature_enhancements.php`  
-(Also run `2026_05_19_000001_contract_type_free_text.php` if not applied.)
+Migrations:
+- `2026_05_20_160000_scm_platform_feature_enhancements.php`
+- `2026_05_21_120000_rename_line_item_tables.php` (renames `mrf_items` → `mrf_line_items`, adds `quoted_amount`)
+- `2026_05_19_000001_contract_type_free_text.php` (if not applied)
 
 ---
 

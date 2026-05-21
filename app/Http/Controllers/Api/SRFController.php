@@ -7,6 +7,7 @@ use App\Models\SRF;
 use App\Models\Logistics\VehicleMaintenance;
 use App\Services\FormattedIdGenerator;
 use App\Services\LineItemBudgetService;
+use App\Support\RequestLineItemParser;
 use App\Services\WorkflowNotificationService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
@@ -194,6 +195,9 @@ class SRFController extends Controller
             ], 403);
         }
 
+        RequestLineItemParser::mergeIntoRequest($request);
+        $lineItems = RequestLineItemParser::resolve($request);
+
         // Normalize urgency to proper case
         if ($request->has('urgency')) {
             $request->merge([
@@ -201,7 +205,7 @@ class SRFController extends Controller
             ]);
         }
 
-        $validator = Validator::make($request->all(), [
+        $validator = Validator::make($request->all(), array_merge([
             'title' => 'required|string|max:255',
             'serviceType' => 'required|string|max:255',
             'contractType' => 'nullable|string|max:255',
@@ -212,12 +216,7 @@ class SRFController extends Controller
             'estimatedCost' => 'required|numeric|min:0',
             'justification' => 'required|string',
             'invoice' => 'nullable|file|mimes:pdf,doc,docx,xls,xlsx,png,jpg,jpeg|max:10240', // Optional invoice upload (10MB max)
-            'items' => 'nullable|array',
-            'items.*.itemName' => 'required_with:items|string|max:255',
-            'items.*.quantity' => 'nullable|integer|min:1',
-            'items.*.unit' => 'nullable|string|max:50',
-            'items.*.budgetAmount' => 'nullable|numeric|min:0',
-        ]);
+        ], RequestLineItemParser::validationRules()));
 
         if ($validator->fails()) {
             return response()->json([
@@ -312,8 +311,8 @@ class SRFController extends Controller
             'invoice_share_url' => $invoiceShareUrl,
         ]);
 
-        if ($request->filled('items') && is_array($request->items)) {
-            app(LineItemBudgetService::class)->syncSrfItems($srf, $request->items);
+        if ($lineItems !== []) {
+            app(LineItemBudgetService::class)->syncSrfItems($srf, $lineItems);
         }
 
         try {
@@ -350,10 +349,15 @@ class SRFController extends Controller
         $payload['items'] = $srf->items->map(fn ($item) => [
             'id' => $item->id,
             'itemName' => $item->item_name,
+            'item_name' => $item->item_name,
             'quantity' => $item->quantity,
             'unit' => $item->unit,
             'budgetAmount' => $item->budget_amount !== null ? (float) $item->budget_amount : null,
+            'budget_amount' => $item->budget_amount !== null ? (float) $item->budget_amount : null,
+            'quotedAmount' => $item->quoted_amount !== null ? (float) $item->quoted_amount : null,
+            'quoted_amount' => $item->quoted_amount !== null ? (float) $item->quoted_amount : null,
         ])->values();
+        $payload['line_items'] = $payload['items'];
         $payload['profitAndLoss'] = app(LineItemBudgetService::class)->srfProfitAndLoss($srf);
 
         // Best-effort lookup of RFQs / quotations that were spawned from
@@ -436,10 +440,14 @@ class SRFController extends Controller
 
         $srf->load('items');
 
+        $pnl = app(LineItemBudgetService::class)->srfProfitAndLoss($srf);
+
         return response()->json([
             'success' => true,
             'srfId' => $srf->srf_id,
-            'data' => app(LineItemBudgetService::class)->srfProfitAndLoss($srf),
+            'items' => $pnl['items'],
+            'summary' => $pnl['summary'],
+            'data' => $pnl,
         ]);
     }
 
@@ -503,6 +511,9 @@ class SRFController extends Controller
             ], 403);
         }
 
+        RequestLineItemParser::mergeIntoRequest($request);
+        $lineItems = RequestLineItemParser::resolve($request);
+
         // Normalize urgency to proper case
         if ($request->has('urgency')) {
             $request->merge([
@@ -510,7 +521,7 @@ class SRFController extends Controller
             ]);
         }
 
-        $validator = Validator::make($request->all(), [
+        $validator = Validator::make($request->all(), array_merge([
             'title' => 'sometimes|required|string|max:255',
             'serviceType' => 'sometimes|required|string|max:255',
             'urgency' => 'sometimes|required|in:Low,Medium,High,Critical',
@@ -518,7 +529,7 @@ class SRFController extends Controller
             'duration' => 'sometimes|required|string',
             'estimatedCost' => 'sometimes|required|numeric|min:0',
             'justification' => 'sometimes|required|string',
-        ]);
+        ], RequestLineItemParser::validationRules()));
 
         if ($validator->fails()) {
             return response()->json([
@@ -544,9 +555,27 @@ class SRFController extends Controller
         }
 
         $srf->update($updateData);
-        $srf->refresh();
 
-        return response()->json($this->presentSrf($srf));
+        if ($request->has('items') || $request->has('line_items')) {
+            app(LineItemBudgetService::class)->syncSrfItems($srf, $lineItems);
+        }
+
+        $srf->refresh();
+        $srf->load('items');
+
+        $payload = $this->presentSrf($srf);
+        $payload['items'] = $srf->items->map(fn ($item) => [
+            'id' => $item->id,
+            'itemName' => $item->item_name,
+            'item_name' => $item->item_name,
+            'quantity' => $item->quantity,
+            'unit' => $item->unit,
+            'budgetAmount' => $item->budget_amount !== null ? (float) $item->budget_amount : null,
+            'budget_amount' => $item->budget_amount !== null ? (float) $item->budget_amount : null,
+        ])->values();
+        $payload['line_items'] = $payload['items'];
+
+        return response()->json($payload);
     }
 
     /**
