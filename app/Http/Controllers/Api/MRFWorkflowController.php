@@ -11,6 +11,7 @@ use App\Models\Quotation;
 use App\Models\Vendor;
 use App\Models\QuotationItem;
 use App\Models\POTermsTemplate;
+use App\Models\ProcurementDocument;
 use App\Services\NotificationService;
 use App\Services\EmailService;
 use App\Services\WorkflowNotificationService;
@@ -18,6 +19,7 @@ use App\Services\WorkflowStateService;
 use App\Services\PermissionService;
 use App\Services\PurchaseOrderPdfService;
 use App\Services\PaymentScheduleService;
+use App\Services\ProcurementDocumentService;
 use App\Services\QuotationAttachmentService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
@@ -1510,6 +1512,8 @@ class MRFWorkflowController extends Controller
         }
 
         // Handle file upload mode (Mode 1)
+        $storedPoPath = null;
+        $storedPoFileName = null;
         if ($isFileUpload) {
                         $file = $request->file('unsigned_po');
 
@@ -1538,6 +1542,9 @@ class MRFWorkflowController extends Controller
                 }
 
                 Storage::disk($disk)->putFileAs($directory, $file, basename($poPath));
+
+                $storedPoPath = $poPath;
+                $storedPoFileName = basename($poPath);
 
                 // Get URL (temporary signed URL for S3, public URL for local)
                 $poUrl = $this->getFileUrl($poPath, $disk);
@@ -1630,6 +1637,9 @@ class MRFWorkflowController extends Controller
 
             // Store PDF
             Storage::disk($disk)->put($poPath, $pdfContent);
+
+            $storedPoPath = $poPath;
+            $storedPoFileName = $poFileName;
 
             // Get URL (temporary signed URL for S3, public URL for local)
             $poUrl = $this->getFileUrl($poPath, $disk);
@@ -1733,6 +1743,16 @@ class MRFWorkflowController extends Controller
             $poTotalForSchedule = (float) ($mrf->estimated_cost ?? 0);
         }
         app(PaymentScheduleService::class)->lockOnPoGeneration($mrf, $poTotalForSchedule);
+
+        if ($storedPoPath && $poUrl) {
+            $this->registerPoPdfInRegistry(
+                $mrf,
+                $user,
+                $storedPoPath,
+                $poUrl,
+                $storedPoFileName ?? ('po_' . $poNumber . '.pdf'),
+            );
+        }
 
         // Record in approval history
         $action = $isRegeneration ? 'regenerated_po' : 'generated_po';
@@ -1983,6 +2003,14 @@ class MRFWorkflowController extends Controller
 
         $mrf->refresh();
 
+        $this->registerSignedPoInRegistry(
+            $mrf,
+            $user,
+            $signedPOPath,
+            $signedPOUrl,
+            basename($signedPOPath),
+        );
+
         // Record in approval history
         MRFApprovalHistory::record($mrf, 'signed_po', 'supply_chain', $user, 'PO signed and uploaded');
 
@@ -2069,6 +2097,14 @@ class MRFWorkflowController extends Controller
         ], force: true);
 
         $mrf->refresh();
+
+        $this->registerSignedPoInRegistry(
+            $mrf,
+            $user,
+            $signedPath,
+            $signedUrl,
+            basename($signedPath),
+        );
 
         return response()->json([
             'success' => true,
@@ -3514,5 +3550,57 @@ class MRFWorkflowController extends Controller
         $data['payment_milestones'] = $scheduleService->milestonesForPoPdf($schedule, $poTotal, $currency);
 
         return $data;
+    }
+
+    private function registerPoPdfInRegistry(
+        MRF $mrf,
+        $user,
+        string $storagePath,
+        string $fileUrl,
+        string $fileName,
+    ): void {
+        try {
+            app(ProcurementDocumentService::class)->registerExistingStorageFile(
+                $mrf,
+                ProcurementDocument::TYPE_PO_PDF,
+                $storagePath,
+                $fileUrl,
+                $fileName,
+                $user,
+                app(ProcurementDocumentService::class)->resolveVendorId($mrf),
+            );
+        } catch (\Throwable $e) {
+            Log::warning('Failed to register PO PDF in procurement document registry', [
+                'mrf_id' => $mrf->mrf_id,
+                'path' => $storagePath,
+                'error' => $e->getMessage(),
+            ]);
+        }
+    }
+
+    private function registerSignedPoInRegistry(
+        MRF $mrf,
+        $user,
+        string $storagePath,
+        string $fileUrl,
+        string $fileName,
+    ): void {
+        try {
+            app(ProcurementDocumentService::class)->registerExistingStorageFile(
+                $mrf,
+                ProcurementDocument::TYPE_SIGNED_PO,
+                $storagePath,
+                $fileUrl,
+                $fileName,
+                $user,
+                app(ProcurementDocumentService::class)->resolveVendorId($mrf),
+            );
+        } catch (\Throwable $e) {
+            Log::warning('Failed to register signed PO in procurement document registry', [
+                'mrf_id' => $mrf->mrf_id,
+                'path' => $storagePath,
+                'error' => $e->getMessage(),
+            ]);
+        }
     }
 }

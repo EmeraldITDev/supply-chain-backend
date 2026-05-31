@@ -160,6 +160,109 @@ Update schedule (versioned audit trail). Returns `409 SCHEDULE_LOCKED` after PO 
 
 ---
 
-## Phase 2+ (pending)
+## Phase 2 — Document registry completion
 
-Document GRN generate, vendor invoice portal, delivery confirmation, and Finance sync endpoints here as they are implemented.
+### `GET /api/mrfs/{id}/procurement-documents` (updated)
+
+Response now includes grouped views:
+
+```json
+{
+  "success": true,
+  "data": {
+    "mrfId": "MRF-EMERALD-2026-001",
+    "scmTransactionId": "uuid",
+    "documents": [ "...flat list..." ],
+    "documentsByType": {
+      "grn": [ { "id": 1, "type": "grn", "isActive": true, "...": "..." } ],
+      "po_pdf": [ "..."]
+    },
+    "activeByType": {
+      "grn": { "id": 1, "type": "grn", "version": 1, "...": "..." },
+      "signed_po": { "...": "..." }
+    }
+  }
+}
+```
+
+Query params unchanged: `type`, `include_inactive`.
+
+---
+
+### `POST /api/mrfs/{id}/procurement-documents`
+
+Upload waybill, JCC, PFI, delivery confirmation, GRN (file), or other supporting documents to the registry.
+
+**Body (multipart):**
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `type` | yes | `grn`, `waybill`, `jcc`, `pfi`, `delivery_confirmation`, `other` |
+| `file` | yes | PDF/DOC/DOCX/JPG/PNG, max 20MB |
+
+Returns `201` with document payload. Procurement roles only; allowed after PO signed (and related delivery/finance states).
+
+---
+
+### `GET /api/mrfs/{id}/grn/preview`
+
+Generates a **preview GRN PDF** from MRF line items (not saved). Returns `application/pdf` inline.
+
+Optional query/body params: `remarks`, `grn_number`, `received_at`.
+
+**Frontend flow:** open preview in new tab or PDF viewer → user reviews → call generate.
+
+---
+
+### `POST /api/mrfs/{id}/grn/generate`
+
+Generates the same GRN PDF and **saves to document registry** after PM confirmation.
+
+**Body:**
+
+```json
+{
+  "confirm": true,
+  "remarks": "Received in good condition",
+  "grnNumber": "GRN-PO-123-20260531"
+}
+```
+
+`confirm` must be `true` (default). Returns `201` with `document` and syncs legacy `grn_url` on MRF.
+
+Legacy `POST /api/mrfs/{id}/complete-grn` (file upload) also writes to registry.
+
+---
+
+### PO document registry (automatic)
+
+On PO generation and signing, the backend now registers:
+
+| Event | Registry type |
+|-------|----------------|
+| `POST /api/mrfs/{id}/generate-po` | `po_pdf` |
+| `POST /api/mrfs/{id}/upload-signed-po` or `POST /api/purchase-orders/{po}/sign` | `signed_po` |
+
+No frontend change required — documents appear in `GET /api/mrfs/{id}/procurement-documents`.
+
+---
+
+### Permission flags (MRF actions API)
+
+New/updated action flags for procurement users:
+
+- `canGenerateGRN` — preview/generate GRN from line items
+- `canUploadGRN` — upload GRN file (legacy + registry)
+
+GRN operations are allowed after PO signed (not only after legacy post-payment GRN request).
+
+**Frontend action:**
+
+- Delivery confirmation UI: preview GRN → confirm generate; upload waybill/JCC/delivery docs via procurement-documents POST.
+- Documents panel: group by `documentsByType` / show `activeByType` badges.
+
+---
+
+## Phase 3+ (pending)
+
+Document vendor invoice portal, delivery confirmation gates, and Finance sync endpoints here as they are implemented.

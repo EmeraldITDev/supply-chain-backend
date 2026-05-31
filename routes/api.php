@@ -366,9 +366,12 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/mrfs/{id}/approve-payment', [\App\Http\Controllers\Api\MRFWorkflowController::class, 'approvePayment']);
 
     // GRN endpoints
+    Route::get('/mrfs/{id}/grn/preview', [\App\Http\Controllers\Api\GRNController::class, 'previewGrn']);
+    Route::post('/mrfs/{id}/grn/generate', [\App\Http\Controllers\Api\GRNController::class, 'generateGrn']);
     Route::post('/mrfs/{id}/request-grn', [\App\Http\Controllers\Api\GRNController::class, 'requestGRN']);
     Route::post('/mrfs/{id}/complete-grn', [\App\Http\Controllers\Api\GRNController::class, 'completeGRN']);
     Route::get('/mrfs/{id}/procurement-documents', [\App\Http\Controllers\Api\ProcurementDocumentController::class, 'index']);
+    Route::post('/mrfs/{id}/procurement-documents', [\App\Http\Controllers\Api\ProcurementDocumentController::class, 'store']);
     Route::get('/mrfs/{id}/payment-schedule', [\App\Http\Controllers\Api\PaymentScheduleController::class, 'show']);
     Route::post('/mrfs/{id}/payment-schedule', [\App\Http\Controllers\Api\PaymentScheduleController::class, 'store']);
     Route::put('/mrfs/{id}/payment-schedule', [\App\Http\Controllers\Api\PaymentScheduleController::class, 'update']);

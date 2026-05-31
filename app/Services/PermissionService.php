@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\Employee;
 use App\Models\User;
 use App\Models\MRF;
+use App\Models\ProcurementDocument;
 
 class PermissionService
 {
@@ -414,24 +415,90 @@ class PermissionService
      */
     public function canUploadGRN(User $user, MRF $mrf): bool
     {
-        if (!in_array($user->role, ['procurement', 'procurement_manager', 'admin'])) {
-            return false;
-        }
-
-        $currentState = $mrf->workflow_state ?? WorkflowStateService::STATE_MRF_CREATED;
-        return $currentState === WorkflowStateService::STATE_GRN_REQUESTED;
+        return $this->canCompleteGRN($user, $mrf);
     }
 
     /**
-     * Check if user can view GRN (All roles can view after upload)
+     * Check if user can generate or upload GRN documents.
+     */
+    public function canGenerateGRN(User $user, MRF $mrf): bool
+    {
+        return $this->canCompleteGRN($user, $mrf);
+    }
+
+    /**
+     * Check if user can complete/upload GRN (Procurement only).
+     */
+    public function canCompleteGRN(User $user, MRF $mrf): bool
+    {
+        if (! in_array($user->role, ['procurement', 'procurement_manager', 'admin'], true)) {
+            return false;
+        }
+
+        if ($this->isMRFClosed($mrf)) {
+            return false;
+        }
+
+        return $this->workflowStateAllowsGrnDocument($mrf);
+    }
+
+    /**
+     * Check if user can upload registry documents (waybill, JCC, PFI, delivery confirmation, etc.).
+     */
+    public function canUploadProcurementDocument(User $user, MRF $mrf, string $type): bool
+    {
+        if ($this->isMRFClosed($mrf)) {
+            return false;
+        }
+
+        if ($type === ProcurementDocument::TYPE_GRN) {
+            return $this->canCompleteGRN($user, $mrf);
+        }
+
+        if (! in_array($user->role, ['procurement', 'procurement_manager', 'admin'], true)) {
+            return false;
+        }
+
+        return $this->workflowStateAllowsProcurementDocuments($mrf);
+    }
+
+    /**
+     * Check if user can view GRN (registry or legacy URL).
      */
     public function canViewGRN(User $user, MRF $mrf): bool
     {
+        if ($mrf->procurementDocuments()->where('type', 'grn')->where('is_active', true)->exists()) {
+            return $this->canViewDocument($user, $mrf, 'grn');
+        }
+
         $currentState = $mrf->workflow_state ?? WorkflowStateService::STATE_MRF_CREATED;
+
         return in_array($currentState, [
             WorkflowStateService::STATE_GRN_COMPLETED,
+            WorkflowStateService::STATE_DELIVERY_CONFIRMATION_COMPLETE,
+            WorkflowStateService::STATE_FINANCE_HANDOFF_PENDING,
             WorkflowStateService::STATE_CLOSED,
-        ]) && !empty($mrf->grn_url);
+        ], true) && ! empty($mrf->grn_url);
+    }
+
+    private function workflowStateAllowsGrnDocument(MRF $mrf): bool
+    {
+        $currentState = $mrf->workflow_state ?? WorkflowStateService::STATE_MRF_CREATED;
+
+        return in_array($currentState, [
+            WorkflowStateService::STATE_PO_SIGNED,
+            WorkflowStateService::STATE_DELIVERY_CONFIRMATION_PENDING,
+            WorkflowStateService::STATE_DELIVERY_CONFIRMATION_COMPLETE,
+            WorkflowStateService::STATE_FINANCE_HANDOFF_PENDING,
+            WorkflowStateService::STATE_GRN_REQUESTED,
+            WorkflowStateService::STATE_GRN_COMPLETED,
+            WorkflowStateService::STATE_PAYMENT_PROCESSED,
+        ], true);
+    }
+
+    private function workflowStateAllowsProcurementDocuments(MRF $mrf): bool
+    {
+        return $this->workflowStateAllowsGrnDocument($mrf);
     }
 
     /**
@@ -510,6 +577,7 @@ class PermissionService
                 'canProcessPayment' => false,
                 'canRequestGRN' => false,
                 'canUploadGRN' => false,
+                'canGenerateGRN' => false,
                 'canViewGRN' => $this->canViewGRN($user, $mrf),
                 'availableActions' => ['view'],
             ];
@@ -527,6 +595,7 @@ class PermissionService
             'canProcessPayment' => $this->canProcessPayment($user, $mrf),
             'canRequestGRN' => $this->canRequestGRN($user, $mrf),
             'canUploadGRN' => $this->canUploadGRN($user, $mrf),
+            'canGenerateGRN' => $this->canGenerateGRN($user, $mrf),
             'canViewGRN' => $this->canViewGRN($user, $mrf),
         ];
         
@@ -542,6 +611,7 @@ class PermissionService
         if ($actions['canProcessPayment']) $availableActions[] = 'process_payment';
         if ($actions['canRequestGRN']) $availableActions[] = 'request_grn';
         if ($actions['canUploadGRN']) $availableActions[] = 'upload_grn';
+        if ($actions['canGenerateGRN']) $availableActions[] = 'generate_grn';
         if ($actions['canViewGRN']) $availableActions[] = 'view_grn';
         
         $actions['availableActions'] = $availableActions;

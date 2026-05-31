@@ -4,31 +4,28 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\MRF;
-use App\Services\WorkflowStateService;
-use App\Services\PermissionService;
+use App\Models\ProcurementDocument;
+use App\Services\GrnPdfService;
 use App\Services\NotificationService;
+use App\Services\PermissionService;
+use App\Services\ProcurementDocumentService;
+use App\Services\WorkflowStateService;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Validator;
-use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Validator;
 
 class GRNController extends Controller
 {
-    protected WorkflowStateService $workflowService;
-    protected PermissionService $permissionService;
-    protected NotificationService $notificationService;
-
     public function __construct(
-        WorkflowStateService $workflowService,
-        PermissionService $permissionService,
-        NotificationService $notificationService
+        protected WorkflowStateService $workflowService,
+        protected PermissionService $permissionService,
+        protected NotificationService $notificationService,
+        protected ProcurementDocumentService $documentService,
+        protected GrnPdfService $grnPdfService,
     ) {
-        $this->workflowService = $workflowService;
-        $this->permissionService = $permissionService;
-        $this->notificationService = $notificationService;
     }
 
-    private function findMrfByAnyId(string $id)
+    private function findMrfByAnyId(string $id): ?MRF
     {
         return MRF::where(function ($query) use ($id) {
             $query->where('formatted_id', $id)
@@ -41,93 +38,203 @@ class GRNController extends Controller
     }
 
     /**
-     * Get the storage disk for documents
+     * Preview GRN PDF populated from MRF line items (not saved to registry).
      */
-    protected function getStorageDisk(): string
+    public function previewGrn(Request $request, string $id)
     {
-        return config('filesystems.documents_disk', env('DOCUMENTS_DISK', 's3'));
+        $user = $request->user();
+        $mrf = $this->findMrfByAnyId($id);
+
+        if (! $mrf) {
+            return response()->json([
+                'success' => false,
+                'error' => 'MRF not found',
+                'code' => 'NOT_FOUND',
+            ], 404);
+        }
+
+        if (! $this->permissionService->canGenerateGRN($user, $mrf)) {
+            return response()->json([
+                'success' => false,
+                'error' => 'You do not have permission to preview GRN for this MRF',
+                'code' => 'FORBIDDEN',
+            ], 403);
+        }
+
+        $resolved = $this->grnPdfService->resolveLineItems($mrf);
+        if (! $resolved['success']) {
+            return response()->json([
+                'success' => false,
+                'error' => $resolved['error'] ?? 'Unable to resolve GRN line items',
+                'code' => 'ITEMS_MISSING',
+            ], 422);
+        }
+
+        try {
+            $pdf = $this->grnPdfService->renderPdf($mrf, $this->grnOptionsFromRequest($request));
+            $fileName = 'grn_preview_' . ($mrf->mrf_id ?? $id) . '.pdf';
+
+            return response($pdf, 200, [
+                'Content-Type' => 'application/pdf',
+                'Content-Disposition' => 'inline; filename="' . $fileName . '"',
+            ]);
+        } catch (\Throwable $e) {
+            Log::error('GRN preview generation failed', [
+                'mrf_id' => $mrf->mrf_id,
+                'error' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'error' => 'Failed to generate GRN preview: ' . $e->getMessage(),
+                'code' => 'PDF_GENERATION_FAILED',
+            ], 500);
+        }
     }
 
     /**
-     * Get file URL - for S3 uses temporary signed URL, for local uses public URL
-     * Default expiration is 7 days to prevent URL expiration issues
+     * Generate GRN PDF from line items and save to procurement document registry.
      */
-    protected function getFileUrl(string $filePath, string $disk, int $expirationHours = 168): string
+    public function generateGrn(Request $request, string $id)
     {
-        if ($disk === 's3') {
+        $user = $request->user();
+        $mrf = $this->findMrfByAnyId($id);
+
+        if (! $mrf) {
+            return response()->json([
+                'success' => false,
+                'error' => 'MRF not found',
+                'code' => 'NOT_FOUND',
+            ], 404);
+        }
+
+        if (! $this->permissionService->canGenerateGRN($user, $mrf)) {
+            return response()->json([
+                'success' => false,
+                'error' => 'You do not have permission to generate GRN for this MRF',
+                'code' => 'FORBIDDEN',
+            ], 403);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'remarks' => 'nullable|string|max:2000',
+            'grn_number' => 'nullable|string|max:100',
+            'received_at' => 'nullable|date',
+            'confirm' => 'nullable|boolean',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Validation failed',
+                'errors' => $validator->errors(),
+                'code' => 'VALIDATION_ERROR',
+            ], 422);
+        }
+
+        if (! $request->boolean('confirm', true)) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Set confirm=true after reviewing the GRN preview to save the document.',
+                'code' => 'CONFIRMATION_REQUIRED',
+            ], 422);
+        }
+
+        try {
+            $options = $this->grnOptionsFromRequest($request);
+            $pdf = $this->grnPdfService->renderPdf($mrf, $options);
+            $grnNumber = (string) ($options['grn_number'] ?? $this->grnPdfService->defaultGrnNumber($mrf));
+            $fileName = $grnNumber . '.pdf';
+
+            $document = $this->documentService->storeBinaryContent(
+                $mrf,
+                $pdf,
+                $fileName,
+                ProcurementDocument::TYPE_GRN,
+                $user,
+                $this->documentService->resolveVendorId($mrf),
+                'procurement-documents/' . date('Y/m') . '/' . $mrf->mrf_id . '/grn',
+            );
+
+            $this->documentService->syncGrnLegacyFields($mrf, $document);
+            $this->transitionAfterGrnSaved($mrf, $user);
+
             try {
-                return Storage::disk($disk)->temporaryUrl($filePath, now()->addHours($expirationHours));
+                $this->notificationService->notifyGRNCompleted($mrf, $user);
             } catch (\Exception $e) {
-                Log::warning('S3 temporary URL generation failed, using regular URL', [
+                Log::warning('Failed to send GRN completion notification', [
+                    'mrf_id' => $mrf->mrf_id,
                     'error' => $e->getMessage(),
-                    'path' => $filePath
                 ]);
-                return Storage::disk($disk)->url($filePath);
             }
-        }
 
-        // For local/public storage
-        $url = Storage::disk($disk)->url($filePath);
-        if (!filter_var($url, FILTER_VALIDATE_URL)) {
-            $baseUrl = config('app.url');
-            return rtrim($baseUrl, '/') . '/' . ltrim($url, '/');
+            return response()->json([
+                'success' => true,
+                'message' => 'GRN generated and saved to document registry',
+                'data' => [
+                    'mrfId' => $mrf->mrf_id,
+                    'grnNumber' => $grnNumber,
+                    'workflowState' => $mrf->fresh()->workflow_state,
+                    'document' => $this->documentService->transform($document),
+                ],
+            ], 201);
+        } catch (\Throwable $e) {
+            Log::error('GRN generation failed', [
+                'mrf_id' => $mrf->mrf_id,
+                'error' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'error' => 'Failed to generate GRN: ' . $e->getMessage(),
+                'code' => 'GRN_GENERATION_FAILED',
+            ], 500);
         }
-        return $url;
     }
 
     /**
-     * Finance Officer requests GRN
+     * Finance Officer requests GRN (legacy path — retained for in-flight MRFs).
      */
     public function requestGRN(Request $request, $id)
     {
         $user = $request->user();
         $mrf = $this->findMrfByAnyId((string) $id);
 
-        if (!$mrf) {
+        if (! $mrf) {
             return response()->json([
                 'success' => false,
                 'error' => 'MRF not found',
-                'code' => 'NOT_FOUND'
+                'code' => 'NOT_FOUND',
             ], 404);
         }
 
-        // Check permission
-        if (!$this->permissionService->canRequestGRN($user, $mrf)) {
+        if (! $this->permissionService->canRequestGRN($user, $mrf)) {
             return response()->json([
                 'success' => false,
                 'error' => 'You do not have permission to request GRN',
-                'code' => 'FORBIDDEN'
+                'code' => 'FORBIDDEN',
             ], 403);
         }
 
-        // Check workflow state
-        $currentState = $mrf->workflow_state ?? WorkflowStateService::STATE_MRF_CREATED;
-        if ($currentState !== WorkflowStateService::STATE_PAYMENT_PROCESSED) {
-            return response()->json([
-                'success' => false,
-                'error' => 'GRN can only be requested after payment is processed',
-                'code' => 'INVALID_STATE',
-                'current_state' => $currentState
-            ], 422);
-        }
-
-        // Update MRF
         $mrf->update([
             'grn_requested' => true,
             'grn_requested_at' => now(),
             'grn_requested_by' => $user->id,
         ]);
 
-        // Transition workflow state
-        $this->workflowService->transition($mrf, WorkflowStateService::STATE_GRN_REQUESTED, $user);
+        if ($this->workflowService->canTransition(
+            $mrf->workflow_state ?? WorkflowStateService::STATE_MRF_CREATED,
+            WorkflowStateService::STATE_GRN_REQUESTED
+        )) {
+            $this->workflowService->transition($mrf, WorkflowStateService::STATE_GRN_REQUESTED, $user);
+        }
 
-        // Notify Procurement Manager
         try {
             $this->notificationService->notifyGRNRequested($mrf, $user);
         } catch (\Exception $e) {
             Log::error('Failed to send GRN request notification', [
                 'mrf_id' => $mrf->mrf_id,
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ]);
         }
 
@@ -139,48 +246,36 @@ class GRNController extends Controller
                 'workflow_state' => $mrf->workflow_state,
                 'grn_requested' => $mrf->grn_requested,
                 'grn_requested_at' => $mrf->grn_requested_at,
-            ]
+            ],
         ]);
     }
 
     /**
-     * Procurement Manager completes GRN
+     * Upload GRN file (legacy endpoint — writes to registry + legacy MRF fields).
      */
     public function completeGRN(Request $request, $id)
     {
         $user = $request->user();
         $mrf = $this->findMrfByAnyId((string) $id);
 
-        if (!$mrf) {
+        if (! $mrf) {
             return response()->json([
                 'success' => false,
                 'error' => 'MRF not found',
-                'code' => 'NOT_FOUND'
+                'code' => 'NOT_FOUND',
             ], 404);
         }
 
-        // Check permission
-        if (!$this->permissionService->canCompleteGRN($user, $mrf)) {
+        if (! $this->permissionService->canCompleteGRN($user, $mrf)) {
             return response()->json([
                 'success' => false,
                 'error' => 'You do not have permission to complete GRN',
-                'code' => 'FORBIDDEN'
+                'code' => 'FORBIDDEN',
             ], 403);
         }
 
-        // Check workflow state
-        $currentState = $mrf->workflow_state ?? WorkflowStateService::STATE_MRF_CREATED;
-        if ($currentState !== WorkflowStateService::STATE_GRN_REQUESTED) {
-            return response()->json([
-                'success' => false,
-                'error' => 'GRN can only be completed when it has been requested',
-                'code' => 'INVALID_STATE',
-                'current_state' => $currentState
-            ], 422);
-        }
-
         $validator = Validator::make($request->all(), [
-            'grn' => 'required|file|mimes:pdf,doc,docx|max:10240', // 10MB max
+            'grn' => 'required|file|mimes:pdf,doc,docx|max:10240',
         ]);
 
         if ($validator->fails()) {
@@ -188,73 +283,87 @@ class GRNController extends Controller
                 'success' => false,
                 'error' => 'Validation failed',
                 'errors' => $validator->errors(),
-                'code' => 'VALIDATION_ERROR'
+                'code' => 'VALIDATION_ERROR',
             ], 422);
         }
 
-        // Handle GRN file upload
-        $grnFile = $request->file('grn');
-        $grnUrl = null;
-        $grnShareUrl = null;
-
-        // Upload to S3 storage
-        $disk = $this->getStorageDisk();
-        $grnFileName = "grn_{$mrf->po_number}_" . time() . "." . $grnFile->getClientOriginalExtension();
-        $grnPath = "grns/" . date('Y/m') . "/{$mrf->mrf_id}/{$grnFileName}";
-
-        // Ensure directory structure exists (for S3, this is just the path)
-        $directory = dirname($grnPath);
-        if ($disk !== 's3' && !Storage::disk($disk)->exists($directory)) {
-            Storage::disk($disk)->makeDirectory($directory, 0755, true);
-        }
-
-        $grnFile->storeAs($directory, basename($grnPath), $disk);
-
-        // Get URL (temporary signed URL for S3, public URL for local)
-        $grnUrl = $this->getFileUrl($grnPath, $disk);
-        $grnShareUrl = $grnUrl;
-
-        Log::info('GRN uploaded to storage', [
-                    'mrf_id' => $mrf->mrf_id,
-                    'po_number' => $mrf->po_number,
-            'stored_path' => $grnPath,
-            'url' => $grnUrl,
-            'disk' => $disk
-        ]);
-
-        // Update MRF
-        $mrf->update([
-            'grn_completed' => true,
-            'grn_completed_at' => now(),
-            'grn_completed_by' => $user->id,
-            'grn_url' => $grnUrl,
-            'grn_share_url' => $grnShareUrl,
-        ]);
-
-        // Transition workflow state
-        $this->workflowService->transition($mrf, WorkflowStateService::STATE_GRN_COMPLETED, $user);
-
-        // Notify Finance Officer
         try {
-            $this->notificationService->notifyGRNCompleted($mrf, $user);
-        } catch (\Exception $e) {
-            Log::error('Failed to send GRN completion notification', [
-                'mrf_id' => $mrf->mrf_id,
-                'error' => $e->getMessage()
+            $document = $this->documentService->storeUpload(
+                $mrf,
+                $request->file('grn'),
+                ProcurementDocument::TYPE_GRN,
+                $user,
+                $this->documentService->resolveVendorId($mrf),
+                'procurement-documents/' . date('Y/m') . '/' . $mrf->mrf_id . '/grn',
+            );
+
+            $this->documentService->syncGrnLegacyFields($mrf, $document);
+            $this->transitionAfterGrnSaved($mrf, $user);
+
+            try {
+                $this->notificationService->notifyGRNCompleted($mrf, $user);
+            } catch (\Exception $e) {
+                Log::error('Failed to send GRN completion notification', [
+                    'mrf_id' => $mrf->mrf_id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+
+            return response()->json([
+                'success' => true,
+                'message' => 'GRN completed successfully',
+                'data' => [
+                    'mrf_id' => $mrf->mrf_id,
+                    'workflow_state' => $mrf->fresh()->workflow_state,
+                    'grn_completed' => true,
+                    'grn_url' => $document->file_url,
+                    'grn_share_url' => $document->file_url,
+                    'document' => $this->documentService->transform($document),
+                ],
             ]);
+        } catch (\Exception $e) {
+            Log::error('GRN upload failed', [
+                'mrf_id' => $mrf->mrf_id,
+                'error' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'error' => 'Failed to upload GRN: ' . $e->getMessage(),
+                'code' => 'UPLOAD_FAILED',
+            ], 500);
+        }
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function grnOptionsFromRequest(Request $request): array
+    {
+        return array_filter([
+            'remarks' => $request->input('remarks'),
+            'grn_number' => $request->input('grn_number') ?? $request->input('grnNumber'),
+            'received_at' => $request->input('received_at') ?? $request->input('receivedAt'),
+        ], fn ($value) => $value !== null && $value !== '');
+    }
+
+    private function transitionAfterGrnSaved(MRF $mrf, $user): void
+    {
+        $currentState = $mrf->workflow_state ?? WorkflowStateService::STATE_MRF_CREATED;
+
+        if ($currentState === WorkflowStateService::STATE_GRN_REQUESTED
+            && $this->workflowService->canTransition($currentState, WorkflowStateService::STATE_GRN_COMPLETED)) {
+            $this->workflowService->transition($mrf, WorkflowStateService::STATE_GRN_COMPLETED, $user);
+
+            return;
         }
 
-        return response()->json([
-            'success' => true,
-            'message' => 'GRN completed successfully',
-            'data' => [
-                'mrf_id' => $mrf->mrf_id,
-                'workflow_state' => $mrf->workflow_state,
-                'grn_completed' => $mrf->grn_completed,
-                'grn_completed_at' => $mrf->grn_completed_at,
-                'grn_url' => $mrf->grn_url,
-                'grn_share_url' => $mrf->grn_share_url,
-            ]
-        ]);
+        if ($currentState === WorkflowStateService::STATE_DELIVERY_CONFIRMATION_PENDING
+            && $this->workflowService->canTransition(
+                $currentState,
+                WorkflowStateService::STATE_DELIVERY_CONFIRMATION_COMPLETE
+            )) {
+            $this->workflowService->transition($mrf, WorkflowStateService::STATE_DELIVERY_CONFIRMATION_COMPLETE, $user);
+        }
     }
 }
