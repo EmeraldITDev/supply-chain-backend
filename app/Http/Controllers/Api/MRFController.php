@@ -862,7 +862,6 @@ class MRFController extends Controller
                     'executiveRemarks' => $mrf->executive_remarks,
                     'chairmanApproved' => (bool) $mrf->chairman_approved,
                     'chairmanApprovedAt' => $mrf->chairman_approved_at ? $mrf->chairman_approved_at->toIso8601String() : null,
-                ],
                 'rfqs' => $rfqs->map(function ($rfq) {
                     return [
                         'id' => $rfq->rfq_id,
