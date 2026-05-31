@@ -7,10 +7,39 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\URL;
+use Illuminate\Support\Str;
 
 class MRF extends Model
 {
     protected $table = 'm_r_f_s';
+
+    protected static function booted(): void
+    {
+        static::creating(function (MRF $mrf) {
+            if (empty($mrf->scm_transaction_id)) {
+                $mrf->scm_transaction_id = (string) Str::uuid();
+            }
+        });
+
+        static::updating(function (MRF $mrf) {
+            if ($mrf->isDirty('scm_transaction_id')) {
+                $mrf->scm_transaction_id = $mrf->getOriginal('scm_transaction_id');
+            }
+        });
+    }
+
+    /**
+     * Cross-system identifier fields for API responses.
+     *
+     * @return array{scmTransactionId: ?string, scm_transaction_id: ?string}
+     */
+    public function scmTransactionApiFields(): array
+    {
+        return [
+            'scmTransactionId' => $this->scm_transaction_id,
+            'scm_transaction_id' => $this->scm_transaction_id,
+        ];
+    }
 
     protected $fillable = [
         'mrf_id',
@@ -247,6 +276,11 @@ class MRF extends Model
     public function priceComparisons(): HasMany
     {
         return $this->hasMany(PriceComparison::class, 'purchase_order_id');
+    }
+
+    public function procurementDocuments(): HasMany
+    {
+        return $this->hasMany(ProcurementDocument::class, 'mrf_id');
     }
 
     /**

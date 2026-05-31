@@ -250,7 +250,7 @@ class MRFController extends Controller
         return response()->json($mrfs->map(function($mrf) {
             $freshPOUrls = $this->generateFreshPOUrls($mrf);
 
-            return [
+            return array_merge($mrf->scmTransactionApiFields(), [
                 'id' => $mrf->mrf_id,
                 'formattedId' => $mrf->formatted_id,
                 'formatted_id' => $mrf->formatted_id,
@@ -328,7 +328,7 @@ class MRFController extends Controller
                         'selection_reason' => $row->selection_reason,
                     ];
                 })->values(),
-            ];
+            ]);
         }));
         } catch (\Illuminate\Database\QueryException $e) {
             // Handle database errors (e.g., missing columns)
@@ -448,7 +448,7 @@ class MRFController extends Controller
         $freshPOUrls = $this->generateFreshPOUrls($mrf);
         $profitAndLoss = app(LineItemBudgetService::class)->mrfProfitAndLoss($mrf);
 
-        return response()->json([
+        return response()->json(array_merge($mrf->scmTransactionApiFields(), [
             'id' => $mrf->mrf_id,
             'formattedId' => $mrf->formatted_id,
             'formatted_id' => $mrf->formatted_id,
@@ -562,7 +562,7 @@ class MRFController extends Controller
                 'quoted_amount' => $item->quoted_amount !== null ? (float) $item->quoted_amount : null,
             ])->values(),
             'profitAndLoss' => $profitAndLoss,
-        ]);
+        ]));
     }
 
     /**
@@ -828,7 +828,7 @@ class MRFController extends Controller
         return response()->json([
             'success' => true,
             'data' => [
-                'mrf' => [
+                'mrf' => array_merge($mrf->scmTransactionApiFields(), [
                     'id' => $mrf->mrf_id,
                     'formattedId' => $mrf->formatted_id,
                     'formatted_id' => $mrf->formatted_id,
@@ -1028,6 +1028,7 @@ class MRFController extends Controller
                     ];
                 })->values(),
                 'linkedFleetSrfs' => $linkedFleetSrfsPayload,
+                ]),
             ],
         ]);
     }
@@ -1175,7 +1176,7 @@ class MRFController extends Controller
 
         return response()->json([
             'success' => true,
-            'data' => [
+            'data' => array_merge($mrf->scmTransactionApiFields(), [
                 'mrfId' => $mrf->mrf_id,
                 'formattedId' => $mrf->formatted_id,
                 'formatted_id' => $mrf->formatted_id,
@@ -1184,7 +1185,7 @@ class MRFController extends Controller
                                  (collect($steps)->where('status', 'completed')->last()['step'] ?? 1),
                 'steps' => $steps,
                 'currentWorkflowState' => $mrf->workflow_state,
-            ],
+            ]),
         ]);
     }
 
@@ -1497,7 +1498,7 @@ class MRFController extends Controller
 
             return response()->json([
                 'success' => true,
-                'data' => [
+                'data' => array_merge($mrf->scmTransactionApiFields(), [
                 'id' => $mrf->mrf_id,
                 'formattedId' => $mrf->formatted_id,
                 'formatted_id' => $mrf->formatted_id,
@@ -1526,7 +1527,7 @@ class MRFController extends Controller
                     'attachmentUrl' => $mrf->attachment_url,
                     'attachmentShareUrl' => $mrf->attachment_share_url,
                     'attachmentName' => $mrf->attachment_name,
-                ]
+                ]),
             ], 201);
         } catch (\Exception $e) {
             \Log::error('MRF creation failed', [

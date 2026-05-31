@@ -1964,22 +1964,14 @@ class MRFWorkflowController extends Controller
             'disk' => $disk
         ]);
 
-        // Update MRF
-        $updateData = [
+        // Update MRF via unified PO signed transition
+        $this->workflowService->applyPoSigned($mrf, $user, [
             'signed_po_url' => $signedPOUrl,
             'po_signed_at' => now(),
-            'status' => 'signed',
-            'current_stage' => 'finance',
-        ];
+            'signed_po_share_url' => $signedPOShareUrl ?? $signedPOUrl,
+        ], force: true);
 
-        // Add sharing URL if available (use web URL as fallback)
-        if (isset($signedPOShareUrl) && $signedPOShareUrl) {
-            $updateData['signed_po_share_url'] = $signedPOShareUrl;
-        } elseif ($signedPOUrl) {
-            $updateData['signed_po_share_url'] = $signedPOUrl;
-        }
-
-        $mrf->update($updateData);
+        $mrf->refresh();
 
         // Record in approval history
         MRFApprovalHistory::record($mrf, 'signed_po', 'supply_chain', $user, 'PO signed and uploaded');
@@ -2060,14 +2052,13 @@ class MRFWorkflowController extends Controller
         Storage::disk($disk)->put($signedPath, $pdfBinary);
         $signedUrl = $this->getFileUrl($signedPath, $disk);
 
-        $mrf->update([
+        $this->workflowService->applyPoSigned($mrf, $user, [
             'signed_po_url' => $signedUrl,
             'signed_po_share_url' => $signedUrl,
             'po_signed_at' => now(),
-            'status' => 'signed',
-            'current_stage' => 'finance',
-            'workflow_state' => WorkflowStateService::STATE_PO_SIGNED,
-        ]);
+        ], force: true);
+
+        $mrf->refresh();
 
         return response()->json([
             'success' => true,

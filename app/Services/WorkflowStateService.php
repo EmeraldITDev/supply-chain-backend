@@ -26,6 +26,15 @@ class WorkflowStateService
     const STATE_PO_GENERATED = 'po_generated';
     const STATE_PO_SIGNED = 'po_signed';
     const STATE_CLOSED = 'closed';
+
+    // Finance AP workflow states
+    const STATE_DELIVERY_CONFIRMATION_PENDING = 'delivery_confirmation_pending';
+    const STATE_DELIVERY_CONFIRMATION_COMPLETE = 'delivery_confirmation_complete';
+    const STATE_FINANCE_HANDOFF_PENDING = 'finance_handoff_pending';
+    const STATE_FINANCE_IN_REVIEW = 'finance_in_review';
+    const STATE_MILESTONE_PAYMENT_IN_PROGRESS = 'milestone_payment_in_progress';
+    const STATE_FINANCIALLY_COMPLETE = 'financially_complete';
+    const STATE_OPERATIONALLY_COMPLETE = 'operationally_complete';
     
     // Legacy states (kept for backward compatibility)
     const STATE_EXECUTIVE_REVIEW = 'executive_review';
@@ -59,7 +68,25 @@ class WorkflowStateService
         self::STATE_QUOTATIONS_RECEIVED => [self::STATE_QUOTATIONS_EVALUATED],
         self::STATE_QUOTATIONS_EVALUATED => [self::STATE_PO_GENERATED],
         self::STATE_PO_GENERATED => [self::STATE_PO_SIGNED],
-        self::STATE_PO_SIGNED => [self::STATE_CLOSED],
+        self::STATE_PO_SIGNED => [
+            self::STATE_DELIVERY_CONFIRMATION_PENDING,
+            self::STATE_FINANCE_HANDOFF_PENDING,
+            self::STATE_PAYMENT_PROCESSED,
+            self::STATE_CLOSED,
+        ],
+        self::STATE_DELIVERY_CONFIRMATION_PENDING => [self::STATE_DELIVERY_CONFIRMATION_COMPLETE],
+        self::STATE_DELIVERY_CONFIRMATION_COMPLETE => [self::STATE_FINANCE_HANDOFF_PENDING],
+        self::STATE_FINANCE_HANDOFF_PENDING => [self::STATE_FINANCE_IN_REVIEW],
+        self::STATE_FINANCE_IN_REVIEW => [
+            self::STATE_MILESTONE_PAYMENT_IN_PROGRESS,
+            self::STATE_FINANCIALLY_COMPLETE,
+        ],
+        self::STATE_MILESTONE_PAYMENT_IN_PROGRESS => [
+            self::STATE_FINANCE_IN_REVIEW,
+            self::STATE_FINANCIALLY_COMPLETE,
+        ],
+        self::STATE_FINANCIALLY_COMPLETE => [self::STATE_OPERATIONALLY_COMPLETE],
+        self::STATE_OPERATIONALLY_COMPLETE => [self::STATE_CLOSED],
         self::STATE_CLOSED => [], // Terminal state
         
         // Legacy transitions (for backward compatibility with existing MRFs)
@@ -187,30 +214,76 @@ class WorkflowStateService
     }
 
     /**
-     * Transition MRF to new state
+     * Transition MRF to new state and sync legacy status/current_stage fields.
      */
-    public function transition(MRF $mrf, string $newState, $user): bool
+    public function applyWorkflowState(MRF $mrf, string $newState, $user, bool $force = false): bool
     {
         $currentState = $mrf->workflow_state ?? self::STATE_MRF_CREATED;
 
-        if (!$this->canTransition($currentState, $newState)) {
+        if (! $force && ! $this->canTransition($currentState, $newState)) {
             Log::warning('Invalid state transition attempted', [
                 'mrf_id' => $mrf->mrf_id,
                 'current_state' => $currentState,
                 'attempted_state' => $newState,
-                'user_id' => $user->id,
+                'user_id' => $user->id ?? null,
             ]);
+
             return false;
         }
 
-        $mrf->workflow_state = $newState;
+        $legacy = app(WorkflowStateMapper::class)->legacyFieldsFor($newState, $mrf);
+
+        $mrf->fill(array_merge(['workflow_state' => $newState], $legacy));
         $mrf->save();
 
         Log::info('MRF state transitioned', [
             'mrf_id' => $mrf->mrf_id,
             'from_state' => $currentState,
             'to_state' => $newState,
-            'user_id' => $user->id,
+            'user_id' => $user->id ?? null,
+            'legacy' => $legacy,
+        ]);
+
+        return true;
+    }
+
+    /**
+     * Transition MRF to new state (includes legacy field sync).
+     */
+    public function transition(MRF $mrf, string $newState, $user): bool
+    {
+        return $this->applyWorkflowState($mrf, $newState, $user);
+    }
+
+    /**
+     * Apply PO signed canonical state + legacy fields in one step.
+     */
+    public function applyPoSigned(MRF $mrf, $user, array $extraAttributes = [], bool $force = false): bool
+    {
+        $currentState = $mrf->workflow_state ?? self::STATE_MRF_CREATED;
+
+        if (! $force
+            && $currentState !== self::STATE_PO_SIGNED
+            && ! $this->canTransition($currentState, self::STATE_PO_SIGNED)) {
+            Log::warning('Cannot apply PO signed transition', [
+                'mrf_id' => $mrf->mrf_id,
+                'current_state' => $currentState,
+            ]);
+
+            return false;
+        }
+
+        $legacy = app(WorkflowStateMapper::class)->legacyFieldsFor(self::STATE_PO_SIGNED, $mrf);
+
+        $mrf->fill(array_merge([
+            'workflow_state' => self::STATE_PO_SIGNED,
+        ], $legacy, $extraAttributes));
+        $mrf->save();
+
+        Log::info('MRF PO signed state applied', [
+            'mrf_id' => $mrf->mrf_id,
+            'from_state' => $currentState,
+            'user_id' => $user->id ?? null,
         ]);
 
         return true;
@@ -256,6 +329,13 @@ class WorkflowStateService
             self::STATE_INVOICE_APPROVED => 'Invoice Approved',
             self::STATE_PO_GENERATED => 'PO Generated',
             self::STATE_PO_SIGNED => 'PO Signed',
+            self::STATE_DELIVERY_CONFIRMATION_PENDING => 'Delivery Confirmation Pending',
+            self::STATE_DELIVERY_CONFIRMATION_COMPLETE => 'Delivery Confirmation Complete',
+            self::STATE_FINANCE_HANDOFF_PENDING => 'Finance Handoff Pending',
+            self::STATE_FINANCE_IN_REVIEW => 'Finance In Review',
+            self::STATE_MILESTONE_PAYMENT_IN_PROGRESS => 'Milestone Payment In Progress',
+            self::STATE_FINANCIALLY_COMPLETE => 'Financially Complete',
+            self::STATE_OPERATIONALLY_COMPLETE => 'Operationally Complete',
             self::STATE_PAYMENT_PROCESSED => 'Payment Processed',
             self::STATE_GRN_REQUESTED => 'GRN Requested',
             self::STATE_GRN_COMPLETED => 'GRN Completed',

@@ -368,6 +368,7 @@ Route::middleware('auth:sanctum')->group(function () {
     // GRN endpoints
     Route::post('/mrfs/{id}/request-grn', [\App\Http\Controllers\Api\GRNController::class, 'requestGRN']);
     Route::post('/mrfs/{id}/complete-grn', [\App\Http\Controllers\Api\GRNController::class, 'completeGRN']);
+    Route::get('/mrfs/{id}/procurement-documents', [\App\Http\Controllers\Api\ProcurementDocumentController::class, 'index']);
 
     // User management (admin only)
     Route::get('/users', [\App\Http\Controllers\Api\UserManagementController::class, 'index']);
