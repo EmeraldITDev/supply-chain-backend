@@ -66,7 +66,9 @@ class QuotationController extends Controller
             $query->where('status', $request->status);
         }
 
-        $quotations = $query->with('items')->orderBy('created_at', 'desc')->get();
+        $perPage = (int) $request->get('per_page', 50);
+        $perPage = min($perPage, 200); // Cap at 200 to prevent abuse
+        $quotations = $query->with('items')->orderBy('created_at', 'desc')->paginate($perPage);
 
         return response()->json([
             'success' => true,

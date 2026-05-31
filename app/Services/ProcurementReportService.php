@@ -84,19 +84,24 @@ class ProcurementReportService
         $totalLoss = 0.0;
         $lineCount = 0;
 
-        foreach (MRF::with('items')->whereIn('id', $mrfIds)->get() as $mrf) {
-            $pl = $this->budgetService->mrfProfitAndLoss($mrf);
-            $totalSavings += (float) $pl['summary']['totalSavings'];
-            $totalLoss += (float) $pl['summary']['totalLoss'];
-            $lineCount += (int) $pl['summary']['lineCount'];
-        }
+        // Use chunking to avoid loading all records into memory at once
+        MRF::with('items')->whereIn('id', $mrfIds)->chunk(100, function ($mrfs) use (&$totalSavings, &$totalLoss, &$lineCount) {
+            foreach ($mrfs as $mrf) {
+                $pl = $this->budgetService->mrfProfitAndLoss($mrf);
+                $totalSavings += (float) $pl['summary']['totalSavings'];
+                $totalLoss += (float) $pl['summary']['totalLoss'];
+                $lineCount += (int) $pl['summary']['lineCount'];
+            }
+        });
 
-        foreach (SRF::with('items')->whereIn('id', $srfIds)->get() as $srf) {
-            $pl = $this->budgetService->srfProfitAndLoss($srf);
-            $totalSavings += (float) $pl['summary']['totalSavings'];
-            $totalLoss += (float) $pl['summary']['totalLoss'];
-            $lineCount += (int) $pl['summary']['lineCount'];
-        }
+        SRF::with('items')->whereIn('id', $srfIds)->chunk(100, function ($srfs) use (&$totalSavings, &$totalLoss, &$lineCount) {
+            foreach ($srfs as $srf) {
+                $pl = $this->budgetService->srfProfitAndLoss($srf);
+                $totalSavings += (float) $pl['summary']['totalSavings'];
+                $totalLoss += (float) $pl['summary']['totalLoss'];
+                $lineCount += (int) $pl['summary']['lineCount'];
+            }
+        });
 
         return [
             'totalSavings' => round($totalSavings, 2),

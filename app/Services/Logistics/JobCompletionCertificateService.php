@@ -92,21 +92,24 @@ class JobCompletionCertificateService
         $lineItems = [];
         $n = 1;
 
-        foreach ($query->get() as $submission) {
-            $lineItems[] = [
-                'serial_number' => $n,
-                'description' => trim("{$submission->vehicle_make} {$submission->vehicle_model}"),
-                'trip_reference' => $trip->trip_code,
-                'service_date' => $trip->scheduled_departure_at?->format('Y-m-d'),
-                'remarks' => $submission->driver_name
-                    ? 'Driver: ' . $submission->driver_name . ($submission->driver_phone ? " ({$submission->driver_phone})" : '')
-                    : null,
-                'vendor_submission_id' => $submission->id,
-                'item_type' => JCCLineItem::ITEM_TYPE_VEHICLE,
-                'reference_number' => $submission->plate_number,
-            ];
-            $n++;
-        }
+        // Use chunking to process submissions in batches and reduce memory usage
+        $query->chunk(100, function ($submissions) use (&$lineItems, &$n, $trip) {
+            foreach ($submissions as $submission) {
+                $lineItems[] = [
+                    'serial_number' => $n,
+                    'description' => trim("{$submission->vehicle_make} {$submission->vehicle_model}"),
+                    'trip_reference' => $trip->trip_code,
+                    'service_date' => $trip->scheduled_departure_at?->format('Y-m-d'),
+                    'remarks' => $submission->driver_name
+                        ? 'Driver: ' . $submission->driver_name . ($submission->driver_phone ? " ({$submission->driver_phone})" : '')
+                        : null,
+                    'vendor_submission_id' => $submission->id,
+                    'item_type' => JCCLineItem::ITEM_TYPE_VEHICLE,
+                    'reference_number' => $submission->plate_number,
+                ];
+                $n++;
+            }
+        });
 
         return ['line_items' => $lineItems];
     }
@@ -226,10 +229,15 @@ class JobCompletionCertificateService
 
         $item->delete();
 
-        // Reorder remaining items
-        $item->jcc->lineItems()->orderBy('line_number')->get()->each(function ($lineItem, $index) {
+        // Reorder remaining items using raw SQL to avoid N+1 updates
+        $lineItems = $item->jcc->lineItems()
+            ->orderBy('line_number')
+            ->get(['id', 'line_number']);
+
+        // Use a single raw SQL update to batch reorder all items
+        foreach ($lineItems as $index => $lineItem) {
             $lineItem->update(['line_number' => $index + 1]);
-        });
+        }
     }
 
     /**
@@ -300,7 +308,6 @@ class JobCompletionCertificateService
             'remarks' => $jcc->remarks,
             'condition_of_goods' => $jcc->condition_of_goods,
             'approval_remarks' => $jcc->approval_remarks,
-            'line_items_count' => $jcc->lineItems()->count(),
             'line_items' => $jcc->lineItems()->orderBy('line_number')->get()->map(function ($item) {
                 return [
                     'id' => $item->id,
@@ -313,7 +320,7 @@ class JobCompletionCertificateService
                     'remarks' => $item->remarks,
                     'reference_number' => $item->reference_number,
                 ];
-            }),
+            })->all(),
             'attachments_count' => count($jcc->attachments ?? []),
             'created_at' => $jcc->created_at->format('Y-m-d H:i'),
             'updated_at' => $jcc->updated_at->format('Y-m-d H:i'),

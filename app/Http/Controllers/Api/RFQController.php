@@ -74,7 +74,9 @@ class RFQController extends Controller
             $query->where('status', $request->status);
         }
 
-        $rfqs = $query->orderBy('created_at', 'desc')->get();
+        $perPage = (int) $request->get('per_page', 50);
+        $perPage = min($perPage, 200); // Cap at 200 to prevent abuse
+        $rfqs = $query->orderBy('created_at', 'desc')->paginate($perPage);
 
         return response()->json($rfqs->map(function($rfq) {
             $mrfEstimatedCost = $rfq->mrf ? (float) $rfq->mrf->estimated_cost : null;

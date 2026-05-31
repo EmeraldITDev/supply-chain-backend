@@ -18,7 +18,7 @@ class ClearTestMRFs extends Command
      *
      * @var string
      */
-    protected $signature = 'mrfs:clear-test 
+    protected $signature = 'mrfs:clear-test
                             {--title=* : Filter by title (e.g., "supply of stock")}
                             {--category=* : Filter by category}
                             {--force : Force deletion without confirmation}';
@@ -60,16 +60,23 @@ class ClearTestMRFs extends Command
             $query->whereIn('category', $categories);
         }
 
-        $mrfs = $query->get();
+        // Get count first without loading all records
+        $totalCount = $query->count();
 
-        if ($mrfs->isEmpty()) {
+        if ($totalCount === 0) {
             $this->info('No MRFs found matching the criteria.');
             return 0;
         }
 
-        $this->info("Found {$mrfs->count()} MRF(s) to delete:");
-        foreach ($mrfs as $mrf) {
+        $this->info("Found {$totalCount} MRF(s) to delete:");
+
+        // Display first 10 MRFs as preview
+        $query->clone()->limit(10)->get()->each(function($mrf) {
             $this->line("  - {$mrf->mrf_id}: {$mrf->title} ({$mrf->category})");
+        });
+
+        if ($totalCount > 10) {
+            $this->line("  ... and " . ($totalCount - 10) . " more");
         }
 
         if (!$force && !$this->confirm('Do you want to delete these MRFs?', true)) {
@@ -80,40 +87,44 @@ class ClearTestMRFs extends Command
         DB::beginTransaction();
         try {
             $deletedCount = 0;
-            
-            foreach ($mrfs as $mrf) {
-                // Delete related data
-                $this->info("Deleting MRF: {$mrf->mrf_id}...");
 
-                // Delete approval history
-                MRFApprovalHistory::where('mrf_id', $mrf->id)->delete();
-                $this->line("  - Deleted approval history");
+            // Use chunking to process deletions in batches and reduce memory usage
+            $query->chunk(50, function ($mrfs) use (&$deletedCount) {
+                foreach ($mrfs as $mrf) {
+                    // Delete related data
+                    $this->info("Deleting MRF: {$mrf->mrf_id}...");
 
-                // Delete related RFQs and quotations
-                $rfqs = RFQ::where('mrf_id', $mrf->id)->get();
-                foreach ($rfqs as $rfq) {
-                    Quotation::where('rfq_id', $rfq->id)->delete();
-                    $rfq->vendors()->detach();
-                    RFQItem::where('rfq_id', $rfq->id)->delete();
-                    $rfq->delete();
+                    // Delete approval history
+                    MRFApprovalHistory::where('mrf_id', $mrf->id)->delete();
+                    $this->line("  - Deleted approval history");
+
+                    // Delete related RFQs and quotations
+                    RFQ::where('mrf_id', $mrf->id)->chunk(50, function ($rfqs) {
+                        foreach ($rfqs as $rfq) {
+                            Quotation::where('rfq_id', $rfq->id)->delete();
+                            $rfq->vendors()->detach();
+                            RFQItem::where('rfq_id', $rfq->id)->delete();
+                            $rfq->delete();
+                        }
+                    });
+                    $this->line("  - Deleted related RFQs and quotations");
+
+                    // Delete MRF items
+                    $mrf->items()->delete();
+                    $this->line("  - Deleted MRF items");
+
+                    // Delete associated files (PO, GRN, PFI)
+                    $this->deleteMRFFiles($mrf);
+
+                    // Delete the MRF
+                    $mrf->delete();
+                    $deletedCount++;
+                    $this->line("  ✓ MRF {$mrf->mrf_id} deleted successfully");
                 }
-                $this->line("  - Deleted related RFQs and quotations");
-
-                // Delete MRF items
-                $mrf->items()->delete();
-                $this->line("  - Deleted MRF items");
-
-                // Delete associated files (PO, GRN, PFI)
-                $this->deleteMRFFiles($mrf);
-
-                // Delete the MRF
-                $mrf->delete();
-                $deletedCount++;
-                $this->line("  ✓ MRF {$mrf->mrf_id} deleted successfully");
-            }
+            });
 
             DB::commit();
-            
+
             $this->info("\n✓ Successfully deleted {$deletedCount} MRF(s) and all related data.");
             return 0;
         } catch (\Exception $e) {
@@ -142,7 +153,7 @@ class ClearTestMRFs extends Command
                 try {
                     $url = $mrf->$urlField;
                     $path = $this->extractPathFromUrl($url, $disk);
-                    
+
                     if ($path && Storage::disk($disk)->exists($path)) {
                         Storage::disk($disk)->delete($path);
                         $this->line("  - Deleted {$fileType} file");
@@ -174,7 +185,7 @@ class ClearTestMRFs extends Command
 
         foreach ($possiblePaths as $path) {
             if (empty($path)) continue;
-            
+
             $path = ltrim(str_replace('/storage/', '', $path), '/');
             if (Storage::disk($disk)->exists($path)) {
                 return $path;

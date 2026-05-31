@@ -91,7 +91,9 @@ class SRFController extends Controller
             });
         }
 
-        $srfs = $query->orderBy('date', 'desc')->get();
+        $perPage = (int) $request->get('per_page', 50);
+        $perPage = min($perPage, 200); // Cap at 200 to prevent abuse
+        $srfs = $query->orderBy('date', 'desc')->paginate($perPage);
 
         return response()->json($srfs->map(fn ($srf) => $this->presentSrf($srf)));
     }

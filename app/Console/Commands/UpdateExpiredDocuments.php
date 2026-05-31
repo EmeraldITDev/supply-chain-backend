@@ -44,38 +44,42 @@ class UpdateExpiredDocuments extends Command
     private function handleExpiredVendorRegistrations()
     {
         try {
-            // Get all approved registrations
-            $registrations = VendorRegistration::where('status', 'Approved')
-                ->get();
+            $this->line("Checking approved registrations...");
+            $processedCount = 0;
 
-            $this->line("Checking {$registrations->count()} approved registrations...");
+            // Use chunking to process registrations in batches and reduce memory usage
+            VendorRegistration::where('status', 'Approved')
+                ->chunk(100, function ($registrations) use (&$processedCount) {
+                    foreach ($registrations as $registration) {
+                        // Check if has expired required documents
+                        $hasExpiredRequiredDoc = $registration->registrationDocuments()
+                            ->where('is_required', true)
+                            ->where('status', 'Expired')
+                            ->exists();
 
-            foreach ($registrations as $registration) {
-                // Check if has expired required documents
-                $hasExpiredRequiredDoc = $registration->registrationDocuments()
-                    ->where('is_required', true)
-                    ->where('status', 'Expired')
-                    ->exists();
+                        if ($hasExpiredRequiredDoc) {
+                            $this->line("⚠️  Registration {$registration->id} ({$registration->company_name}) has expired required docs");
 
-                if ($hasExpiredRequiredDoc) {
-                    $this->line("⚠️  Registration {$registration->id} ({$registration->company_name}) has expired required docs");
+                            // Update registration status
+                            $registration->update([
+                                'status' => 'Documents Incomplete',
+                                'review_notes' => 'One or more required documents have expired. Please upload renewed documents.',
+                            ]);
 
-                    // Update registration status
-                    $registration->update([
-                        'status' => 'Documents Incomplete',
-                        'review_notes' => 'One or more required documents have expired. Please upload renewed documents.',
-                    ]);
+                            // Send notification email to vendor
+                            try {
+                                $this->sendExpiredDocumentNotification($registration);
+                            } catch (\Exception $e) {
+                                $this->warn("   Email failed for {$registration->email}: " . $e->getMessage());
+                            }
 
-                    // Send notification email to vendor
-                    try {
-                        $this->sendExpiredDocumentNotification($registration);
-                    } catch (\Exception $e) {
-                        $this->warn("   Email failed for {$registration->email}: " . $e->getMessage());
+                            $this->line("   ✅ Updated registration status to Documents Incomplete");
+                            $processedCount++;
+                        }
                     }
+                });
 
-                    $this->line("   ✅ Updated registration status to Documents Incomplete");
-                }
-            }
+            $this->line("Processed {$processedCount} registrations with expired documents.");
 
         } catch (\Exception $e) {
             $this->error('Error handling expired vendor registrations: ' . $e->getMessage());

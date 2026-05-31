@@ -243,7 +243,9 @@ class MRFController extends Controller
             $query->where('requester_id', $user->id);
         }
 
-        $mrfs = $query->get();
+        $perPage = (int) $request->get('per_page', 50);
+        $perPage = min($perPage, 200); // Cap at 200 to prevent abuse
+        $mrfs = $query->paginate($perPage);
 
         return response()->json($mrfs->map(function($mrf) {
             $freshPOUrls = $this->generateFreshPOUrls($mrf);
