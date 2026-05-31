@@ -8,6 +8,7 @@ use App\Models\RFQ;
 use App\Models\MRF;
 use App\Models\Vendor;
 use App\Services\FormattedIdGenerator;
+use App\Services\PaymentScheduleService;
 use App\Services\WorkflowNotificationService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
@@ -44,7 +45,7 @@ class RFQController extends Controller
     public function index(Request $request)
     {
         $user = $request->user();
-        $query = RFQ::with(['mrf', 'creator', 'vendors']);
+        $query = RFQ::with(['mrf.paymentSchedule.milestones', 'creator', 'vendors']);
 
         // If user is a vendor, only show RFQs assigned to them
         $isVendor = false;
@@ -103,6 +104,8 @@ class RFQController extends Controller
                 'estimated_budget' => $estimatedBudget,
                 'estimatedBudget' => $estimatedBudget,
                 'paymentTerms' => $rfq->payment_terms,
+                'paymentSchedule' => $this->paymentSchedulePayload($rfq->mrf),
+                'payment_schedule' => $this->paymentSchedulePayload($rfq->mrf),
                 'notes' => $rfq->notes,
                 'supportingDocuments' => $rfq->supporting_documents ?? [],
                 'deadline' => $rfq->deadline->format('Y-m-d'),
@@ -127,7 +130,7 @@ class RFQController extends Controller
                 $query->orWhere('id', (int) $id);
             }
         })
-            ->with(['mrf', 'creator', 'vendors', 'items'])
+            ->with(['mrf.paymentSchedule.milestones', 'creator', 'vendors', 'items'])
             ->first();
 
         if (!$rfq) {
@@ -162,6 +165,8 @@ class RFQController extends Controller
             'estimated_budget' => $estimatedBudget,
             'estimatedBudget' => $estimatedBudget,
             'paymentTerms' => $rfq->payment_terms,
+            'paymentSchedule' => $this->paymentSchedulePayload($rfq->mrf),
+            'payment_schedule' => $this->paymentSchedulePayload($rfq->mrf),
             'notes' => $rfq->notes,
             'supportingDocuments' => $rfq->supporting_documents ?? [],
             'deadline' => $rfq->deadline?->format('Y-m-d'),
@@ -318,7 +323,7 @@ class RFQController extends Controller
             'quantity' => $request->quantity,
             'estimated_cost' => $estimatedCost,
             'deadline' => $request->deadline,
-            'payment_terms' => $request->paymentTerms,
+            'payment_terms' => $this->resolvePaymentTermsForMrf($mrf, $request->paymentTerms ?? $request->payment_terms),
             'notes' => $request->notes,
             'supporting_documents' => !empty($supportingDocuments) ? $supportingDocuments : null,
             'status' => 'Open',
@@ -378,6 +383,8 @@ class RFQController extends Controller
             'quantity' => $rfq->quantity,
             'estimatedCost' => $rfq->estimated_cost !== null ? (float) $rfq->estimated_cost : null,
             'paymentTerms' => $rfq->payment_terms,
+            'paymentSchedule' => $this->paymentSchedulePayload($rfq->mrf),
+            'payment_schedule' => $this->paymentSchedulePayload($rfq->mrf),
             'notes' => $rfq->notes,
             'supportingDocuments' => $rfq->supporting_documents ?? [],
             'deadline' => $rfq->deadline->format('Y-m-d'),
@@ -453,5 +460,35 @@ class RFQController extends Controller
             'vendorIds' => $rfq->vendors->pluck('vendor_id')->toArray(),
             'createdAt' => $rfq->created_at->toIso8601String(),
         ]);
+    }
+
+    private function paymentSchedulePayload(?MRF $mrf): ?array
+    {
+        if (! $mrf) {
+            return null;
+        }
+
+        if ($mrf->relationLoaded('paymentSchedule') && $mrf->paymentSchedule) {
+            return app(PaymentScheduleService::class)->toApiArray($mrf->paymentSchedule);
+        }
+
+        $schedule = app(PaymentScheduleService::class)->findForMrf($mrf);
+
+        return $schedule ? app(PaymentScheduleService::class)->toApiArray($schedule) : null;
+    }
+
+    private function resolvePaymentTermsForMrf(?MRF $mrf, ?string $fallback): ?string
+    {
+        if (! $mrf) {
+            return $fallback;
+        }
+
+        $schedule = app(PaymentScheduleService::class)->findForMrf($mrf);
+
+        if ($schedule) {
+            return app(PaymentScheduleService::class)->summaryText($schedule);
+        }
+
+        return $fallback;
     }
 }

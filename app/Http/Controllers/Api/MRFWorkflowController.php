@@ -17,6 +17,7 @@ use App\Services\WorkflowNotificationService;
 use App\Services\WorkflowStateService;
 use App\Services\PermissionService;
 use App\Services\PurchaseOrderPdfService;
+use App\Services\PaymentScheduleService;
 use App\Services\QuotationAttachmentService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
@@ -1724,6 +1725,15 @@ class MRFWorkflowController extends Controller
 
         $mrf->update($updateData);
 
+        $poTotalForSchedule = $subtotal + $taxAmount;
+        if ($poTotalForSchedule <= 0 && isset($poData['data'])) {
+            $poTotalForSchedule = (float) ($poData['data']['quotation']['total_amount'] ?? 0);
+        }
+        if ($poTotalForSchedule <= 0) {
+            $poTotalForSchedule = (float) ($mrf->estimated_cost ?? 0);
+        }
+        app(PaymentScheduleService::class)->lockOnPoGeneration($mrf, $poTotalForSchedule);
+
         // Record in approval history
         $action = $isRegeneration ? 'regenerated_po' : 'generated_po';
         $remarks = $isRegeneration
@@ -3011,7 +3021,7 @@ class MRFWorkflowController extends Controller
             'total' => $total,
         ]);
 
-        return [
+        $payload = [
             'success' => true,
             'data' => [
                 'mrf' => [
@@ -3051,6 +3061,10 @@ class MRFWorkflowController extends Controller
                 ],
             ],
         ];
+
+        $payload['data'] = $this->enrichPoPayloadWithPaymentSchedule($mrf, $payload['data']);
+
+        return $payload;
     }
 
     /**
@@ -3327,6 +3341,10 @@ class MRFWorkflowController extends Controller
                 ],
             ]
         ];
+
+        $result['data'] = $this->enrichPoPayloadWithPaymentSchedule($mrf, $result['data']);
+
+        return $result;
     }
 
     /**
@@ -3460,5 +3478,41 @@ class MRFWorkflowController extends Controller
         }
 
         return $query->first();
+    }
+
+    /**
+     * @param  array<string, mixed>  $data
+     * @return array<string, mixed>
+     */
+    private function enrichPoPayloadWithPaymentSchedule(MRF $mrf, array $data): array
+    {
+        $scheduleService = app(PaymentScheduleService::class);
+        $schedule = $scheduleService->findForMrf($mrf);
+
+        if (! $schedule) {
+            $data['payment_schedule'] = null;
+            $data['payment_milestones'] = [];
+
+            return $data;
+        }
+
+        $quotation = $data['quotation'] ?? [];
+        $items = $data['items'] ?? [];
+        $currency = (string) ($quotation['currency'] ?? $mrf->currency ?? 'NGN');
+
+        $poTotal = (float) ($quotation['total_amount'] ?? 0);
+        if ($poTotal <= 0) {
+            foreach ($items as $item) {
+                $poTotal += (float) ($item['total_price'] ?? 0);
+            }
+        }
+        if ($poTotal <= 0) {
+            $poTotal = (float) ($mrf->estimated_cost ?? 0);
+        }
+
+        $data['payment_schedule'] = $scheduleService->toApiArray($schedule);
+        $data['payment_milestones'] = $scheduleService->milestonesForPoPdf($schedule, $poTotal, $currency);
+
+        return $data;
     }
 }

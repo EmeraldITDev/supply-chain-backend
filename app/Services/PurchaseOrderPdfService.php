@@ -88,6 +88,7 @@ class PurchaseOrderPdfService
         }
 
         $paymentTerms = (string) ($data['payment_terms'] ?? '');
+        $paymentMilestones = $data['payment_milestones'] ?? [];
         $additionalNotes = $this->buildAdditionalNotesMrf($data);
 
         $approverName = (string) ($data['approved_by_name'] ?? env('PO_APPROVER_NAME', ''));
@@ -113,6 +114,7 @@ class PurchaseOrderPdfService
             $approverName,
             $approverDate,
             $data['signature_image_url'] ?? null,
+            is_array($paymentMilestones) ? $paymentMilestones : [],
         ))->render();
     }
 
@@ -160,7 +162,9 @@ class PurchaseOrderPdfService
         $currency = $quotation['currency'] ?? 'NGN';
 
         $shipTo = env('COMPANY_ADDRESS', $company['address'] ?? '');
-        $paymentTerms = (string) ($quotation['payment_terms'] ?? '');
+        $paymentMilestones = is_array($data['payment_milestones'] ?? null) ? $data['payment_milestones'] : [];
+        // Structured milestone table replaces legacy free-text payment terms on workflow POs.
+        $paymentTerms = '';
 
         $additionalParts = [];
         if (!empty($quotation['delivery_days'])) {
@@ -200,6 +204,7 @@ class PurchaseOrderPdfService
             (string) ($user->name ?? ''),
             $date->format('F j, Y'),
             $data['signature_image_url'] ?? null,
+            $paymentMilestones,
         ))->render();
     }
 
@@ -225,7 +230,8 @@ class PurchaseOrderPdfService
         bool $showTaxBreakdown,
         string $approvedByName,
         string $approvedByDate,
-        ?string $signatureImageUrl = null
+        ?string $signatureImageUrl = null,
+        array $paymentMilestones = [],
     ): array {
         $company = $this->normalizeCompany($company);
 
@@ -241,6 +247,7 @@ class PurchaseOrderPdfService
             'document_title' => 'Purchase Order',
             'line_items' => $lineItems,
             'payment_terms' => $paymentTerms,
+            'payment_milestones' => $paymentMilestones,
             'additional_notes' => trim($additionalNotes),
             'subtotal' => $this->fmtMoney($subtotal),
             'tax' => $this->fmtMoney($tax),

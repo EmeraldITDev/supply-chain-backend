@@ -69,6 +69,97 @@ Living document for API changes requiring frontend updates. See `FINANCE_AP_IMPL
 
 ---
 
-## Phase 1+ (pending)
+## Phase 1 — Payment schedule & milestones
 
-Document payment schedule, vendor invoice portal, delivery confirmation, and Finance sync endpoints here as they are implemented.
+### `GET /api/payment-term-templates`
+
+Lists predefined payment term templates (100% advance, 70/30, 50/50, 30/40/30).
+
+**Response:**
+
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "key": "70_30_delivery",
+      "name": "70% Advance / 30% Upon Delivery",
+      "milestones": [
+        {
+          "milestone_number": 1,
+          "label": "Advance",
+          "percentage": 70,
+          "trigger_condition": "on_advance",
+          "required_documents": ["signed_po", "pfi"]
+        }
+      ]
+    }
+  ]
+}
+```
+
+**Frontend action:** Populate template picker on RFQ create/edit and payment schedule UI.
+
+---
+
+### `GET /api/mrfs/{id}/payment-schedule`
+
+Returns the current structured payment schedule for an MRF (404 if none).
+
+**Response fields:** `id`, `templateKey`, `templateName`, `version`, `isLocked`, `lockedAt`, `summary`, `milestones[]` (each with `milestoneNumber`, `label`, `percentage`, `amount`, `triggerCondition`, `triggerLabel`, `requiredDocuments`, `status`).
+
+---
+
+### `POST /api/mrfs/{id}/payment-schedule`
+
+Create schedule from template or custom milestones. Percentages must total 100%.
+
+**Body (template):**
+
+```json
+{ "templateKey": "70_30_delivery" }
+```
+
+**Body (custom):**
+
+```json
+{
+  "milestones": [
+    { "milestoneNumber": 1, "label": "Advance", "percentage": 60, "triggerCondition": "on_advance" },
+    { "milestoneNumber": 2, "label": "Balance", "percentage": 40, "triggerCondition": "upon_delivery" }
+  ]
+}
+```
+
+Returns `201` with full schedule payload. Returns `422` if percentages ≠ 100% or schedule already exists.
+
+---
+
+### `PUT /api/mrfs/{id}/payment-schedule`
+
+Update schedule (versioned audit trail). Returns `409 SCHEDULE_LOCKED` after PO generation.
+
+---
+
+### Propagation (additive fields)
+
+| Endpoint | New fields |
+|----------|------------|
+| `GET /api/rfqs`, `GET /api/rfqs/{id}`, `POST /api/rfqs` | `paymentSchedule`, `payment_schedule` |
+| Vendor RFQ list (`RFQWorkflowController`) | `paymentSchedule`, `payment_schedule` |
+| `GET /api/quotations` | `paymentSchedule`, `payment_schedule` (read-only from MRF) |
+| `GET /api/mrfs/{id}/price-comparisons` | Top-level `paymentSchedule`; each row has `paymentTerms` / `paymentScheduleSummary` |
+
+**PO PDF:** Auto-generated POs now render a milestone table instead of free-text `payment_terms`. Schedule locks on `POST /api/mrfs/{id}/generate-po`.
+
+**Frontend action:**
+
+- RFQ create/edit: select template or customize milestones via payment-schedule API before/at RFQ send.
+- Quotation evaluation / price comparison: show `paymentScheduleSummary` column.
+- PO preview: expect milestone table on generated PDFs.
+
+---
+
+## Phase 2+ (pending)
+
+Document GRN generate, vendor invoice portal, delivery confirmation, and Finance sync endpoints here as they are implemented.

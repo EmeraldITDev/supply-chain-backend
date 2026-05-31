@@ -8,6 +8,7 @@ use App\Models\Quotation;
 use App\Models\QuotationItem;
 use App\Models\RFQ;
 use App\Models\Vendor;
+use App\Services\PaymentScheduleService;
 use App\Services\QuotationAttachmentService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
@@ -20,7 +21,7 @@ class QuotationController extends Controller
     public function index(Request $request)
     {
         $user = $request->user();
-        $query = Quotation::with(['rfq', 'vendor', 'approver']);
+        $query = Quotation::with(['rfq.mrf.paymentSchedule.milestones', 'vendor', 'approver']);
 
         // If user is a vendor, only show their quotations
         $isVendor = false;
@@ -125,6 +126,8 @@ class QuotationController extends Controller
                     'payment_terms' => $quotation->payment_terms ?? null,
                     'paymentTerms' => $quotation->payment_terms ?? null,
                     'payment_terms_text' => $quotation->payment_terms ?? null,
+                    'paymentSchedule' => $this->paymentSchedulePayload($quotation),
+                    'payment_schedule' => $this->paymentSchedulePayload($quotation),
 
                     // Validity and warranty
                     'validity_days' => $quotation->validity_days ?? null,
@@ -920,5 +923,18 @@ class QuotationController extends Controller
                 'updated_at' => $quotation->updated_at->toIso8601String(),
             ]
         ]);
+    }
+
+    private function paymentSchedulePayload(Quotation $quotation): ?array
+    {
+        $mrf = $quotation->rfq?->mrf;
+
+        if (! $mrf) {
+            return null;
+        }
+
+        $schedule = app(PaymentScheduleService::class)->findForMrf($mrf);
+
+        return $schedule ? app(PaymentScheduleService::class)->toApiArray($schedule) : null;
     }
 }

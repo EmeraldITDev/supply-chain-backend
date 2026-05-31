@@ -7,6 +7,7 @@ use App\Http\Requests\Procurement\StorePriceComparisonsRequest;
 use App\Models\MRF;
 use App\Models\PriceComparison;
 use App\Models\Vendor;
+use App\Services\PaymentScheduleService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -62,15 +63,20 @@ class PriceComparisonController extends Controller
             $mrf->syncPriceComparisonsFromQuotations();
         }
 
+        $schedule = app(PaymentScheduleService::class)->findForMrf($mrf);
+        $scheduleSummary = $schedule ? app(PaymentScheduleService::class)->summaryText($schedule) : null;
+
         $rows = $mrf->priceComparisons()
             ->with('vendor:id,vendor_id,name')
             ->orderByDesc('is_selected')
             ->orderBy('id')
             ->get()
-            ->map(fn (PriceComparison $row) => $this->serializeRow($row));
+            ->map(fn (PriceComparison $row) => $this->serializeRow($row, $scheduleSummary));
 
         return response()->json([
             'success' => true,
+            'paymentSchedule' => $schedule ? app(PaymentScheduleService::class)->toApiArray($schedule) : null,
+            'payment_schedule' => $schedule ? app(PaymentScheduleService::class)->toApiArray($schedule) : null,
             'data' => $rows->values(),
         ]);
     }
@@ -167,10 +173,13 @@ class PriceComparisonController extends Controller
             ->orderBy('id')
             ->get();
 
+        $schedule = app(PaymentScheduleService::class)->findForMrf($mrf);
+        $scheduleSummary = $schedule ? app(PaymentScheduleService::class)->summaryText($schedule) : null;
+
         return response()->json([
             'success' => true,
             'message' => 'Price comparison saved',
-            'data' => $saved->map(fn (PriceComparison $row) => $this->serializeRow($row))->values(),
+            'data' => $saved->map(fn (PriceComparison $row) => $this->serializeRow($row, $scheduleSummary))->values(),
         ]);
     }
 
@@ -229,7 +238,7 @@ class PriceComparisonController extends Controller
         return $vendor;
     }
 
-    private function serializeRow(PriceComparison $row): array
+    private function serializeRow(PriceComparison $row, ?string $scheduleSummary = null): array
     {
         return [
             'id' => $row->id,
@@ -243,6 +252,10 @@ class PriceComparisonController extends Controller
             'total_price' => (float) $row->total_price,
             'is_selected' => (bool) $row->is_selected,
             'selection_reason' => $row->selection_reason,
+            'paymentTerms' => $scheduleSummary,
+            'payment_terms' => $scheduleSummary,
+            'paymentScheduleSummary' => $scheduleSummary,
+            'payment_schedule_summary' => $scheduleSummary,
             'created_at' => $row->created_at?->toIso8601String(),
             'updated_at' => $row->updated_at?->toIso8601String(),
         ];

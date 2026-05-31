@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\URL;
 use Illuminate\Support\Str;
@@ -281,6 +282,11 @@ class MRF extends Model
     public function procurementDocuments(): HasMany
     {
         return $this->hasMany(ProcurementDocument::class, 'mrf_id');
+    }
+
+    public function paymentSchedule(): HasOne
+    {
+        return $this->hasOne(PaymentSchedule::class, 'mrf_id');
     }
 
     /**

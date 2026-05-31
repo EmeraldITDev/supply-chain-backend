@@ -12,6 +12,7 @@ use App\Models\QuotationItem;
 use App\Models\Vendor;
 use App\Services\NotificationService;
 use App\Services\EmailService;
+use App\Services\PaymentScheduleService;
 use App\Services\QuotationAttachmentService;
 use App\Services\WorkflowNotificationService;
 use Illuminate\Http\Request;
@@ -71,7 +72,7 @@ class RFQWorkflowController extends Controller
         })
         ->with([
             'items',
-            'mrf',
+            'mrf.paymentSchedule.milestones',
             'vendors' => function ($query) use ($vendor) {
                 // Only load the current vendor's pivot data for efficiency
                 $query->where('vendors.id', $vendor->id);
@@ -110,6 +111,8 @@ class RFQWorkflowController extends Controller
                 'estimatedCost' => (float) $estimatedCost,
                 'budget' => (float) $estimatedCost, // Alias for estimatedCost for frontend compatibility
                 'paymentTerms' => $rfq->payment_terms,
+                'paymentSchedule' => $this->vendorPaymentSchedulePayload($rfq),
+                'payment_schedule' => $this->vendorPaymentSchedulePayload($rfq),
                 'notes' => $rfq->notes,
                 'supportingDocuments' => $rfq->supporting_documents ?? [],
                 'deadline' => $rfq->deadline ? $rfq->deadline->format('Y-m-d') : null,
@@ -1118,5 +1121,22 @@ class RFQWorkflowController extends Controller
             })
             ->with(['items', 'mrf.executiveApprover', 'mrf.chairmanApprover'])
             ->first();
+    }
+
+    private function vendorPaymentSchedulePayload(RFQ $rfq): ?array
+    {
+        $mrf = $rfq->mrf;
+
+        if (! $mrf) {
+            return null;
+        }
+
+        if ($mrf->relationLoaded('paymentSchedule') && $mrf->paymentSchedule) {
+            return app(PaymentScheduleService::class)->toApiArray($mrf->paymentSchedule);
+        }
+
+        $schedule = app(PaymentScheduleService::class)->findForMrf($mrf);
+
+        return $schedule ? app(PaymentScheduleService::class)->toApiArray($schedule) : null;
     }
 }

@@ -225,7 +225,32 @@
 
     <div class="payment-block">
         <div class="lbl">PAYMENT TERMS:</div>
-        <div class="payment-text">{!! nl2br(e($payment_terms)) !!}</div>
+        @if (!empty($payment_milestones))
+            <table class="items-table payment-milestones-table">
+                <thead>
+                    <tr>
+                        <th style="width:8%">#</th>
+                        <th style="width:22%">Milestone</th>
+                        <th style="width:12%">Percentage</th>
+                        <th style="width:18%">Amount</th>
+                        <th style="width:40%">Trigger</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach ($payment_milestones as $milestone)
+                        <tr>
+                            <td>{{ $milestone['number'] ?? '' }}</td>
+                            <td>{{ $milestone['label'] ?? '' }}</td>
+                            <td>{{ $milestone['percentage'] ?? '' }}</td>
+                            <td>{{ $milestone['amount'] ?? '' }}</td>
+                            <td>{{ $milestone['trigger'] ?? '' }}</td>
+                        </tr>
+                    @endforeach
+                </tbody>
+            </table>
+        @elseif (!empty($payment_terms))
+            <div class="payment-text">{!! nl2br(e($payment_terms)) !!}</div>
+        @endif
     </div>
 
     @if ($additional_notes !== '')

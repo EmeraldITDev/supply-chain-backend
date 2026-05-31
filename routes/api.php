@@ -369,6 +369,10 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/mrfs/{id}/request-grn', [\App\Http\Controllers\Api\GRNController::class, 'requestGRN']);
     Route::post('/mrfs/{id}/complete-grn', [\App\Http\Controllers\Api\GRNController::class, 'completeGRN']);
     Route::get('/mrfs/{id}/procurement-documents', [\App\Http\Controllers\Api\ProcurementDocumentController::class, 'index']);
+    Route::get('/mrfs/{id}/payment-schedule', [\App\Http\Controllers\Api\PaymentScheduleController::class, 'show']);
+    Route::post('/mrfs/{id}/payment-schedule', [\App\Http\Controllers\Api\PaymentScheduleController::class, 'store']);
+    Route::put('/mrfs/{id}/payment-schedule', [\App\Http\Controllers\Api\PaymentScheduleController::class, 'update']);
+    Route::get('/payment-term-templates', [\App\Http\Controllers\Api\PaymentScheduleController::class, 'templates']);
 
     // User management (admin only)
     Route::get('/users', [\App\Http\Controllers\Api\UserManagementController::class, 'index']);
