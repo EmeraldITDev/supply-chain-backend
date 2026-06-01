@@ -669,3 +669,213 @@ Query params (where applicable): `from`, `to` (dates), `limit` (list endpoints, 
 **Report responses (all four endpoints):** include `cutoverDate` and `routingConfigured` (same semantics as `GET /api/dashboard/finance` → `routing`). When `routingConfigured` is `false`, cohort queries return empty/zero totals — show the cutover warning in UI.
 
 **Backend:** Implemented in `MrfProgressTrackerService`, `FinanceApReportController`, and `FinanceApReportingService` (commit `144ece2` and follow-ups).
+
+---
+
+## SCM Platform — Trip Request & SRF updates (Jun 2026)
+
+### Trip request — mandatory trip type & advance booking
+
+**Trip type** (UI label) is stored as `bookingScope` / `booking_scope`:
+
+| Value | Label | Minimum lead time |
+|-------|--------|-------------------|
+| `within_state` | Within State | 2 calendar days before trip date |
+| `outside_state` | Outside State | 14 calendar days before trip date |
+
+**Do not** use logistics `trip_type` (`personnel` / `material` / `mixed`) on the staff trip request form.
+
+#### `GET /api/trip-requests/booking-rules`
+
+Returns lead-time rules for inline form validation (mirror on the client; backend still enforces on submit).
+
+```json
+{
+  "success": true,
+  "data": {
+    "bookingRules": {
+      "scopes": [
+        {
+          "value": "within_state",
+          "label": "Within State",
+          "minimumLeadDays": 2,
+          "violationMessage": "Within state trips must be requested at least 2 days in advance..."
+        },
+        {
+          "value": "outside_state",
+          "label": "Outside State",
+          "minimumLeadDays": 14,
+          "violationMessage": "Outside state trips must be requested at least 2 weeks (14 days) in advance..."
+        }
+      ],
+      "referenceDate": "2026-06-01"
+    }
+  }
+}
+```
+
+**Frontend:** Required radio/select for trip type. On date change, compare `scheduled_departure_at` (trip date) to `referenceDate + minimumLeadDays`. Disable submit and show `violationMessage` when invalid.
+
+#### `POST /api/trip-requests` (updated)
+
+**Request (staff):**
+
+```json
+{
+  "destination": "Lagos Airport",
+  "purpose": "Client meeting",
+  "origin": "Office",
+  "scheduled_departure_at": "2026-06-15T08:00:00Z",
+  "scheduled_arrival_at": "2026-06-15T18:00:00Z",
+  "passenger_user_ids": [2, 5],
+  "bookingScope": "outside_state"
+}
+```
+
+| Field | Required | Notes |
+|-------|----------|--------|
+| `bookingScope` | **Yes** | `within_state` \| `outside_state` (aliases: `tripType`, `booking_scope`) |
+| `passenger_user_ids` | Yes | min 1 |
+| `scheduled_departure_at` | Yes | Must satisfy lead-time for `bookingScope` |
+| `driver_user_id` | **Removed** | Do not send; logistics assigns driver on convert |
+
+**422 `BOOKING_LEAD_TIME_VIOLATION`:** `errors.bookingScope`, `errors.scheduled_departure_at`, `minimum_trip_date[]`.
+
+**Response:** `data.trip` includes `bookingScope`, `bookingScopeLabel`, `progressSummary` (for list cards).
+
+---
+
+### My Trip Requests (staff dashboard)
+
+#### `GET /api/trip-requests`
+
+**Auth:** Same users who may create trip requests (`PassengerEligibility`).
+
+**Query:** `limit` or `per_page` (default 50, max 100), optional `status`.
+
+**Response:**
+
+```json
+{
+  "success": true,
+  "data": {
+    "trips": [
+      {
+        "id": 42,
+        "tripCode": "TRQ-20260601-ABC123",
+        "destination": "Abuja",
+        "bookingScope": "within_state",
+        "bookingScopeLabel": "Within State",
+        "workflowStage": "trip_request",
+        "status": "draft",
+        "progressSummary": {
+          "currentStepKey": "submitted",
+          "currentStepLabel": "Submitted",
+          "progressPercent": 0
+        },
+        "progress": { "steps": [], "currentStepKey": "submitted" }
+      }
+    ],
+    "pagination": { "total": 1, "per_page": 50, "current_page": 1, "last_page": 1 }
+  }
+}
+```
+
+**Frontend:** Add **My Trip Requests** section/tab on the staff dashboard; list from this endpoint; show `progressSummary` on each row; link to detail/progress.
+
+#### `GET /api/trip-requests/{id}`
+
+Single trip for the logged-in creator, passenger, or internal logistics/procurement roles.
+
+#### `GET /api/trip-requests/{id}/progress-tracker`
+
+Staff-facing steps: **Submitted → Logistics Review → Confirmed → Completed**.
+
+```json
+{
+  "success": true,
+  "data": {
+    "progress": {
+      "currentStepKey": "submitted",
+      "currentStep": 1,
+      "totalSteps": 4,
+      "progressPercent": 0,
+      "steps": [
+        { "key": "submitted", "label": "Submitted", "status": "in_progress", "step": 1 },
+        { "key": "logistics_review", "label": "Logistics Review", "status": "pending", "step": 2 }
+      ]
+    }
+  }
+}
+```
+
+**UI:** Reuse existing stepper/progress component from MRF if present; pass `data.progress.steps`.
+
+---
+
+### SRF — estimated cost optional
+
+#### `POST /api/srfs` / `PUT /api/srfs/{id}`
+
+| Field | Required |
+|-------|----------|
+| `duration` | **Yes** |
+| `estimatedCost` / `estimated_cost` | **No** (nullable) |
+
+All other prior required header fields unchanged.
+
+**Frontend:** Remove required validator from Estimated Cost on SRF form; keep Duration required.
+
+---
+
+### SRF — line item View Details & progress
+
+#### `GET /api/srfs` (updated)
+
+- Staff / `regular_staff` / `employee` / `general_employee`: only own SRFs (`requester_id`).
+- Default `include_line_items=true` — each SRF includes `lineItems[]` with `progressSummary` for list **View Details** buttons.
+
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "id": "SRF-2026-001",
+      "lineItems": [
+        {
+          "id": 10,
+          "itemName": "Brake service",
+          "progressSummary": {
+            "currentStepLabel": "Supply Chain Director review",
+            "srfStatus": "Pending",
+            "srfStage": "supply_chain_director_review"
+          }
+        }
+      ]
+    }
+  ],
+  "pagination": { "total": 1, "per_page": 50, "current_page": 1, "last_page": 1 }
+}
+```
+
+Set `include_line_items=false` to omit line items on list (lighter payload).
+
+#### `GET /api/srfs/{id}/line-items/{itemId}`
+
+**Use for:** View Details modal — full line item + parent SRF header + workflow progress.
+
+```json
+{
+  "success": true,
+  "srf": { "id": "SRF-2026-001", "title": "..." },
+  "lineItem": { "id": 10, "itemName": "...", "quantity": 1, "progressSummary": {} },
+  "progress": [ { "key": "logistics_initiated", "label": "...", "status": "completed" } ],
+  "steps": []
+}
+```
+
+#### `GET /api/srfs/{id}/progress-tracker`
+
+SRF-level timeline (same steps as embedded in `GET /api/srfs/{id}` → `progress`). Prefer this for a dedicated tracker panel.
+
+**Frontend:** Per line item in list, **View Details** → `GET .../line-items/{itemId}`; render `lineItem` + `progress` stepper. Do not duplicate a second progress API if `show` already loaded — extend existing modal.

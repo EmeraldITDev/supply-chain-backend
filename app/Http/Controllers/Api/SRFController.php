@@ -71,7 +71,7 @@ class SRFController extends Controller
             return response()->json([]);
         }
 
-        if ($user && in_array($user->role, ['employee', 'general_employee'])) {
+        if ($user && in_array($user->role, ['employee', 'general_employee', 'staff', 'regular_staff'], true)) {
             $query->where('requester_id', $user->id);
         }
 
@@ -93,9 +93,23 @@ class SRFController extends Controller
 
         $perPage = (int) $request->get('per_page', 50);
         $perPage = min($perPage, 200); // Cap at 200 to prevent abuse
+        $includeLineItems = $request->boolean('include_line_items', true);
+        if ($includeLineItems) {
+            $query->with('items');
+        }
         $srfs = $query->orderBy('date', 'desc')->paginate($perPage);
 
-        return response()->json($srfs->map(fn ($srf) => $this->presentSrf($srf)));
+        return response()->json([
+            'success' => true,
+            'data' => collect($srfs->items())->map(fn (SRF $srf) => $this->presentSrf($srf, $includeLineItems))->values(),
+            'srfs' => collect($srfs->items())->map(fn (SRF $srf) => $this->presentSrf($srf, $includeLineItems))->values(),
+            'pagination' => [
+                'total' => $srfs->total(),
+                'per_page' => $srfs->perPage(),
+                'current_page' => $srfs->currentPage(),
+                'last_page' => $srfs->lastPage(),
+            ],
+        ]);
     }
 
     /**
@@ -103,7 +117,7 @@ class SRFController extends Controller
      * frontend. Centralised so the new logistics columns (vehicle snapshot,
      * maintenance history, RFQ prefill) are exposed everywhere.
      */
-    private function presentSrf(SRF $srf): array
+    private function presentSrf(SRF $srf, bool $includeLineItems = false): array
     {
         $requesterName = $srf->requester_name
             ?: ($srf->relationLoaded('requester') && $srf->requester ? $srf->requester->name : null);
@@ -114,7 +128,7 @@ class SRFController extends Controller
             'email' => $srf->relationLoaded('requester') && $srf->requester ? $srf->requester->email : null,
         ];
 
-        return [
+        $payload = [
             'id' => $srf->srf_id,
             'formattedId' => $srf->formatted_id,
             'formatted_id' => $srf->formatted_id,
@@ -129,7 +143,7 @@ class SRFController extends Controller
             'urgency' => $srf->urgency,
             'description' => $srf->description,
             'duration' => $srf->duration,
-            'estimatedCost' => (float) $srf->estimated_cost,
+            'estimatedCost' => $srf->estimated_cost !== null ? (float) $srf->estimated_cost : null,
             'estimated_cost' => $srf->estimated_cost !== null ? (float) $srf->estimated_cost : null,
             'justification' => $srf->justification,
             // Plain name (legacy + list views)
@@ -158,6 +172,47 @@ class SRFController extends Controller
             'vehicleSnapshot' => $srf->vehicle_snapshot,
             'maintenanceHistory' => $srf->maintenance_history,
             'rfqPrefill' => $srf->rfq_prefill,
+        ];
+
+        if ($includeLineItems && $srf->relationLoaded('items')) {
+            $progress = $this->buildProgressTimeline($srf);
+            $currentStep = collect($progress)->firstWhere('status', 'in_progress')
+                ?? collect($progress)->last(fn (array $s) => $s['status'] === 'completed');
+            $payload['lineItems'] = $srf->items->map(fn ($item) => $this->presentLineItem($srf, $item, $progress, $currentStep))->values();
+            $payload['line_items'] = $payload['lineItems'];
+        }
+
+        return $payload;
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $progress
+     * @param  array<string, mixed>|null  $currentStep
+     * @return array<string, mixed>
+     */
+    private function presentLineItem(SRF $srf, $item, array $progress, ?array $currentStep): array
+    {
+        return [
+            'id' => $item->id,
+            'srfId' => $srf->srf_id,
+            'srf_id' => $srf->srf_id,
+            'formattedId' => $srf->formatted_id,
+            'itemName' => $item->item_name,
+            'item_name' => $item->item_name,
+            'description' => $item->description,
+            'quantity' => $item->quantity,
+            'unit' => $item->unit,
+            'budgetAmount' => $item->budget_amount !== null ? (float) $item->budget_amount : null,
+            'budget_amount' => $item->budget_amount !== null ? (float) $item->budget_amount : null,
+            'quotedAmount' => $item->quoted_amount !== null ? (float) $item->quoted_amount : null,
+            'quoted_amount' => $item->quoted_amount !== null ? (float) $item->quoted_amount : null,
+            'specifications' => $item->specifications,
+            'progressSummary' => [
+                'currentStepKey' => $currentStep['key'] ?? null,
+                'currentStepLabel' => $currentStep['label'] ?? null,
+                'srfStatus' => $srf->status,
+                'srfStage' => $srf->current_stage,
+            ],
         ];
     }
 
@@ -214,8 +269,9 @@ class SRFController extends Controller
             'department' => 'nullable|string|max:255',
             'urgency' => 'required|in:Low,Medium,High,Critical',
             'description' => 'required|string',
-            'duration' => 'required|string',
-            'estimatedCost' => 'required|numeric|min:0',
+            'duration' => 'required|string|max:255',
+            'estimatedCost' => 'nullable|numeric|min:0',
+            'estimated_cost' => 'nullable|numeric|min:0',
             'justification' => 'required|string',
             'invoice' => 'nullable|file|mimes:pdf,doc,docx,xls,xlsx,png,jpg,jpeg|max:10240', // Optional invoice upload (10MB max)
         ], RequestLineItemParser::validationRules()));
@@ -293,7 +349,7 @@ class SRFController extends Controller
             'urgency' => $request->urgency,
             'description' => $request->description,
             'duration' => $request->duration,
-            'estimated_cost' => $request->estimatedCost,
+            'estimated_cost' => $request->input('estimatedCost', $request->input('estimated_cost')),
             'justification' => $request->justification,
             'requester_id' => $user->id,
             'requester_name' => $user->name,
@@ -433,6 +489,51 @@ class SRFController extends Controller
         return response()->json($payload);
     }
 
+    public function progressTracker(Request $request, $id)
+    {
+        $srf = $this->findSrfByAnyId((string) $id);
+        if (! $srf) {
+            return response()->json(['success' => false, 'error' => 'SRF not found', 'code' => 'NOT_FOUND'], 404);
+        }
+
+        $timeline = $this->buildProgressTimeline($srf);
+
+        return response()->json([
+            'success' => true,
+            'srfId' => $srf->srf_id,
+            'currentStage' => $srf->current_stage,
+            'status' => $srf->status,
+            'progress' => $timeline,
+            'steps' => $timeline,
+        ]);
+    }
+
+    public function showLineItem(Request $request, $id, $itemId)
+    {
+        $srf = $this->findSrfByAnyId((string) $id);
+        if (! $srf) {
+            return response()->json(['success' => false, 'error' => 'SRF not found', 'code' => 'NOT_FOUND'], 404);
+        }
+
+        $srf->load('items');
+        $item = $srf->items->firstWhere('id', (int) $itemId);
+        if (! $item) {
+            return response()->json(['success' => false, 'error' => 'Line item not found', 'code' => 'NOT_FOUND'], 404);
+        }
+
+        $progress = $this->buildProgressTimeline($srf);
+        $currentStep = collect($progress)->firstWhere('status', 'in_progress')
+            ?? collect($progress)->last(fn (array $s) => $s['status'] === 'completed');
+
+        return response()->json([
+            'success' => true,
+            'srf' => $this->presentSrf($srf),
+            'lineItem' => $this->presentLineItem($srf, $item, $progress, $currentStep),
+            'progress' => $progress,
+            'steps' => $progress,
+        ]);
+    }
+
     public function lineItemProfitAndLoss(Request $request, $id)
     {
         $srf = $this->findSrfByAnyId((string) $id);
@@ -529,7 +630,8 @@ class SRFController extends Controller
             'urgency' => 'sometimes|required|in:Low,Medium,High,Critical',
             'description' => 'sometimes|required|string',
             'duration' => 'sometimes|required|string',
-            'estimatedCost' => 'sometimes|required|numeric|min:0',
+            'estimatedCost' => 'sometimes|nullable|numeric|min:0',
+            'estimated_cost' => 'sometimes|nullable|numeric|min:0',
             'justification' => 'sometimes|required|string',
         ], RequestLineItemParser::validationRules()));
 
@@ -548,7 +650,11 @@ class SRFController extends Controller
         if ($request->has('urgency')) $updateData['urgency'] = $request->urgency;
         if ($request->has('description')) $updateData['description'] = $request->description;
         if ($request->has('duration')) $updateData['duration'] = $request->duration;
-        if ($request->has('estimatedCost')) $updateData['estimated_cost'] = $request->estimatedCost;
+        if ($request->has('estimatedCost')) {
+            $updateData['estimated_cost'] = $request->estimatedCost;
+        } elseif ($request->has('estimated_cost')) {
+            $updateData['estimated_cost'] = $request->estimated_cost;
+        }
         if ($request->has('justification')) $updateData['justification'] = $request->justification;
 
         if ($srf->status === 'Rejected') {

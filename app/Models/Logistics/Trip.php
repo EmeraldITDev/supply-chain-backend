@@ -27,6 +27,9 @@ class Trip extends Model
     public const TYPE_MATERIAL = 'material';
     public const TYPE_MIXED = 'mixed';
 
+    public const BOOKING_SCOPE_WITHIN_STATE = 'within_state';
+    public const BOOKING_SCOPE_OUTSIDE_STATE = 'outside_state';
+
     public const PRIORITY_LOW = 'low';
     public const PRIORITY_NORMAL = 'normal';
     public const PRIORITY_HIGH = 'high';
@@ -38,6 +41,7 @@ class Trip extends Model
         'description',
         'purpose',
         'trip_type',
+        'booking_scope',
         'priority',
         'status',
         'scheduled_departure_at',

@@ -231,16 +231,18 @@ Same query params. Returns **CSV download** (`metric`, `value` rows).
   "destination": "Lagos Airport",
   "purpose": "Client meeting",
   "origin": "HQ",
-  "scheduled_departure_at": "2026-06-01T08:00:00Z",
-  "scheduled_arrival_at": "2026-06-01T18:00:00Z",
+  "scheduled_departure_at": "2026-06-15T08:00:00Z",
+  "scheduled_arrival_at": "2026-06-15T18:00:00Z",
   "passenger_user_ids": [2, 5, 8],
-  "driver_user_id": 12
+  "bookingScope": "outside_state"
 }
 ```
 
 **Response:** `{ "success": true, "data": { "trip": { ... } } }` with `workflow_stage: "trip_request"`.
 
-**Frontend:** **Trip Request** form (new page if missing): destination, purpose, date/time, passenger multi-select, optional driver.
+**Frontend:** **Trip Request** form: destination, purpose, **mandatory trip type** (`within_state` / `outside_state`), date/time with lead-time validation (`GET /api/trip-requests/booking-rules`), passenger multi-select. **No driver field** — logistics assigns on convert.
+
+**Staff dashboard:** `GET /api/trip-requests`, `GET /api/trip-requests/{id}/progress-tracker` — see `docs/frontend_changes.md` § SCM Platform — Trip Request & SRF updates.
 
 ### POST `/api/trips/{id}/convert-to-logistics-request` (NEW)
 **Roles:** `logistics_manager`, `logistics_officer`, `admin`.
