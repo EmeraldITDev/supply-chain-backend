@@ -174,6 +174,9 @@ class SRFController extends Controller
             'rfqPrefill' => $srf->rfq_prefill,
         ];
 
+        $payload['ui'] = $this->srfCardUi($srf);
+        $payload['lineItemCount'] = $srf->relationLoaded('items') ? $srf->items->count() : null;
+
         if ($includeLineItems && $srf->relationLoaded('items')) {
             $progress = $this->buildProgressTimeline($srf);
             $currentStep = collect($progress)->firstWhere('status', 'in_progress')
@@ -183,6 +186,48 @@ class SRFController extends Controller
         }
 
         return $payload;
+    }
+
+    /**
+     * UI hints for SRF list cards — frontend must render View Details / make card clickable.
+     *
+     * @return array<string, mixed>
+     */
+    private function srfCardUi(SRF $srf): array
+    {
+        $srfKey = $srf->formatted_id ?: $srf->srf_id;
+
+        return [
+            'cardClickable' => true,
+            'viewDetails' => [
+                'showButton' => true,
+                'label' => 'View Details',
+                'method' => 'GET',
+                'path' => '/api/srfs/' . rawurlencode((string) $srfKey),
+            ],
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function lineItemUi(SRF $srf, int $lineItemId): array
+    {
+        $srfKey = $srf->formatted_id ?: $srf->srf_id;
+
+        return [
+            'viewDetails' => [
+                'showButton' => true,
+                'label' => 'View Details',
+                'method' => 'GET',
+                'path' => '/api/srfs/' . rawurlencode((string) $srfKey) . '/line-items/' . $lineItemId,
+            ],
+            'progressTracker' => [
+                'method' => 'GET',
+                'path' => '/api/srfs/' . rawurlencode((string) $srfKey) . '/line-items/' . $lineItemId,
+                'description' => 'Opens line item detail with approval/procurement progress steps',
+            ],
+        ];
     }
 
     /**
@@ -213,7 +258,24 @@ class SRFController extends Controller
                 'srfStatus' => $srf->status,
                 'srfStage' => $srf->current_stage,
             ],
+            'ui' => $this->lineItemUi($srf, (int) $item->id),
         ];
+    }
+
+    private function userCanViewSrf(?\App\Models\User $user, SRF $srf): bool
+    {
+        if (! $user) {
+            return false;
+        }
+
+        if (in_array($user->role, [
+            'logistics_manager', 'logistics_officer', 'supply_chain_director', 'supply_chain',
+            'procurement_manager', 'procurement', 'admin', 'executive', 'chairman',
+        ], true)) {
+            return true;
+        }
+
+        return (int) $srf->requester_id === (int) $user->id;
     }
 
     /**
@@ -402,20 +464,24 @@ class SRFController extends Controller
             ], 404);
         }
 
+        if (! $this->userCanViewSrf($request->user(), $srf)) {
+            return response()->json([
+                'success' => false,
+                'error' => 'You are not allowed to view this SRF',
+                'code' => 'FORBIDDEN',
+            ], 403);
+        }
+
         $srf->load(['vehicle', 'maintenance', 'requester', 'items']);
-        $payload = $this->presentSrf($srf);
-        $payload['items'] = $srf->items->map(fn ($item) => [
-            'id' => $item->id,
-            'itemName' => $item->item_name,
-            'item_name' => $item->item_name,
-            'quantity' => $item->quantity,
-            'unit' => $item->unit,
-            'budgetAmount' => $item->budget_amount !== null ? (float) $item->budget_amount : null,
-            'budget_amount' => $item->budget_amount !== null ? (float) $item->budget_amount : null,
-            'quotedAmount' => $item->quoted_amount !== null ? (float) $item->quoted_amount : null,
-            'quoted_amount' => $item->quoted_amount !== null ? (float) $item->quoted_amount : null,
-        ])->values();
-        $payload['line_items'] = $payload['items'];
+        $progress = $this->buildProgressTimeline($srf);
+        $currentStep = collect($progress)->firstWhere('status', 'in_progress')
+            ?? collect($progress)->last(fn (array $s) => $s['status'] === 'completed');
+
+        $payload = $this->presentSrf($srf, true);
+        $lineItems = $srf->items->map(fn ($item) => $this->presentLineItem($srf, $item, $progress, $currentStep))->values();
+        $payload['items'] = $lineItems;
+        $payload['line_items'] = $lineItems;
+        $payload['lineItemCount'] = $lineItems->count();
         $payload['profitAndLoss'] = app(LineItemBudgetService::class)->srfProfitAndLoss($srf);
 
         // Best-effort lookup of RFQs / quotations that were spawned from
@@ -461,7 +527,11 @@ class SRFController extends Controller
             ];
         })->values();
 
-        $payload['progress'] = $this->buildProgressTimeline($srf);
+        $payload['progress'] = $progress;
+        $payload['progressTracker'] = [
+            'method' => 'GET',
+            'path' => '/api/srfs/' . rawurlencode((string) ($srf->formatted_id ?: $srf->srf_id)) . '/progress-tracker',
+        ];
 
         $liveMaintenance = collect();
         if ($srf->vehicle_id) {
@@ -486,7 +556,7 @@ class SRFController extends Controller
         $payload['liveMaintenanceRecords'] = $liveMaintenance;
         $payload['live_maintenance_records'] = $liveMaintenance;
 
-        return response()->json($payload);
+        return response()->json(array_merge(['success' => true], $payload));
     }
 
     public function progressTracker(Request $request, $id)
@@ -494,6 +564,10 @@ class SRFController extends Controller
         $srf = $this->findSrfByAnyId((string) $id);
         if (! $srf) {
             return response()->json(['success' => false, 'error' => 'SRF not found', 'code' => 'NOT_FOUND'], 404);
+        }
+
+        if (! $this->userCanViewSrf($request->user(), $srf)) {
+            return response()->json(['success' => false, 'error' => 'Forbidden', 'code' => 'FORBIDDEN'], 403);
         }
 
         $timeline = $this->buildProgressTimeline($srf);
@@ -515,6 +589,10 @@ class SRFController extends Controller
             return response()->json(['success' => false, 'error' => 'SRF not found', 'code' => 'NOT_FOUND'], 404);
         }
 
+        if (! $this->userCanViewSrf($request->user(), $srf)) {
+            return response()->json(['success' => false, 'error' => 'Forbidden', 'code' => 'FORBIDDEN'], 403);
+        }
+
         $srf->load('items');
         $item = $srf->items->firstWhere('id', (int) $itemId);
         if (! $item) {
@@ -525,10 +603,18 @@ class SRFController extends Controller
         $currentStep = collect($progress)->firstWhere('status', 'in_progress')
             ?? collect($progress)->last(fn (array $s) => $s['status'] === 'completed');
 
+        $lineItem = $this->presentLineItem($srf, $item, $progress, $currentStep);
+
         return response()->json([
             'success' => true,
-            'srf' => $this->presentSrf($srf),
-            'lineItem' => $this->presentLineItem($srf, $item, $progress, $currentStep),
+            'data' => [
+                'srf' => $this->presentSrf($srf->load('requester'), true),
+                'lineItem' => $lineItem,
+                'progress' => $progress,
+                'steps' => $progress,
+            ],
+            'srf' => $this->presentSrf($srf, true),
+            'lineItem' => $lineItem,
             'progress' => $progress,
             'steps' => $progress,
         ]);

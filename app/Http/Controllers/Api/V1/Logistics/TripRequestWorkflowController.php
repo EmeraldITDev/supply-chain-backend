@@ -46,7 +46,7 @@ class TripRequestWorkflowController extends ApiController
 
         $paginator = $query->paginate($perPage);
         $trips = collect($paginator->items())
-            ->map(fn (Trip $trip) => $this->presentTripRequest($trip, includeProgressSummary: true))
+            ->map(fn (Trip $trip) => $this->presentTripRequest($trip, includeProgressSummary: true, viewer: $user))
             ->values()
             ->all();
 
@@ -73,7 +73,42 @@ class TripRequestWorkflowController extends ApiController
         }
 
         return $this->success([
-            'trip' => $this->presentTripRequest($trip->load(['creator']), includeProgressSummary: true),
+            'trip' => $this->presentTripRequest($trip->load(['creator']), includeProgressSummary: true, viewer: $request->user()),
+        ]);
+    }
+
+    /**
+     * Permanently delete a staff trip request that is still in draft (creator only).
+     */
+    public function destroy(Request $request, int $id)
+    {
+        $user = $request->user();
+        if (! $user || ! PassengerEligibility::canCreateTripRequest($user)) {
+            return $this->error('You are not allowed to delete trip requests', 'FORBIDDEN', 403);
+        }
+
+        $trip = Trip::find($id);
+        if (! $trip) {
+            return $this->error('Trip request not found', 'NOT_FOUND', 404);
+        }
+
+        if ((int) $trip->created_by !== (int) $user->id) {
+            return $this->error('Only the creator can delete this trip request', 'FORBIDDEN', 403);
+        }
+
+        if (! $this->isDeletableDraft($trip)) {
+            return $this->error(
+                'Only draft trip requests can be deleted. Submitted or in-progress trips cannot be removed.',
+                'INVALID_STATE',
+                422
+            );
+        }
+
+        $trip->delete();
+
+        return $this->success([
+            'message' => 'Draft trip request deleted successfully',
+            'deletedId' => $id,
         ]);
     }
 
@@ -164,7 +199,7 @@ class TripRequestWorkflowController extends ApiController
         );
 
         return $this->success([
-            'trip' => $this->presentTripRequest($trip->load(['creator']), includeProgressSummary: true),
+            'trip' => $this->presentTripRequest($trip->load(['creator']), includeProgressSummary: true, viewer: $user),
             'bookingRules' => $this->bookingRulesPayload(),
         ], 201);
     }
@@ -368,9 +403,21 @@ class TripRequestWorkflowController extends ApiController
     /**
      * @return array<string, mixed>
      */
-    private function presentTripRequest(Trip $trip, bool $includeProgressSummary = false): array
+    private function isDeletableDraft(Trip $trip): bool
+    {
+        if (! str_starts_with((string) $trip->trip_code, 'TRQ-')) {
+            return false;
+        }
+
+        return strtolower((string) $trip->status) === Trip::STATUS_DRAFT
+            && $trip->workflow_stage === Trip::WORKFLOW_TRIP_REQUEST;
+    }
+
+    private function presentTripRequest(Trip $trip, bool $includeProgressSummary = false, ?User $viewer = null): array
     {
         $scope = $trip->booking_scope;
+        $canDelete = $viewer && $this->isDeletableDraft($trip) && (int) $trip->created_by === (int) $viewer->id;
+
         $payload = [
             'id' => $trip->id,
             'tripCode' => $trip->trip_code,
@@ -398,6 +445,23 @@ class TripRequestWorkflowController extends ApiController
             'createdBy' => $trip->created_by,
             'createdAt' => $trip->created_at?->toIso8601String(),
             'created_at' => $trip->created_at?->toIso8601String(),
+            'canDelete' => $canDelete,
+            'isDraft' => $this->isDeletableDraft($trip),
+            'ui' => [
+                'viewDetails' => [
+                    'showButton' => true,
+                    'label' => 'View Details',
+                    'method' => 'GET',
+                    'path' => '/api/trip-requests/' . $trip->id,
+                ],
+                'deleteDraft' => $canDelete ? [
+                    'showButton' => true,
+                    'label' => 'Delete draft',
+                    'method' => 'DELETE',
+                    'path' => '/api/trip-requests/' . $trip->id,
+                    'confirmMessage' => 'Are you sure you want to delete this draft trip request? This cannot be undone.',
+                ] : null,
+            ],
         ];
 
         if ($includeProgressSummary) {

@@ -212,6 +212,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/trip-requests', [TripRequestWorkflowController::class, 'store']);
     Route::get('/trip-requests/{id}', [TripRequestWorkflowController::class, 'show']);
     Route::get('/trip-requests/{id}/progress-tracker', [TripRequestWorkflowController::class, 'progressTracker']);
+    Route::delete('/trip-requests/{id}', [TripRequestWorkflowController::class, 'destroy']);
     Route::post('/trips/{id}/convert-to-logistics-request', [TripRequestWorkflowController::class, 'convertToLogisticsRequest'])->middleware($logisticsInternalRoles);
     Route::post('/trips/{id}/procurement-approve-quote', [TripRequestWorkflowController::class, 'procurementApproveQuote'])->middleware($logisticsInternalRoles);
     Route::post('/trips/{id}/scd-approve', [TripRequestWorkflowController::class, 'scdApprove'])->middleware('role:supply_chain_director,supply_chain,admin');
@@ -629,6 +630,7 @@ Route::prefix('v1/logistics')->group(function () {
         Route::post('/trip-requests', [TripRequestWorkflowController::class, 'store']);
         Route::get('/trip-requests/{id}', [TripRequestWorkflowController::class, 'show']);
         Route::get('/trip-requests/{id}/progress-tracker', [TripRequestWorkflowController::class, 'progressTracker']);
+        Route::delete('/trip-requests/{id}', [TripRequestWorkflowController::class, 'destroy']);
         Route::post('/trips/{id}/convert-to-logistics-request', [TripRequestWorkflowController::class, 'convertToLogisticsRequest'])->middleware($logisticsInternalRoles);
         Route::post('/trips/{id}/procurement-approve-quote', [TripRequestWorkflowController::class, 'procurementApproveQuote'])->middleware($logisticsInternalRoles);
         Route::post('/trips/{id}/scd-approve', [TripRequestWorkflowController::class, 'scdApprove'])->middleware('role:supply_chain_director,supply_chain,admin');
@@ -767,6 +769,7 @@ Route::prefix('logistics')->group(function () {
         Route::post('/trip-requests', [TripRequestWorkflowController::class, 'store']);
         Route::get('/trip-requests/{id}', [TripRequestWorkflowController::class, 'show']);
         Route::get('/trip-requests/{id}/progress-tracker', [TripRequestWorkflowController::class, 'progressTracker']);
+        Route::delete('/trip-requests/{id}', [TripRequestWorkflowController::class, 'destroy']);
         Route::post('/trips/{id}/convert-to-logistics-request', [TripRequestWorkflowController::class, 'convertToLogisticsRequest'])->middleware($logisticsInternalRoles);
         Route::post('/trips/{id}/procurement-approve-quote', [TripRequestWorkflowController::class, 'procurementApproveQuote'])->middleware($logisticsInternalRoles);
         Route::post('/trips/{id}/scd-approve', [TripRequestWorkflowController::class, 'scdApprove'])->middleware('role:supply_chain_director,supply_chain,admin');

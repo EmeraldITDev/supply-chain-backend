@@ -879,3 +879,140 @@ Set `include_line_items=false` to omit line items on list (lighter payload).
 SRF-level timeline (same steps as embedded in `GET /api/srfs/{id}` → `progress`). Prefer this for a dedicated tracker panel.
 
 **Frontend:** Per line item in list, **View Details** → `GET .../line-items/{itemId}`; render `lineItem` + `progress` stepper. Do not duplicate a second progress API if `show` already loaded — extend existing modal.
+
+---
+
+## SRF View Details UI contract & trip draft deletion (Jun 2026 follow-up)
+
+### Important: backend cannot render buttons
+
+The API now exposes explicit **`ui`** blocks so the frontend must wire buttons/navigation. If cards still look “dead”, the dashboard is not reading these fields yet.
+
+**List source:** `GET /api/srfs` (not procurement dashboard-only payloads). Response shape:
+
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "id": "SRF-EMERALD-BD-TRN-2026-010",
+      "formattedId": "SRF-EMERALD-BD-TRN-2026-010",
+      "title": "Test SRF",
+      "ui": {
+        "cardClickable": true,
+        "viewDetails": {
+          "showButton": true,
+          "label": "View Details",
+          "method": "GET",
+          "path": "/api/srfs/SRF-EMERALD-BD-TRN-2026-010"
+        }
+      },
+      "lineItems": [
+        {
+          "id": 10,
+          "itemName": "Service line A",
+          "ui": {
+            "viewDetails": {
+              "showButton": true,
+              "label": "View Details",
+              "method": "GET",
+              "path": "/api/srfs/SRF-EMERALD-BD-TRN-2026-010/line-items/10"
+            },
+            "progressTracker": {
+              "method": "GET",
+              "path": "/api/srfs/SRF-EMERALD-BD-TRN-2026-010/line-items/10"
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "srfs": []
+}
+```
+
+#### Frontend actions (SRF dashboard list)
+
+| User action | When `ui.*.showButton` is true | API call |
+|-------------|-------------------------------|----------|
+| **SRF card click** or **View Details** on card | `ui.cardClickable` / `ui.viewDetails` | `GET` `ui.viewDetails.path` → SRF detail page/modal |
+| **View Details** on a line item row | `lineItems[].ui.viewDetails` | `GET` `lineItems[].ui.viewDetails.path` → modal with `progress` / `steps` |
+| Line item progress only | After line item fetch | Render `data.progress` or `data.steps` as stepper (same component as MRF) |
+
+#### `GET /api/srfs/{id}` (SRF detail — updated)
+
+- Wrapped with `"success": true` at root (legacy fields still at top level).
+- Each `items[]` / `line_items[]` entry includes **`ui.viewDetails`** (same as list).
+- Includes `progress`, `progressTracker.path`, `lineItemCount`.
+
+**Flow:** Card → SRF detail → per line item **View Details** → line item modal with full `progress` timeline.
+
+#### `GET /api/srfs/{id}/line-items/{itemId}` (line item detail + progress)
+
+```json
+{
+  "success": true,
+  "data": {
+    "srf": { "title": "...", "ui": { "cardClickable": true } },
+    "lineItem": { "itemName": "...", "ui": { "viewDetails": { "showButton": true, "path": "..." } } },
+    "progress": [
+      { "key": "supply_chain_director_review", "label": "Supply Chain Director review", "status": "in_progress" }
+    ],
+    "steps": []
+  }
+}
+```
+
+Use **`data.progress`** (or `data.steps`) for the line item progress tracker UI.
+
+---
+
+### Trip request — delete draft
+
+#### `DELETE /api/trip-requests/{id}`
+
+**Who:** Creator only (`created_by` = current user). Same eligibility as creating trip requests.
+
+**When allowed:** `status` = `draft` **and** `workflow_stage` = `trip_request` (staff `TRQ-*` requests only).
+
+**When blocked:** 422 `INVALID_STATE` if already submitted or past draft.
+
+**Request:** No body.
+
+**Response:**
+
+```json
+{
+  "success": true,
+  "data": {
+    "message": "Draft trip request deleted successfully",
+    "deletedId": 42
+  }
+}
+```
+
+**List/detail flags** (on each trip in `GET /api/trip-requests` and `GET /api/trip-requests/{id}`):
+
+```json
+{
+  "canDelete": true,
+  "isDraft": true,
+  "ui": {
+    "deleteDraft": {
+      "showButton": true,
+      "label": "Delete draft",
+      "method": "DELETE",
+      "path": "/api/trip-requests/42",
+      "confirmMessage": "Are you sure you want to delete this draft trip request? This cannot be undone."
+    }
+  }
+}
+```
+
+When `canDelete` is `false`, omit the delete button entirely (`ui.deleteDraft` is `null`).
+
+**Frontend:**
+
+1. Show delete control on list row and detail only when `canDelete === true` (or `ui.deleteDraft.showButton`).
+2. On click, show `ui.deleteDraft.confirmMessage` in a confirmation dialog.
+3. On confirm, `DELETE` `ui.deleteDraft.path`, then remove the row from local state or refetch the list.
