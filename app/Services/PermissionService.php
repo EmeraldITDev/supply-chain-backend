@@ -462,6 +462,32 @@ class PermissionService
         return $this->workflowStateAllowsProcurementDocuments($mrf);
     }
 
+    public function canManageDeliveryConfirmation(User $user, MRF $mrf): bool
+    {
+        if (! mrfUsesFinanceAp($mrf)) {
+            return false;
+        }
+
+        if ($this->isMRFClosed($mrf)) {
+            return false;
+        }
+
+        if (! in_array($user->role, ['procurement', 'procurement_manager', 'admin'], true)) {
+            return false;
+        }
+
+        return $this->workflowStateAllowsProcurementDocuments($mrf);
+    }
+
+    public function showDeliveryConfirmationPanel(MRF $mrf): bool
+    {
+        if (! mrfUsesFinanceAp($mrf)) {
+            return false;
+        }
+
+        return app(\App\Services\FinanceAp\DeliveryConfirmationService::class)->showPanel($mrf);
+    }
+
     /**
      * Check if user can view GRN (registry or legacy URL).
      */
@@ -579,9 +605,17 @@ class PermissionService
                 'canUploadGRN' => false,
                 'canGenerateGRN' => false,
                 'canViewGRN' => $this->canViewGRN($user, $mrf),
+                'showDeliveryConfirmationPanel' => false,
+                'canManageDeliveryConfirmation' => false,
+                'canUploadWaybill' => false,
+                'canUploadJcc' => false,
+                'canUploadDeliveryConfirmation' => false,
                 'availableActions' => ['view'],
             ];
         }
+
+        $canManageDeliveryConfirmation = $this->canManageDeliveryConfirmation($user, $mrf);
+        $showDeliveryConfirmationPanel = $this->showDeliveryConfirmationPanel($mrf);
         
         $actions = [
             'canEdit' => $this->canEditMRF($user, $mrf),
@@ -597,6 +631,23 @@ class PermissionService
             'canUploadGRN' => $this->canUploadGRN($user, $mrf),
             'canGenerateGRN' => $this->canGenerateGRN($user, $mrf),
             'canViewGRN' => $this->canViewGRN($user, $mrf),
+            'showDeliveryConfirmationPanel' => $showDeliveryConfirmationPanel,
+            'canManageDeliveryConfirmation' => $canManageDeliveryConfirmation,
+            'canUploadWaybill' => $canManageDeliveryConfirmation && $this->canUploadProcurementDocument(
+                $user,
+                $mrf,
+                ProcurementDocument::TYPE_WAYBILL
+            ),
+            'canUploadJcc' => $canManageDeliveryConfirmation && $this->canUploadProcurementDocument(
+                $user,
+                $mrf,
+                ProcurementDocument::TYPE_JCC
+            ),
+            'canUploadDeliveryConfirmation' => $canManageDeliveryConfirmation && $this->canUploadProcurementDocument(
+                $user,
+                $mrf,
+                ProcurementDocument::TYPE_DELIVERY_CONFIRMATION
+            ),
         ];
         
         // Build list of available action keys
@@ -613,6 +664,11 @@ class PermissionService
         if ($actions['canUploadGRN']) $availableActions[] = 'upload_grn';
         if ($actions['canGenerateGRN']) $availableActions[] = 'generate_grn';
         if ($actions['canViewGRN']) $availableActions[] = 'view_grn';
+        if ($actions['showDeliveryConfirmationPanel']) $availableActions[] = 'view_delivery_confirmation';
+        if ($actions['canManageDeliveryConfirmation']) $availableActions[] = 'manage_delivery_confirmation';
+        if ($actions['canUploadWaybill']) $availableActions[] = 'upload_waybill';
+        if ($actions['canUploadJcc']) $availableActions[] = 'upload_jcc';
+        if ($actions['canUploadDeliveryConfirmation']) $availableActions[] = 'upload_delivery_confirmation';
         
         $actions['availableActions'] = $availableActions;
         

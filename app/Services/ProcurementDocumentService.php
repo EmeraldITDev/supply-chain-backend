@@ -136,12 +136,18 @@ class ProcurementDocumentService
 
     public function hasActiveDocument(MRF $mrf, string $type, ?int $vendorId = null): bool
     {
+        return $this->findActiveDocument($mrf, $type, $vendorId) !== null;
+    }
+
+    public function findActiveDocument(MRF $mrf, string $type, ?int $vendorId = null): ?ProcurementDocument
+    {
         return ProcurementDocument::query()
             ->where('mrf_id', $mrf->id)
             ->where('type', $type)
             ->where('is_active', true)
             ->when($vendorId, fn ($q) => $q->where('vendor_id', $vendorId))
-            ->exists();
+            ->latest('uploaded_at')
+            ->first();
     }
 
     /**

@@ -31,7 +31,7 @@ class WorkflowGateController extends Controller
         }
 
         $vendorInvoiceGate = $this->vendorInvoiceGate->status($mrf);
-        $deliveryConfirmation = $this->deliveryConfirmation->evaluate($mrf);
+        $deliveryConfirmation = $this->deliveryConfirmation->panelPayload($mrf);
         $closureReadiness = $this->closureReadiness->evaluate($mrf);
 
         return response()->json([
@@ -49,10 +49,12 @@ class WorkflowGateController extends Controller
                 'deliveryConfirmation' => [
                     'required' => $deliveryConfirmation['required'],
                     'satisfied' => $deliveryConfirmation['satisfied'],
+                    'showPanel' => $deliveryConfirmation['showPanel'],
                     'currentMilestone' => $deliveryConfirmation['currentMilestone'],
                     'requiredDocuments' => $deliveryConfirmation['requiredDocuments'],
                     'missingDocuments' => $deliveryConfirmation['missingDocuments'],
                     'uploadedDocuments' => $deliveryConfirmation['uploadedDocuments'],
+                    'checklist' => $deliveryConfirmation['checklist'],
                 ],
                 'closureReadiness' => [
                     'financiallyComplete' => $closureReadiness['financially_complete'],

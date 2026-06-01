@@ -431,6 +431,89 @@ Alias: `POST /api/vendors/portal/mrfs/{mrfId}/invoice`
 
 ---
 
-## Phase 5+ (pending)
+## Phase 5 — Delivery confirmation UI (backend)
 
-Document delivery confirmation UI and Finance sync endpoints here as they are implemented.
+Procurement Manager panel on MRF/PO detail for Finance AP MRFs with delivery-based payment milestones. Advance-only schedules (e.g. `100_advance`) skip this panel.
+
+### `GET /api/mrfs/{id}/delivery-confirmation`
+
+Primary endpoint for the Delivery Confirmation panel. Combines gate status, milestone context, document checklist, and permission flags.
+
+**Response `data` (key fields):**
+
+| Field | Description |
+|-------|-------------|
+| `showPanel` | Render the panel when `true` |
+| `required` / `satisfied` | Delivery gate status |
+| `currentMilestone` | Pending milestone driving the checklist |
+| `checklist[]` | Per-document rows (see below) |
+| `missingDocuments` / `uploadedDocuments` | Aggregate doc types |
+| `permissions` | Role + stage flags for upload/generate actions |
+| `refreshHint` | Poll this endpoint (or `workflow-gates`) after uploads |
+
+**Checklist item shape:**
+
+```json
+{
+  "type": "grn",
+  "label": "Goods Received Note (GRN)",
+  "required": true,
+  "satisfied": false,
+  "document": null,
+  "actions": ["generate_grn", "upload_grn"]
+}
+```
+
+| `type` | Suggested frontend action |
+|--------|---------------------------|
+| `grn` | Preview/generate via GRN endpoints **or** upload via procurement-documents |
+| `waybill` | `POST /api/mrfs/{id}/procurement-documents` with `type=waybill` |
+| `jcc` | `type=jcc` |
+| `delivery_confirmation` | `type=delivery_confirmation` |
+| `other` | `type=other` |
+
+**Permissions object:**
+
+| Flag | Meaning |
+|------|---------|
+| `canManageDeliveryConfirmation` | PM/admin can act on the panel |
+| `canGenerateGRN` / `canUploadGRN` | GRN actions |
+| `canUploadWaybill` | Waybill upload |
+| `canUploadJcc` | JCC upload (service/completion milestones) |
+| `canUploadDeliveryConfirmation` | Delivery confirmation proof upload |
+
+Also exposed on `GET /api/mrfs/{id}/available-actions`:
+
+- `showDeliveryConfirmationPanel`
+- `canManageDeliveryConfirmation`
+- `canUploadWaybill`, `canUploadJcc`, `canUploadDeliveryConfirmation`
+- Action keys: `view_delivery_confirmation`, `manage_delivery_confirmation`, `upload_waybill`, etc.
+
+---
+
+### Related endpoints (panel actions)
+
+| Action | Endpoint |
+|--------|----------|
+| Preview GRN PDF | `GET/POST /api/mrfs/{id}/grn/preview` |
+| Generate + register GRN | `POST /api/mrfs/{id}/grn/generate` |
+| Upload waybill/JCC/delivery docs | `POST /api/mrfs/{id}/procurement-documents` |
+| List all docs | `GET /api/mrfs/{id}/procurement-documents` |
+| Gate status (poll) | `GET /api/mrfs/{id}/workflow-gates` (includes `deliveryConfirmation.checklist`) |
+| Progress tracker step | `GET /api/mrfs/{id}/progress-tracker` — step 8 when delivery stage applies |
+
+---
+
+### Frontend implementation guide
+
+1. **Show panel** when `available-actions.showDeliveryConfirmationPanel === true` (or `delivery-confirmation.showPanel`).
+2. **Render checklist** from `checklist[]` — tick satisfied rows, show upload/generate buttons from `actions` when `permissions` allow.
+3. **After any upload or GRN generate**, poll `GET /delivery-confirmation` or `GET /workflow-gates` until `satisfied === true` (auto-advances workflow to `finance_handoff_pending`).
+4. **Tracker:** step 8 “Delivery Confirmation” appears only for non-advance schedules (see progress-tracker response).
+5. **Read-only mode:** when `satisfied === true` or workflow moves past delivery confirmation, show checklist as completed reference.
+
+---
+
+## Phase 6+ (pending)
+
+Document Finance AP integration, cutover routing, and dashboard endpoints here as they are implemented.
