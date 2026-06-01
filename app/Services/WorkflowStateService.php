@@ -220,6 +220,20 @@ class WorkflowStateService
     {
         $currentState = $mrf->workflow_state ?? self::STATE_MRF_CREATED;
 
+        if ($newState === self::STATE_CLOSED) {
+            $readiness = app(\App\Services\FinanceAp\ClosureReadinessService::class)->evaluate($mrf);
+
+            if (! $readiness['can_close']) {
+                Log::warning('MRF closure blocked by readiness gate', [
+                    'mrf_id' => $mrf->mrf_id,
+                    'current_state' => $currentState,
+                    'blockers' => $readiness['blockers'],
+                ]);
+
+                return false;
+            }
+        }
+
         if (! $force && ! $this->canTransition($currentState, $newState)) {
             Log::warning('Invalid state transition attempted', [
                 'mrf_id' => $mrf->mrf_id,

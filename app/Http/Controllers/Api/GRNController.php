@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\MRF;
 use App\Models\ProcurementDocument;
 use App\Services\GrnPdfService;
+use App\Services\FinanceAp\FinanceApWorkflowOrchestrator;
 use App\Services\NotificationService;
 use App\Services\PermissionService;
 use App\Services\ProcurementDocumentService;
@@ -381,6 +382,12 @@ class GRNController extends Controller
 
     private function transitionAfterGrnSaved(MRF $mrf, $user): void
     {
+        if (mrfUsesFinanceAp($mrf)) {
+            app(FinanceApWorkflowOrchestrator::class)->afterOperationalDocumentChanged($mrf, $user);
+
+            return;
+        }
+
         $currentState = $mrf->workflow_state ?? WorkflowStateService::STATE_MRF_CREATED;
 
         if ($currentState === WorkflowStateService::STATE_GRN_REQUESTED

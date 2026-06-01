@@ -16,6 +16,7 @@ use App\Support\RequestLineItemParser;
 use App\Services\NotificationService;
 use App\Services\FormattedIdGenerator;
 use App\Services\WorkflowNotificationService;
+use App\Services\PaymentScheduleService;
 use App\Services\WorkflowStateService;
 use App\Services\PermissionService;
 use App\Services\PurchaseOrderPdfService;
@@ -1164,14 +1165,83 @@ class MRFController extends Controller
                 'poNumber' => $mrf->po_number,
                 'description' => 'PO created from selected quotation',
             ],
-            [
+        ];
+
+        $financeApStatesFromPoSigned = [
+            'po_signed',
+            'delivery_confirmation_pending',
+            'delivery_confirmation_complete',
+            'finance_handoff_pending',
+            'finance_in_review',
+            'milestone_payment_in_progress',
+            'financially_complete',
+            'operationally_complete',
+            'closed',
+        ];
+        $financeApStatesFromDeliveryComplete = [
+            'delivery_confirmation_complete',
+            'finance_handoff_pending',
+            'finance_in_review',
+            'milestone_payment_in_progress',
+            'financially_complete',
+            'operationally_complete',
+            'closed',
+        ];
+        $financeApStatesFromFinanceHandoff = [
+            'finance_handoff_pending',
+            'finance_in_review',
+            'milestone_payment_in_progress',
+            'financially_complete',
+            'operationally_complete',
+            'closed',
+        ];
+        $financeApStatesFinanceComplete = [
+            'financially_complete',
+            'operationally_complete',
+            'closed',
+        ];
+
+        if (mrfUsesFinanceAp($mrf)) {
+            $schedule = app(PaymentScheduleService::class)->findForMrf($mrf);
+            $requiresDeliveryConfirmation = app(PaymentScheduleService::class)->requiresDeliveryConfirmationStage($schedule);
+
+            $steps[] = [
+                'step' => 7,
+                'name' => 'Purchase Order Signed',
+                'status' => in_array($mrf->workflow_state, $financeApStatesFromPoSigned, true) ? 'completed' :
+                    ($mrf->workflow_state === 'po_generated' ? 'pending' : 'not_started'),
+                'completedAt' => $mrf->po_signed_at ? $mrf->po_signed_at->toIso8601String() : null,
+                'description' => 'Signed PO registered; post-PO routing applies per payment schedule',
+            ];
+
+            if ($requiresDeliveryConfirmation) {
+                $steps[] = [
+                    'step' => 8,
+                    'name' => 'Delivery Confirmation',
+                    'status' => in_array($mrf->workflow_state, $financeApStatesFromDeliveryComplete, true) ? 'completed' :
+                        ($mrf->workflow_state === 'delivery_confirmation_pending' ? 'pending' : 'not_started'),
+                    'description' => 'Upload or generate GRN, waybill, and other milestone delivery documents',
+                    'requiredDocuments' => app(\App\Services\FinanceAp\DeliveryConfirmationService::class)->evaluate($mrf)['requiredDocuments'],
+                ];
+            }
+
+            $financeHandoffStep = $requiresDeliveryConfirmation ? 9 : 8;
+            $steps[] = [
+                'step' => $financeHandoffStep,
+                'name' => 'Finance Handoff',
+                'status' => in_array($mrf->workflow_state, $financeApStatesFinanceComplete, true) ? 'completed' :
+                    (in_array($mrf->workflow_state, $financeApStatesFromFinanceHandoff, true) ? 'pending' : 'not_started'),
+                'description' => 'Finance AP package preparation and milestone payments',
+            ];
+        } else {
+            $steps[] = [
                 'step' => 7,
                 'name' => 'Process Complete',
                 'status' => in_array($mrf->workflow_state, ['po_signed', 'closed']) ? 'completed' : 'not_started',
                 'completedAt' => $mrf->po_signed_at ? $mrf->po_signed_at->toIso8601String() : null,
                 'description' => 'MRF process ends after PO creation',
-            ],
-        ];
+            ];
+        }
 
         return response()->json([
             'success' => true,

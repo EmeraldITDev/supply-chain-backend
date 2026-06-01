@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\MRF;
 use App\Models\ProcurementDocument;
+use App\Services\FinanceAp\FinanceApWorkflowOrchestrator;
 use App\Services\PermissionService;
 use App\Services\ProcurementDocumentService;
 use Illuminate\Http\Request;
@@ -110,6 +111,15 @@ class ProcurementDocumentController extends Controller
 
             if ($type === ProcurementDocument::TYPE_GRN) {
                 $this->documentService->syncGrnLegacyFields($mrf, $document);
+            }
+
+            if (in_array($type, [
+                ProcurementDocument::TYPE_GRN,
+                ProcurementDocument::TYPE_WAYBILL,
+                ProcurementDocument::TYPE_JCC,
+                ProcurementDocument::TYPE_DELIVERY_CONFIRMATION,
+            ], true)) {
+                app(FinanceApWorkflowOrchestrator::class)->afterOperationalDocumentChanged($mrf, $user);
             }
         } catch (\RuntimeException $e) {
             return response()->json([

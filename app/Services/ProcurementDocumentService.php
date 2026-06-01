@@ -134,6 +134,33 @@ class ProcurementDocumentService
         return null;
     }
 
+    public function hasActiveDocument(MRF $mrf, string $type, ?int $vendorId = null): bool
+    {
+        return ProcurementDocument::query()
+            ->where('mrf_id', $mrf->id)
+            ->where('type', $type)
+            ->where('is_active', true)
+            ->when($vendorId, fn ($q) => $q->where('vendor_id', $vendorId))
+            ->exists();
+    }
+
+    /**
+     * @param  list<string>  $types
+     * @return list<string> Missing document types from the required set.
+     */
+    public function missingDocumentTypes(MRF $mrf, array $types, ?int $vendorId = null): array
+    {
+        $missing = [];
+
+        foreach (array_unique($types) as $type) {
+            if (! $this->hasActiveDocument($mrf, $type, $vendorId)) {
+                $missing[] = $type;
+            }
+        }
+
+        return $missing;
+    }
+
     public function syncGrnLegacyFields(MRF $mrf, ProcurementDocument $document): void
     {
         $mrf->update([

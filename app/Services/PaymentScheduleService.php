@@ -263,6 +263,126 @@ class PaymentScheduleService
         };
     }
 
+    public function hasAdvanceMilestone(?PaymentSchedule $schedule): bool
+    {
+        if (! $schedule) {
+            return false;
+        }
+
+        $schedule->loadMissing('milestones');
+
+        return $schedule->milestones->contains(
+            fn (PaymentMilestone $m) => $m->trigger_condition === PaymentMilestone::TRIGGER_ON_ADVANCE
+        );
+    }
+
+    public function isAdvanceOnlySchedule(?PaymentSchedule $schedule): bool
+    {
+        if (! $schedule) {
+            return false;
+        }
+
+        $schedule->loadMissing('milestones');
+
+        if ($schedule->milestones->isEmpty()) {
+            return false;
+        }
+
+        return $schedule->milestones->every(
+            fn (PaymentMilestone $m) => $m->trigger_condition === PaymentMilestone::TRIGGER_ON_ADVANCE
+        );
+    }
+
+    public function requiresDeliveryConfirmationStage(?PaymentSchedule $schedule): bool
+    {
+        if (! $schedule) {
+            return false;
+        }
+
+        $schedule->loadMissing('milestones');
+
+        foreach ($schedule->milestones as $milestone) {
+            if ($this->milestoneRequiresDeliveryConfirmation($milestone)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * @return list<PaymentMilestone>
+     */
+    public function milestonesWithOperationalDocumentRequirements(?PaymentSchedule $schedule): array
+    {
+        if (! $schedule) {
+            return [];
+        }
+
+        $schedule->loadMissing('milestones');
+
+        return $schedule->milestones
+            ->filter(fn (PaymentMilestone $m) => count($this->requiredDocumentsForMilestone($m)) > 0)
+            ->values()
+            ->all();
+    }
+
+    public function currentPendingMilestone(?PaymentSchedule $schedule): ?PaymentMilestone
+    {
+        if (! $schedule) {
+            return null;
+        }
+
+        $schedule->loadMissing('milestones');
+
+        return $schedule->milestones
+            ->first(fn (PaymentMilestone $m) => ! in_array($m->status, [
+                PaymentMilestone::STATUS_PAID,
+                PaymentMilestone::STATUS_COMPLETE,
+            ], true));
+    }
+
+    /**
+     * @return list<string>
+     */
+    public function requiredDocumentsForMilestone(PaymentMilestone $milestone): array
+    {
+        $documents = is_array($milestone->required_documents) ? $milestone->required_documents : [];
+
+        return array_values(array_unique(array_filter($documents, fn ($d) => is_string($d) && $d !== '')));
+    }
+
+    public function milestoneRequiresDeliveryConfirmation(PaymentMilestone $milestone): bool
+    {
+        if ($milestone->trigger_condition === PaymentMilestone::TRIGGER_UPON_DELIVERY) {
+            return true;
+        }
+
+        $deliveryDocs = ['grn', 'waybill'];
+
+        return (bool) array_intersect($this->requiredDocumentsForMilestone($milestone), $deliveryDocs);
+    }
+
+    public function allMilestonesFinanciallyComplete(?PaymentSchedule $schedule): bool
+    {
+        if (! $schedule) {
+            return false;
+        }
+
+        $schedule->loadMissing('milestones');
+
+        if ($schedule->milestones->isEmpty()) {
+            return false;
+        }
+
+        return $schedule->milestones->every(
+            fn (PaymentMilestone $m) => in_array($m->status, [
+                PaymentMilestone::STATUS_PAID,
+                PaymentMilestone::STATUS_COMPLETE,
+            ], true)
+        );
+    }
+
     /**
      * @param  array<string, mixed>  $input
      * @return list<array<string, mixed>>

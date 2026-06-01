@@ -288,6 +288,74 @@ GRN operations are allowed after PO signed (not only after legacy post-payment G
 
 ---
 
-## Phase 3+ (pending)
+## Phase 3 — Workflow gates (invoice timing, delivery confirmation, closure)
 
-Document vendor invoice portal, delivery confirmation gates, and Finance sync endpoints here as they are implemented.
+Phase 3 adds backend workflow gates for Finance AP MRFs (`mrfUsesFinanceAp()`). Legacy MRFs keep existing behaviour.
+
+### `GET /api/mrfs/{id}/workflow-gates`
+
+Single endpoint for gate status used by internal UI and (Phase 4) vendor portal.
+
+**Response `data`:**
+
+| Field | Description |
+|-------|-------------|
+| `usesFinanceAp` | Whether Finance AP rules apply |
+| `workflowState` | Current canonical workflow state |
+| `vendorInvoiceGate.canSubmit` | Vendor may submit invoice (Phase 4 enforces on upload) |
+| `vendorInvoiceGate.gateType` | `advance` or `delivery` when applicable |
+| `vendorInvoiceGate.reason` | Human-readable gate explanation |
+| `deliveryConfirmation.required` | Whether delivery confirmation stage applies |
+| `deliveryConfirmation.satisfied` | All required delivery docs present |
+| `deliveryConfirmation.requiredDocuments` | Aggregated doc types from milestones |
+| `deliveryConfirmation.missingDocuments` | Still required |
+| `closureReadiness.canClose` | MRF may transition to `closed` |
+| `closureReadiness.blockers` | Reasons closure is blocked |
+| `closureReadiness.milestoneSummary` | Per-milestone financial/doc status |
+
+**Vendor invoice gate rules:**
+
+| Payment structure | Gate opens when |
+|-------------------|-----------------|
+| 100% advance or any advance milestone | After SCD vendor quote approval (`invoice_approved` or later) |
+| Standard / split / delivery-based | After GRN received and confirmed |
+
+**Post-PO routing (automatic on signed PO):**
+
+| Schedule | Next workflow state |
+|----------|---------------------|
+| Advance-only (e.g. `100_advance`) | `finance_handoff_pending` (skips delivery confirmation step in tracker) |
+| Delivery-based milestones | `delivery_confirmation_pending` → auto-advances when GRN/waybill docs satisfied |
+
+Uploading or generating GRN, waybill, JCC, or delivery confirmation documents triggers auto-evaluation of delivery confirmation and intermediate completion states.
+
+**Closure:** `WorkflowStateService` rejects transition to `closed` unless `closureReadiness.canClose` is true (all milestones paid + required docs present).
+
+---
+
+### Progress tracker (`GET /api/mrfs/{id}/progress-tracker`)
+
+For Finance AP MRFs, steps after PO generation:
+
+| Step | Name | Notes |
+|------|------|-------|
+| 7 | Purchase Order Signed | Replaces legacy "Process Complete" |
+| 8 | Delivery Confirmation | **Omitted** for advance-only schedules (e.g. 100% advance) |
+| 8 or 9 | Finance Handoff | Pending from `finance_handoff_pending` through milestone payments |
+
+Delivery Confirmation step includes `requiredDocuments` when present.
+
+**SCD quote approval response:** `POST` vendor selection approval responses now include `vendorInvoiceGateOpen` (boolean) for Finance AP MRFs.
+
+**Frontend actions:**
+
+- Poll or refresh `GET /api/mrfs/{id}/workflow-gates` on MRF detail after PO sign, GRN generate/upload, and document uploads.
+- Show delivery confirmation checklist from `deliveryConfirmation.missingDocuments`.
+- Disable close/archive actions when `closureReadiness.canClose` is false; display `blockers`.
+- Vendor invoice upload UI (Phase 4): show only when `vendorInvoiceGate.canSubmit` is true.
+
+---
+
+## Phase 4+ (pending)
+
+Document vendor invoice portal and Finance sync endpoints here as they are implemented.

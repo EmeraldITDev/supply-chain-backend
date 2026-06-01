@@ -50,4 +50,36 @@ class WorkflowStateServiceTest extends TestCase
         $this->assertSame('signed', $legacy['status']);
         $this->assertSame('finance', $legacy['current_stage']);
     }
+
+    public function test_closure_transition_blocked_when_readiness_fails(): void
+    {
+        $this->mock(\App\Services\FinanceAp\ClosureReadinessService::class, function ($mock) {
+            $mock->shouldReceive('evaluate')->andReturn([
+                'financially_complete' => false,
+                'operationally_complete' => false,
+                'can_close' => false,
+                'blockers' => ['Not all payment milestones are marked paid or complete.'],
+                'milestoneSummary' => [],
+            ]);
+        });
+
+        $service = app(WorkflowStateService::class);
+        $mrf = new \App\Models\MRF([
+            'mrf_id' => 'MRF-TEST-001',
+            'workflow_state' => WorkflowStateService::STATE_OPERATIONALLY_COMPLETE,
+        ]);
+
+        $this->assertTrue($service->canTransition(
+            WorkflowStateService::STATE_OPERATIONALLY_COMPLETE,
+            WorkflowStateService::STATE_CLOSED
+        ));
+
+        $result = $service->applyWorkflowState(
+            $mrf,
+            WorkflowStateService::STATE_CLOSED,
+            new \App\Models\User(['id' => 1])
+        );
+
+        $this->assertFalse($result);
+    }
 }

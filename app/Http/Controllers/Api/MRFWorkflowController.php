@@ -12,6 +12,7 @@ use App\Models\Vendor;
 use App\Models\QuotationItem;
 use App\Models\POTermsTemplate;
 use App\Models\ProcurementDocument;
+use App\Services\FinanceAp\FinanceApWorkflowOrchestrator;
 use App\Services\NotificationService;
 use App\Services\EmailService;
 use App\Services\WorkflowNotificationService;
@@ -933,6 +934,8 @@ class MRFWorkflowController extends Controller
         MRFApprovalHistory::record($mrf, 'vendor_approved', 'supply_chain', $user,
             'Vendor selection approved. ' . ($request->remarks ?? ''));
 
+        app(FinanceApWorkflowOrchestrator::class)->afterVendorQuoteScdApproved($mrf, $user);
+
         // Notify Procurement that vendor is approved and PO upload is required
         // Provide clear actionable guidance: "Upload PO" is the next step
         try {
@@ -963,6 +966,7 @@ class MRFWorkflowController extends Controller
                 'current_stage' => $mrf->current_stage,
                 'next_action' => 'upload_po',
                 'next_action_label' => 'Upload Purchase Order',
+                'vendorInvoiceGateOpen' => app(\App\Services\FinanceAp\VendorInvoiceGateService::class)->canSubmitInvoice($mrf->fresh()),
             ]
         ]);
     }
@@ -2011,6 +2015,8 @@ class MRFWorkflowController extends Controller
             basename($signedPOPath),
         );
 
+        app(FinanceApWorkflowOrchestrator::class)->afterPoSigned($mrf, $user);
+
         // Record in approval history
         MRFApprovalHistory::record($mrf, 'signed_po', 'supply_chain', $user, 'PO signed and uploaded');
 
@@ -2105,6 +2111,8 @@ class MRFWorkflowController extends Controller
             $signedUrl,
             basename($signedPath),
         );
+
+        app(FinanceApWorkflowOrchestrator::class)->afterPoSigned($mrf, $user);
 
         return response()->json([
             'success' => true,
