@@ -6,6 +6,7 @@ use App\Models\Employee;
 use App\Models\User;
 use App\Models\MRF;
 use App\Models\ProcurementDocument;
+use App\Services\Finance\FinanceRoutingService;
 
 class PermissionService
 {
@@ -389,12 +390,33 @@ class PermissionService
      */
     public function canProcessPayment(User $user, MRF $mrf): bool
     {
-        if (!in_array($user->role, ['finance', 'finance_officer', 'admin'])) {
+        if (! in_array($user->role, ['finance', 'finance_officer', 'admin'], true)) {
             return false;
         }
 
+        if (mrfUsesFinanceAp($mrf)) {
+            return false;
+        }
+
+        if ($mrf->status === 'finance' || $mrf->current_stage === 'finance') {
+            return true;
+        }
+
         $currentState = $mrf->workflow_state ?? WorkflowStateService::STATE_MRF_CREATED;
+
         return $currentState === WorkflowStateService::STATE_PO_SIGNED;
+    }
+
+    /**
+     * Finance AP MRFs: SCM finance role may view sync status only (no internal payment actions).
+     */
+    public function canViewFinanceSync(User $user, MRF $mrf): bool
+    {
+        if (! mrfUsesFinanceAp($mrf)) {
+            return false;
+        }
+
+        return in_array($user->role, ['finance', 'finance_officer', 'admin'], true);
     }
 
     /**
@@ -402,11 +424,16 @@ class PermissionService
      */
     public function canRequestGRN(User $user, MRF $mrf): bool
     {
-        if (!in_array($user->role, ['finance', 'finance_officer', 'admin'])) {
+        if (! in_array($user->role, ['finance', 'finance_officer', 'admin'], true)) {
+            return false;
+        }
+
+        if (mrfUsesFinanceAp($mrf)) {
             return false;
         }
 
         $currentState = $mrf->workflow_state ?? WorkflowStateService::STATE_MRF_CREATED;
+
         return $currentState === WorkflowStateService::STATE_PAYMENT_PROCESSED;
     }
 
@@ -591,7 +618,12 @@ class PermissionService
         
         // If MRF is closed, no actions are available
         if ($isClosed) {
+            $routing = app(FinanceRoutingService::class)->routingMeta($mrf);
+
             return [
+                'usesFinanceAp' => $routing['usesFinanceAp'],
+                'financeRoute' => $routing['financeRoute'],
+                'cutoverDate' => $routing['cutoverDate'],
                 'canEdit' => false,
                 'canApprove' => false,
                 'canReject' => false,
@@ -601,6 +633,7 @@ class PermissionService
                 'canGeneratePO' => false,
                 'canSignPO' => false,
                 'canProcessPayment' => false,
+                'canViewFinanceSync' => $this->canViewFinanceSync($user, $mrf),
                 'canRequestGRN' => false,
                 'canUploadGRN' => false,
                 'canGenerateGRN' => false,
@@ -617,7 +650,12 @@ class PermissionService
         $canManageDeliveryConfirmation = $this->canManageDeliveryConfirmation($user, $mrf);
         $showDeliveryConfirmationPanel = $this->showDeliveryConfirmationPanel($mrf);
         
+        $routing = app(FinanceRoutingService::class)->routingMeta($mrf);
+
         $actions = [
+            'usesFinanceAp' => $routing['usesFinanceAp'],
+            'financeRoute' => $routing['financeRoute'],
+            'cutoverDate' => $routing['cutoverDate'],
             'canEdit' => $this->canEditMRF($user, $mrf),
             'canApprove' => $this->canApproveMRF($user, $mrf),
             'canReject' => $this->canApproveMRF($user, $mrf), // Same permission as approve
@@ -627,6 +665,7 @@ class PermissionService
             'canGeneratePO' => $this->canGeneratePO($user, $mrf),
             'canSignPO' => false, // PO signing is automatic after generation in new workflow
             'canProcessPayment' => $this->canProcessPayment($user, $mrf),
+            'canViewFinanceSync' => $this->canViewFinanceSync($user, $mrf),
             'canRequestGRN' => $this->canRequestGRN($user, $mrf),
             'canUploadGRN' => $this->canUploadGRN($user, $mrf),
             'canGenerateGRN' => $this->canGenerateGRN($user, $mrf),
@@ -659,7 +698,12 @@ class PermissionService
         if ($actions['canViewInvoices']) $availableActions[] = 'view_invoices';
         if ($actions['canApproveInvoice']) $availableActions[] = 'approve_invoice';
         if ($actions['canGeneratePO']) $availableActions[] = 'generate_po';
-        if ($actions['canProcessPayment']) $availableActions[] = 'process_payment';
+        if ($actions['canProcessPayment']) {
+            $availableActions[] = 'process_payment';
+        }
+        if ($actions['canViewFinanceSync']) {
+            $availableActions[] = 'view_finance_sync';
+        }
         if ($actions['canRequestGRN']) $availableActions[] = 'request_grn';
         if ($actions['canUploadGRN']) $availableActions[] = 'upload_grn';
         if ($actions['canGenerateGRN']) $availableActions[] = 'generate_grn';

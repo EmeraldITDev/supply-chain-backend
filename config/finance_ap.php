@@ -1,6 +1,8 @@
 <?php
 
 return [
+    // Phase 7: MRFs with created_at >= this date use Finance AP; earlier MRFs use internal SCM finance.
+    // No feature flag — set once at go-live (FINANCE_AP_CUTOVER_DATE in .env).
     'cutover_date' => env('FINANCE_AP_CUTOVER_DATE'),
 
     'base_url' => rtrim((string) env('FINANCE_AP_BASE_URL', 'https://financeap-backend.onrender.com'), '/'),

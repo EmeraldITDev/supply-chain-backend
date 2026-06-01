@@ -567,6 +567,53 @@ When workflow reaches `finance_handoff_pending`, SCM calls Finance AP `POST /api
 
 ---
 
-## Phase 7+ (pending)
+## Phase 7 — Finance routing by cutover date
 
-Document cutover routing and dashboard/reporting endpoints here as they are implemented.
+**Rule:** `mrfUsesFinanceAp(mrf)` = `mrf.created_at >= FINANCE_AP_CUTOVER_DATE`. No feature flag, no per-MRF toggle.
+
+Set `FINANCE_AP_CUTOVER_DATE` in `.env` (see `.env.example`). Until set, all MRFs behave as **legacy internal** finance (vendor invoice portal stays locked).
+
+### `GET /api/mrfs/{id}/available-actions` (updated)
+
+| Field | Meaning |
+|-------|---------|
+| `usesFinanceAp` | Post-cutover cohort |
+| `financeRoute` | `legacy_internal` \| `finance_ap` |
+| `cutoverDate` | Configured cutover (ISO date) or null |
+| `canProcessPayment` | `false` when `usesFinanceAp` — hide “Process Payment” |
+| `canViewFinanceSync` | `true` for finance roles on Finance AP MRFs — show sync panel |
+| `availableActions` | Includes `view_finance_sync` when applicable |
+
+### Internal payment endpoints
+
+| Endpoint | Post-cutover |
+|----------|----------------|
+| `POST /api/mrfs/{id}/process-payment` | `422` `FINANCE_AP_ROUTED` |
+| `POST /api/mrfs/{id}/approve-payment` | `422` `FINANCE_AP_ROUTED` |
+
+### `GET /api/dashboard/finance` (updated)
+
+**New `routing` object:** `cutoverDate`, `routingConfigured`, `description`.
+
+**Lists:**
+
+| Key | Content |
+|-----|---------|
+| `financeMRFs` | Unified list (legacy + Finance AP) |
+| `legacyFinanceMRFs` | Pre-cutover, `status` / `chairman_payment` |
+| `financeApMRFs` | Post-cutover, `workflow_state` in Finance AP pipeline |
+
+Each MRF row includes `usesFinanceAp`, `financeRoute`, `workflowState`, `financeApCaseId`, `financeApStatus`, `canProcessPaymentInternal`, `financeSyncPath` (when Finance AP).
+
+**Stats:** `stats.legacy.*` (internal pending/chairman) and `stats.financeAp.*` (handoff, in review, package pushed).
+
+**UI:**
+
+- Legacy rows: show Process Payment / chairman flow.
+- Finance AP rows: hide internal payment; link to `financeSyncPath` or Finance AP app.
+
+---
+
+## Phase 8+ (pending)
+
+Progress tracker steps 10–12, reporting dashboards.
