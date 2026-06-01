@@ -100,7 +100,7 @@ class JourneyController extends ApiController
         try {
             $trip = $journey->trip;
             if ($trip && $trip->vendor && $trip->vendor->email) {
-                $trip->vendor->notify(new JourneyStatusUpdatedNotification($journey, $previousStatus, $status));
+                $trip->vendor->notifyNow(new JourneyStatusUpdatedNotification($journey, $previousStatus, $status));
             }
         } catch (\Exception $e) {
             // Log but don't fail the request if notification fails

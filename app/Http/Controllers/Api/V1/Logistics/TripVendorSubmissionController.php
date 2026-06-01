@@ -303,7 +303,7 @@ class TripVendorSubmissionController extends ApiController
             $vendor = $trip->selectedVendor;
             $notifiable = $vendor->users()->first();
             if ($notifiable) {
-                $notifiable->notify(new VendorTripInvoiceReminderNotification($trip, $vendor));
+                $notifiable->notifyNow(new VendorTripInvoiceReminderNotification($trip, $vendor));
             }
 
             return $this->success([

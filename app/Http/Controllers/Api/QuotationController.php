@@ -618,7 +618,7 @@ class QuotationController extends Controller
         // Send notification to vendor
         try {
             if ($quotation->vendor) {
-                $quotation->vendor->notify(new \App\Notifications\QuotationStatusUpdatedNotification(
+                $quotation->vendor->notifyNow(new \App\Notifications\QuotationStatusUpdatedNotification(
                     $quotation,
                     'rejected',
                     "Your quotation has been rejected. Reason: {$request->reason}"

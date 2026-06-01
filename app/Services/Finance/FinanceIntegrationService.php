@@ -521,7 +521,7 @@ class FinanceIntegrationService
                 ->get();
 
             foreach ($users as $user) {
-                $user->notify(new SystemAnnouncementNotification($title, $message, $url, $priority));
+                $user->notifyNow(new SystemAnnouncementNotification($title, $message, $url, $priority));
             }
         } catch (\Throwable $e) {
             Log::warning('Failed to notify procurement of Finance AP event', ['error' => $e->getMessage()]);

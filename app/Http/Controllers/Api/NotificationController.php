@@ -6,6 +6,8 @@ use App\Http\Controllers\Controller;
 use App\Services\NotificationService;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Notifications\DatabaseNotification;
+use Illuminate\Support\Str;
 
 class NotificationController extends Controller
 {
@@ -18,16 +20,12 @@ class NotificationController extends Controller
 
     /**
      * Get all notifications for the authenticated user
-     * 
-     * @param Request $request
-     * @return JsonResponse
      */
     public function index(Request $request): JsonResponse
     {
         try {
             $user = $request->user();
-            
-            $perPage = $request->input('per_page', 15);
+            $perPage = $this->resolveListLimit($request);
             $unreadOnly = $request->boolean('unread_only', false);
 
             $query = $user->notifications()->orderBy('created_at', 'desc');
@@ -37,30 +35,15 @@ class NotificationController extends Controller
             }
 
             $notifications = $query->paginate($perPage);
-            
-            // Format notifications for frontend
-            $formattedNotifications = collect($notifications->items())->map(function ($notification) {
-                $data = $notification->data;
-                
-                return [
-                    'id' => $notification->id,
-                    'type' => $data['type'] ?? 'unknown',
-                    'title' => $data['title'] ?? 'Notification',
-                    'message' => $data['message'] ?? '',
-                    'action_url' => $data['action_url'] ?? null,
-                    'icon' => $data['icon'] ?? 'bell',
-                    'color' => $data['color'] ?? 'blue',
-                    'priority' => $data['priority'] ?? 'normal',
-                    'read_at' => $notification->read_at ? $notification->read_at->toIso8601String() : null,
-                    'created_at' => $notification->created_at->toIso8601String(),
-                    'is_read' => $notification->read_at !== null,
-                    // Include additional context based on notification type
-                    'data' => $data,
-                ];
-            });
+
+            $formattedNotifications = collect($notifications->items())
+                ->map(fn (DatabaseNotification $notification) => $this->formatNotification($notification))
+                ->values()
+                ->all();
 
             return response()->json([
                 'success' => true,
+                'data' => $formattedNotifications,
                 'notifications' => $formattedNotifications,
                 'pagination' => [
                     'total' => $notifications->total(),
@@ -75,7 +58,7 @@ class NotificationController extends Controller
         } catch (\Exception $e) {
             \Log::error('Failed to fetch notifications', [
                 'user_id' => $request->user()->id,
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ]);
 
             return response()->json([
@@ -88,9 +71,6 @@ class NotificationController extends Controller
 
     /**
      * Get unread notifications count
-     * 
-     * @param Request $request
-     * @return JsonResponse
      */
     public function unreadCount(Request $request): JsonResponse
     {
@@ -113,10 +93,6 @@ class NotificationController extends Controller
 
     /**
      * Get a single notification
-     * 
-     * @param Request $request
-     * @param string $id
-     * @return JsonResponse
      */
     public function show(Request $request, string $id): JsonResponse
     {
@@ -124,33 +100,18 @@ class NotificationController extends Controller
             $user = $request->user();
             $notification = $user->notifications()->find($id);
 
-            if (!$notification) {
+            if (! $notification) {
                 return response()->json([
                     'success' => false,
                     'message' => 'Notification not found',
                 ], 404);
             }
 
-            $data = $notification->data;
-            
-            // Format notification for frontend
-            $formattedNotification = [
-                'id' => $notification->id,
-                'type' => $data['type'] ?? 'unknown',
-                'title' => $data['title'] ?? 'Notification',
-                'message' => $data['message'] ?? '',
-                'action_url' => $data['action_url'] ?? null,
-                'icon' => $data['icon'] ?? 'bell',
-                'color' => $data['color'] ?? 'blue',
-                'priority' => $data['priority'] ?? 'normal',
-                'read_at' => $notification->read_at ? $notification->read_at->toIso8601String() : null,
-                'created_at' => $notification->created_at->toIso8601String(),
-                'is_read' => $notification->read_at !== null,
-                'data' => $data,
-            ];
+            $formattedNotification = $this->formatNotification($notification);
 
             return response()->json([
                 'success' => true,
+                'data' => $formattedNotification,
                 'notification' => $formattedNotification,
             ]);
         } catch (\Exception $e) {
@@ -164,10 +125,6 @@ class NotificationController extends Controller
 
     /**
      * Mark a notification as read
-     * 
-     * @param Request $request
-     * @param string $id
-     * @return JsonResponse
      */
     public function markAsRead(Request $request, string $id): JsonResponse
     {
@@ -175,7 +132,7 @@ class NotificationController extends Controller
             $user = $request->user();
             $notification = $user->notifications()->find($id);
 
-            if (!$notification) {
+            if (! $notification) {
                 return response()->json([
                     'success' => false,
                     'message' => 'Notification not found',
@@ -183,27 +140,14 @@ class NotificationController extends Controller
             }
 
             $notification->markAsRead();
-            
-            // Format notification for response
-            $data = $notification->data;
-            $formattedNotification = [
-                'id' => $notification->id,
-                'type' => $data['type'] ?? 'unknown',
-                'title' => $data['title'] ?? 'Notification',
-                'message' => $data['message'] ?? '',
-                'action_url' => $data['action_url'] ?? null,
-                'icon' => $data['icon'] ?? 'bell',
-                'color' => $data['color'] ?? 'blue',
-                'priority' => $data['priority'] ?? 'normal',
-                'read_at' => $notification->read_at ? $notification->read_at->toIso8601String() : null,
-                'created_at' => $notification->created_at->toIso8601String(),
-                'is_read' => true,
-                'data' => $data,
-            ];
+
+            $formattedNotification = $this->formatNotification($notification);
+            $formattedNotification['is_read'] = true;
 
             return response()->json([
                 'success' => true,
                 'message' => 'Notification marked as read',
+                'data' => $formattedNotification,
                 'notification' => $formattedNotification,
                 'unread_count' => $user->unreadNotifications()->count(),
             ]);
@@ -218,9 +162,6 @@ class NotificationController extends Controller
 
     /**
      * Mark all notifications as read
-     * 
-     * @param Request $request
-     * @return JsonResponse
      */
     public function markAllAsRead(Request $request): JsonResponse
     {
@@ -243,10 +184,6 @@ class NotificationController extends Controller
 
     /**
      * Delete a notification
-     * 
-     * @param Request $request
-     * @param string $id
-     * @return JsonResponse
      */
     public function destroy(Request $request, string $id): JsonResponse
     {
@@ -254,7 +191,7 @@ class NotificationController extends Controller
             $user = $request->user();
             $notification = $user->notifications()->find($id);
 
-            if (!$notification) {
+            if (! $notification) {
                 return response()->json([
                     'success' => false,
                     'message' => 'Notification not found',
@@ -278,9 +215,6 @@ class NotificationController extends Controller
 
     /**
      * Delete all notifications
-     * 
-     * @param Request $request
-     * @return JsonResponse
      */
     public function destroyAll(Request $request): JsonResponse
     {
@@ -303,17 +237,13 @@ class NotificationController extends Controller
 
     /**
      * Send a system announcement (Admin only)
-     * 
-     * @param Request $request
-     * @return JsonResponse
      */
     public function sendAnnouncement(Request $request): JsonResponse
     {
         try {
             $user = $request->user();
 
-            // Check if user is admin
-            if (!in_array($user->role, ['admin', 'chairman', 'executive'])) {
+            if (! in_array($user->role, ['admin', 'chairman', 'executive'])) {
                 return response()->json([
                     'success' => false,
                     'message' => 'Unauthorized. Only administrators can send announcements.',
@@ -358,9 +288,6 @@ class NotificationController extends Controller
 
     /**
      * Get notification statistics
-     * 
-     * @param Request $request
-     * @return JsonResponse
      */
     public function statistics(Request $request): JsonResponse
     {
@@ -374,11 +301,12 @@ class NotificationController extends Controller
                 'by_type' => [],
             ];
 
-            // Group by notification type
             $typeGroups = $user->notifications()
                 ->get()
                 ->groupBy(function ($notification) {
-                    return $notification->data['type'] ?? 'unknown';
+                    $data = $notification->data;
+
+                    return $data['type'] ?? $data['notification_type'] ?? 'unknown';
                 })
                 ->map(function ($group) {
                     return [
@@ -400,5 +328,64 @@ class NotificationController extends Controller
                 'error' => $e->getMessage(),
             ], 500);
         }
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function formatNotification(DatabaseNotification $notification): array
+    {
+        $data = $notification->data;
+        $type = $data['type'] ?? $data['notification_type'] ?? 'unknown';
+        $message = $data['message'] ?? ($data['payload']['message'] ?? '');
+        $title = $data['title'] ?? null;
+
+        if (! filled($title) && filled($message)) {
+            $title = Str::limit($message, 100);
+        }
+
+        if (! filled($title)) {
+            $title = $this->titleFromType((string) $type);
+        }
+
+        return [
+            'id' => $notification->id,
+            'type' => $type,
+            'title' => $title,
+            'message' => $message,
+            'action_url' => $data['action_url'] ?? ($data['payload']['action_url'] ?? null),
+            'icon' => $data['icon'] ?? 'bell',
+            'color' => $data['color'] ?? 'blue',
+            'priority' => $data['priority'] ?? 'normal',
+            'read_at' => $notification->read_at ? $notification->read_at->toIso8601String() : null,
+            'created_at' => $notification->created_at->toIso8601String(),
+            'is_read' => $notification->read_at !== null,
+            'data' => $data,
+        ];
+    }
+
+    private function titleFromType(string $type): string
+    {
+        return match ($type) {
+            'mrf_submitted' => 'New MRF Submitted',
+            'mrf_approved' => 'MRF Approved',
+            'mrf_rejected' => 'MRF Rejected',
+            'system_announcement' => 'System Announcement',
+            'rfq_assigned' => 'New RFQ Assignment',
+            'quotation_submitted' => 'New Quotation Received',
+            'quotation_status_updated' => 'Quotation Status Updated',
+            'vendor_registration' => 'New Vendor Registration',
+            'vendor_approved' => 'Vendor Registration Approved',
+            'vendor_quote_approved' => 'Quotation Approved',
+            'journey_status_update' => 'Journey Status Update',
+            default => Str::title(str_replace('_', ' ', $type)),
+        };
+    }
+
+    private function resolveListLimit(Request $request): int
+    {
+        $limit = $request->input('limit', $request->input('per_page', 50));
+
+        return min(100, max(1, (int) $limit));
     }
 }

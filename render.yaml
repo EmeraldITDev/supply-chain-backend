@@ -23,6 +23,8 @@ services:
         value: database
       - key: MAIL_MAILER
         value: log
+      - key: QUEUE_CONNECTION
+        value: sync
       - key: FRONTEND_URL
         value: https://emerald-supply-chain.vercel.app
       - key: DOCUMENTS_DISK

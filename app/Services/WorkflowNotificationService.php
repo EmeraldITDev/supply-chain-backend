@@ -248,7 +248,7 @@ class WorkflowNotificationService
         $vendorUser = User::query()->where('vendor_id', $quotation->vendor_id)->first();
         if ($vendorUser) {
             try {
-                $vendorUser->notify(new \App\Notifications\VendorQuoteApprovedNotification(
+                $vendorUser->notifyNow(new \App\Notifications\VendorQuoteApprovedNotification(
                     $mrf,
                     $quotation,
                     (bool) $gate['canSubmit'],

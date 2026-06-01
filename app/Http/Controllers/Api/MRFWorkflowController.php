@@ -822,7 +822,7 @@ class MRFWorkflowController extends Controller
         try {
             $scdUsers = \App\Models\User::whereIn('role', ['supply_chain_director', 'supply_chain', 'admin'])->get();
             foreach ($scdUsers as $scdUser) {
-                $scdUser->notify(new \App\Notifications\SystemAnnouncementNotification(
+                $scdUser->notifyNow(new \App\Notifications\SystemAnnouncementNotification(
                     'Vendor Selection Pending Approval',
                     "MRF {$mrf->mrf_id} - Vendor {$vendor->name} selected and pending your approval",
                     [
@@ -950,7 +950,7 @@ class MRFWorkflowController extends Controller
         try {
             $procurementUsers = \App\Models\User::whereIn('role', ['procurement', 'procurement_manager', 'admin'])->get();
             foreach ($procurementUsers as $procUser) {
-                $procUser->notify(new \App\Notifications\SystemAnnouncementNotification(
+                $procUser->notifyNow(new \App\Notifications\SystemAnnouncementNotification(
                     'Vendor Selection Approved - PO Upload Required',
                     "MRF {$mrf->mrf_id} - Vendor selection has been approved by Supply Chain Director. Please upload the Purchase Order.",
                     [
@@ -1058,7 +1058,7 @@ class MRFWorkflowController extends Controller
         try {
             $procurementUsers = \App\Models\User::whereIn('role', ['procurement', 'procurement_manager', 'admin'])->get();
             foreach ($procurementUsers as $procUser) {
-                $procUser->notify(new \App\Notifications\SystemAnnouncementNotification(
+                $procUser->notifyNow(new \App\Notifications\SystemAnnouncementNotification(
                     'Vendor Selection Rejected',
                     "MRF {$mrf->mrf_id} - Vendor selection rejected. Reason: {$request->reason}. Please select another vendor."
                 ));
@@ -1815,7 +1815,7 @@ class MRFWorkflowController extends Controller
             $financeTeam = \App\Models\User::whereIn('role', ['finance', 'admin'])->get();
 
             foreach ($financeTeam as $finance) {
-                $finance->notify(new \App\Notifications\SystemAnnouncementNotification(
+                $finance->notifyNow(new \App\Notifications\SystemAnnouncementNotification(
                     'PO Generated',
                     "Purchase Order {$poNumber} for MRF {$mrf->mrf_id} has been generated and is ready for review.",
                     "/mrfs/{$mrf->mrf_id}",
@@ -2203,7 +2203,7 @@ class MRFWorkflowController extends Controller
         if ($mrf->procurement_manager_id) {
             $manager = \App\Models\User::find($mrf->procurement_manager_id);
             if ($manager) {
-                $manager->notify(new \App\Notifications\SystemAnnouncementNotification(
+                $manager->notifyNow(new \App\Notifications\SystemAnnouncementNotification(
                     'PO Returned for Revision',
                     "PO {$mrf->po_number} was returned for revision. Reason: {$request->reason}",
                     [

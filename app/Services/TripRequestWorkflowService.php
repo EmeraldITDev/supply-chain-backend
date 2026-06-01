@@ -19,7 +19,7 @@ class TripRequestWorkflowService
         $users = $query->whereNotNull('email')->get();
         foreach ($users as $user) {
             try {
-                $user->notify(new LogisticsEventNotification($eventType, [
+                $user->notifyNow(new LogisticsEventNotification($eventType, [
                     'trip_id' => $trip->id,
                     'trip_code' => $trip->trip_code,
                     'workflow_stage' => $trip->workflow_stage,

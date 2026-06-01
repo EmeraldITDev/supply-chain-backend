@@ -439,7 +439,7 @@ class VendorAuthController extends Controller
 
             foreach ($procurementManagers as $manager) {
                 // Send notification to each procurement manager
-                $manager->notify(new \App\Notifications\VendorPasswordResetRequestNotification(
+                $manager->notifyNow(new \App\Notifications\VendorPasswordResetRequestNotification(
                     $vendor ?? (object)['vendor_id' => 'N/A', 'name' => $user->name, 'email' => $user->email],
                     $user->email
                 ));

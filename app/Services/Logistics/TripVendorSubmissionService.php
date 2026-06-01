@@ -33,7 +33,7 @@ class TripVendorSubmissionService
         }
 
         try {
-            $notifiable->notify($notification);
+            $notifiable->notifyNow($notification);
         } catch (\Throwable $e) {
             Log::warning('Vendor trip invitation notification failed (assignment still saved)', [
                 'trip_id' => $trip->id,
@@ -178,7 +178,7 @@ class TripVendorSubmissionService
         // Send rejection notification
         $vendor = $submission->vendor;
         if ($vendor && $vendor->users()->first()) {
-            $vendor->users()->first()->notify(new VendorRejectedForTripNotification(
+            $vendor->users()->first()->notifyNow(new VendorRejectedForTripNotification(
                 $submission->trip,
                 $vendor,
                 $reason
@@ -219,7 +219,7 @@ class TripVendorSubmissionService
 
         // Send approval notification to selected vendor
         if ($vendor && $vendor->users()->first()) {
-            $vendor->users()->first()->notify(new VendorSelectedForTripNotification($trip, $vendor));
+            $vendor->users()->first()->notifyNow(new VendorSelectedForTripNotification($trip, $vendor));
         }
     }
 

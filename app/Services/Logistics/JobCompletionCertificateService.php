@@ -168,14 +168,14 @@ class JobCompletionCertificateService
         $primaryVendor = $trip->selectedVendor ?? $trip->vendor;
         $vendorUser = $primaryVendor?->users()->first();
         if ($vendorUser) {
-            $vendorUser->notify(
+            $vendorUser->notifyNow(
                 new JobCompletionCertificateApprovedNotification($trip, $jcc)
             );
         }
 
         // Notify trip creator
         if ($trip->creator) {
-            $trip->creator->notify(new JobCompletionCertificateApprovedNotification($trip, $jcc));
+            $trip->creator->notifyNow(new JobCompletionCertificateApprovedNotification($trip, $jcc));
         }
 
         return $jcc;
