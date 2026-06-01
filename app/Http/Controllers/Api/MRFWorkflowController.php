@@ -936,6 +936,15 @@ class MRFWorkflowController extends Controller
 
         app(FinanceApWorkflowOrchestrator::class)->afterVendorQuoteScdApproved($mrf, $user);
 
+        try {
+            app(WorkflowNotificationService::class)->notifyVendorQuoteScdApproved($mrf->fresh());
+        } catch (\Exception $e) {
+            Log::warning('Failed to send vendor quote approved notifications', [
+                'mrf_id' => $mrf->mrf_id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
         // Notify Procurement that vendor is approved and PO upload is required
         // Provide clear actionable guidance: "Upload PO" is the next step
         try {

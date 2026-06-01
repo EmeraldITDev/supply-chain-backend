@@ -356,6 +356,81 @@ Delivery Confirmation step includes `requiredDocuments` when present.
 
 ---
 
-## Phase 4+ (pending)
+## Phase 4 — Vendor invoice portal
 
-Document vendor invoice portal and Finance sync endpoints here as they are implemented.
+Vendor-authenticated endpoints for final invoice upload on Finance AP MRFs. Gate enforcement is server-side via `VendorInvoiceGateService`.
+
+### Auth
+
+Use vendor portal login (`POST /api/vendors/auth/login`) and Bearer token on all routes below. Vendor user must be linked to the MRF's `selected_vendor_id`.
+
+### `GET /api/vendor-portal/mrfs`
+
+Lists MRFs where the authenticated vendor is the selected vendor.
+
+**Response `data.mrfs[]`:** `mrfId`, `title`, `workflowState`, `vendorInvoiceGate`, `invoiceSubmitted`.
+
+Alias: `GET /api/vendors/portal/mrfs`
+
+---
+
+### `GET /api/vendor-portal/mrfs/{mrfId}/invoice`
+
+Invoice submission status for one MRF.
+
+| Field | Description |
+|-------|-------------|
+| `canSubmit` | Gate open and no active invoice yet |
+| `submitted` | Active `vendor_invoice` exists |
+| `document` | Registry document when submitted |
+| `gateType` | `advance` or `delivery` |
+
+Alias: `GET /api/vendors/portal/mrfs/{mrfId}/invoice`
+
+---
+
+### `POST /api/vendor-portal/mrfs/{mrfId}/invoice`
+
+Upload final vendor invoice (multipart).
+
+**Body:** `invoice` — required file (`pdf`, `jpg`, `jpeg`, `png`; max 10MB)
+
+**Success:** `201` with registry `document` row; syncs legacy `invoice_url` on MRF.
+
+**Errors:**
+
+| Code | HTTP | When |
+|------|------|------|
+| `INVOICE_GATE_CLOSED` | 422 | Gate not open (advance/delivery rules) |
+| `INVOICE_ALREADY_SUBMITTED` | 422 | Active invoice already exists |
+| `FORBIDDEN` | 403 | Not the selected vendor |
+| `VALIDATION_ERROR` | 422 | Invalid/missing file |
+
+Alias: `POST /api/vendors/portal/mrfs/{mrfId}/invoice`
+
+**Frontend:**
+
+- Show Upload Invoice only when `canSubmit === true`.
+- After submit, read-only UI (`submitted === true`); no resubmit.
+- Internal MRF detail: `vendor_invoice` appears in `GET /api/mrfs/{id}/procurement-documents` (`activeByType.vendor_invoice`).
+
+---
+
+### Notifications
+
+**On SCD vendor quote approval** (Finance AP MRFs only):
+
+- Email: `VendorQuoteApprovedMail` — no approver names/roles; explains when invoice upload opens.
+- In-app: `VendorQuoteApprovedNotification` on vendor portal user.
+
+**On vendor invoice submit:**
+
+- In-app to Procurement, SCD, Executive, Finance (monitor), Admin.
+
+**Delta sync:** If Finance AP package was already pushed (`finance_ap_case_id` set, Phase 6), backend calls `FinanceIntegrationService::pushDelta(..., 'vendor_invoice_submitted')` automatically.
+
+---
+
+## Phase 5+ (pending)
+
+Document delivery confirmation UI and Finance sync endpoints here as they are implemented.

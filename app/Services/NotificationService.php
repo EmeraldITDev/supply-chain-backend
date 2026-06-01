@@ -9,6 +9,7 @@ use App\Models\RFQ;
 use App\Models\Quotation;
 use App\Models\Vendor;
 use App\Models\VendorRegistration;
+use App\Models\ProcurementDocument;
 use App\Notifications\MRFSubmittedNotification;
 use App\Notifications\MRFApprovedNotification;
 use App\Notifications\MRFRejectedNotification;
@@ -877,6 +878,51 @@ class NotificationService
             Log::error('Failed to send GRN completed notification', [
                 'mrf_id' => $mrf->mrf_id,
                 'error' => $e->getMessage()
+            ]);
+        }
+    }
+
+    public function notifyVendorInvoiceSubmitted(MRF $mrf, ProcurementDocument $document): void
+    {
+        try {
+            $message = "Vendor invoice submitted for MRF {$mrf->mrf_id}. Document: {$document->file_name}.";
+
+            $recipients = User::query()
+                ->whereIn('role', [
+                    'procurement_manager',
+                    'procurement',
+                    'supply_chain_director',
+                    'supply_chain',
+                    'executive',
+                    'finance',
+                    'admin',
+                ])
+                ->whereNotNull('email')
+                ->get();
+
+            foreach ($recipients as $recipient) {
+                $recipient->notify(new SystemAnnouncementNotification(
+                    'Vendor Invoice Submitted',
+                    $message,
+                    "/mrfs/{$mrf->mrf_id}",
+                    'normal',
+                    [
+                        'mrf_id' => $mrf->mrf_id,
+                        'document_id' => $document->id,
+                        'document_type' => $document->type,
+                    ]
+                ));
+            }
+
+            Log::info('Vendor invoice submitted notifications sent', [
+                'mrf_id' => $mrf->mrf_id,
+                'document_id' => $document->id,
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Failed to send vendor invoice submitted notifications', [
+                'mrf_id' => $mrf->mrf_id,
+                'document_id' => $document->id,
+                'error' => $e->getMessage(),
             ]);
         }
     }

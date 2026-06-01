@@ -410,6 +410,12 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // RFQ Workflow routes (enhanced)
     Route::get('/vendors/rfqs', [\App\Http\Controllers\Api\RFQWorkflowController::class, 'getVendorRFQs']); // Vendor portal
+    Route::get('/vendor-portal/mrfs', [\App\Http\Controllers\Api\VendorPortalMrfController::class, 'index']);
+    Route::get('/vendor-portal/mrfs/{mrfId}/invoice', [\App\Http\Controllers\Api\VendorPortalMrfController::class, 'showInvoiceStatus']);
+    Route::post('/vendor-portal/mrfs/{mrfId}/invoice', [\App\Http\Controllers\Api\VendorPortalMrfController::class, 'submitInvoice']);
+    Route::get('/vendors/portal/mrfs', [\App\Http\Controllers\Api\VendorPortalMrfController::class, 'index']);
+    Route::get('/vendors/portal/mrfs/{mrfId}/invoice', [\App\Http\Controllers\Api\VendorPortalMrfController::class, 'showInvoiceStatus']);
+    Route::post('/vendors/portal/mrfs/{mrfId}/invoice', [\App\Http\Controllers\Api\VendorPortalMrfController::class, 'submitInvoice']);
     // Assigned trips (logistics) — /vendors/* so clients that only attach Bearer for /api/vendors/* (same as RFQs) authenticate correctly
     Route::get('/vendors/assigned-trips', [LogisticsVendorPortalTripController::class, 'indexVendorTrips']);
     Route::post('/vendors/portal/trips/{tripId}/submission', [LogisticsVendorPortalTripController::class, 'submitVendorDetails']);

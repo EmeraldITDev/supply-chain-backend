@@ -9,6 +9,7 @@ use App\Mail\POGeneratedMail;
 use App\Mail\QuotationSubmittedMail;
 use App\Mail\RFQSentMail;
 use App\Mail\SRFCreatedMail;
+use App\Mail\VendorQuoteApprovedMail;
 use App\Mail\VendorSelectedMail;
 use App\Models\MRF;
 use App\Models\Quotation;
@@ -202,6 +203,64 @@ class WorkflowNotificationService
                 modelId: $quotation->quotation_id,
                 mailableFactory: static fn () => new VendorSelectedMail($quotation)
             );
+        }
+    }
+
+    public function notifyVendorQuoteScdApproved(MRF $mrf): void
+    {
+        if (! mrfUsesFinanceAp($mrf)) {
+            return;
+        }
+
+        $mrf->loadMissing(['selectedVendor']);
+        $quotation = $mrf->selectedQuotation();
+
+        if (! $quotation) {
+            Log::warning('SCD vendor quote approval notification skipped; no selected quotation', [
+                'mrf_id' => $mrf->mrf_id,
+            ]);
+
+            return;
+        }
+
+        $quotation->loadMissing(['vendor', 'rfq']);
+        $gate = app(\App\Services\FinanceAp\VendorInvoiceGateService::class)->status($mrf->fresh());
+
+        $vendorEmails = collect([
+            $quotation->vendor?->email ?? null,
+            User::query()->where('vendor_id', $quotation->vendor_id)->value('email'),
+        ])->filter()->unique(fn ($email) => strtolower((string) $email));
+
+        foreach ($vendorEmails as $email) {
+            $this->deliverMailable(
+                event: 'vendor_quote_scd_approved',
+                recipient: (string) $email,
+                modelId: $mrf->mrf_id,
+                mailableFactory: fn () => new VendorQuoteApprovedMail(
+                    $mrf,
+                    $quotation,
+                    (bool) $gate['canSubmit'],
+                    $gate['gateType'],
+                )
+            );
+        }
+
+        $vendorUser = User::query()->where('vendor_id', $quotation->vendor_id)->first();
+        if ($vendorUser) {
+            try {
+                $vendorUser->notify(new \App\Notifications\VendorQuoteApprovedNotification(
+                    $mrf,
+                    $quotation,
+                    (bool) $gate['canSubmit'],
+                    $gate['gateType'],
+                ));
+            } catch (\Throwable $e) {
+                Log::error('Vendor quote approved in-app notification failed', [
+                    'mrf_id' => $mrf->mrf_id,
+                    'user_id' => $vendorUser->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
         }
     }
 
