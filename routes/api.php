@@ -367,6 +367,7 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // GRN endpoints
     Route::get('/mrfs/{id}/grn/preview', [\App\Http\Controllers\Api\GRNController::class, 'previewGrn']);
+    Route::post('/mrfs/{id}/grn/preview', [\App\Http\Controllers\Api\GRNController::class, 'previewGrn']);
     Route::post('/mrfs/{id}/grn/generate', [\App\Http\Controllers\Api\GRNController::class, 'generateGrn']);
     Route::post('/mrfs/{id}/request-grn', [\App\Http\Controllers\Api\GRNController::class, 'requestGRN']);
     Route::post('/mrfs/{id}/complete-grn', [\App\Http\Controllers\Api\GRNController::class, 'completeGRN']);

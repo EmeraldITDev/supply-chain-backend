@@ -3,103 +3,51 @@
 namespace App\Services;
 
 use App\Models\MRF;
+use App\Models\ProcurementDocument;
 use App\Models\Quotation;
 use App\Models\QuotationItem;
 use App\Models\RFQ;
+use App\Models\User;
+use App\Models\Vendor;
 use Carbon\Carbon;
 use Dompdf\Dompdf;
 use Dompdf\Options;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\View;
-use Illuminate\Support\Str;
 
 class GrnPdfService
 {
+    public function __construct(
+        private PurchaseOrderPdfService $purchaseOrderPdfService,
+    ) {
+    }
+
     /**
      * @return array{success: bool, error?: string, line_items?: list<array<string, mixed>>}
      */
-    public function resolveLineItems(MRF $mrf): array
+    public function resolveLineItems(MRF $mrf, ?array $overrides = null): array
     {
-        $mrf->loadMissing('items');
+        try {
+            $lineItems = $this->buildLineItems($mrf, $overrides);
 
-        if ($mrf->items->isNotEmpty()) {
             return [
                 'success' => true,
-                'line_items' => $this->mapMrfItems($mrf->items),
+                'line_items' => $lineItems,
             ];
-        }
-
-        $rfq = RFQ::query()->where('mrf_id', $mrf->id)->first();
-        if (! $rfq) {
+        } catch (\RuntimeException $e) {
             return [
                 'success' => false,
-                'error' => 'No line items found on this MRF. Add MRF line items before generating a GRN.',
+                'error' => $e->getMessage(),
             ];
         }
-
-        $quotation = null;
-        if ($rfq->selected_quotation_id) {
-            $quotation = Quotation::query()->with('vendor')->find($rfq->selected_quotation_id);
-        }
-        if (! $quotation) {
-            $quotation = Quotation::query()
-                ->where('rfq_id', $rfq->id)
-                ->where('status', 'Approved')
-                ->with('vendor')
-                ->orderByDesc('created_at')
-                ->first();
-        }
-
-        if ($quotation) {
-            $quotationItems = QuotationItem::query()
-                ->where('quotation_id', $quotation->id)
-                ->get();
-
-            if ($quotationItems->isNotEmpty()) {
-                return [
-                    'success' => true,
-                    'line_items' => $quotationItems->map(fn ($item) => [
-                        'name' => (string) ($item->item_name ?? 'Item'),
-                        'description' => trim((string) ($item->description ?? $item->specifications ?? '')),
-                        'quantity' => $this->fmtQty((float) ($item->quantity ?? 1)),
-                        'unit' => (string) ($item->unit ?? 'unit'),
-                    ])->values()->all(),
-                ];
-            }
-        }
-
-        $rfq->loadMissing('items');
-        if ($rfq->items->isNotEmpty()) {
-            return [
-                'success' => true,
-                'line_items' => $rfq->items->map(fn ($item) => [
-                    'name' => (string) ($item->item_name ?? 'Item'),
-                    'description' => trim((string) ($item->description ?? $item->specifications ?? '')),
-                    'quantity' => $this->fmtQty((float) ($item->quantity ?? 1)),
-                    'unit' => (string) ($item->unit ?? 'unit'),
-                ])->values()->all(),
-            ];
-        }
-
-        return [
-            'success' => false,
-            'error' => 'No line items found on this MRF. Add MRF line items before generating a GRN.',
-        ];
     }
 
     /**
      * @param  array<string, mixed>  $options
      */
-    public function renderPdf(MRF $mrf, array $options = []): string
+    public function renderPdf(MRF $mrf, User $actingUser, array $options = []): string
     {
-        $mrf->loadMissing(['items', 'selectedVendor']);
-
-        $resolved = $this->resolveLineItems($mrf);
-        if (! $resolved['success']) {
-            throw new \RuntimeException($resolved['error'] ?? 'Unable to resolve GRN line items.');
-        }
-
-        $html = $this->html($mrf, $resolved['line_items'], $options);
+        $html = $this->html($mrf, $actingUser, $options);
 
         $dompdfOptions = new Options();
         $dompdfOptions->set('isHtml5ParserEnabled', true);
@@ -116,54 +64,374 @@ class GrnPdfService
     }
 
     /**
-     * @param  list<array<string, mixed>>  $lineItems
      * @param  array<string, mixed>  $options
      */
-    public function html(MRF $mrf, array $lineItems, array $options = []): string
+    public function html(MRF $mrf, User $actingUser, array $options = []): string
     {
-        $date = isset($options['received_at'])
-            ? Carbon::parse($options['received_at'])
+        $viewData = $this->buildViewData($mrf, $actingUser, $options);
+
+        return View::make('pdf.grn', $viewData)->render();
+    }
+
+    /**
+     * @param  array<string, mixed>  $options
+     * @return array<string, mixed>
+     */
+    public function buildViewData(MRF $mrf, User $actingUser, array $options = []): array
+    {
+        $mrf->loadMissing(['items', 'selectedVendor', 'requester', 'procurementManager']);
+
+        $overrides = is_array($options['line_items'] ?? null) ? $options['line_items'] : null;
+        $lineItems = $this->buildLineItems($mrf, $overrides);
+
+        $receiptDate = isset($options['date_of_receipt']) || isset($options['received_at'])
+            ? Carbon::parse($options['date_of_receipt'] ?? $options['received_at'])
             : now()->setTimezone('Africa/Lagos');
 
-        $grnNumber = (string) ($options['grn_number'] ?? $this->defaultGrnNumber($mrf));
+        $deliveryDate = ! empty($options['delivery_date'])
+            ? Carbon::parse($options['delivery_date'])->format('d-m-y')
+            : $receiptDate->format('d-m-y');
 
-        return View::make('pdf.grn', [
-            'grn_number' => $grnNumber,
-            'grn_date' => $date->format('d/m/Y'),
-            'po_number' => (string) ($mrf->po_number ?? ''),
-            'mrf_reference' => (string) ($mrf->formatted_id ?? $mrf->mrf_id ?? ''),
-            'supplier_name' => (string) ($options['supplier_name'] ?? $mrf->selectedVendor?->name ?? 'Supplier'),
-            'supplier_address' => (string) ($options['supplier_address'] ?? $mrf->selectedVendor?->address ?? ''),
-            'received_at' => (string) ($options['received_at_label'] ?? env('COMPANY_ADDRESS', 'Emerald Industrial Co. FZE')),
-            'department' => (string) ($mrf->department ?? ''),
+        $vendor = $this->resolveVendor($mrf);
+        $signatories = $this->resolveSignatories($mrf, $actingUser, $vendor);
+
+        $companyName = env('COMPANY_NAME', 'Emerald Industrial Co. CFZE');
+
+        return [
+            'logo_html' => $this->purchaseOrderPdfService->logoHtml(),
+            'company_name' => $companyName,
+            'company_address' => env('COMPANY_ADDRESS', ''),
+            'grn_number' => (string) ($options['grn_number'] ?? $options['grnNumber'] ?? $this->defaultGrnNumber($mrf)),
+            'date_of_receipt' => $receiptDate->format('d/m/Y'),
+            'delivery_note_number' => $this->fieldValue($options, ['delivery_note_number', 'deliveryNoteNumber'], 'N/A'),
+            'delivery_date' => $deliveryDate,
+            'carrier_name' => $this->fieldValue($options, ['carrier_name', 'carrierName', 'carrier_driver_name', 'carrierDriverName'], 'N/A'),
+            'driver_number' => $this->fieldValue($options, ['driver_number', 'driverNumber', 'carrier_number', 'carrierNumber'], 'N/A'),
+            'vehicle_plate_number' => $this->fieldValue($options, ['vehicle_plate_number', 'vehiclePlateNumber'], 'N/A'),
+            'supplier_name' => (string) ($options['supplier_name'] ?? $vendor?->name ?? 'Supplier'),
+            'supplier_address' => (string) ($options['supplier_address'] ?? $vendor?->address ?? ''),
             'line_items' => $lineItems,
-            'remarks' => trim((string) ($options['remarks'] ?? '')),
-        ])->render();
+            'comments' => trim((string) ($options['comments'] ?? $options['remarks'] ?? '')),
+            'signatories' => $signatories,
+        ];
     }
 
     public function defaultGrnNumber(MRF $mrf): string
     {
-        $base = $mrf->po_number ?: ($mrf->formatted_id ?: $mrf->mrf_id);
+        $year = now()->format('Y');
+        $mrfRef = (string) ($mrf->mrf_id ?? $mrf->formatted_id ?? ('MRF-' . $mrf->id));
 
-        return 'GRN-' . Str::upper(Str::slug((string) $base, '-')) . '-' . now()->format('Ymd');
+        $sequence = 1;
+        if ($mrf->id) {
+            $sequence = ProcurementDocument::query()
+                ->where('mrf_id', $mrf->id)
+                ->where('type', ProcurementDocument::TYPE_GRN)
+                ->whereYear('uploaded_at', $year)
+                ->count() + 1;
+        }
+
+        return sprintf('GRN-%s-%s-%03d', $mrfRef, $year, $sequence);
     }
 
     /**
-     * @param  Collection<int, \App\Models\MRFItem>  $items
+     * @param  list<array<string, mixed>>|null  $overrides
      * @return list<array<string, mixed>>
      */
-    private function mapMrfItems(Collection $items): array
+    private function buildLineItems(MRF $mrf, ?array $overrides = null): array
     {
-        return $items->map(fn ($item) => [
-            'name' => (string) ($item->item_name ?? 'Item'),
-            'description' => trim((string) ($item->description ?? $item->specifications ?? '')),
-            'quantity' => $this->fmtQty((float) ($item->quantity ?? 1)),
-            'unit' => (string) ($item->unit ?? 'unit'),
-        ])->values()->all();
+        $quotationItems = $this->resolveQuotationItems($mrf);
+        $rows = [];
+
+        if ($mrf->items->isNotEmpty()) {
+            foreach ($mrf->items->values() as $index => $item) {
+                $quoteItem = $this->matchQuotationItem($quotationItems, $item->item_name, $index);
+                $qtyOrdered = (float) ($item->quantity ?? 1);
+                $unitPrice = (float) ($quoteItem?->unit_price ?? $item->unit_price ?? 0);
+                $uom = (string) ($item->unit ?? $quoteItem?->unit ?? 'unit');
+                $description = trim((string) ($item->description ?? $item->specifications ?? $quoteItem?->description ?? ''));
+
+                $rows[] = $this->composeLineRow(
+                    $index + 1,
+                    (string) ($item->item_name ?? 'Item'),
+                    $description,
+                    $uom,
+                    $qtyOrdered,
+                    $unitPrice,
+                    $overrides,
+                    $index,
+                );
+            }
+        } elseif ($quotationItems->isNotEmpty()) {
+            foreach ($quotationItems->values() as $index => $quoteItem) {
+                $qtyOrdered = (float) ($quoteItem->quantity ?? 1);
+                $rows[] = $this->composeLineRow(
+                    $index + 1,
+                    (string) ($quoteItem->item_name ?? 'Item'),
+                    trim((string) ($quoteItem->description ?? $quoteItem->specifications ?? '')),
+                    (string) ($quoteItem->unit ?? 'unit'),
+                    $qtyOrdered,
+                    (float) ($quoteItem->unit_price ?? 0),
+                    $overrides,
+                    $index,
+                );
+            }
+        } else {
+            $rfq = RFQ::query()->where('mrf_id', $mrf->id)->with('items')->first();
+            if (! $rfq || $rfq->items->isEmpty()) {
+                throw new \RuntimeException('No line items found on this MRF. Add MRF line items before generating a GRN.');
+            }
+
+            foreach ($rfq->items->values() as $index => $item) {
+                $rows[] = $this->composeLineRow(
+                    $index + 1,
+                    (string) ($item->item_name ?? 'Item'),
+                    trim((string) ($item->description ?? $item->specifications ?? '')),
+                    (string) ($item->unit ?? 'unit'),
+                    (float) ($item->quantity ?? 1),
+                    0.0,
+                    $overrides,
+                    $index,
+                );
+            }
+        }
+
+        return $rows;
+    }
+
+    /**
+     * @param  list<array<string, mixed>>|null  $overrides
+     * @return array<string, mixed>
+     */
+    private function composeLineRow(
+        int $itemNumber,
+        string $name,
+        string $description,
+        string $uom,
+        float $qtyOrdered,
+        float $unitPrice,
+        ?array $overrides,
+        int $index,
+    ): array {
+        $override = $this->findLineOverride($overrides, $index, $itemNumber);
+        $qtyReceived = isset($override['quantity_received']) || isset($override['quantityReceived'])
+            ? (float) ($override['quantity_received'] ?? $override['quantityReceived'])
+            : $qtyOrdered;
+
+        if (isset($override['unit_price']) || isset($override['unitPrice'])) {
+            $unitPrice = (float) ($override['unit_price'] ?? $override['unitPrice']);
+        }
+
+        $lineTotal = round($qtyReceived * $unitPrice, 2);
+
+        return [
+            'item' => $itemNumber,
+            'name' => $name,
+            'description' => $description !== '' ? $description : $name,
+            'uom' => $uom,
+            'quantity_ordered' => $this->fmtQty($qtyOrdered),
+            'quantity_received' => $this->fmtQty($qtyReceived),
+            'unit_price' => $this->fmtMoney($unitPrice),
+            'total' => $this->fmtMoney($lineTotal),
+        ];
+    }
+
+    /**
+     * @param  list<array<string, mixed>>|null  $overrides
+     * @return array<string, mixed>|null
+     */
+    private function findLineOverride(?array $overrides, int $index, int $itemNumber): ?array
+    {
+        if ($overrides === null) {
+            return null;
+        }
+
+        foreach ($overrides as $override) {
+            if (! is_array($override)) {
+                continue;
+            }
+
+            $lineIndex = $override['index'] ?? $override['line_index'] ?? null;
+            $lineItem = $override['item'] ?? $override['item_number'] ?? $override['itemNumber'] ?? null;
+
+            if ($lineIndex !== null && (int) $lineIndex === $index) {
+                return $override;
+            }
+
+            if ($lineItem !== null && (int) $lineItem === $itemNumber) {
+                return $override;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * @return Collection<int, QuotationItem>
+     */
+    private function resolveQuotationItems(MRF $mrf): Collection
+    {
+        $rfq = RFQ::query()->where('mrf_id', $mrf->id)->first();
+        if (! $rfq) {
+            return collect();
+        }
+
+        $quotation = null;
+        if ($rfq->selected_quotation_id) {
+            $quotation = Quotation::query()->find($rfq->selected_quotation_id);
+        }
+
+        if (! $quotation) {
+            $quotation = Quotation::query()
+                ->where('rfq_id', $rfq->id)
+                ->where('status', 'Approved')
+                ->orderByDesc('created_at')
+                ->first();
+        }
+
+        if (! $quotation) {
+            return collect();
+        }
+
+        return QuotationItem::query()
+            ->where('quotation_id', $quotation->id)
+            ->orderBy('id')
+            ->get();
+    }
+
+    private function matchQuotationItem(Collection $quotationItems, ?string $itemName, int $index): ?QuotationItem
+    {
+        if ($quotationItems->isEmpty()) {
+            return null;
+        }
+
+        if ($itemName) {
+            $matched = $quotationItems->first(
+                fn (QuotationItem $item) => strcasecmp((string) $item->item_name, (string) $itemName) === 0
+            );
+            if ($matched) {
+                return $matched;
+            }
+        }
+
+        return $quotationItems->get($index);
+    }
+
+    private function resolveVendor(MRF $mrf): ?Vendor
+    {
+        if ($mrf->selectedVendor) {
+            return $mrf->selectedVendor;
+        }
+
+        $rfq = RFQ::query()->where('mrf_id', $mrf->id)->first();
+        if (! $rfq) {
+            return null;
+        }
+
+        $quotation = null;
+        if ($rfq->selected_quotation_id) {
+            $quotation = Quotation::query()->with('vendor')->find($rfq->selected_quotation_id);
+        }
+        if (! $quotation) {
+            $quotation = Quotation::query()
+                ->where('rfq_id', $rfq->id)
+                ->where('status', 'Approved')
+                ->with('vendor')
+                ->orderByDesc('created_at')
+                ->first();
+        }
+
+        return $quotation?->vendor;
+    }
+
+    /**
+     * @return array<string, array<string, string>>
+     */
+    private function resolveSignatories(MRF $mrf, User $actingUser, ?Vendor $vendor): array
+    {
+        $receivedBy = $this->resolveReceivedByUser($mrf, $actingUser);
+        $procurementManager = $mrf->procurementManager
+            ?? User::query()
+                ->whereIn('role', ['procurement_manager', 'procurement'])
+                ->when($mrf->procurement_manager_id, fn ($q) => $q->orWhere('id', $mrf->procurement_manager_id))
+                ->orderByRaw("CASE WHEN role = 'procurement_manager' THEN 0 ELSE 1 END")
+                ->first();
+
+        return [
+            'vendor_delivered' => [
+                'name' => (string) ($vendor?->contact_person ?: $vendor?->name ?: ''),
+                'position' => 'Vendor',
+                'sign_date' => '',
+                'phone' => (string) ($vendor?->phone ?? ''),
+                'email' => (string) ($vendor?->email ?? ''),
+            ],
+            'emerald_received' => [
+                'name' => (string) ($receivedBy?->name ?? $mrf->requester_name ?? ''),
+                'position' => $this->formatUserPosition($receivedBy),
+                'sign_date' => '',
+                'phone' => (string) ($receivedBy?->phone ?? ''),
+                'email' => (string) ($receivedBy?->email ?? ''),
+            ],
+            'vendor_witnessed' => [
+                'name' => '',
+                'position' => '',
+                'sign_date' => '',
+                'phone' => '',
+                'email' => '',
+            ],
+            'emerald_supervised' => [
+                'name' => (string) ($procurementManager?->name ?? 'Procurement Manager'),
+                'position' => 'Site Manager',
+                'sign_date' => '',
+                'phone' => (string) ($procurementManager?->phone ?? ''),
+                'email' => '',
+            ],
+        ];
+    }
+
+    private function resolveReceivedByUser(MRF $mrf, User $actingUser): ?User
+    {
+        if (in_array($actingUser->role, ['procurement', 'procurement_manager', 'admin'], true)) {
+            return $actingUser;
+        }
+
+        return $mrf->requester ?? $actingUser;
+    }
+
+    private function formatUserPosition(?User $user): string
+    {
+        if (! $user) {
+            return '';
+        }
+
+        if (! empty($user->department)) {
+            return (string) $user->department;
+        }
+
+        return ucwords(str_replace('_', ' ', (string) ($user->role ?? 'Staff')));
+    }
+
+    /**
+     * @param  list<string>  $keys
+     */
+    private function fieldValue(array $options, array $keys, string $default = ''): string
+    {
+        foreach ($keys as $key) {
+            $value = $options[$key] ?? null;
+            if ($value !== null && trim((string) $value) !== '') {
+                return trim((string) $value);
+            }
+        }
+
+        return $default;
     }
 
     private function fmtQty(float $qty): string
     {
         return rtrim(rtrim(number_format($qty, 2, '.', ''), '0'), '.');
+    }
+
+    private function fmtMoney(float $amount): string
+    {
+        return number_format($amount, 0, '.', ',');
     }
 }

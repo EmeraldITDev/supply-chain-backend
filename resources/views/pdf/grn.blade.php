@@ -4,154 +4,263 @@
     <meta charset="UTF-8">
     <title>Goods Received Note - {{ $grn_number }}</title>
     <style>
+        @page {
+            margin: 2.5cm;
+        }
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
             font-family: DejaVu Sans, Arial, Helvetica, sans-serif;
             font-size: 10px;
-            line-height: 1.4;
+            line-height: 1.35;
             color: #000;
-            padding: 18px 22px 28px;
         }
-        .header { margin-bottom: 16px; }
-        .title {
-            font-size: 18px;
-            font-weight: bold;
-            text-transform: uppercase;
-            letter-spacing: 0.04em;
-            margin-bottom: 8px;
-        }
-        .meta { font-size: 9.5px; margin-bottom: 4px; }
-        .meta strong { font-weight: bold; }
-        .pair-grid {
+        .top-band {
             width: 100%;
             border-collapse: collapse;
-            margin: 12px 0 16px;
+            margin-bottom: 10px;
         }
-        .pair-grid td {
+        .top-band td { vertical-align: top; }
+        .brand-cell { width: 58%; padding-right: 10px; }
+        .title-cell { width: 42%; text-align: right; vertical-align: top; }
+        .logo-wrap { display: block; margin-bottom: 6px; }
+        .logo-img { max-width: 180px; max-height: 58px; object-fit: contain; display: block; }
+        .logo-placeholder {
+            width: 150px; height: 48px; border: 1px solid #ccc;
+            text-align: center; line-height: 48px; font-size: 9px; color: #666;
+        }
+        .company-name {
+            font-size: 11px;
+            font-weight: bold;
+            margin-bottom: 3px;
+        }
+        .company-lines {
+            font-size: 9px;
+            white-space: pre-wrap;
+        }
+        .doc-title {
+            font-size: 22px;
+            font-weight: bold;
+            letter-spacing: 0.03em;
+            line-height: 1.1;
+        }
+        .header-meta {
+            margin: 12px 0 14px;
+            font-size: 10px;
+        }
+        .header-meta div { margin-bottom: 4px; }
+        .header-meta strong { font-weight: bold; }
+        .info-grid {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 14px;
+            font-size: 9.5px;
+        }
+        .info-grid td {
             width: 50%;
             vertical-align: top;
             border: 1px solid #000;
-            padding: 10px 12px;
+            padding: 8px 10px;
         }
-        .pair-label {
+        .section-heading {
             font-weight: bold;
+            margin-bottom: 8px;
             font-size: 10px;
+        }
+        .field-row { margin-bottom: 5px; }
+        .field-row .lbl { font-weight: bold; }
+        .material-heading {
+            text-align: center;
+            font-weight: bold;
+            font-size: 11px;
+            margin: 8px 0 6px;
             text-transform: uppercase;
-            margin-bottom: 6px;
         }
         .items-table {
             width: 100%;
             border-collapse: collapse;
-            margin-bottom: 16px;
-            font-size: 9.5px;
+            margin-bottom: 0;
+            font-size: 9px;
         }
-        .items-table th, .items-table td {
+        .items-table th,
+        .items-table td {
             border: 1px solid #000;
-            padding: 6px 8px;
-            text-align: left;
+            padding: 6px 5px;
+            vertical-align: top;
         }
-        .items-table th { background: #f0f0f0; font-weight: bold; }
-        .col-num { width: 6%; text-align: center; }
-        .col-qty { width: 12%; text-align: center; }
-        .col-unit { width: 12%; text-align: center; }
-        .notes-block {
-            margin-top: 14px;
-            font-size: 9.5px;
-        }
-        .notes-block .lbl {
+        .items-table th {
             font-weight: bold;
-            text-transform: uppercase;
+            text-align: center;
+        }
+        .items-table th.col-item { width: 5%; }
+        .items-table th.col-desc { width: 28%; text-align: left; }
+        .items-table th.col-uom { width: 8%; }
+        .items-table th.col-qty { width: 11%; }
+        .items-table th.col-price { width: 13%; }
+        .items-table th.col-total { width: 13%; }
+        .items-table td.col-item,
+        .items-table td.col-uom,
+        .items-table td.col-qty,
+        .items-table td.col-price,
+        .items-table td.col-total {
+            text-align: center;
+        }
+        .items-table td.col-price,
+        .items-table td.col-total {
+            white-space: nowrap;
+        }
+        .comments-row td {
+            height: 42px;
+            vertical-align: top;
+        }
+        .comments-label {
+            font-weight: bold;
             margin-bottom: 4px;
         }
-        .signature-row {
-            margin-top: 28px;
-            width: 100%;
+        .signatories-heading {
+            font-weight: bold;
+            margin: 16px 0 8px;
+            font-size: 10px;
         }
-        .signature-row td {
+        .signatories-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 9px;
+        }
+        .signatories-table td {
             width: 50%;
             vertical-align: top;
-            padding-top: 24px;
+            border: 1px solid #000;
+            padding: 8px 10px;
         }
-        .sig-line {
-            border-top: 1px solid #000;
-            margin-top: 40px;
-            padding-top: 4px;
-            font-size: 9px;
+        .sig-block-title {
+            font-weight: bold;
+            margin-bottom: 8px;
+        }
+        .sig-field { margin-bottom: 5px; }
+        .sig-field .lbl { font-weight: bold; }
+        .sig-blank-line {
+            min-height: 18px;
+            border-bottom: 1px solid #000;
+            margin-top: 2px;
         }
     </style>
 </head>
 <body>
-    <div class="header">
-        <div class="title">Goods Received Note (GRN)</div>
-        <div class="meta"><strong>GRN No:</strong> {{ $grn_number }}</div>
-        <div class="meta"><strong>Date:</strong> {{ $grn_date }}</div>
-        @if (!empty($po_number))
-            <div class="meta"><strong>PO No:</strong> {{ $po_number }}</div>
-        @endif
-        @if (!empty($mrf_reference))
-            <div class="meta"><strong>MRF:</strong> {{ $mrf_reference }}</div>
-        @endif
-    </div>
-
-    <table class="pair-grid">
+    <table class="top-band">
         <tr>
-            <td>
-                <div class="pair-label">Supplier</div>
-                <div>{{ $supplier_name }}</div>
-                @if (!empty($supplier_address))
-                    <div style="margin-top:4px; white-space:pre-wrap;">{{ $supplier_address }}</div>
+            <td class="brand-cell">
+                {!! $logo_html !!}
+                <div class="company-name">{{ $company_name }}</div>
+                @if (!empty($company_address))
+                    <div class="company-lines">{{ $company_address }}</div>
                 @endif
             </td>
-            <td>
-                <div class="pair-label">Received At</div>
-                <div>{{ $received_at }}</div>
-                @if (!empty($department))
-                    <div style="margin-top:6px;"><strong>Department:</strong> {{ $department }}</div>
-                @endif
+            <td class="title-cell">
+                <div class="doc-title">GOODS RECEIVED NOTE</div>
             </td>
         </tr>
     </table>
 
+    <div class="header-meta">
+        <div><strong>GRN Number:</strong> {{ $grn_number }}</div>
+        <div><strong>Date of Receipt:</strong> {{ $date_of_receipt }}</div>
+    </div>
+
+    <table class="info-grid">
+        <tr>
+            <td>
+                <div class="section-heading">Delivery Information</div>
+                <div class="field-row"><span class="lbl">Delivery Note Number:</span> {{ $delivery_note_number }}</div>
+                <div class="field-row"><span class="lbl">Delivery Date:</span> {{ $delivery_date }}</div>
+                <div class="field-row"><span class="lbl">Carrier/Driver Name:</span> {{ $carrier_name }}</div>
+                <div class="field-row"><span class="lbl">Number:</span> {{ $driver_number }}</div>
+                <div class="field-row"><span class="lbl">Vehicle Plate Number:</span> {{ $vehicle_plate_number }}</div>
+            </td>
+            <td>
+                <div class="section-heading">Supplier Information</div>
+                <div class="field-row"><span class="lbl">Supplier Name:</span> {{ $supplier_name }}</div>
+                <div class="field-row"><span class="lbl">Supplier Address:</span></div>
+                <div style="white-space: pre-wrap; margin-top: 2px;">{{ $supplier_address }}</div>
+            </td>
+        </tr>
+    </table>
+
+    <div class="material-heading">Material Received Note</div>
+
     <table class="items-table">
         <thead>
             <tr>
-                <th class="col-num">#</th>
-                <th>Description</th>
-                <th class="col-qty">Qty</th>
-                <th class="col-unit">Unit</th>
+                <th class="col-item">Item</th>
+                <th class="col-desc">Description</th>
+                <th class="col-uom">UOM</th>
+                <th class="col-qty">Quantity<br>Ordered</th>
+                <th class="col-qty">Quantity<br>Received</th>
+                <th class="col-price">Unit Price (₦)</th>
+                <th class="col-total">Total</th>
             </tr>
         </thead>
         <tbody>
-            @foreach ($line_items as $index => $line)
+            @foreach ($line_items as $line)
                 <tr>
-                    <td class="col-num">{{ $index + 1 }}</td>
-                    <td>
-                        <strong>{{ $line['name'] }}</strong>
-                        @if (!empty($line['description']))
-                            <div style="margin-top:2px;">{{ $line['description'] }}</div>
-                        @endif
-                    </td>
-                    <td class="col-qty">{{ $line['quantity'] }}</td>
-                    <td class="col-unit">{{ $line['unit'] }}</td>
+                    <td class="col-item">{{ $line['item'] }}</td>
+                    <td class="col-desc">{{ $line['description'] }}</td>
+                    <td class="col-uom">{{ $line['uom'] }}</td>
+                    <td class="col-qty">{{ $line['quantity_ordered'] }}</td>
+                    <td class="col-qty">{{ $line['quantity_received'] }}</td>
+                    <td class="col-price">{{ $line['unit_price'] }}</td>
+                    <td class="col-total">{{ $line['total'] }}</td>
                 </tr>
             @endforeach
+            <tr class="comments-row">
+                <td colspan="7">
+                    <div class="comments-label">COMMENTS:</div>
+                    @if (!empty($comments))
+                        {!! nl2br(e($comments)) !!}
+                    @else
+                        <div class="sig-blank-line"></div>
+                    @endif
+                </td>
+            </tr>
         </tbody>
     </table>
 
-    @if (!empty($remarks))
-        <div class="notes-block">
-            <div class="lbl">Remarks</div>
-            <div>{!! nl2br(e($remarks)) !!}</div>
-        </div>
-    @endif
+    <div class="signatories-heading">Authorized signatories</div>
 
-    <table class="signature-row">
+    <table class="signatories-table">
         <tr>
             <td>
-                <div class="sig-line">Received By (Procurement)</div>
+                <div class="sig-block-title">Vendor (delivered by)</div>
+                <div class="sig-field"><span class="lbl">Name:</span> {{ $signatories['vendor_delivered']['name'] }}</div>
+                <div class="sig-field"><span class="lbl">Position:</span> {{ $signatories['vendor_delivered']['position'] }}</div>
+                <div class="sig-field"><span class="lbl">Sign/Date:</span> {{ $signatories['vendor_delivered']['sign_date'] }}</div>
+                <div class="sig-field"><span class="lbl">Phone:</span> {{ $signatories['vendor_delivered']['phone'] }}</div>
+                <div class="sig-field"><span class="lbl">Email:</span> {{ $signatories['vendor_delivered']['email'] }}</div>
             </td>
             <td>
-                <div class="sig-line">Verified By</div>
+                <div class="sig-block-title">Emerald (Received by)</div>
+                <div class="sig-field"><span class="lbl">Name:</span> {{ $signatories['emerald_received']['name'] }}</div>
+                <div class="sig-field"><span class="lbl">Position:</span> {{ $signatories['emerald_received']['position'] }}</div>
+                <div class="sig-field"><span class="lbl">Sign/Date:</span> {{ $signatories['emerald_received']['sign_date'] }}</div>
+                <div class="sig-field"><span class="lbl">Phone:</span> {{ $signatories['emerald_received']['phone'] }}</div>
+                <div class="sig-field"><span class="lbl">Email:</span> {{ $signatories['emerald_received']['email'] }}</div>
+            </td>
+        </tr>
+        <tr>
+            <td>
+                <div class="sig-block-title">Vendor (witnessed by)</div>
+                <div class="sig-field"><span class="lbl">Name:</span> {{ $signatories['vendor_witnessed']['name'] }}</div>
+                <div class="sig-field"><span class="lbl">Position:</span> {{ $signatories['vendor_witnessed']['position'] }}</div>
+                <div class="sig-field"><span class="lbl">Sign/Date:</span> {{ $signatories['vendor_witnessed']['sign_date'] }}</div>
+                <div class="sig-field"><span class="lbl">Phone:</span> {{ $signatories['vendor_witnessed']['phone'] }}</div>
+                <div class="sig-field"><span class="lbl">Email:</span> {{ $signatories['vendor_witnessed']['email'] }}</div>
+            </td>
+            <td>
+                <div class="sig-block-title">Emerald (supervised by)</div>
+                <div class="sig-field"><span class="lbl">Name:</span> {{ $signatories['emerald_supervised']['name'] }}</div>
+                <div class="sig-field"><span class="lbl">Position:</span> {{ $signatories['emerald_supervised']['position'] }}</div>
+                <div class="sig-field"><span class="lbl">Sign/Date:</span> {{ $signatories['emerald_supervised']['sign_date'] }}</div>
+                <div class="sig-field"><span class="lbl">Phone:</span> {{ $signatories['emerald_supervised']['phone'] }}</div>
+                <div class="sig-field"><span class="lbl">Email:</span> {{ $signatories['emerald_supervised']['email'] }}</div>
             </td>
         </tr>
     </table>

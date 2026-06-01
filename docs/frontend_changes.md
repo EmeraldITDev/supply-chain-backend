@@ -208,23 +208,48 @@ Returns `201` with document payload. Procurement roles only; allowed after PO si
 
 Generates a **preview GRN PDF** from MRF line items (not saved). Returns `application/pdf` inline.
 
-Optional query/body params: `remarks`, `grn_number`, `received_at`.
+**Also available:** `POST /api/mrfs/{id}/grn/preview` with the same body as generate (use after editing line quantities).
 
-**Frontend flow:** open preview in new tab or PDF viewer → user reviews → call generate.
+**Optional parameters** (query string for GET, JSON body for POST):
+
+| Field | Description |
+|-------|-------------|
+| `dateOfReceipt` / `receivedAt` | Date of receipt (default: today) |
+| `deliveryNoteNumber` | Delivery note reference (default: N/A) |
+| `deliveryDate` | Delivery date |
+| `carrierName` | Carrier/driver name (default: N/A) |
+| `driverNumber` | Driver contact number (default: N/A) |
+| `vehiclePlateNumber` | Vehicle plate (default: N/A) |
+| `comments` | Pre-fill comments row (optional) |
+| `lineItems[]` | Override `quantityReceived` per row before preview/generate |
+
+**GRN number format (auto on preview):** `GRN-{MRF_ID}-{YYYY}-{sequence}` (e.g. `GRN-MRF-OANDO-PRC-MAIN-2026-029-2026-001`)
+
+**Layout:** Emerald logo top-left, "GOODS RECEIVED NOTE" top-right, delivery/supplier columns, material table with pricing from approved quotation, comments row, 2×2 authorized signatories block.
+
+**Frontend flow:** preview PDF → edit quantities in UI → POST preview again or POST generate with overrides.
 
 ---
 
 ### `POST /api/mrfs/{id}/grn/generate`
 
-Generates the same GRN PDF and **saves to document registry** after PM confirmation.
+Generates the GRN PDF and **saves to document registry** after PM confirmation.
 
 **Body:**
 
 ```json
 {
   "confirm": true,
-  "remarks": "Received in good condition",
-  "grnNumber": "GRN-PO-123-20260531"
+  "dateOfReceipt": "2026-02-02",
+  "deliveryNoteNumber": "DN-001",
+  "deliveryDate": "2026-04-10",
+  "carrierName": "N/A",
+  "driverNumber": "N/A",
+  "vehiclePlateNumber": "N/A",
+  "comments": "",
+  "lineItems": [
+    { "index": 0, "quantityReceived": 1 }
+  ]
 }
 ```
 

@@ -71,7 +71,8 @@ class GRNController extends Controller
         }
 
         try {
-            $pdf = $this->grnPdfService->renderPdf($mrf, $this->grnOptionsFromRequest($request));
+            $options = $this->grnOptionsFromRequest($request);
+            $pdf = $this->grnPdfService->renderPdf($mrf, $user, $options);
             $fileName = 'grn_preview_' . ($mrf->mrf_id ?? $id) . '.pdf';
 
             return response($pdf, 200, [
@@ -118,8 +119,29 @@ class GRNController extends Controller
 
         $validator = Validator::make($request->all(), [
             'remarks' => 'nullable|string|max:2000',
+            'comments' => 'nullable|string|max:2000',
             'grn_number' => 'nullable|string|max:100',
+            'grnNumber' => 'nullable|string|max:100',
             'received_at' => 'nullable|date',
+            'receivedAt' => 'nullable|date',
+            'date_of_receipt' => 'nullable|date',
+            'delivery_note_number' => 'nullable|string|max:100',
+            'deliveryNoteNumber' => 'nullable|string|max:100',
+            'delivery_date' => 'nullable|date',
+            'deliveryDate' => 'nullable|date',
+            'carrier_name' => 'nullable|string|max:255',
+            'carrierName' => 'nullable|string|max:255',
+            'driver_number' => 'nullable|string|max:100',
+            'driverNumber' => 'nullable|string|max:100',
+            'vehicle_plate_number' => 'nullable|string|max:50',
+            'vehiclePlateNumber' => 'nullable|string|max:50',
+            'line_items' => 'nullable|array',
+            'line_items.*.index' => 'nullable|integer|min:0',
+            'line_items.*.item' => 'nullable|integer|min:1',
+            'line_items.*.quantity_received' => 'nullable|numeric|min:0',
+            'line_items.*.quantityReceived' => 'nullable|numeric|min:0',
+            'line_items.*.unit_price' => 'nullable|numeric|min:0',
+            'line_items.*.unitPrice' => 'nullable|numeric|min:0',
             'confirm' => 'nullable|boolean',
         ]);
 
@@ -142,7 +164,7 @@ class GRNController extends Controller
 
         try {
             $options = $this->grnOptionsFromRequest($request);
-            $pdf = $this->grnPdfService->renderPdf($mrf, $options);
+            $pdf = $this->grnPdfService->renderPdf($mrf, $user, $options);
             $grnNumber = (string) ($options['grn_number'] ?? $this->grnPdfService->defaultGrnNumber($mrf));
             $fileName = $grnNumber . '.pdf';
 
@@ -340,11 +362,21 @@ class GRNController extends Controller
      */
     private function grnOptionsFromRequest(Request $request): array
     {
-        return array_filter([
+        $options = [
             'remarks' => $request->input('remarks'),
+            'comments' => $request->input('comments'),
             'grn_number' => $request->input('grn_number') ?? $request->input('grnNumber'),
-            'received_at' => $request->input('received_at') ?? $request->input('receivedAt'),
-        ], fn ($value) => $value !== null && $value !== '');
+            'received_at' => $request->input('received_at') ?? $request->input('receivedAt') ?? $request->input('date_of_receipt'),
+            'date_of_receipt' => $request->input('date_of_receipt') ?? $request->input('received_at') ?? $request->input('receivedAt'),
+            'delivery_note_number' => $request->input('delivery_note_number') ?? $request->input('deliveryNoteNumber'),
+            'delivery_date' => $request->input('delivery_date') ?? $request->input('deliveryDate'),
+            'carrier_name' => $request->input('carrier_name') ?? $request->input('carrierName') ?? $request->input('carrier_driver_name'),
+            'driver_number' => $request->input('driver_number') ?? $request->input('driverNumber') ?? $request->input('carrier_number'),
+            'vehicle_plate_number' => $request->input('vehicle_plate_number') ?? $request->input('vehiclePlateNumber'),
+            'line_items' => $request->input('line_items') ?? $request->input('lineItems'),
+        ];
+
+        return array_filter($options, fn ($value) => $value !== null && $value !== '');
     }
 
     private function transitionAfterGrnSaved(MRF $mrf, $user): void
