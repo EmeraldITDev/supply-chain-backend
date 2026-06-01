@@ -1091,7 +1091,7 @@ class MRFController extends Controller
         $procurementAuthors = ['procurement_manager', 'procurement'];
         $privilegedAuthors = array_merge($logisticsAuthors, $procurementAuthors);
         $isPrivilegedAuthor = in_array($user->role, $privilegedAuthors, true);
-        $isDepartmentEmployee = $user->role === 'employee';
+        $isDepartmentEmployee = in_array($user->role, ['employee', 'staff', 'regular_staff'], true);
 
         if (!$isPrivilegedAuthor && !$isDepartmentEmployee) {
             return response()->json([
@@ -1103,7 +1103,7 @@ class MRFController extends Controller
         // Department employees still need to be the designated requisition
         // creator. Logistics authors are department-managed: any logistics
         // manager/officer may originate an MRF.
-        if ($isDepartmentEmployee && !$user->designated_requisition_creator) {
+        if ($isDepartmentEmployee && ! $user->designated_requisition_creator) {
             return response()->json([
                 'success' => false,
                 'error' => 'You are not authorised to create requisition requests for your department.',

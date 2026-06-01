@@ -396,6 +396,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::delete('/users/{id}', [\App\Http\Controllers\Api\UserManagementController::class, 'destroy']);
     Route::post('/users/{id}/signature', [\App\Http\Controllers\Api\UserManagementController::class, 'uploadSignature']);
     Route::delete('/users/{id}/signature', [\App\Http\Controllers\Api\UserManagementController::class, 'deleteSignature']);
+    Route::get('/departments/requisition-creators', [\App\Http\Controllers\Api\UserManagementController::class, 'listRequisitionCreators']);
     Route::put('/departments/{department}/requisition-creator', [\App\Http\Controllers\Api\UserManagementController::class, 'assignRequisitionCreator']);
     Route::post('/mrfs/{id}/workflow-reject', [\App\Http\Controllers\Api\MRFWorkflowController::class, 'rejectMRF']);
     Route::post('/admin/backfill-vendor-profiles', [\App\Http\Controllers\Api\VendorController::class, 'backfillProfiles'])

@@ -181,7 +181,7 @@ class SRFController extends Controller
 
         $logisticsAuthors = ['logistics_manager', 'logistics_officer'];
         $isLogisticsAuthor = in_array($user->role, $logisticsAuthors, true);
-        $isDepartmentEmployee = $user->role === 'employee';
+        $isDepartmentEmployee = in_array($user->role, ['employee', 'staff', 'regular_staff'], true);
 
         if (!$isLogisticsAuthor && !$isDepartmentEmployee) {
             return response()->json([

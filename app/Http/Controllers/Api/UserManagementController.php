@@ -5,8 +5,10 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\User;
 use App\Services\PermissionService;
+use App\Support\DepartmentMatcher;
 use App\Support\SignatureUrls;
 use App\Support\UserRoleNormalizer;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\Hash;
@@ -330,16 +332,87 @@ class UserManagementController extends Controller
         ]);
     }
 
+    /**
+     * List departments and each designated requisition creator (for Settings UI).
+     */
+    public function listRequisitionCreators(Request $request)
+    {
+        $user = $request->user();
+        if (! $this->permissionService->canManageUsers($user)) {
+            return response()->json([
+                'success' => false,
+                'error' => 'You do not have permission to view requisition creator settings',
+                'code' => 'FORBIDDEN',
+            ], 403);
+        }
+
+        $departmentNames = collect();
+
+        if (\Illuminate\Support\Facades\Schema::hasTable('department_codes')) {
+            $departmentNames = $departmentNames->merge(
+                DB::table('department_codes')->orderBy('department_name')->pluck('department_name')
+            );
+        }
+
+        $departmentNames = $departmentNames
+            ->merge(User::query()->whereNotNull('department')->where('department', '!=', '')->distinct()->pluck('department'))
+            ->map(fn ($name) => trim((string) $name))
+            ->filter()
+            ->unique(fn ($name) => DepartmentMatcher::normalizeKey($name))
+            ->sort()
+            ->values();
+
+        $allUsers = User::query()
+            ->whereIn('role', ['employee', 'staff', 'regular_staff'])
+            ->orderBy('name')
+            ->get(['id', 'name', 'email', 'department', 'designated_requisition_creator']);
+
+        $items = $departmentNames->map(function (string $departmentLabel) use ($allUsers) {
+            $members = $allUsers->filter(
+                fn (User $u) => DepartmentMatcher::matches($u->department, $departmentLabel)
+            )->values();
+
+            $designated = $members->first(
+                fn (User $u) => (bool) $u->designated_requisition_creator
+            );
+
+            return [
+                'department' => $departmentLabel,
+                'canonicalDepartment' => DepartmentMatcher::canonicalName($departmentLabel),
+                'designatedCreator' => $designated ? [
+                    'id' => $designated->id,
+                    'name' => $designated->name,
+                    'email' => $designated->email,
+                    'department' => $designated->department,
+                ] : null,
+                'members' => $members->map(fn (User $u) => [
+                    'id' => $u->id,
+                    'name' => $u->name,
+                    'email' => $u->email,
+                    'department' => $u->department,
+                    'designated_requisition_creator' => (bool) $u->designated_requisition_creator,
+                ])->values()->all(),
+            ];
+        });
+
+        return response()->json([
+            'success' => true,
+            'data' => $items->values()->all(),
+        ]);
+    }
+
     public function assignRequisitionCreator(Request $request, string $department)
     {
         $user = $request->user();
-        if (!$this->permissionService->canManageUsers($user)) {
+        if (! $this->permissionService->canManageUsers($user)) {
             return response()->json([
                 'success' => false,
                 'error' => 'You do not have permission to assign requisition creators',
-                'code' => 'FORBIDDEN'
+                'code' => 'FORBIDDEN',
             ], 403);
         }
+
+        $departmentLabel = DepartmentMatcher::decodeRouteLabel($department);
 
         $validator = Validator::make($request->all(), [
             'user_id' => 'required|integer|exists:users,id',
@@ -350,29 +423,47 @@ class UserManagementController extends Controller
                 'success' => false,
                 'error' => 'Validation failed',
                 'errors' => $validator->errors(),
-                'code' => 'VALIDATION_ERROR'
+                'code' => 'VALIDATION_ERROR',
             ], 422);
         }
 
         $targetUser = User::find($request->integer('user_id'));
-        if (!$targetUser || strcasecmp((string) $targetUser->department, (string) $department) !== 0) {
+        if (! $targetUser || ! DepartmentMatcher::matches($targetUser->department, $departmentLabel)) {
             return response()->json([
                 'success' => false,
                 'error' => 'Selected user must belong to the requested department.',
-                'code' => 'VALIDATION_ERROR'
+                'code' => 'DEPARTMENT_MISMATCH',
+                'details' => [
+                    'requestedDepartment' => $departmentLabel,
+                    'userDepartment' => $targetUser?->department,
+                ],
             ], 422);
         }
 
-        User::whereRaw('LOWER(department) = ?', [strtolower($department)])
-            ->update(['designated_requisition_creator' => false]);
+        if (! in_array($targetUser->role, ['employee', 'staff', 'regular_staff'], true)) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Only staff in the employee role group can be designated requisition creators.',
+                'code' => 'INVALID_ROLE',
+            ], 422);
+        }
 
+        $memberIds = DepartmentMatcher::matchingUserIds($departmentLabel);
+        if ($memberIds !== []) {
+            User::query()
+                ->whereIn('id', $memberIds)
+                ->update(['designated_requisition_creator' => false]);
+        }
+
+        $targetUser->refresh();
         $targetUser->update(['designated_requisition_creator' => true]);
 
         return response()->json([
             'success' => true,
             'message' => 'Designated requisition creator updated.',
             'data' => [
-                'department' => $department,
+                'department' => $departmentLabel,
+                'canonicalDepartment' => DepartmentMatcher::canonicalName($departmentLabel),
                 'designated_creator' => [
                     'id' => $targetUser->id,
                     'name' => $targetUser->name,
