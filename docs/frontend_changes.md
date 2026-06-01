@@ -665,3 +665,7 @@ Query params (where applicable): `from`, `to` (dates), `limit` (list endpoints, 
 | GET | `/api/reports/finance-ap/cycle-times` | Avg days PO signed → first milestone paid; PO signed → closed |
 
 **UI:** Finance / procurement dashboards — cards from `summary`, tables from `outstanding-milestones` and `advance-delivery-risk`, KPI strip from `cycle-times`. Scope is post-cutover Finance AP cohort only (`FINANCE_AP_CUTOVER_DATE`).
+
+**Report responses (all four endpoints):** include `cutoverDate` and `routingConfigured` (same semantics as `GET /api/dashboard/finance` → `routing`). When `routingConfigured` is `false`, cohort queries return empty/zero totals — show the cutover warning in UI.
+
+**Backend:** Implemented in `MrfProgressTrackerService`, `FinanceApReportController`, and `FinanceApReportingService` (commit `144ece2` and follow-ups).

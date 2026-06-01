@@ -61,9 +61,8 @@ class FinanceApReportingService
 
         $outstanding = $this->outstandingMilestoneBalance($mrfIds);
 
-        return [
+        return array_merge($this->reportContext(), [
             'period' => ['from' => $from?->toDateString(), 'to' => $to?->toDateString()],
-            'cutoverDate' => $this->routing->cutoverDate()?->toDateString(),
             'totals' => [
                 'financeApMrfs' => $totalCases,
                 'packagePushed' => $packagePushed,
@@ -77,7 +76,7 @@ class FinanceApReportingService
                 'outstandingMilestoneBalance' => $outstanding['totalAmount'],
                 'outstandingMilestoneCount' => $outstanding['count'],
             ],
-        ];
+        ]);
     }
 
     /**
@@ -112,10 +111,11 @@ class FinanceApReportingService
             ];
         });
 
-        return [
+        return array_merge($this->reportContext(), [
+            'period' => ['from' => $from?->toDateString(), 'to' => $to?->toDateString()],
             'items' => $rows->values()->all(),
             'totalOutstanding' => (float) $rows->sum('amount'),
-        ];
+        ]);
     }
 
     /**
@@ -167,7 +167,10 @@ class FinanceApReportingService
             }
         }
 
-        return ['items' => $items, 'count' => count($items)];
+        return array_merge($this->reportContext(), [
+            'items' => $items,
+            'count' => count($items),
+        ]);
     }
 
     /**
@@ -201,13 +204,24 @@ class FinanceApReportingService
             }
         }
 
-        return [
+        return array_merge($this->reportContext(), [
             'period' => ['from' => $from?->toDateString(), 'to' => $to?->toDateString()],
             'sampleSize' => $mrfs->count(),
             'avgDaysPoSignedToFirstMilestonePaid' => $poToFirstPayment !== []
                 ? round(array_sum($poToFirstPayment) / count($poToFirstPayment), 1) : null,
             'avgDaysPoSignedToClosed' => $poToClosed !== []
                 ? round(array_sum($poToClosed) / count($poToClosed), 1) : null,
+        ]);
+    }
+
+    /**
+     * @return array{cutoverDate: ?string, routingConfigured: bool}
+     */
+    private function reportContext(): array
+    {
+        return [
+            'cutoverDate' => $this->routing->cutoverDate()?->toDateString(),
+            'routingConfigured' => $this->routing->isRoutingConfigured(),
         ];
     }
 
