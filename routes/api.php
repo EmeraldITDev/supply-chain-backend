@@ -63,6 +63,13 @@ Route::get('/', function () {
     ]);
 });
 
+// Finance AP integration (machine auth, no session)
+Route::prefix('v1/integrations/scm')->middleware('finance_ap.integration')->group(function () {
+    Route::get('/documents/{scm_transaction_id}/{document_id}', [\App\Http\Controllers\Api\FinanceApIntegrationDocumentController::class, 'show']);
+});
+
+Route::post('/webhooks/finance-ap', [\App\Http\Controllers\Api\FinanceApWebhookController::class, 'handle']);
+
 // Public routes
 Route::get('/cors-test', function () {
     return response()->json([
@@ -367,6 +374,7 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // GRN endpoints
     Route::get('/mrfs/{id}/workflow-gates', [\App\Http\Controllers\Api\WorkflowGateController::class, 'show']);
+    Route::get('/mrfs/{id}/finance-sync', [\App\Http\Controllers\Api\FinanceSyncController::class, 'show']);
     Route::get('/mrfs/{id}/delivery-confirmation', [\App\Http\Controllers\Api\DeliveryConfirmationController::class, 'show']);
     Route::get('/mrfs/{id}/grn/preview', [\App\Http\Controllers\Api\GRNController::class, 'previewGrn']);
     Route::post('/mrfs/{id}/grn/preview', [\App\Http\Controllers\Api\GRNController::class, 'previewGrn']);

@@ -137,6 +137,9 @@ class MRF extends Model
         'invoice_approved_at',
         'invoice_remarks',
         'expected_delivery_date',
+        'scm_transaction_id',
+        'finance_ap_case_id',
+        'finance_ap_status',
     ];
 
     protected $casts = [

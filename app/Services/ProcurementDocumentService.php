@@ -264,6 +264,13 @@ class ProcurementDocumentService
         ];
     }
 
+    public function refreshFileUrl(string $filePath, ?string $disk = null): string
+    {
+        $disk ??= config('filesystems.documents_disk', env('DOCUMENTS_DISK', 's3'));
+
+        return $this->fileUrl($filePath, $disk);
+    }
+
     private function fileUrl(string $filePath, string $disk): string
     {
         if ($disk === 's3') {

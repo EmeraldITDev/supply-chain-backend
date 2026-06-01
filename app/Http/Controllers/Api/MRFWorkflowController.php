@@ -2251,6 +2251,14 @@ class MRFWorkflowController extends Controller
             ], 404);
         }
 
+        if (mrfUsesFinanceAp($mrf)) {
+            return response()->json([
+                'success' => false,
+                'error' => 'This MRF is processed through Finance AP. Use the Finance AP platform for milestone payments.',
+                'code' => 'FINANCE_AP_ROUTED',
+            ], 422);
+        }
+
         // Check if MRF is in finance status
         if ($mrf->status !== 'finance') {
             return response()->json([
@@ -2308,6 +2316,14 @@ class MRFWorkflowController extends Controller
                 'error' => 'MRF not found',
                 'code' => 'NOT_FOUND'
             ], 404);
+        }
+
+        if (mrfUsesFinanceAp($mrf)) {
+            return response()->json([
+                'success' => false,
+                'error' => 'This MRF is processed through Finance AP. Payment approval happens in Finance AP.',
+                'code' => 'FINANCE_AP_ROUTED',
+            ], 422);
         }
 
         // Check if MRF is in chairman_payment status

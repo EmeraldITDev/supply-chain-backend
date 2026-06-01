@@ -33,6 +33,7 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->alias([
             'role' => \App\Http\Middleware\EnsureRole::class,
             'permission' => \App\Http\Middleware\EnsurePermission::class,
+            'finance_ap.integration' => \App\Http\Middleware\VerifyFinanceApIntegrationKey::class,
         ]);
 
         $middleware->api(prepend: [

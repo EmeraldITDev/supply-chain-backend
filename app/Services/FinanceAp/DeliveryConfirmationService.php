@@ -174,6 +174,8 @@ class DeliveryConfirmationService
             'mrf_id' => $mrf->mrf_id,
         ]);
 
+        app(FinanceApWorkflowOrchestrator::class)->attemptFinanceApPush($mrf, $user);
+
         return true;
     }
 

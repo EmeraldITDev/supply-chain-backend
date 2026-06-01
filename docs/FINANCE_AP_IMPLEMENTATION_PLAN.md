@@ -417,7 +417,27 @@ The vendor portal must expose the Upload Invoice action only when `VendorInvoice
 
 ## Phase 6 — Finance AP integration
 
-**Goal:** `FinanceIntegrationService` + webhooks + delta sync.
+**Goal:** Connect SCM to the **existing** Finance AP platform (`financeap-backend` + `EmeraldFinanceAP` frontend) via REST push, webhooks, and document refresh — **not** build Finance AP from scratch.
+
+**Authoritative cross-system spec:** `docs/FINANCE_AP_SIDE_SCM_INTEGRATION.md` (copied to `financeap-backend/docs/`). Integration decisions are **locked** (2026-05-31); implementation not started.
+
+### Locked decisions (summary)
+
+| Topic | Decision |
+|-------|----------|
+| Finance AP cases | SCM push creates **SCM case only** — no auto `purchase_orders` / `invoices` |
+| Payments | Existing Finance AP `payment_requests` + `approval_thresholds` per milestone |
+| Documents | Pull + **cache** on ingest/delta; SCM **document refresh** when signed URLs expire |
+| Vendors | SCM master; `vendor_scm_mappings` on Finance AP |
+| PO numbers | Cross-reference only; independent numbering per system |
+| Ingest status | `pending_review` — Account Officer review, Finance Manager approval (no auto-approve) |
+
+### Environment URLs
+
+| | URL |
+|---|-----|
+| SCM → Finance AP (`FINANCE_AP_BASE_URL`) | `https://financeap-backend.onrender.com` |
+| Finance AP → SCM webhooks | `https://supply-chain-backend-hwh6.onrender.com/api/webhooks/finance-ap` |
 
 ### 6.1 Persistence
 
@@ -462,12 +482,18 @@ The approvals summary must **never** include an individual user's name or email 
 
 ### 6.3 Config
 
-- [ ] `config/finance_ap.php`: base URL, webhook secret, API key, queue name, retry policy.
+- [ ] `config/finance_ap.php`: `base_url` = `https://financeap-backend.onrender.com`, webhook secret, API key, queue name, retry policy.
+- [ ] SCM webhook route: `POST /api/webhooks/finance-ap` (see integration doc).
 
-### 6.4 Frontend (monitor role)
+### 6.4 SCM frontend (monitor role)
 
 - [ ] Finance dashboard: sync status, last event, milestone payment progress, link to Finance AP case (if URL provided).
 - [ ] No “Process Payment” button when `mrfUsesFinanceAp($mrf)` is true.
+
+### 6.5 Finance AP frontend (`EmeraldFinanceAP`)
+
+- [ ] Nav item **“SCM Cases”** (Account Officer + Finance Manager only) from `GET /api/v1/me` `navigation`.
+- [ ] List/detail: documents (cached), milestones, status; manual PO/invoice link optional.
 
 ---
 

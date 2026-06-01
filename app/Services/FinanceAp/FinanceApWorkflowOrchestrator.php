@@ -4,6 +4,7 @@ namespace App\Services\FinanceAp;
 
 use App\Models\MRF;
 use App\Models\User;
+use App\Services\Finance\FinanceIntegrationService;
 use App\Services\PaymentScheduleService;
 use App\Services\WorkflowStateService;
 use Illuminate\Support\Facades\Log;
@@ -15,6 +16,7 @@ class FinanceApWorkflowOrchestrator
         private DeliveryConfirmationService $deliveryConfirmationService,
         private ClosureReadinessService $closureReadinessService,
         private WorkflowStateService $workflowStateService,
+        private FinanceIntegrationService $financeIntegrationService,
     ) {
     }
 
@@ -55,10 +57,35 @@ class FinanceApWorkflowOrchestrator
 
         $this->workflowStateService->transition($mrf, $nextState, $user);
 
+        $mrf->refresh();
+
+        if ($nextState === WorkflowStateService::STATE_FINANCE_HANDOFF_PENDING) {
+            $this->attemptFinanceApPush($mrf, $user);
+        }
+
         Log::info('Finance AP post-PO routing applied', [
             'mrf_id' => $mrf->mrf_id,
             'next_state' => $nextState,
         ]);
+    }
+
+    public function attemptFinanceApPush(MRF $mrf, ?User $user = null): void
+    {
+        if (! mrfUsesFinanceAp($mrf)) {
+            return;
+        }
+
+        $mrf->refresh();
+
+        if (($mrf->workflow_state ?? null) !== WorkflowStateService::STATE_FINANCE_HANDOFF_PENDING) {
+            return;
+        }
+
+        if ($this->financeIntegrationService->hasPackageBeenPushed($mrf)) {
+            return;
+        }
+
+        $this->financeIntegrationService->pushPackage($mrf, null, $user);
     }
 
     public function afterOperationalDocumentChanged(MRF $mrf, User $user): void

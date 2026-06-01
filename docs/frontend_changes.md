@@ -514,6 +514,59 @@ Also exposed on `GET /api/mrfs/{id}/available-actions`:
 
 ---
 
-## Phase 6+ (pending)
+## Phase 6 — Finance AP integration (SCM backend)
 
-Document Finance AP integration, cutover routing, and dashboard endpoints here as they are implemented.
+Cross-system contract: `docs/FINANCE_AP_SIDE_SCM_INTEGRATION.md`.
+
+| | Production URL |
+|---|----------------|
+| SCM pushes to Finance AP | `https://financeap-backend.onrender.com` |
+| Finance AP webhooks to SCM | `POST /api/webhooks/finance-ap` |
+| Finance AP document refresh | `GET /api/v1/integrations/scm/documents/{scm_transaction_id}/{document_id}` (machine auth) |
+
+### MRF fields (Finance AP routing)
+
+| Field | Description |
+|-------|-------------|
+| `finance_ap_case_id` | Set after successful package push |
+| `finance_ap_status` | Mirror of Finance AP case status (`pending_review`, `in_review`, `rejected`, `rfi`, `closed`, …) |
+
+### `GET /api/mrfs/{id}/finance-sync`
+
+Auth: Sanctum (same as other MRF detail endpoints).
+
+**Response `data`:**
+
+| Field | Description |
+|-------|-------------|
+| `usesFinanceAp` | Cutover routing |
+| `financeApCaseId` | Finance AP case id when pushed |
+| `financeApStatus` | Last known FA status |
+| `packagePushed` | `true` when `financeApCaseId` is set |
+| `integrationConfigured` | SCM has `FINANCE_AP_BASE_URL` + `FINANCE_AP_API_KEY` |
+| `financeApBaseUrl` | Configured FA base URL |
+| `lastOutbound` / `lastInbound` | Latest sync event summary |
+| `recentEvents` | Last 20 rows from `finance_sync_events` |
+
+**UI:** Finance monitor dashboard — show sync status, last event, link to Finance AP case when available. **Hide** “Process Payment” / chairman payment actions when `usesFinanceAp === true` (API returns `422` `FINANCE_AP_ROUTED` on those endpoints).
+
+### Internal payment endpoints (post-cutover MRFs)
+
+| Endpoint | When blocked |
+|----------|----------------|
+| `POST /api/mrfs/{id}/process-payment` | `mrfUsesFinanceAp(mrf)` |
+| `POST /api/mrfs/{id}/approve-payment` | `mrfUsesFinanceAp(mrf)` |
+
+Error: `422`, `code`: `FINANCE_AP_ROUTED`.
+
+### Automatic package push
+
+When workflow reaches `finance_handoff_pending`, SCM calls Finance AP `POST /api/v1/integrations/scm/packages` (if integration configured and not already pushed). After vendor invoice post-push, delta sync runs automatically (`vendor_invoice_submitted`).
+
+**Finance AP (separate repos):** SCM cases ingest API, pull/cache documents, outbound webhooks, **SCM Cases** UI in `EmeraldFinanceAP`.
+
+---
+
+## Phase 7+ (pending)
+
+Document cutover routing and dashboard/reporting endpoints here as they are implemented.
