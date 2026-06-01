@@ -566,9 +566,9 @@ class MrfProgressTrackerService
     private function firstQuotationReceivedAt(MRF $mrf): ?string
     {
         $first = $mrf->quotations()
-            ->whereIn('status', ['submitted', 'approved', 'selected'])
-            ->oldest()
-            ->value('created_at');
+            ->whereIn('quotations.status', ['submitted', 'approved', 'selected'])
+            ->orderBy('quotations.created_at')
+            ->value('quotations.created_at');
 
         return $first ? \Carbon\Carbon::parse($first)->toIso8601String() : null;
     }

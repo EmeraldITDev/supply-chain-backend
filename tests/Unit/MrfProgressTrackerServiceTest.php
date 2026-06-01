@@ -77,6 +77,20 @@ class MrfProgressTrackerServiceTest extends TestCase
         $this->assertSame('2026-06-10T12:00:00+00:00', $payload['stageTimestamps']['vendor_invoice_submitted_at']);
     }
 
+    public function test_quotations_timestamp_query_qualifies_joined_columns(): void
+    {
+        $mrf = new MRF(['id' => 175]);
+
+        $sql = $mrf->quotations()
+            ->whereIn('quotations.status', ['submitted', 'approved', 'selected'])
+            ->orderBy('quotations.created_at')
+            ->toSql();
+
+        $this->assertStringContainsString('quotations.created_at', $sql);
+        $this->assertStringContainsString('quotations.status', $sql);
+        $this->assertDoesNotMatchRegularExpression('/order by ["`]?created_at["`]?\s/i', $sql);
+    }
+
     public function test_payment_phase_includes_milestone_rows(): void
     {
         $mrf = $this->financeApMrf([
