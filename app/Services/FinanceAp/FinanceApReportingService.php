@@ -1,0 +1,247 @@
+<?php
+
+namespace App\Services\FinanceAp;
+
+use App\Models\FinanceSyncEvent;
+use App\Models\MRF;
+use App\Models\PaymentMilestone;
+use App\Services\Finance\FinanceRoutingService;
+use App\Services\PaymentScheduleService;
+use App\Services\WorkflowStateService;
+use Carbon\Carbon;
+
+class FinanceApReportingService
+{
+    public function __construct(
+        private FinanceRoutingService $routing,
+        private PaymentScheduleService $paymentScheduleService,
+        private DeliveryConfirmationService $deliveryConfirmationService,
+    ) {
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function summary(?Carbon $from, ?Carbon $to): array
+    {
+        $cohort = MRF::query()->tap(fn ($q) => $this->routing->scopeFinanceApCohort($q));
+        $this->applyDateRange($cohort, $from, $to, 'created_at');
+
+        $mrfIds = (clone $cohort)->pluck('id');
+
+        $totalCases = (clone $cohort)->count();
+        $packagePushed = (clone $cohort)->whereNotNull('finance_ap_case_id')->count();
+        $inHandoff = (clone $cohort)->where('workflow_state', WorkflowStateService::STATE_FINANCE_HANDOFF_PENDING)->count();
+        $inReview = (clone $cohort)->whereIn('workflow_state', [
+            WorkflowStateService::STATE_FINANCE_IN_REVIEW,
+            WorkflowStateService::STATE_MILESTONE_PAYMENT_IN_PROGRESS,
+        ])->count();
+        $closed = (clone $cohort)->whereIn('workflow_state', [
+            WorkflowStateService::STATE_CLOSED,
+            WorkflowStateService::STATE_OPERATIONALLY_COMPLETE,
+        ])->count();
+
+        $rejected = FinanceSyncEvent::query()
+            ->whereIn('mrf_id', $mrfIds)
+            ->where('direction', FinanceSyncEvent::DIRECTION_INBOUND)
+            ->where('event_type', 'rejected')
+            ->where('status', FinanceSyncEvent::STATUS_SUCCESS)
+            ->when($from, fn ($q) => $q->where('created_at', '>=', $from))
+            ->when($to, fn ($q) => $q->where('created_at', '<=', $to))
+            ->count();
+
+        $rfi = FinanceSyncEvent::query()
+            ->whereIn('mrf_id', $mrfIds)
+            ->where('direction', FinanceSyncEvent::DIRECTION_INBOUND)
+            ->where('event_type', 'rfi_raised')
+            ->where('status', FinanceSyncEvent::STATUS_SUCCESS)
+            ->when($from, fn ($q) => $q->where('created_at', '>=', $from))
+            ->when($to, fn ($q) => $q->where('created_at', '<=', $to))
+            ->count();
+
+        $outstanding = $this->outstandingMilestoneBalance($mrfIds);
+
+        return [
+            'period' => ['from' => $from?->toDateString(), 'to' => $to?->toDateString()],
+            'cutoverDate' => $this->routing->cutoverDate()?->toDateString(),
+            'totals' => [
+                'financeApMrfs' => $totalCases,
+                'packagePushed' => $packagePushed,
+                'financeHandoffPending' => $inHandoff,
+                'inReviewOrPaying' => $inReview,
+                'closedOrComplete' => $closed,
+                'financeApRejections' => $rejected,
+                'financeApRfiRaised' => $rfi,
+                'rejectionRate' => $packagePushed > 0 ? round($rejected / $packagePushed, 4) : 0,
+                'rfiRate' => $packagePushed > 0 ? round($rfi / $packagePushed, 4) : 0,
+                'outstandingMilestoneBalance' => $outstanding['totalAmount'],
+                'outstandingMilestoneCount' => $outstanding['count'],
+            ],
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function outstandingMilestones(?Carbon $from, ?Carbon $to, int $limit = 50): array
+    {
+        $query = PaymentMilestone::query()
+            ->with(['schedule.mrf'])
+            ->whereNotIn('status', [PaymentMilestone::STATUS_PAID, PaymentMilestone::STATUS_COMPLETE])
+            ->whereHas('schedule.mrf', function ($q) use ($from, $to) {
+                $this->routing->scopeFinanceApCohort($q);
+                $this->applyDateRange($q, $from, $to, 'created_at');
+            })
+            ->orderByDesc('amount')
+            ->limit($limit);
+
+        $rows = $query->get()->map(function (PaymentMilestone $milestone) {
+            $mrf = $milestone->schedule?->mrf;
+
+            return [
+                'mrfId' => $mrf?->mrf_id,
+                'formattedId' => $mrf?->formatted_id,
+                'milestoneId' => $milestone->id,
+                'milestoneNumber' => $milestone->milestone_number,
+                'label' => $milestone->label,
+                'amount' => (float) ($milestone->amount ?? 0),
+                'percentage' => (float) $milestone->percentage,
+                'status' => $milestone->status,
+                'workflowState' => $mrf?->workflow_state,
+                'financeApCaseId' => $mrf?->finance_ap_case_id,
+            ];
+        });
+
+        return [
+            'items' => $rows->values()->all(),
+            'totalOutstanding' => (float) $rows->sum('amount'),
+        ];
+    }
+
+    /**
+     * Advance paid (or in progress) but delivery documents still missing.
+     *
+     * @return array<string, mixed>
+     */
+    public function advanceDeliveryRisk(int $limit = 50): array
+    {
+        $items = [];
+
+        $mrfs = MRF::query()
+            ->tap(fn ($q) => $this->routing->scopeFinanceApCohort($q))
+            ->whereNotNull('signed_po_url')
+            ->with(['paymentSchedule.milestones'])
+            ->orderByDesc('updated_at')
+            ->limit(200)
+            ->get();
+
+        foreach ($mrfs as $mrf) {
+            $schedule = $mrf->paymentSchedule;
+            if (! $schedule || ! $this->paymentScheduleService->hasAdvanceMilestone($schedule)) {
+                continue;
+            }
+
+            $evaluation = $this->deliveryConfirmationService->evaluate($mrf);
+            if ($evaluation['satisfied'] || ! $this->paymentScheduleService->requiresDeliveryConfirmationStage($schedule)) {
+                continue;
+            }
+
+            $advancePaid = $schedule->milestones
+                ->contains(fn (PaymentMilestone $m) => $m->trigger_condition === PaymentMilestone::TRIGGER_ON_ADVANCE
+                    && in_array($m->status, [PaymentMilestone::STATUS_PAID, PaymentMilestone::STATUS_COMPLETE], true));
+
+            if (! $advancePaid && $mrf->workflow_state !== WorkflowStateService::STATE_MILESTONE_PAYMENT_IN_PROGRESS) {
+                continue;
+            }
+
+            $items[] = [
+                'mrfId' => $mrf->mrf_id,
+                'formattedId' => $mrf->formatted_id,
+                'workflowState' => $mrf->workflow_state,
+                'missingDocuments' => $evaluation['missingDocuments'],
+                'advancePaid' => $advancePaid,
+            ];
+
+            if (count($items) >= $limit) {
+                break;
+            }
+        }
+
+        return ['items' => $items, 'count' => count($items)];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function cycleTimes(?Carbon $from, ?Carbon $to): array
+    {
+        $mrfs = MRF::query()
+            ->tap(fn ($q) => $this->routing->scopeFinanceApCohort($q))
+            ->whereNotNull('po_signed_at')
+            ->when($from, fn ($q) => $q->where('created_at', '>=', $from))
+            ->when($to, fn ($q) => $q->where('created_at', '<=', $to))
+            ->with(['paymentSchedule.milestones'])
+            ->get();
+
+        $poToFirstPayment = [];
+        $poToClosed = [];
+
+        foreach ($mrfs as $mrf) {
+            $firstPaid = $mrf->paymentSchedule?->milestones
+                ->filter(fn (PaymentMilestone $m) => $m->paid_at)
+                ->sortBy('paid_at')
+                ->first();
+
+            if ($firstPaid?->paid_at && $mrf->po_signed_at) {
+                $poToFirstPayment[] = $mrf->po_signed_at->diffInDays($firstPaid->paid_at);
+            }
+
+            if ($mrf->workflow_state === WorkflowStateService::STATE_CLOSED && $mrf->po_signed_at) {
+                $poToClosed[] = $mrf->po_signed_at->diffInDays($mrf->updated_at);
+            }
+        }
+
+        return [
+            'period' => ['from' => $from?->toDateString(), 'to' => $to?->toDateString()],
+            'sampleSize' => $mrfs->count(),
+            'avgDaysPoSignedToFirstMilestonePaid' => $poToFirstPayment !== []
+                ? round(array_sum($poToFirstPayment) / count($poToFirstPayment), 1) : null,
+            'avgDaysPoSignedToClosed' => $poToClosed !== []
+                ? round(array_sum($poToClosed) / count($poToClosed), 1) : null,
+        ];
+    }
+
+    /**
+     * @param  \Illuminate\Support\Collection<int, int>|\Illuminate\Database\Eloquent\Builder  $mrfIds
+     * @return array{count: int, totalAmount: float}
+     */
+    private function outstandingMilestoneBalance($mrfIds): array
+    {
+        if ($mrfIds instanceof \Illuminate\Database\Eloquent\Builder) {
+            $mrfIds = $mrfIds->pluck('id');
+        }
+
+        if ($mrfIds->isEmpty()) {
+            return ['count' => 0, 'totalAmount' => 0.0];
+        }
+
+        $query = PaymentMilestone::query()
+            ->whereHas('schedule', fn ($q) => $q->whereIn('mrf_id', $mrfIds))
+            ->whereNotIn('status', [PaymentMilestone::STATUS_PAID, PaymentMilestone::STATUS_COMPLETE]);
+
+        return [
+            'count' => (int) (clone $query)->count(),
+            'totalAmount' => (float) (clone $query)->sum('amount'),
+        ];
+    }
+
+    private function applyDateRange($query, ?Carbon $from, ?Carbon $to, string $column): void
+    {
+        if ($from) {
+            $query->where($column, '>=', $from);
+        }
+        if ($to) {
+            $query->where($column, '<=', $to);
+        }
+    }
+}

@@ -614,6 +614,54 @@ Each MRF row includes `usesFinanceAp`, `financeRoute`, `workflowState`, `finance
 
 ---
 
-## Phase 8+ (pending)
+## Phase 8 — Progress tracker & Finance AP reporting
 
-Progress tracker steps 10–12, reporting dashboards.
+### Progress tracker (`GET /api/mrfs/{id}/progress-tracker`)
+
+**Phases (collapsible on UI):**
+
+| Phase | Steps |
+|-------|--------|
+| Approval | MRF Created → Initial Approval → Procurement Review |
+| Sourcing | RFQ Issued → Quotes Received → Vendor Selection Approved |
+| Procurement | Vendor Final Invoice → PO Generated → PO Signed by SCD |
+| Delivery | GRN / Goods Received → Delivery Documents Uploaded *(hidden when schedule is single 100% `on_advance` milestone)* |
+| Payment | Finance Review → one row per milestone → Fully Paid / Closed |
+
+**Response highlights:**
+
+| Field | Purpose |
+|-------|---------|
+| `phases[]` | `{ id, label, steps[], completedSteps, totalSteps }` |
+| `steps[]` | Flat list (same steps as phases); each step has `key`, `status`, `completedAt` (optional), `description` |
+| `meta.hideDeliveryPhase` | `true` for 100% advance-only schedules |
+| `meta.progressPercent` | Completed steps / total steps (delivery excluded when hidden) |
+| `stageTimestamps` | `mrf_created_at`, `initial_approval_at`, `procurement_review_at`, `rfq_issued_at`, `quotes_received_at`, `vendor_selection_approved_at`, `vendor_invoice_submitted_at`, `po_generated_at`, `po_signed_at`, `grn_generated_at`, `delivery_docs_uploaded_at`, `finance_reviewed_at`, `payment_completed_at`, `closed_at` |
+| `paymentSchedule` | Same shape as payment-schedule API (drives milestone rows) |
+| `documentsByType` / `activeByType` | Same grouping as `GET /api/mrfs/{id}/procurement-documents` |
+| `usesFinanceAp` / `financeRoute` | Cutover routing |
+
+**Document-driven completion (backend):**
+
+- Step `vendor_final_invoice`: complete when `activeByType.vendor_invoice` exists.
+- Step `grn_received`: complete when `activeByType.grn` or legacy `grn_completed` + `grn_url`.
+- Step `delivery_docs_uploaded`: complete when any of `waybill`, `jcc`, `delivery_confirmation` is active.
+
+**UI:** Pass `documentsByType`, `activeByType`, and `paymentSchedule` from this endpoint (or procurement documents + schedule endpoints). Steps may be `completed` without `completedAt` — omit duration line only.
+
+Legacy pre-cutover MRFs still get flat `steps[]` with chairman payment instead of Finance AP milestones.
+
+### Finance AP reports
+
+All require auth; roles: `finance`, `finance_officer`, `procurement_manager`, `procurement`, `supply_chain_director`, `supply_chain`, `admin`.
+
+Query params (where applicable): `from`, `to` (dates), `limit` (list endpoints, default 50, max 100).
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/reports/finance-ap/summary` | Cohort totals: cases pushed, handoff, in review, closed, rejection/RFI rates, outstanding milestone balance |
+| GET | `/api/reports/finance-ap/outstanding-milestones` | Unpaid milestones on Finance AP MRFs |
+| GET | `/api/reports/finance-ap/advance-delivery-risk` | Advance paid (or paying) but delivery docs still missing |
+| GET | `/api/reports/finance-ap/cycle-times` | Avg days PO signed → first milestone paid; PO signed → closed |
+
+**UI:** Finance / procurement dashboards — cards from `summary`, tables from `outstanding-milestones` and `advance-delivery-risk`, KPI strip from `cycle-times`. Scope is post-cutover Finance AP cohort only (`FINANCE_AP_CUTOVER_DATE`).

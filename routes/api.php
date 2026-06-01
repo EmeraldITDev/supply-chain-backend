@@ -8,6 +8,7 @@ use App\Http\Controllers\Api\ContractTypeController;
 use App\Http\Controllers\Api\DashboardController;
 use App\Http\Controllers\Api\DashboardKpiController;
 use App\Http\Controllers\Api\EligiblePassengersController;
+use App\Http\Controllers\Api\FinanceApReportController;
 use App\Http\Controllers\Api\ProcurementReportController;
 use App\Http\Controllers\Api\MRFController;
 use App\Http\Controllers\Api\SRFController;
@@ -487,6 +488,10 @@ Route::middleware('auth:sanctum')->group(function () {
     // Procurement reporting
     Route::get('/reports/procurement', [ProcurementReportController::class, 'index']);
     Route::get('/reports/procurement/export', [ProcurementReportController::class, 'export']);
+    Route::get('/reports/finance-ap/summary', [FinanceApReportController::class, 'summary']);
+    Route::get('/reports/finance-ap/outstanding-milestones', [FinanceApReportController::class, 'outstandingMilestones']);
+    Route::get('/reports/finance-ap/advance-delivery-risk', [FinanceApReportController::class, 'advanceDeliveryRisk']);
+    Route::get('/reports/finance-ap/cycle-times', [FinanceApReportController::class, 'cycleTimes']);
 
     // Eligible passengers / drivers for trip scheduling (excludes vendors & power users)
     Route::get('/users/eligible-passengers', [EligiblePassengersController::class, 'index']);

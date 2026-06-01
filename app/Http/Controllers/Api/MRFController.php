@@ -16,6 +16,7 @@ use App\Support\RequestLineItemParser;
 use App\Services\NotificationService;
 use App\Services\FormattedIdGenerator;
 use App\Services\WorkflowNotificationService;
+use App\Services\FinanceAp\MrfProgressTrackerService;
 use App\Services\PaymentScheduleService;
 use App\Services\WorkflowStateService;
 use App\Services\PermissionService;
@@ -1034,10 +1035,9 @@ class MRFController extends Controller
     }
 
     /**
-     * Get progress tracker for MRF
-     * Shows the complete workflow sequence with status
+     * Get progress tracker for MRF (5 phases, document-driven steps, milestone payments).
      */
-    public function getProgressTracker(Request $request, $id)
+    public function getProgressTracker(Request $request, $id, MrfProgressTrackerService $tracker)
     {
         $mrf = MRF::where(function ($query) use ($id) {
             $query->where('formatted_id', $id)
@@ -1046,214 +1046,22 @@ class MRFController extends Controller
             if (is_numeric((string) $id)) {
                 $query->orWhere('id', (int) $id);
             }
-        })
-            ->with(['requester', 'selectedVendor', 'rfqs'])
-            ->first();
+        })->first();
 
-        if (!$mrf) {
+        if (! $mrf) {
             return response()->json([
                 'success' => false,
                 'error' => 'MRF not found',
-                'code' => 'NOT_FOUND'
+                'code' => 'NOT_FOUND',
             ], 404);
         }
 
-        $isEmeraldContract = strtolower(trim((string) $mrf->contract_type)) === 'emerald';
-        $hasRfqs = $mrf->rfqs->isNotEmpty();
-
-        $procurementSourcingCompletedStates = [
-            'quotations_evaluated',
-            'vendor_selected',
-            'invoice_approved',
-            'po_generated',
-            'po_signed',
-            'closed',
-        ];
-        $procurementSourcingActiveStates = [
-            'supply_chain_director_approved',
-            'executive_approved',
-            'procurement_review',
-            'procurement_approved',
-            'rfq_issued',
-            'quotations_received',
-        ];
-
-        // Determine step statuses based on workflow state
-        $steps = [
-            [
-                'step' => 1,
-                'name' => 'MRF Created by Employee',
-                'status' => 'completed',
-                'completedAt' => $mrf->created_at ? $mrf->created_at->toIso8601String() : null,
-                'completedBy' => $mrf->requester ? [
-                    'id' => $mrf->requester->id,
-                    'name' => $mrf->requester->name,
-                ] : null,
-                'description' => 'General employee submitted Material Request Form',
-            ],
-            [
-                'step' => 2,
-                'name' => $isEmeraldContract ? 'Executive Approval (bunmi.babajide@emeraldcfze.com)' : 'Supply Chain Director Initial Approval',
-                'status' => $isEmeraldContract
-                    ? (
-                        in_array($mrf->workflow_state, ['executive_rejected']) || strtolower($mrf->status ?? '') === 'rejected'
-                            ? 'rejected'
-                            : (
-                                $mrf->workflow_state === 'executive_review'
-                                    ? 'pending'
-                                    : (
-                                        in_array($mrf->workflow_state, [
-                                            'executive_approved',
-                                            'procurement_review',
-                                            'procurement_approved',
-                                            'rfq_issued',
-                                            'quotations_received',
-                                            'quotations_evaluated',
-                                            'vendor_selected',
-                                            'invoice_approved',
-                                            'po_generated',
-                                            'po_signed',
-                                            'closed'
-                                        ]) ? 'completed' : 'not_started'
-                                    )
-                            )
-                    )
-                    : ($mrf->workflow_state === 'supply_chain_director_review' ? 'pending' :
-                        (in_array($mrf->workflow_state, ['supply_chain_director_approved', 'procurement_review', 'procurement_approved', 'rfq_issued', 'quotations_received', 'quotations_evaluated', 'vendor_selected', 'invoice_approved', 'po_generated', 'po_signed', 'closed']) ? 'completed' : 'not_started')),
-
-                'completedAt' => null,
-                'description' => $isEmeraldContract
-                    ? 'Executive performs first approval for Emerald contract MRFs'
-                    : 'Supply Chain Director performs first approval for non-Emerald contract MRFs',
-            ],
-            [
-                'step' => 3,
-                'name' => 'Procurement Manager Sources Quotations',
-                'status' => in_array($mrf->workflow_state, $procurementSourcingCompletedStates, true)
-                    ? 'completed'
-                    : (
-                        in_array($mrf->workflow_state, $procurementSourcingActiveStates, true) || $hasRfqs
-                            ? 'pending'
-                            : 'not_started'
-                    ),
-                'description' => 'Procurement manager sources and evaluates onboarded vendor quotations',
-            ],
-            [
-                'step' => 4,
-                'name' => 'RFQ Issued to Vendors',
-                'status' => $hasRfqs
-                    ? 'completed'
-                    : ($mrf->workflow_state === 'rfq_issued' ? 'pending' : 'not_started'),
-                'completedAt' => $hasRfqs ? $mrf->rfqs->first()->created_at->toIso8601String() : null,
-                'rfqCount' => $mrf->rfqs->count(),
-                'description' => 'Requests for Quotation sent to identified vendors',
-            ],
-            [
-                'step' => 5,
-                'name' => 'Supply Chain Director Final Quote Approval',
-                'status' => in_array($mrf->workflow_state, ['invoice_approved', 'po_generated', 'po_signed', 'closed']) ? 'completed' :
-                           ($mrf->workflow_state === 'vendor_selected' ? 'pending' : 'not_started'),
-                'quotationCount' => $mrf->quotations()->count(),
-                'description' => 'Selected vendor/quotation is submitted for final Supply Chain Director approval',
-            ],
-            [
-                'step' => 6,
-                'name' => 'Purchase Order Generated',
-                'status' => $mrf->po_number ? 'completed' :
-                           ($mrf->workflow_state === 'po_generated' ? 'pending' : 'not_started'),
-                'completedAt' => $mrf->po_generated_at ? $mrf->po_generated_at->toIso8601String() : null,
-                'poNumber' => $mrf->po_number,
-                'description' => 'PO created from selected quotation',
-            ],
-        ];
-
-        $financeApStatesFromPoSigned = [
-            'po_signed',
-            'delivery_confirmation_pending',
-            'delivery_confirmation_complete',
-            'finance_handoff_pending',
-            'finance_in_review',
-            'milestone_payment_in_progress',
-            'financially_complete',
-            'operationally_complete',
-            'closed',
-        ];
-        $financeApStatesFromDeliveryComplete = [
-            'delivery_confirmation_complete',
-            'finance_handoff_pending',
-            'finance_in_review',
-            'milestone_payment_in_progress',
-            'financially_complete',
-            'operationally_complete',
-            'closed',
-        ];
-        $financeApStatesFromFinanceHandoff = [
-            'finance_handoff_pending',
-            'finance_in_review',
-            'milestone_payment_in_progress',
-            'financially_complete',
-            'operationally_complete',
-            'closed',
-        ];
-        $financeApStatesFinanceComplete = [
-            'financially_complete',
-            'operationally_complete',
-            'closed',
-        ];
-
-        if (mrfUsesFinanceAp($mrf)) {
-            $schedule = app(PaymentScheduleService::class)->findForMrf($mrf);
-            $requiresDeliveryConfirmation = app(PaymentScheduleService::class)->requiresDeliveryConfirmationStage($schedule);
-
-            $steps[] = [
-                'step' => 7,
-                'name' => 'Purchase Order Signed',
-                'status' => in_array($mrf->workflow_state, $financeApStatesFromPoSigned, true) ? 'completed' :
-                    ($mrf->workflow_state === 'po_generated' ? 'pending' : 'not_started'),
-                'completedAt' => $mrf->po_signed_at ? $mrf->po_signed_at->toIso8601String() : null,
-                'description' => 'Signed PO registered; post-PO routing applies per payment schedule',
-            ];
-
-            if ($requiresDeliveryConfirmation) {
-                $steps[] = [
-                    'step' => 8,
-                    'name' => 'Delivery Confirmation',
-                    'status' => in_array($mrf->workflow_state, $financeApStatesFromDeliveryComplete, true) ? 'completed' :
-                        ($mrf->workflow_state === 'delivery_confirmation_pending' ? 'pending' : 'not_started'),
-                    'description' => 'Upload or generate GRN, waybill, and other milestone delivery documents',
-                    'requiredDocuments' => app(\App\Services\FinanceAp\DeliveryConfirmationService::class)->evaluate($mrf)['requiredDocuments'],
-                ];
-            }
-
-            $financeHandoffStep = $requiresDeliveryConfirmation ? 9 : 8;
-            $steps[] = [
-                'step' => $financeHandoffStep,
-                'name' => 'Finance Handoff',
-                'status' => in_array($mrf->workflow_state, $financeApStatesFinanceComplete, true) ? 'completed' :
-                    (in_array($mrf->workflow_state, $financeApStatesFromFinanceHandoff, true) ? 'pending' : 'not_started'),
-                'description' => 'Finance AP package preparation and milestone payments',
-            ];
-        } else {
-            $steps[] = [
-                'step' => 7,
-                'name' => 'Process Complete',
-                'status' => in_array($mrf->workflow_state, ['po_signed', 'closed']) ? 'completed' : 'not_started',
-                'completedAt' => $mrf->po_signed_at ? $mrf->po_signed_at->toIso8601String() : null,
-                'description' => 'MRF process ends after PO creation',
-            ];
-        }
+        $payload = $tracker->build($mrf);
 
         return response()->json([
             'success' => true,
-            'data' => array_merge($mrf->scmTransactionApiFields(), [
-                'mrfId' => $mrf->mrf_id,
-                'formattedId' => $mrf->formatted_id,
+            'data' => array_merge($mrf->scmTransactionApiFields(), $payload, [
                 'formatted_id' => $mrf->formatted_id,
-                'title' => $mrf->title,
-                'currentStep' => collect($steps)->where('status', 'pending')->first()['step'] ??
-                                 (collect($steps)->where('status', 'completed')->last()['step'] ?? 1),
-                'steps' => $steps,
-                'currentWorkflowState' => $mrf->workflow_state,
             ]),
         ]);
     }
