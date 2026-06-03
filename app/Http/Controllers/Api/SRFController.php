@@ -343,7 +343,7 @@ class SRFController extends Controller
             'estimated_cost' => 'nullable|numeric|min:0',
             'justification' => 'required|string',
             'invoice' => 'nullable|file|mimes:pdf,doc,docx,xls,xlsx,png,jpg,jpeg|max:10240', // Optional invoice upload (10MB max)
-        ], array_merge(RequestLineItemParser::validationRules(), PaymentMilestoneRequest::validationRules()));
+        ], RequestLineItemParser::validationRules(), PaymentMilestoneRequest::validationRules()));
 
         if ($validator->fails()) {
             return response()->json([
@@ -745,7 +745,7 @@ class SRFController extends Controller
             'estimatedCost' => 'sometimes|nullable|numeric|min:0',
             'estimated_cost' => 'sometimes|nullable|numeric|min:0',
             'justification' => 'sometimes|required|string',
-        ], array_merge(RequestLineItemParser::validationRules(), PaymentMilestoneRequest::validationRules()));
+        ], RequestLineItemParser::validationRules(), PaymentMilestoneRequest::validationRules()));
 
         if ($validator->fails()) {
             return response()->json([

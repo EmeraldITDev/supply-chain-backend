@@ -1137,7 +1137,7 @@ class MRFController extends Controller
                 'department' => 'nullable|string|max:255',
                 'pfi' => 'nullable|file|mimes:pdf,doc,docx|max:10240', // Optional PFI upload (10MB max)
                 'attachment' => 'nullable|file|max:10240', // Max 10MB, any file type
-            ], array_merge(RequestLineItemParser::validationRules(), PaymentMilestoneRequest::validationRules()));
+            ], RequestLineItemParser::validationRules(), PaymentMilestoneRequest::validationRules()));
 
             if ($validator->fails()) {
                 return response()->json([
@@ -1497,7 +1497,7 @@ class MRFController extends Controller
             'estimatedCost' => 'sometimes|nullable|numeric|min:0',
             'justification' => 'sometimes|required|string',
             'department' => 'sometimes|nullable|string|max:255',
-        ], array_merge(RequestLineItemParser::validationRules(), PaymentMilestoneRequest::validationRules()));
+        ], RequestLineItemParser::validationRules(), PaymentMilestoneRequest::validationRules()));
 
         if ($validator->fails()) {
             return response()->json([
