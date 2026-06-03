@@ -36,6 +36,7 @@ class SRF extends Model
         'maintenance_history',
         'rfq_prefill',
         'origin',
+        'payment_milestones',
     ];
 
     protected $casts = [
@@ -45,6 +46,7 @@ class SRF extends Model
         'vehicle_snapshot' => 'array',
         'maintenance_history' => 'array',
         'rfq_prefill' => 'array',
+        'payment_milestones' => 'array',
     ];
 
     /**

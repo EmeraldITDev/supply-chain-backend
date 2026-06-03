@@ -2,13 +2,17 @@
 
 namespace App\Http\Controllers\Api\V1\Logistics;
 
+use App\Mail\TripExternalPassengerConfirmedMail;
 use App\Models\Logistics\Trip;
 use App\Models\User;
 use App\Services\Logistics\TripRequestProgressTrackerService;
 use App\Services\TripRequestWorkflowService;
+use App\Support\ExternalPassengerRequest;
 use App\Support\PassengerEligibility;
 use App\Support\TripBookingRules;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
 
@@ -139,7 +143,9 @@ class TripRequestWorkflowController extends ApiController
             $request->input('bookingScope', $request->input('booking_scope', $request->input('tripType', $request->input('trip_type'))))
         );
 
-        $validator = Validator::make($request->all(), [
+        ExternalPassengerRequest::mergeIntoRequest($request);
+
+        $validator = Validator::make($request->all(), array_merge([
             'destination' => 'required|string|max:255',
             'purpose' => 'required|string|max:500',
             'scheduled_departure_at' => 'required|date',
@@ -151,7 +157,7 @@ class TripRequestWorkflowController extends ApiController
             'booking_scope' => 'nullable|string',
             'tripType' => 'nullable|string',
             'trip_type' => 'nullable|string',
-        ]);
+        ], ExternalPassengerRequest::validationRules()));
 
         if ($bookingScope === null) {
             $validator->after(function ($v) {
@@ -184,6 +190,7 @@ class TripRequestWorkflowController extends ApiController
             'scheduled_departure_at' => $request->scheduled_departure_at,
             'scheduled_arrival_at' => $request->scheduled_arrival_at,
             'passenger_user_ids' => $request->passenger_user_ids,
+            'external_passengers' => ExternalPassengerRequest::resolve($request),
             'status' => Trip::STATUS_DRAFT,
             'workflow_stage' => Trip::WORKFLOW_TRIP_REQUEST,
             'approval_status' => 'draft',
@@ -202,6 +209,157 @@ class TripRequestWorkflowController extends ApiController
             'trip' => $this->presentTripRequest($trip->load(['creator']), includeProgressSummary: true, viewer: $user),
             'bookingRules' => $this->bookingRulesPayload(),
         ], 201);
+    }
+
+    /**
+     * Update a draft trip request (creator only).
+     */
+    public function update(Request $request, int $id)
+    {
+        $user = $request->user();
+        if (! $user || ! PassengerEligibility::canCreateTripRequest($user)) {
+            return $this->error('You are not allowed to update trip requests', 'FORBIDDEN', 403);
+        }
+
+        $trip = Trip::find($id);
+        if (! $trip) {
+            return $this->error('Trip request not found', 'NOT_FOUND', 404);
+        }
+
+        if ((int) $trip->created_by !== (int) $user->id) {
+            return $this->error('Only the creator can update this trip request', 'FORBIDDEN', 403);
+        }
+
+        if (! $this->isDeletableDraft($trip)) {
+            return $this->error(
+                'Only draft trip requests can be edited.',
+                'INVALID_STATE',
+                422
+            );
+        }
+
+        ExternalPassengerRequest::mergeIntoRequest($request);
+
+        $validator = Validator::make($request->all(), array_merge([
+            'destination' => 'sometimes|required|string|max:255',
+            'purpose' => 'sometimes|required|string|max:500',
+            'scheduled_departure_at' => 'sometimes|required|date',
+            'scheduled_arrival_at' => 'nullable|date|after_or_equal:scheduled_departure_at',
+            'origin' => 'nullable|string|max:255',
+            'passenger_user_ids' => 'sometimes|required|array|min:1',
+            'passenger_user_ids.*' => 'integer|exists:users,id',
+            'bookingScope' => 'nullable|string',
+            'booking_scope' => 'nullable|string',
+            'tripType' => 'nullable|string',
+            'trip_type' => 'nullable|string',
+        ], ExternalPassengerRequest::validationRules()));
+
+        $bookingScope = TripBookingRules::normalizeScope(
+            $request->input('bookingScope', $request->input('booking_scope', $request->input('tripType', $trip->booking_scope)))
+        );
+
+        if ($validator->fails()) {
+            return $this->error('Validation failed', 'VALIDATION_ERROR', 422, $validator->errors()->toArray());
+        }
+
+        if ($request->has('scheduled_departure_at') && $bookingScope !== null) {
+            $leadCheck = TripBookingRules::validateDeparture($bookingScope, $request->scheduled_departure_at);
+            if (! $leadCheck['valid']) {
+                return $this->error($leadCheck['message'], 'BOOKING_LEAD_TIME_VIOLATION', 422, [
+                    'bookingScope' => [$leadCheck['message']],
+                    'scheduled_departure_at' => [$leadCheck['message']],
+                    'minimum_trip_date' => [$leadCheck['minimum_trip_date']],
+                ]);
+            }
+        }
+
+        $fill = array_filter([
+            'destination' => $request->input('destination'),
+            'purpose' => $request->input('purpose'),
+            'origin' => $request->input('origin'),
+            'scheduled_departure_at' => $request->input('scheduled_departure_at'),
+            'scheduled_arrival_at' => $request->input('scheduled_arrival_at'),
+            'passenger_user_ids' => $request->input('passenger_user_ids'),
+            'booking_scope' => $bookingScope,
+        ], fn ($value) => $value !== null);
+
+        if ($request->has('external_passengers') || $request->has('externalPassengers')) {
+            $fill['external_passengers'] = ExternalPassengerRequest::resolve($request);
+        }
+
+        if (isset($fill['destination'])) {
+            $fill['title'] = 'Trip request: ' . $fill['destination'];
+        }
+
+        $trip->fill($fill);
+        $trip->save();
+
+        return $this->success([
+            'trip' => $this->presentTripRequest($trip->load(['creator']), includeProgressSummary: true, viewer: $user),
+        ]);
+    }
+
+    /**
+     * Logistics manager confirms trip details; notifies external passengers by email.
+     */
+    public function confirm(Request $request, int $id)
+    {
+        $user = $request->user();
+        if (! $user || ! in_array($user->role, ['logistics_manager', 'logistics_officer', 'admin'], true)) {
+            return $this->error('Only logistics managers can confirm trip requests', 'FORBIDDEN', 403);
+        }
+
+        $trip = Trip::with('creator')->find($id);
+        if (! $trip || ! str_starts_with((string) $trip->trip_code, 'TRQ-')) {
+            return $this->error('Trip request not found', 'NOT_FOUND', 404);
+        }
+
+        $metadata = is_array($trip->metadata) ? $trip->metadata : [];
+        if (! empty($metadata['logistics_confirmed_at'])) {
+            return $this->success([
+                'trip' => $this->presentTripRequest($trip, includeProgressSummary: true, viewer: $user),
+                'message' => 'Trip request was already confirmed',
+            ]);
+        }
+
+        $metadata['logistics_confirmed_at'] = now()->toIso8601String();
+        $metadata['logistics_confirmed_by'] = $user->id;
+        $trip->metadata = $metadata;
+        $trip->workflow_stage = Trip::WORKFLOW_LOGISTICS_REVIEW;
+        $trip->updated_by = $user->id;
+        $trip->save();
+
+        $requester = $trip->creator ?? User::find($trip->created_by);
+        if ($requester) {
+            foreach ($trip->external_passengers ?? [] as $passenger) {
+                if (empty($passenger['email'])) {
+                    continue;
+                }
+                try {
+                    Mail::to($passenger['email'])->send(
+                        new TripExternalPassengerConfirmedMail($trip, $passenger, $requester)
+                    );
+                } catch (\Throwable $e) {
+                    Log::warning('Failed to email external trip passenger', [
+                        'trip_id' => $trip->id,
+                        'email' => $passenger['email'],
+                        'error' => $e->getMessage(),
+                    ]);
+                }
+            }
+        }
+
+        $this->workflow->notifyStage(
+            $trip,
+            'trip_request_confirmed',
+            "Trip request {$trip->trip_code} confirmed by logistics",
+            ['procurement_manager', 'procurement']
+        );
+
+        return $this->success([
+            'trip' => $this->presentTripRequest($trip->fresh(['creator']), includeProgressSummary: true, viewer: $user),
+            'message' => 'Trip request confirmed; external passengers notified where applicable',
+        ]);
     }
 
     /**
@@ -438,6 +596,9 @@ class TripRequestWorkflowController extends ApiController
             'scheduled_arrival_at' => $trip->scheduled_arrival_at?->toIso8601String(),
             'passengerUserIds' => $trip->passenger_user_ids ?? [],
             'passenger_user_ids' => $trip->passenger_user_ids ?? [],
+            'passengers' => $this->internalPassengersPayload($trip),
+            'externalPassengers' => $trip->external_passengers ?? [],
+            'external_passengers' => $trip->external_passengers ?? [],
             'workflowStage' => $trip->workflow_stage,
             'workflow_stage' => $trip->workflow_stage,
             'status' => $trip->status,
@@ -477,6 +638,31 @@ class TripRequestWorkflowController extends ApiController
         }
 
         return $payload;
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    private function internalPassengersPayload(Trip $trip): array
+    {
+        $ids = $trip->passenger_user_ids ?? [];
+        if ($ids === []) {
+            return [];
+        }
+
+        return User::query()
+            ->whereIn('id', $ids)
+            ->get(['id', 'name', 'email', 'phone', 'department', 'role'])
+            ->map(fn (User $u) => [
+                'id' => $u->id,
+                'name' => $u->name,
+                'email' => $u->email,
+                'phone' => $u->phone,
+                'department' => $u->department,
+                'role' => $u->role,
+            ])
+            ->values()
+            ->all();
     }
 
     /**

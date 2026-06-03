@@ -8,6 +8,8 @@ use App\Models\PaymentSchedule;
 use App\Models\PaymentScheduleVersion;
 use App\Models\RFQ;
 use App\Models\User;
+use App\Support\PaymentMilestoneRequest;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
@@ -33,6 +35,60 @@ class PaymentScheduleService
             ->where('mrf_id', $mrf->id)
             ->with(['milestones', 'creator:id,name,email'])
             ->first();
+    }
+
+    /**
+     * Create or update schedule when payment_milestones[] is sent on MRF/RFQ/PO payloads.
+     */
+    public function applyFromRequest(MRF $mrf, User $user, Request $request): ?PaymentSchedule
+    {
+        if (! PaymentMilestoneRequest::provided($request)) {
+            return null;
+        }
+
+        $rows = PaymentMilestoneRequest::resolve($request);
+        PaymentMilestoneRequest::validatePercentages($rows);
+
+        if ($rows === []) {
+            throw ValidationException::withMessages([
+                'payment_milestones' => 'At least one payment milestone is required when payment_milestones is provided.',
+            ]);
+        }
+
+        $input = ['milestones' => PaymentMilestoneRequest::toScheduleMilestones($rows)];
+
+        if ($this->findForMrf($mrf)) {
+            return $this->update($mrf, $user, $input);
+        }
+
+        return $this->create($mrf, $user, $input);
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    public function paymentMilestonesForApi(?PaymentSchedule $schedule): array
+    {
+        if (! $schedule) {
+            return [];
+        }
+
+        $schedule->loadMissing('milestones');
+
+        return $schedule->milestones->map(fn (PaymentMilestone $m) => [
+            'label' => $m->label,
+            'percentage' => (float) $m->percentage,
+            'trigger_condition' => $m->trigger_condition,
+            'triggerCondition' => $m->trigger_condition,
+        ])->values()->all();
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    public function paymentMilestonesForMrf(MRF $mrf): array
+    {
+        return $this->paymentMilestonesForApi($this->findForMrf($mrf));
     }
 
     public function assertEditable(PaymentSchedule $schedule): void

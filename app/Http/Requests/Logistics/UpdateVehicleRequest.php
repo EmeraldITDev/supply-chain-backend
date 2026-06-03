@@ -13,6 +13,24 @@ class UpdateVehicleRequest extends FormRequest
 
     protected function prepareForValidation(): void
     {
+        if (! $this->filled('plate_number')) {
+            foreach (['plate', 'registration_number', 'registrationNumber'] as $alias) {
+                if ($this->filled($alias)) {
+                    $this->merge(['plate_number' => trim((string) $this->input($alias))]);
+                    break;
+                }
+            }
+        }
+
+        if ($this->has('plate_number')) {
+            $plate = $this->input('plate_number');
+            if ($plate === null || trim((string) $plate) === '') {
+                $this->request->remove('plate_number');
+            } else {
+                $this->merge(['plate_number' => trim((string) $plate)]);
+            }
+        }
+
         if (!$this->filled('name') && $this->filled('vehicle_name')) {
             $this->merge(['name' => $this->input('vehicle_name')]);
         }

@@ -302,6 +302,10 @@ class RFQWorkflowController extends Controller
                         'payment_terms' => $quotation->payment_terms ?? null,
                         'paymentTerms' => $quotation->payment_terms ?? null,
                         'payment_terms_text' => $quotation->payment_terms ?? null,
+                        'paymentSchedule' => $schedulePayload,
+                        'payment_schedule' => $schedulePayload,
+                        'payment_milestones' => $paymentMilestones,
+                        'paymentMilestones' => $paymentMilestones,
 
                         // Validity and warranty
                         'validity_days' => $quotation->validity_days ?? null,
@@ -414,6 +418,10 @@ class RFQWorkflowController extends Controller
 
         // Get MRF with all relationships
         $mrf = $rfq->mrf;
+        $schedulePayload = $this->vendorPaymentSchedulePayload($rfq);
+        $paymentMilestones = $mrf
+            ? app(PaymentScheduleService::class)->paymentMilestonesForMrf($mrf)
+            : [];
         $mrfEstimatedCost = $mrf ? (float) $mrf->estimated_cost : null;
         $rfqEstimatedCost = $rfq->estimated_cost !== null ? (float) $rfq->estimated_cost : null;
         $estimatedBudget = ($mrfEstimatedCost !== null && $mrfEstimatedCost > 0)
@@ -466,6 +474,10 @@ class RFQWorkflowController extends Controller
                     'workflowState' => $mrf->workflow_state,
                     'status' => $mrf->status,
                 ] : null,
+                'paymentSchedule' => $schedulePayload,
+                'payment_schedule' => $schedulePayload,
+                'payment_milestones' => $paymentMilestones,
+                'paymentMilestones' => $paymentMilestones,
                 'quotations' => $quotations,
                 'statistics' => [
                     'total_quotations' => $quotations->count(),
@@ -1094,7 +1106,12 @@ class RFQWorkflowController extends Controller
 
     private function userCanViewQuotationComparison(\App\Models\User $user): bool
     {
-        $roles = ['procurement_manager', 'procurement', 'admin', 'supply_chain_director', 'supply_chain'];
+        $roles = [
+            'procurement_manager', 'procurement', 'admin',
+            'supply_chain_director', 'supply_chain',
+            'finance', 'finance_officer',
+            'executive', 'chairman',
+        ];
         $r = strtolower((string) ($user->role ?? ''));
         if (in_array($r, $roles, true)) {
             return true;
@@ -1119,7 +1136,7 @@ class RFQWorkflowController extends Controller
                     $q->orWhere('id', (int) $id);
                 }
             })
-            ->with(['items', 'mrf.executiveApprover', 'mrf.chairmanApprover'])
+            ->with(['items', 'mrf.executiveApprover', 'mrf.chairmanApprover', 'mrf.paymentSchedule.milestones'])
             ->first();
     }
 

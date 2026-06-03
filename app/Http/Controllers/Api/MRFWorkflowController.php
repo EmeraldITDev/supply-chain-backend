@@ -1364,6 +1364,23 @@ class MRFWorkflowController extends Controller
             ], 404);
         }
 
+        if (\App\Support\PaymentMilestoneRequest::provided($request)) {
+            \App\Support\PaymentMilestoneRequest::mergeIntoRequest($request);
+            try {
+                \App\Support\PaymentMilestoneRequest::validatePercentages(
+                    \App\Support\PaymentMilestoneRequest::resolve($request)
+                );
+                app(PaymentScheduleService::class)->applyFromRequest($mrf, $user, $request);
+            } catch (\Illuminate\Validation\ValidationException $e) {
+                return response()->json([
+                    'success' => false,
+                    'error' => 'Validation failed',
+                    'errors' => $e->errors(),
+                    'code' => 'VALIDATION_ERROR',
+                ], 422);
+            }
+        }
+
         $fastTrack = $this->resolveFastTrackFlag($request);
         $allowMissingRfq = $request->boolean('allow_missing_rfq');
         $rfq = RFQ::where('mrf_id', $mrf->id)->with('items')->first();
@@ -1860,10 +1877,14 @@ class MRFWorkflowController extends Controller
 
         $poStreamUrl = $mrf->freshUnsignedPoStreamUrl() ?? $mrf->unsigned_po_url;
 
+        $paymentMilestones = app(PaymentScheduleService::class)->paymentMilestonesForMrf($mrf);
+
         return response()->json([
             'success' => true,
             'message' => 'PO generated successfully',
             'data' => [
+                'payment_milestones' => $paymentMilestones,
+                'paymentMilestones' => $paymentMilestones,
                 'mrf' => [
                     'id' => $mrf->mrf_id,
                 'po_number' => $mrf->po_number,
@@ -1884,6 +1905,8 @@ class MRFWorkflowController extends Controller
                 'synthetic_po' => ! $rfq && ($fastTrack || $allowMissingRfq),
                 'syntheticPo' => ! $rfq && ($fastTrack || $allowMissingRfq),
                 'priceComparisons' => $mrf->priceComparisons()->get(),
+                'payment_milestones' => $paymentMilestones,
+                'paymentMilestones' => $paymentMilestones,
                 ],
                 'po_url' => $poStreamUrl,
                 'fast_tracked' => $fastTrack,

@@ -20,9 +20,23 @@ class StoreVehicleRequest extends FormRequest
             ]);
         }
 
-        if (!$this->filled('plate_number')) {
+        if (! $this->filled('plate_number')) {
+            foreach (['plate', 'registration_number', 'registrationNumber'] as $alias) {
+                if ($this->filled($alias)) {
+                    $this->merge(['plate_number' => trim((string) $this->input($alias))]);
+                    break;
+                }
+            }
+        }
+
+        $plate = $this->input('plate_number');
+        if ($plate === null || trim((string) $plate) === '') {
             $this->merge([
                 'plate_number' => 'TEMP-' . Str::upper(Str::random(8)),
+            ]);
+        } else {
+            $this->merge([
+                'plate_number' => trim((string) $plate),
             ]);
         }
 

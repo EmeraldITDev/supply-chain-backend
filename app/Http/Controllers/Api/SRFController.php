@@ -7,7 +7,9 @@ use App\Models\SRF;
 use App\Models\Logistics\VehicleMaintenance;
 use App\Services\FormattedIdGenerator;
 use App\Services\LineItemBudgetService;
+use App\Support\PaymentMilestoneRequest;
 use App\Support\RequestLineItemParser;
+use Illuminate\Validation\ValidationException;
 use App\Services\WorkflowNotificationService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
@@ -176,6 +178,11 @@ class SRFController extends Controller
 
         $payload['ui'] = $this->srfCardUi($srf);
         $payload['lineItemCount'] = $srf->relationLoaded('items') ? $srf->items->count() : null;
+        $payload['line_items_count'] = $payload['lineItemCount'];
+
+        $storedMilestones = is_array($srf->payment_milestones) ? $srf->payment_milestones : [];
+        $payload['payment_milestones'] = $storedMilestones;
+        $payload['paymentMilestones'] = $storedMilestones;
 
         if ($includeLineItems && $srf->relationLoaded('items')) {
             $progress = $this->buildProgressTimeline($srf);
@@ -336,7 +343,7 @@ class SRFController extends Controller
             'estimated_cost' => 'nullable|numeric|min:0',
             'justification' => 'required|string',
             'invoice' => 'nullable|file|mimes:pdf,doc,docx,xls,xlsx,png,jpg,jpeg|max:10240', // Optional invoice upload (10MB max)
-        ], RequestLineItemParser::validationRules()));
+        ], array_merge(RequestLineItemParser::validationRules(), PaymentMilestoneRequest::validationRules()));
 
         if ($validator->fails()) {
             return response()->json([
@@ -345,6 +352,22 @@ class SRFController extends Controller
                 'errors' => $validator->errors(),
                 'code' => 'VALIDATION_ERROR'
             ], 422);
+        }
+
+        PaymentMilestoneRequest::mergeIntoRequest($request);
+        $paymentMilestones = null;
+        if (PaymentMilestoneRequest::provided($request)) {
+            $paymentMilestones = PaymentMilestoneRequest::resolve($request);
+            try {
+                PaymentMilestoneRequest::validatePercentages($paymentMilestones);
+            } catch (ValidationException $e) {
+                return response()->json([
+                    'success' => false,
+                    'error' => 'Validation failed',
+                    'errors' => $e->errors(),
+                    'code' => 'VALIDATION_ERROR',
+                ], 422);
+            }
         }
 
         $user = $request->user();
@@ -429,6 +452,7 @@ class SRFController extends Controller
             'remarks' => 'pending_supply_chain_director_review',
             'invoice_url' => $invoiceUrl,
             'invoice_share_url' => $invoiceShareUrl,
+            'payment_milestones' => $paymentMilestones,
         ]);
 
         if ($lineItems !== []) {
@@ -445,7 +469,9 @@ class SRFController extends Controller
             ]);
         }
 
-        return response()->json($this->presentSrf($srf), 201);
+        $srf->load('items');
+
+        return response()->json($this->presentSrf($srf, true), 201);
     }
 
     /**
@@ -719,7 +745,7 @@ class SRFController extends Controller
             'estimatedCost' => 'sometimes|nullable|numeric|min:0',
             'estimated_cost' => 'sometimes|nullable|numeric|min:0',
             'justification' => 'sometimes|required|string',
-        ], RequestLineItemParser::validationRules()));
+        ], array_merge(RequestLineItemParser::validationRules(), PaymentMilestoneRequest::validationRules()));
 
         if ($validator->fails()) {
             return response()->json([
@@ -728,6 +754,21 @@ class SRFController extends Controller
                 'errors' => $validator->errors(),
                 'code' => 'VALIDATION_ERROR'
             ], 422);
+        }
+
+        PaymentMilestoneRequest::mergeIntoRequest($request);
+        if (PaymentMilestoneRequest::provided($request)) {
+            $milestones = PaymentMilestoneRequest::resolve($request);
+            try {
+                PaymentMilestoneRequest::validatePercentages($milestones);
+            } catch (ValidationException $e) {
+                return response()->json([
+                    'success' => false,
+                    'error' => 'Validation failed',
+                    'errors' => $e->errors(),
+                    'code' => 'VALIDATION_ERROR',
+                ], 422);
+            }
         }
 
         $updateData = [];
@@ -742,6 +783,9 @@ class SRFController extends Controller
             $updateData['estimated_cost'] = $request->estimated_cost;
         }
         if ($request->has('justification')) $updateData['justification'] = $request->justification;
+        if (PaymentMilestoneRequest::provided($request)) {
+            $updateData['payment_milestones'] = PaymentMilestoneRequest::resolve($request);
+        }
 
         if ($srf->status === 'Rejected') {
             $updateData['status'] = 'Pending';
@@ -757,7 +801,7 @@ class SRFController extends Controller
         $srf->refresh();
         $srf->load('items');
 
-        $payload = $this->presentSrf($srf);
+        $payload = $this->presentSrf($srf, true);
         $payload['items'] = $srf->items->map(fn ($item) => [
             'id' => $item->id,
             'itemName' => $item->item_name,

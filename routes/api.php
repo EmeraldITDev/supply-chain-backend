@@ -210,6 +210,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/trip-requests/booking-rules', [TripRequestWorkflowController::class, 'bookingRules']);
     Route::get('/trip-requests', [TripRequestWorkflowController::class, 'index']);
     Route::post('/trip-requests', [TripRequestWorkflowController::class, 'store']);
+    Route::put('/trip-requests/{id}', [TripRequestWorkflowController::class, 'update']);
+    Route::post('/trip-requests/{id}/confirm', [TripRequestWorkflowController::class, 'confirm']);
     Route::get('/trip-requests/{id}', [TripRequestWorkflowController::class, 'show']);
     Route::get('/trip-requests/{id}/progress-tracker', [TripRequestWorkflowController::class, 'progressTracker']);
     Route::delete('/trip-requests/{id}', [TripRequestWorkflowController::class, 'destroy']);
@@ -424,6 +426,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/rfqs/{id}', [RFQController::class, 'show']);
     Route::post('/rfqs', [RFQController::class, 'store']);
     Route::put('/rfqs/{id}', [RFQController::class, 'update']);
+    Route::patch('/rfqs/{id}', [RFQController::class, 'update']);
     Route::get('/po-terms-templates/{type}', [POTermsTemplateController::class, 'show']);
 
     // RFQ Workflow routes (enhanced)
@@ -628,6 +631,8 @@ Route::prefix('v1/logistics')->group(function () {
         Route::get('/trip-requests/booking-rules', [TripRequestWorkflowController::class, 'bookingRules']);
         Route::get('/trip-requests', [TripRequestWorkflowController::class, 'index']);
         Route::post('/trip-requests', [TripRequestWorkflowController::class, 'store']);
+        Route::put('/trip-requests/{id}', [TripRequestWorkflowController::class, 'update']);
+        Route::post('/trip-requests/{id}/confirm', [TripRequestWorkflowController::class, 'confirm']);
         Route::get('/trip-requests/{id}', [TripRequestWorkflowController::class, 'show']);
         Route::get('/trip-requests/{id}/progress-tracker', [TripRequestWorkflowController::class, 'progressTracker']);
         Route::delete('/trip-requests/{id}', [TripRequestWorkflowController::class, 'destroy']);
@@ -767,6 +772,8 @@ Route::prefix('logistics')->group(function () {
         Route::get('/trip-requests/booking-rules', [TripRequestWorkflowController::class, 'bookingRules']);
         Route::get('/trip-requests', [TripRequestWorkflowController::class, 'index']);
         Route::post('/trip-requests', [TripRequestWorkflowController::class, 'store']);
+        Route::put('/trip-requests/{id}', [TripRequestWorkflowController::class, 'update']);
+        Route::post('/trip-requests/{id}/confirm', [TripRequestWorkflowController::class, 'confirm']);
         Route::get('/trip-requests/{id}', [TripRequestWorkflowController::class, 'show']);
         Route::get('/trip-requests/{id}/progress-tracker', [TripRequestWorkflowController::class, 'progressTracker']);
         Route::delete('/trip-requests/{id}', [TripRequestWorkflowController::class, 'destroy']);

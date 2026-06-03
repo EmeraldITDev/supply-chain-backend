@@ -12,7 +12,9 @@ use App\Models\Vendor;
 use App\Models\Logistics\VehicleMaintenance;
 use App\Support\LogisticsMrfRouting;
 use App\Services\LineItemBudgetService;
+use App\Support\PaymentMilestoneRequest;
 use App\Support\RequestLineItemParser;
+use Illuminate\Validation\ValidationException;
 use App\Services\NotificationService;
 use App\Services\FormattedIdGenerator;
 use App\Services\WorkflowNotificationService;
@@ -564,6 +566,8 @@ class MRFController extends Controller
                 'quoted_amount' => $item->quoted_amount !== null ? (float) $item->quoted_amount : null,
             ])->values(),
             'profitAndLoss' => $profitAndLoss,
+            'payment_milestones' => app(PaymentScheduleService::class)->paymentMilestonesForMrf($mrf),
+            'paymentMilestones' => app(PaymentScheduleService::class)->paymentMilestonesForMrf($mrf),
         ]));
     }
 
@@ -1133,7 +1137,7 @@ class MRFController extends Controller
                 'department' => 'nullable|string|max:255',
                 'pfi' => 'nullable|file|mimes:pdf,doc,docx|max:10240', // Optional PFI upload (10MB max)
                 'attachment' => 'nullable|file|max:10240', // Max 10MB, any file type
-            ], RequestLineItemParser::validationRules()));
+            ], array_merge(RequestLineItemParser::validationRules(), PaymentMilestoneRequest::validationRules()));
 
             if ($validator->fails()) {
                 return response()->json([
@@ -1141,6 +1145,18 @@ class MRFController extends Controller
                     'error' => 'Validation failed',
                     'errors' => $validator->errors(),
                     'code' => 'VALIDATION_ERROR'
+                ], 422);
+            }
+
+            PaymentMilestoneRequest::mergeIntoRequest($request);
+            try {
+                PaymentMilestoneRequest::validatePercentages(PaymentMilestoneRequest::resolve($request));
+            } catch (ValidationException $e) {
+                return response()->json([
+                    'success' => false,
+                    'error' => 'Validation failed',
+                    'errors' => $e->errors(),
+                    'code' => 'VALIDATION_ERROR',
                 ], 422);
             }
 
@@ -1326,6 +1342,17 @@ class MRFController extends Controller
                 app(LineItemBudgetService::class)->syncMrfItems($mrf, $lineItems);
             }
 
+            try {
+                app(PaymentScheduleService::class)->applyFromRequest($mrf, $user, $request);
+            } catch (ValidationException $e) {
+                return response()->json([
+                    'success' => false,
+                    'error' => 'Validation failed',
+                    'errors' => $e->errors(),
+                    'code' => 'VALIDATION_ERROR',
+                ], 422);
+            }
+
             // Log routing decision in approval history if custom contract type
             if (!$isStandardType) {
                 try {
@@ -1404,6 +1431,8 @@ class MRFController extends Controller
                     'attachmentUrl' => $mrf->attachment_url,
                     'attachmentShareUrl' => $mrf->attachment_share_url,
                     'attachmentName' => $mrf->attachment_name,
+                    'payment_milestones' => app(PaymentScheduleService::class)->paymentMilestonesForMrf($mrf),
+                    'paymentMilestones' => app(PaymentScheduleService::class)->paymentMilestonesForMrf($mrf),
                 ]),
             ], 201);
         } catch (\Exception $e) {
@@ -1468,7 +1497,7 @@ class MRFController extends Controller
             'estimatedCost' => 'sometimes|nullable|numeric|min:0',
             'justification' => 'sometimes|required|string',
             'department' => 'sometimes|nullable|string|max:255',
-        ], RequestLineItemParser::validationRules()));
+        ], array_merge(RequestLineItemParser::validationRules(), PaymentMilestoneRequest::validationRules()));
 
         if ($validator->fails()) {
             return response()->json([
@@ -1477,6 +1506,20 @@ class MRFController extends Controller
                 'errors' => $validator->errors(),
                 'code' => 'VALIDATION_ERROR'
             ], 422);
+        }
+
+        PaymentMilestoneRequest::mergeIntoRequest($request);
+        if (PaymentMilestoneRequest::provided($request)) {
+            try {
+                PaymentMilestoneRequest::validatePercentages(PaymentMilestoneRequest::resolve($request));
+            } catch (ValidationException $e) {
+                return response()->json([
+                    'success' => false,
+                    'error' => 'Validation failed',
+                    'errors' => $e->errors(),
+                    'code' => 'VALIDATION_ERROR',
+                ], 422);
+            }
         }
 
         $updateData = [];
@@ -1504,6 +1547,19 @@ class MRFController extends Controller
 
         if ($request->has('items') || $request->has('line_items')) {
             app(LineItemBudgetService::class)->syncMrfItems($mrf, $lineItems);
+        }
+
+        if (PaymentMilestoneRequest::provided($request)) {
+            try {
+                app(PaymentScheduleService::class)->applyFromRequest($mrf, $user, $request);
+            } catch (ValidationException $e) {
+                return response()->json([
+                    'success' => false,
+                    'error' => 'Validation failed',
+                    'errors' => $e->errors(),
+                    'code' => 'VALIDATION_ERROR',
+                ], 422);
+            }
         }
 
         $mrf->refresh();
@@ -1544,6 +1600,8 @@ class MRFController extends Controller
                 'budgetAmount' => $item->budget_amount !== null ? (float) $item->budget_amount : null,
                 'budget_amount' => $item->budget_amount !== null ? (float) $item->budget_amount : null,
             ])->values(),
+            'payment_milestones' => app(PaymentScheduleService::class)->paymentMilestonesForMrf($mrf),
+            'paymentMilestones' => app(PaymentScheduleService::class)->paymentMilestonesForMrf($mrf),
         ]);
     }
 

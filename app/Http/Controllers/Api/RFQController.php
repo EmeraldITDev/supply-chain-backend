@@ -10,8 +10,10 @@ use App\Models\Vendor;
 use App\Services\FormattedIdGenerator;
 use App\Services\PaymentScheduleService;
 use App\Services\WorkflowNotificationService;
+use App\Support\PaymentMilestoneRequest;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Validation\ValidationException;
 
 class RFQController extends Controller
 {
@@ -167,6 +169,12 @@ class RFQController extends Controller
             'paymentTerms' => $rfq->payment_terms,
             'paymentSchedule' => $this->paymentSchedulePayload($rfq->mrf),
             'payment_schedule' => $this->paymentSchedulePayload($rfq->mrf),
+            'payment_milestones' => $rfq->mrf
+                ? app(PaymentScheduleService::class)->paymentMilestonesForMrf($rfq->mrf)
+                : [],
+            'paymentMilestones' => $rfq->mrf
+                ? app(PaymentScheduleService::class)->paymentMilestonesForMrf($rfq->mrf)
+                : [],
             'notes' => $rfq->notes,
             'supportingDocuments' => $rfq->supporting_documents ?? [],
             'deadline' => $rfq->deadline?->format('Y-m-d'),
@@ -222,7 +230,7 @@ class RFQController extends Controller
             'notes' => 'nullable|string',
             'supportingDocuments' => 'nullable|array',
             'supportingDocuments.*' => 'nullable|string|url', // URLs to supporting documents
-        ]);
+        ], PaymentMilestoneRequest::validationRules());
 
         if ($validator->fails()) {
             return response()->json([
@@ -231,6 +239,20 @@ class RFQController extends Controller
                 'errors' => $validator->errors(),
                 'code' => 'VALIDATION_ERROR'
             ], 422);
+        }
+
+        PaymentMilestoneRequest::mergeIntoRequest($request);
+        if (PaymentMilestoneRequest::provided($request)) {
+            try {
+                PaymentMilestoneRequest::validatePercentages(PaymentMilestoneRequest::resolve($request));
+            } catch (ValidationException $e) {
+                return response()->json([
+                    'success' => false,
+                    'error' => 'Validation failed',
+                    'errors' => $e->errors(),
+                    'code' => 'VALIDATION_ERROR',
+                ], 422);
+            }
         }
 
         $user = $request->user();
@@ -367,6 +389,19 @@ class RFQController extends Controller
             ]);
         }
 
+        if ($mrf && PaymentMilestoneRequest::provided($request)) {
+            try {
+                app(PaymentScheduleService::class)->applyFromRequest($mrf, $user, $request);
+            } catch (ValidationException $e) {
+                return response()->json([
+                    'success' => false,
+                    'error' => 'Validation failed',
+                    'errors' => $e->errors(),
+                    'code' => 'VALIDATION_ERROR',
+                ], 422);
+            }
+        }
+
         return response()->json([
             'id' => $rfq->rfq_id,
             'formattedId' => $rfq->formatted_id,
@@ -385,6 +420,12 @@ class RFQController extends Controller
             'paymentTerms' => $rfq->payment_terms,
             'paymentSchedule' => $this->paymentSchedulePayload($rfq->mrf),
             'payment_schedule' => $this->paymentSchedulePayload($rfq->mrf),
+            'payment_milestones' => $mrf
+                ? app(PaymentScheduleService::class)->paymentMilestonesForMrf($mrf)
+                : [],
+            'paymentMilestones' => $mrf
+                ? app(PaymentScheduleService::class)->paymentMilestonesForMrf($mrf)
+                : [],
             'notes' => $rfq->notes,
             'supportingDocuments' => $rfq->supporting_documents ?? [],
             'deadline' => $rfq->deadline->format('Y-m-d'),
@@ -410,7 +451,7 @@ class RFQController extends Controller
             ], 404);
         }
 
-        $validator = Validator::make($request->all(), [
+        $validator = Validator::make($request->all(), array_merge([
             'description' => 'sometimes|required|string',
             'quantity' => 'sometimes|required|string',
             'estimatedCost' => 'sometimes|nullable|numeric|min:0',
@@ -418,7 +459,7 @@ class RFQController extends Controller
             'status' => 'sometimes|in:Open,Closed,Awarded,Cancelled',
             'vendorIds' => 'sometimes|array|min:1',
             'vendorIds.*' => 'exists:vendors,vendor_id',
-        ]);
+        ], PaymentMilestoneRequest::validationRules()));
 
         if ($validator->fails()) {
             return response()->json([
@@ -427,6 +468,20 @@ class RFQController extends Controller
                 'errors' => $validator->errors(),
                 'code' => 'VALIDATION_ERROR'
             ], 422);
+        }
+
+        PaymentMilestoneRequest::mergeIntoRequest($request);
+        if (PaymentMilestoneRequest::provided($request)) {
+            try {
+                PaymentMilestoneRequest::validatePercentages(PaymentMilestoneRequest::resolve($request));
+            } catch (ValidationException $e) {
+                return response()->json([
+                    'success' => false,
+                    'error' => 'Validation failed',
+                    'errors' => $e->errors(),
+                    'code' => 'VALIDATION_ERROR',
+                ], 422);
+            }
         }
 
         $updateData = [];
@@ -448,6 +503,19 @@ class RFQController extends Controller
 
         $rfq->load(['mrf', 'vendors']);
 
+        if ($rfq->mrf && PaymentMilestoneRequest::provided($request)) {
+            try {
+                app(PaymentScheduleService::class)->applyFromRequest($rfq->mrf, $request->user(), $request);
+            } catch (ValidationException $e) {
+                return response()->json([
+                    'success' => false,
+                    'error' => 'Validation failed',
+                    'errors' => $e->errors(),
+                    'code' => 'VALIDATION_ERROR',
+                ], 422);
+            }
+        }
+
         return response()->json([
             'id' => $rfq->rfq_id,
             'mrfId' => $rfq->mrf_id ? (string) $rfq->mrf->mrf_id : null,
@@ -457,6 +525,12 @@ class RFQController extends Controller
             'estimatedCost' => (float) $rfq->estimated_cost,
             'deadline' => $rfq->deadline->format('Y-m-d'),
             'status' => $rfq->status,
+            'payment_milestones' => $rfq->mrf
+                ? app(PaymentScheduleService::class)->paymentMilestonesForMrf($rfq->mrf)
+                : [],
+            'paymentMilestones' => $rfq->mrf
+                ? app(PaymentScheduleService::class)->paymentMilestonesForMrf($rfq->mrf)
+                : [],
             'vendorIds' => $rfq->vendors->pluck('vendor_id')->toArray(),
             'createdAt' => $rfq->created_at->toIso8601String(),
         ]);

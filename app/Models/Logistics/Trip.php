@@ -57,6 +57,7 @@ class Trip extends Model
         'approval_status',
         'workflow_stage',
         'passenger_user_ids',
+        'external_passengers',
         'driver_user_id',
         'po_number',
         'unsigned_po_url',
@@ -77,6 +78,7 @@ class Trip extends Model
         'cancelled_at' => 'datetime',
         'metadata' => 'array',
         'passenger_user_ids' => 'array',
+        'external_passengers' => 'array',
     ];
 
     public const WORKFLOW_TRIP_REQUEST = 'trip_request';
