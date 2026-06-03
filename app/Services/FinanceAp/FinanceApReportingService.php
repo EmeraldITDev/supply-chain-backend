@@ -178,35 +178,40 @@ class FinanceApReportingService
      */
     public function cycleTimes(?Carbon $from, ?Carbon $to): array
     {
-        $mrfs = MRF::query()
+        $baseQuery = MRF::query()
             ->tap(fn ($q) => $this->routing->scopeFinanceApCohort($q))
             ->whereNotNull('po_signed_at')
             ->when($from, fn ($q) => $q->where('created_at', '>=', $from))
-            ->when($to, fn ($q) => $q->where('created_at', '<=', $to))
-            ->with(['paymentSchedule.milestones'])
-            ->get();
+            ->when($to, fn ($q) => $q->where('created_at', '<=', $to));
+
+        $sampleSize = (clone $baseQuery)->count();
 
         $poToFirstPayment = [];
         $poToClosed = [];
 
-        foreach ($mrfs as $mrf) {
-            $firstPaid = $mrf->paymentSchedule?->milestones
-                ->filter(fn (PaymentMilestone $m) => $m->paid_at)
-                ->sortBy('paid_at')
-                ->first();
+        (clone $baseQuery)
+            ->with(['paymentSchedule.milestones'])
+            ->orderBy('id')
+            ->chunkById(100, function ($mrfs) use (&$poToFirstPayment, &$poToClosed) {
+                foreach ($mrfs as $mrf) {
+                    $firstPaid = $mrf->paymentSchedule?->milestones
+                        ->filter(fn (PaymentMilestone $m) => $m->paid_at)
+                        ->sortBy('paid_at')
+                        ->first();
 
-            if ($firstPaid?->paid_at && $mrf->po_signed_at) {
-                $poToFirstPayment[] = $mrf->po_signed_at->diffInDays($firstPaid->paid_at);
-            }
+                    if ($firstPaid?->paid_at && $mrf->po_signed_at) {
+                        $poToFirstPayment[] = $mrf->po_signed_at->diffInDays($firstPaid->paid_at);
+                    }
 
-            if ($mrf->workflow_state === WorkflowStateService::STATE_CLOSED && $mrf->po_signed_at) {
-                $poToClosed[] = $mrf->po_signed_at->diffInDays($mrf->updated_at);
-            }
-        }
+                    if ($mrf->workflow_state === WorkflowStateService::STATE_CLOSED && $mrf->po_signed_at) {
+                        $poToClosed[] = $mrf->po_signed_at->diffInDays($mrf->updated_at);
+                    }
+                }
+            });
 
         return array_merge($this->reportContext(), [
             'period' => ['from' => $from?->toDateString(), 'to' => $to?->toDateString()],
-            'sampleSize' => $mrfs->count(),
+            'sampleSize' => $sampleSize,
             'avgDaysPoSignedToFirstMilestonePaid' => $poToFirstPayment !== []
                 ? round(array_sum($poToFirstPayment) / count($poToFirstPayment), 1) : null,
             'avgDaysPoSignedToClosed' => $poToClosed !== []

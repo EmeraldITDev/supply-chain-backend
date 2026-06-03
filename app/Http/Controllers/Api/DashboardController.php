@@ -14,6 +14,7 @@ use App\Services\Finance\FinanceRoutingService;
 use App\Services\WorkflowStateService;
 use App\Support\VendorCategoryDisplay;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 class DashboardController extends Controller
 {
@@ -51,9 +52,12 @@ class DashboardController extends Controller
             ], 403);
         }
 
+        $listLimit = $this->dashboardListLimit($request);
+
         // Get pending vendor registrations
         $pendingRegistrations = VendorRegistration::where('status', 'Pending')
             ->orderBy('created_at', 'desc')
+            ->limit($listLimit)
             ->get()
             ->map(function($reg) {
                 return [
@@ -70,6 +74,7 @@ class DashboardController extends Controller
         $pendingMRFs = MRF::where('status', 'Pending')
             ->with(['requester'])
             ->orderBy('created_at', 'desc')
+            ->limit($listLimit)
             ->get()
             ->map(function($mrf) {
                 return [
@@ -88,6 +93,7 @@ class DashboardController extends Controller
         $pendingSRFs = SRF::where('status', 'Pending')
             ->with(['requester'])
             ->orderBy('created_at', 'desc')
+            ->limit($listLimit)
             ->get()
             ->map(function($srf) {
                 return [
@@ -104,6 +110,7 @@ class DashboardController extends Controller
         $pendingQuotations = Quotation::where('status', 'Pending')
             ->with(['rfq', 'vendor'])
             ->orderBy('created_at', 'desc')
+            ->limit($listLimit)
             ->get()
             ->map(function($quote) {
                 return [
@@ -131,28 +138,20 @@ class DashboardController extends Controller
             ->avg('rating') ?? 0;
         $avgRating = round((float) $avgRating, 2);
         
-        // On-Time Delivery: Calculate percentage from approved quotations (database query)
-        // Get all approved quotations with delivery dates and their RFQs
-        $approvedQuotations = Quotation::where('status', 'Approved')
-            ->whereNotNull('delivery_date')
-            ->with('rfq')
-            ->get();
-        
-        $onTimeCount = 0;
-        $totalDeliveries = 0;
-        
-        foreach ($approvedQuotations as $quote) {
-            if ($quote->rfq && $quote->rfq->deadline) {
-                $totalDeliveries++;
-                // If delivery_date is on or before deadline, it's on-time
-                if ($quote->delivery_date <= $quote->rfq->deadline) {
-                    $onTimeCount++;
-                }
-            }
-        }
-        
-        $onTimeDeliveryPercentage = $totalDeliveries > 0 
-            ? round(($onTimeCount / $totalDeliveries) * 100, 1) 
+        // On-Time Delivery: aggregate in SQL (avoids loading every approved quotation + RFQ)
+        $onTimeRow = DB::table('quotations')
+            ->join('rfqs', 'quotations.rfq_id', '=', 'rfqs.id')
+            ->where('quotations.status', 'Approved')
+            ->whereNotNull('quotations.delivery_date')
+            ->whereNotNull('rfqs.deadline')
+            ->selectRaw('COUNT(*) as total')
+            ->selectRaw('SUM(CASE WHEN quotations.delivery_date <= rfqs.deadline THEN 1 ELSE 0 END) as on_time')
+            ->first();
+
+        $totalDeliveries = (int) ($onTimeRow->total ?? 0);
+        $onTimeCount = (int) ($onTimeRow->on_time ?? 0);
+        $onTimeDeliveryPercentage = $totalDeliveries > 0
+            ? round(($onTimeCount / $totalDeliveries) * 100, 1)
             : 0;
 
         $stats = [
@@ -170,6 +169,7 @@ class DashboardController extends Controller
         return response()->json([
             'success' => true,
             'stats' => $stats,
+            'listLimit' => $listLimit,
             'pendingRegistrations' => $pendingRegistrations,
             'pendingMRFs' => $pendingMRFs,
             'pendingSRFs' => $pendingSRFs,
@@ -198,12 +198,15 @@ class DashboardController extends Controller
             ], 403);
         }
 
+        $listLimit = $this->dashboardListLimit($request);
+
         // SRFs waiting on Supply Chain Director (not returned here before — frontends that only read this dashboard never saw them)
         $srfsAwaitingSupplyChainDirectorApproval = SRF::query()
             ->where('status', 'Pending')
             ->where('current_stage', 'supply_chain_director_review')
             ->with(['requester'])
             ->orderByDesc('created_at')
+            ->limit($listLimit)
             ->get()
             ->map(function (SRF $srf) {
                 $requesterName = $srf->requester_name
@@ -434,13 +437,8 @@ class DashboardController extends Controller
         }
 
         $routing = app(FinanceRoutingService::class);
-        $eager = [
-            'requester',
-            'selectedVendor',
-            'rfqs.selectedQuotation',
-            'rfqs.quotations.vendor',
-            'executiveApprover',
-        ];
+        $eager = $this->financeDashboardEager();
+        $perPage = $this->dashboardPerPage($request, default: 50, max: 100);
 
         $mapMrf = function (MRF $mrf) use ($routing) {
             $rfq = $mrf->rfqs->first();
@@ -505,12 +503,16 @@ class DashboardController extends Controller
         $financeApQuery = MRF::query();
         $routing->scopeFinanceApFinanceReady($financeApQuery);
 
-        $legacyMRFs = (clone $legacyQuery)->with($eager)->orderByDesc('created_at')->get()->map($mapMrf)->values();
-        $financeApMRFs = (clone $financeApQuery)->with($eager)->orderByDesc('created_at')->get()->map($mapMrf)->values();
+        $legacyPaginated = (clone $legacyQuery)->with($eager)->orderByDesc('created_at')->paginate($perPage);
+        $financeApPaginated = (clone $financeApQuery)->with($eager)->orderByDesc('created_at')->paginate($perPage);
 
         $unifiedQuery = MRF::query();
         $routing->scopeAnyFinanceReady($unifiedQuery);
-        $financeMRFs = (clone $unifiedQuery)->with($eager)->orderByDesc('created_at')->get()->map($mapMrf)->values();
+        $financePaginated = (clone $unifiedQuery)->with($eager)->orderByDesc('created_at')->paginate($perPage);
+
+        $legacyMRFs = collect($legacyPaginated->items())->map($mapMrf)->values();
+        $financeApMRFs = collect($financeApPaginated->items())->map($mapMrf)->values();
+        $financeMRFs = collect($financePaginated->items())->map($mapMrf)->values();
 
         $legacyPending = (clone $legacyQuery)
             ->where('status', 'finance')
@@ -543,18 +545,24 @@ class DashboardController extends Controller
                 'description' => 'MRFs created on or after cutoverDate use Finance AP; earlier MRFs use internal chairman payment flow in SCM.',
             ],
             'stats' => [
-                'totalFinanceMRFs' => $financeMRFs->count(),
+                'totalFinanceMRFs' => $financePaginated->total(),
                 'legacy' => [
-                    'count' => $legacyMRFs->count(),
+                    'count' => $legacyPaginated->total(),
                     'pendingInternalPayment' => $legacyPending,
                     'awaitingChairmanApproval' => $legacyChairman,
                 ],
                 'financeAp' => [
-                    'count' => $financeApMRFs->count(),
+                    'count' => $financeApPaginated->total(),
                     'financeHandoffPending' => $financeApHandoff,
                     'inReviewOrMilestonePayment' => $financeApInReview,
                     'packagePushedCount' => $financeApSynced,
                 ],
+            ],
+            'pagination' => [
+                'perPage' => $perPage,
+                'financeMRFs' => $this->paginationMeta($financePaginated),
+                'legacyFinanceMRFs' => $this->paginationMeta($legacyPaginated),
+                'financeApMRFs' => $this->paginationMeta($financeApPaginated),
             ],
             'financeMRFs' => $financeMRFs,
             'legacyFinanceMRFs' => $legacyMRFs,
@@ -668,5 +676,51 @@ class DashboardController extends Controller
             'success' => true,
             'data' => $activities
         ]);
+    }
+
+    private function dashboardListLimit(Request $request, int $default = 30, int $max = 50): int
+    {
+        $limit = (int) $request->query('list_limit', $default);
+
+        return max(1, min($limit, $max));
+    }
+
+    private function dashboardPerPage(Request $request, int $default = 50, int $max = 100): int
+    {
+        $perPage = (int) $request->query('per_page', $request->query('perPage', $default));
+
+        return max(1, min($perPage, $max));
+    }
+
+    /**
+     * Minimal relations for finance dashboard rows (avoids loading every quotation per RFQ).
+     *
+     * @return list<string|array<int|string, mixed>>
+     */
+    private function financeDashboardEager(): array
+    {
+        return [
+            'requester',
+            'selectedVendor',
+            'executiveApprover',
+            'rfqs' => fn ($query) => $query
+                ->with('selectedQuotation')
+                ->orderByDesc('created_at')
+                ->limit(1),
+        ];
+    }
+
+    /**
+     * @param  \Illuminate\Contracts\Pagination\LengthAwarePaginator  $paginator
+     * @return array<string, int>
+     */
+    private function paginationMeta($paginator): array
+    {
+        return [
+            'total' => $paginator->total(),
+            'perPage' => $paginator->perPage(),
+            'currentPage' => $paginator->currentPage(),
+            'lastPage' => $paginator->lastPage(),
+        ];
     }
 }
