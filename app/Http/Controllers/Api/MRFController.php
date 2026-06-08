@@ -1137,6 +1137,10 @@ class MRFController extends Controller
                 'department' => 'nullable|string|max:255',
                 'pfi' => 'nullable|file|mimes:pdf,doc,docx|max:10240', // Optional PFI upload (10MB max)
                 'attachment' => 'nullable|file|max:10240', // Max 10MB, any file type
+                'source' => 'nullable|string|in:standard,po_generated',
+                'is_po_linked' => 'nullable|boolean',
+                'isPoLinked' => 'nullable|boolean',
+                'suppress_notifications' => 'nullable|boolean',
             ], RequestLineItemParser::validationRules(), PaymentMilestoneRequest::validationRules()));
 
             if ($validator->fails()) {
@@ -1267,6 +1271,15 @@ class MRFController extends Controller
                     : WorkflowStateService::STATE_EXECUTIVE_REVIEW;
             }
 
+            $mrfSource = strtolower((string) ($request->input('source') ?? 'standard'));
+            if (! in_array($mrfSource, ['standard', 'po_generated'], true)) {
+                $mrfSource = 'standard';
+            }
+
+            $isPoLinked = $request->boolean('is_po_linked')
+                || $request->boolean('isPoLinked')
+                || $mrfSource === 'po_generated';
+
             try {
             $mrf = MRF::create([
                 'mrf_id' => $mrfId,
@@ -1291,6 +1304,8 @@ class MRFController extends Controller
                     'workflow_state' => $initialWorkflowState,
                 'approval_history' => [],
                 'is_resubmission' => false,
+                'source' => $mrfSource,
+                'is_po_linked' => $isPoLinked,
                 'pfi_url' => $pfiUrl,
                 'pfi_share_url' => $pfiShareUrl,
                 'attachment_url' => $attachmentUrl,
@@ -1379,24 +1394,34 @@ class MRFController extends Controller
                 }
             }
 
-            // Send notification to Executive
-            try {
-                $this->notificationService->notifyMRFSubmitted($mrf);
-            } catch (\Exception $e) {
-                // Log notification error but don't fail the request
-                \Log::error('Failed to send MRF notification', [
+            $suppressNotifications = $request->boolean('suppress_notifications')
+                || $mrfSource === 'po_generated';
+
+            if (! $suppressNotifications) {
+                // Send notification to Executive
+                try {
+                    $this->notificationService->notifyMRFSubmitted($mrf);
+                } catch (\Exception $e) {
+                    // Log notification error but don't fail the request
+                    \Log::error('Failed to send MRF notification', [
+                        'mrf_id' => $mrf->mrf_id,
+                        'error' => $e->getMessage()
+                    ]);
+                }
+                try {
+                    $this->workflowNotificationService->notifyMRFSubmitted($mrf);
+                } catch (\Exception $e) {
+                    \Log::error('Failed to send MRF created email notification', [
+                        'event' => 'mrf_created',
+                        'recipient' => null,
+                        'model_id' => $mrf->mrf_id,
+                        'error' => $e->getMessage(),
+                    ]);
+                }
+            } else {
+                Log::info('MRF created notifications suppressed', [
                     'mrf_id' => $mrf->mrf_id,
-                    'error' => $e->getMessage()
-                ]);
-            }
-            try {
-                $this->workflowNotificationService->notifyMRFSubmitted($mrf);
-            } catch (\Exception $e) {
-                \Log::error('Failed to send MRF created email notification', [
-                    'event' => 'mrf_created',
-                    'recipient' => null,
-                    'model_id' => $mrf->mrf_id,
-                    'error' => $e->getMessage(),
+                    'source' => $mrfSource,
                 ]);
             }
 

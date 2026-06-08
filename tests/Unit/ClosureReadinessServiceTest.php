@@ -70,6 +70,22 @@ class ClosureReadinessServiceTest extends TestCase
         $this->assertFalse($readiness['can_close']);
     }
 
+    public function test_blocks_close_when_100_advance_paid_but_completion_docs_missing(): void
+    {
+        $mrf = $this->financeApMrf();
+        $schedule = $this->paidScheduleFromTemplate('100_advance');
+
+        $this->bindServices($schedule, missingDocuments: ['vendor_invoice', 'grn']);
+
+        $readiness = app(ClosureReadinessService::class)->evaluate($mrf);
+
+        $this->assertTrue($readiness['financially_complete']);
+        $this->assertFalse($readiness['operationally_complete']);
+        $this->assertFalse($readiness['can_close']);
+        $this->assertContains('vendor_invoice', $readiness['missing_documents']);
+        $this->assertContains('grn', $readiness['missing_documents']);
+    }
+
     private function financeApMrf(): MRF
     {
         config(['finance_ap.cutover_date' => '2026-01-01']);
@@ -123,6 +139,8 @@ class ClosureReadinessServiceTest extends TestCase
                 ->andReturnUsing(fn (PaymentMilestone $m) => $real->requiredDocumentsForMilestone($m));
             $mock->shouldReceive('allMilestonesFinanciallyComplete')
                 ->andReturnUsing(fn (?PaymentSchedule $s) => $real->allMilestonesFinanciallyComplete($s ?? $schedule));
+            $mock->shouldReceive('isAdvanceOnlySchedule')
+                ->andReturnUsing(fn (?PaymentSchedule $s) => $real->isAdvanceOnlySchedule($s ?? $schedule));
         });
 
         $this->mock(ProcurementDocumentService::class, function ($mock) use ($missingDocuments, $schedule, $real) {

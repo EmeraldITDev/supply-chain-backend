@@ -77,7 +77,7 @@ class DashboardController extends Controller
             ->limit($listLimit)
             ->get()
             ->map(function($mrf) {
-                return [
+                return array_merge($mrf->poOriginApiFields(), [
                     'id' => $mrf->id,
                     'mrfId' => $mrf->mrf_id,
                     'title' => $mrf->title,
@@ -86,7 +86,7 @@ class DashboardController extends Controller
                     'requesterName' => $mrf->requester_name,
                     'estimatedCost' => $mrf->estimated_cost,
                     'createdAt' => $mrf->created_at->toIso8601String(),
-                ];
+                ]);
             });
 
         // Get pending SRFs
@@ -445,7 +445,7 @@ class DashboardController extends Controller
             $selectedQuotation = $rfq?->selectedQuotation;
             $meta = $routing->routingMeta($mrf);
 
-            return array_merge($meta, [
+            return array_merge($meta, $mrf->poOriginApiFields(), [
                 'id' => $mrf->id,
                 'mrfId' => $mrf->mrf_id,
                 'title' => $mrf->title,

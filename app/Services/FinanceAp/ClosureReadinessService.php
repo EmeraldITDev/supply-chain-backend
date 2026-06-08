@@ -4,6 +4,7 @@ namespace App\Services\FinanceAp;
 
 use App\Models\MRF;
 use App\Models\PaymentMilestone;
+use App\Models\ProcurementDocument;
 use App\Services\PaymentScheduleService;
 use App\Services\ProcurementDocumentService;
 use App\Services\WorkflowStateService;
@@ -22,6 +23,7 @@ class ClosureReadinessService
      *     operationally_complete: bool,
      *     can_close: bool,
      *     blockers: list<string>,
+     *     missing_documents: list<string>,
      *     milestoneSummary: list<array<string, mixed>>
      * }
      */
@@ -33,6 +35,7 @@ class ClosureReadinessService
                 'operationally_complete' => $this->legacyOperationallyComplete($mrf),
                 'can_close' => $this->legacyCanClose($mrf),
                 'blockers' => $this->legacyCanClose($mrf) ? [] : ['Legacy MRF closure rules apply.'],
+                'missing_documents' => [],
                 'milestoneSummary' => [],
             ];
         }
@@ -47,12 +50,14 @@ class ClosureReadinessService
                 'operationally_complete' => false,
                 'can_close' => false,
                 'blockers' => ['Payment schedule is required before this MRF can close.'],
+                'missing_documents' => [],
                 'milestoneSummary' => [],
             ];
         }
 
         $schedule->loadMissing('milestones');
         $vendorId = $this->documentService->resolveVendorId($mrf);
+        $missingDocuments = [];
 
         foreach ($schedule->milestones as $milestone) {
             $requiredDocs = $this->paymentScheduleService->requiredDocumentsForMilestone($milestone);
@@ -77,6 +82,7 @@ class ClosureReadinessService
 
             foreach ($missingDocs as $missingDoc) {
                 $blockers[] = "Missing {$missingDoc} document for milestone {$milestone->milestone_number} ({$milestone->label}).";
+                $missingDocuments[] = $missingDoc;
             }
         }
 
@@ -84,6 +90,20 @@ class ClosureReadinessService
         $operationallyComplete = collect($milestoneSummary)->every(
             fn (array $row) => ($row['missingDocuments'] ?? []) === []
         );
+
+        if ($financiallyComplete && $this->paymentScheduleService->isAdvanceOnlySchedule($schedule)) {
+            $completionDocs = $this->advanceOnlyClosureDocumentTypes($schedule);
+            $missingCompletionDocs = $this->documentService->missingDocumentTypes($mrf, $completionDocs, $vendorId);
+
+            foreach ($missingCompletionDocs as $missingDoc) {
+                $blockers[] = "Missing {$missingDoc} document required before PO closure.";
+                $missingDocuments[] = $missingDoc;
+            }
+
+            if ($missingCompletionDocs !== []) {
+                $operationallyComplete = false;
+            }
+        }
 
         $state = $mrf->workflow_state ?? WorkflowStateService::STATE_MRF_CREATED;
         $stateReady = in_array($state, [
@@ -110,8 +130,40 @@ class ClosureReadinessService
             'operationally_complete' => $operationallyComplete,
             'can_close' => $canClose,
             'blockers' => array_values(array_unique($blockers)),
+            'missing_documents' => array_values(array_unique($missingDocuments)),
             'milestoneSummary' => $milestoneSummary,
         ];
+    }
+
+    /**
+     * Completion documents required to close 100% advance POs even after payment.
+     *
+     * @return list<string>
+     */
+    private function advanceOnlyClosureDocumentTypes($schedule): array
+    {
+        if (! $schedule) {
+            return [];
+        }
+
+        $schedule->loadMissing('milestones');
+
+        $docs = [
+            ProcurementDocument::TYPE_VENDOR_INVOICE,
+            ProcurementDocument::TYPE_GRN,
+        ];
+
+        foreach ($schedule->milestones as $milestone) {
+            $required = $this->paymentScheduleService->requiredDocumentsForMilestone($milestone);
+
+            if ($milestone->trigger_condition === PaymentMilestone::TRIGGER_UPON_COMPLETION
+                || in_array(ProcurementDocument::TYPE_JCC, $required, true)) {
+                $docs[] = ProcurementDocument::TYPE_JCC;
+                break;
+            }
+        }
+
+        return array_values(array_unique($docs));
     }
 
     private function legacyFinanciallyComplete(MRF $mrf): bool

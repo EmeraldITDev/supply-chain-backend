@@ -199,6 +199,9 @@ class TripController extends ApiController
             return $this->error('Vendor not found', 'NOT_FOUND', 404);
         }
 
+        $emailSent = false;
+        $emailError = null;
+
         try {
             $trip->vendor_id = $request->vendor_id;
             $trip->status = Trip::STATUS_DRAFT;
@@ -211,12 +214,15 @@ class TripController extends ApiController
             // TripVendorSubmission and send the trip quote (RFQ) email with a
             // vendor-portal link so responses appear under Compare Vendor Responses.
             // notifyExisting=true resends the invitation if a submission already existed.
+            // Email failure must never roll back the assignment or return HTTP 500.
             try {
-                $this->submissionService->createSubmissionsForVendors(
+                $submissionResult = $this->submissionService->createSubmissionsForVendors(
                     $trip->fresh(),
                     [(int) $request->vendor_id],
                     true
                 );
+                $emailSent = (bool) ($submissionResult['invitation']['sent'] ?? false);
+                $emailError = $submissionResult['invitation']['error'] ?? null;
             } catch (\Throwable $submissionException) {
                 \Log::error('Trip vendor invite failed after assignment', [
                     'trip_id' => $trip->id,
@@ -224,12 +230,8 @@ class TripController extends ApiController
                     'error' => $submissionException->getMessage(),
                 ]);
 
-                return $this->error(
-                    'Failed to send vendor invitation. Please try again.',
-                    'INVITATION_FAILED',
-                    500,
-                    config('app.debug') ? ['exception' => [$submissionException->getMessage()]] : []
-                );
+                $emailSent = false;
+                $emailError = $submissionException->getMessage();
             }
 
             try {
@@ -239,7 +241,7 @@ class TripController extends ApiController
                     'trip',
                     (string) $trip->id,
                     "Vendor #{$vendor->id} ({$vendor->name}) assigned to trip {$trip->trip_code}",
-                    ['vendor_id' => $trip->vendor_id],
+                    ['vendor_id' => $trip->vendor_id, 'email_sent' => $emailSent],
                     $request
                 );
             } catch (\Throwable $auditException) {
@@ -265,9 +267,17 @@ class TripController extends ApiController
             );
         }
 
-        return $this->success([
-            'trip' => $trip->fresh(['vendor']),
+        $freshTrip = $trip->fresh(['vendor']);
+        $payload = array_merge($freshTrip->toArray(), [
+            'assigned' => true,
+            'email_sent' => $emailSent,
         ]);
+
+        if (! $emailSent && $emailError) {
+            $payload['email_error'] = $emailError;
+        }
+
+        return $this->success($payload);
     }
 
     public function bulkUpload(BulkUploadTripsRequest $request)

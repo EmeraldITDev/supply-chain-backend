@@ -36,9 +36,30 @@ class MRF extends Model
      */
     public function scmTransactionApiFields(): array
     {
-        return [
+        return array_merge([
             'scmTransactionId' => $this->scm_transaction_id,
             'scm_transaction_id' => $this->scm_transaction_id,
+        ], $this->poOriginApiFields());
+    }
+
+    /**
+     * Flags for PO-generated / manual-PO MRFs used by frontend list filters.
+     *
+     * @return array{source: string, is_po_linked: bool, isPoLinked: bool}
+     */
+    public function poOriginApiFields(): array
+    {
+        $source = $this->source ?? 'standard';
+        if (! in_array($source, ['standard', 'po_generated'], true)) {
+            $source = 'standard';
+        }
+
+        $isPoLinked = (bool) ($this->is_po_linked ?? false);
+
+        return [
+            'source' => $source,
+            'is_po_linked' => $isPoLinked,
+            'isPoLinked' => $isPoLinked,
         ];
     }
 
@@ -138,6 +159,8 @@ class MRF extends Model
         'invoice_remarks',
         'expected_delivery_date',
         'scm_transaction_id',
+        'source',
+        'is_po_linked',
         'finance_ap_case_id',
         'finance_ap_status',
     ];
@@ -146,6 +169,7 @@ class MRF extends Model
         'estimated_cost' => 'decimal:2',
         'date' => 'date',
         'is_resubmission' => 'boolean',
+        'is_po_linked' => 'boolean',
         'approval_history' => 'array',
         'executive_approved' => 'boolean',
         'executive_approved_at' => 'datetime',

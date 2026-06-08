@@ -17,7 +17,10 @@ class TripVendorSubmissionService
      * Trip quote / RFQ invitation (vendor portal). Prefer the vendor's portal User;
      * fall back to the vendor record email so notifications still send when no User is linked.
      */
-    public function notifyVendorInvitation(Trip $trip, Vendor $vendor): void
+    /**
+     * @return array{sent: bool, error: ?string}
+     */
+    public function notifyVendorInvitation(Trip $trip, Vendor $vendor): array
     {
         $notification = new VendorInvitedForTripNotification($trip, $vendor);
 
@@ -29,17 +32,27 @@ class TripVendorSubmissionService
                 'vendor_id' => $vendor->id,
             ]);
 
-            return;
+            return [
+                'sent' => false,
+                'error' => 'No portal user or vendor email on record',
+            ];
         }
 
         try {
             $notifiable->notifyNow($notification);
+
+            return ['sent' => true, 'error' => null];
         } catch (\Throwable $e) {
             Log::warning('Vendor trip invitation notification failed (assignment still saved)', [
                 'trip_id' => $trip->id,
                 'vendor_id' => $vendor->id,
                 'error' => $e->getMessage(),
             ]);
+
+            return [
+                'sent' => false,
+                'error' => $e->getMessage(),
+            ];
         }
     }
 
@@ -49,9 +62,13 @@ class TripVendorSubmissionService
      * @param  bool  $notifyExisting  When true, resend the quote invitation if a submission row already exists
      *                               (used when re-assigning from Schedule Trip / Assign Vendor).
      */
-    public function createSubmissionsForVendors(Trip $trip, array $vendorIds, bool $notifyExisting = false): Collection
+    /**
+     * @return array{submissions: Collection, invitation: array{sent: bool, error: ?string}}
+     */
+    public function createSubmissionsForVendors(Trip $trip, array $vendorIds, bool $notifyExisting = false): array
     {
         $submissions = collect();
+        $invitation = ['sent' => true, 'error' => null];
 
         foreach ($vendorIds as $vendorId) {
             // Check if submission already exists
@@ -61,7 +78,7 @@ class TripVendorSubmissionService
                 if ($notifyExisting) {
                     $vendor = Vendor::find($vendorId);
                     if ($vendor) {
-                        $this->notifyVendorInvitation($trip, $vendor);
+                        $invitation = $this->notifyVendorInvitation($trip, $vendor);
                     }
                 }
 
@@ -85,7 +102,7 @@ class TripVendorSubmissionService
 
             $vendor = Vendor::find($vendorId);
             if ($vendor) {
-                $this->notifyVendorInvitation($trip, $vendor);
+                $invitation = $this->notifyVendorInvitation($trip, $vendor);
             }
         }
 
@@ -97,7 +114,10 @@ class TripVendorSubmissionService
             ]);
         }
 
-        return $submissions;
+        return [
+            'submissions' => $submissions,
+            'invitation' => $invitation,
+        ];
     }
 
     /**

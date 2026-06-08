@@ -61,6 +61,7 @@ class WorkflowGateController extends Controller
                     'operationallyComplete' => $closureReadiness['operationally_complete'],
                     'canClose' => $closureReadiness['can_close'],
                     'blockers' => $closureReadiness['blockers'],
+                    'missingDocuments' => $closureReadiness['missing_documents'] ?? [],
                     'milestoneSummary' => $closureReadiness['milestoneSummary'],
                 ],
             ],

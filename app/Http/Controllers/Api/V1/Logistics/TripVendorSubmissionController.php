@@ -40,7 +40,8 @@ class TripVendorSubmissionController extends ApiController
 
         try {
             $data = $request->validated();
-            $submissions = $this->submissionService->createSubmissionsForVendors($trip, $data['vendor_ids']);
+            $result = $this->submissionService->createSubmissionsForVendors($trip, $data['vendor_ids']);
+            $submissions = $result['submissions'];
 
             return $this->success([
                 'message' => 'Vendors invited successfully',
