@@ -59,7 +59,12 @@ COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
 # Set working directory
 WORKDIR /var/www/html
 
-# Copy app files
+# Install PHP dependencies from the committed lock file (reproducible + lower memory use).
+COPY composer.json composer.lock ./
+ENV COMPOSER_MEMORY_LIMIT=-1
+RUN composer install --no-dev --optimize-autoloader --no-scripts --no-interaction
+
+# Copy application code
 COPY . .
 
 # Set Apache DocumentRoot to /public
@@ -70,10 +75,6 @@ RUN sed -ri -e 's!/var/www/html!${APACHE_DOCUMENT_ROOT}!g' /etc/apache2/sites-av
 # Fix permissions
 RUN chown -R www-data:www-data /var/www/html \
     && chmod -R 775 storage bootstrap/cache
-
-# Install PHP dependencies (remove composer.lock to allow fresh install of new AWS SDK)
-RUN rm -f composer.lock && \
-    composer install --no-dev --optimize-autoloader --no-scripts --no-interaction
 
 EXPOSE 80
 CMD ["apache2-foreground"]
