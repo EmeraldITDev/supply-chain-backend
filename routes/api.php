@@ -426,6 +426,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/rfqs', [RFQController::class, 'index']);
     Route::get('/rfqs/{id}', [RFQController::class, 'show']);
     Route::post('/rfqs', [RFQController::class, 'store']);
+    Route::post('/rfqs/{id}/attachments', [RFQController::class, 'uploadAttachments']);
     Route::put('/rfqs/{id}', [RFQController::class, 'update']);
     Route::patch('/rfqs/{id}', [RFQController::class, 'update']);
     Route::get('/po-terms-templates/{type}', [POTermsTemplateController::class, 'show']);

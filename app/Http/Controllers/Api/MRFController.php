@@ -451,6 +451,14 @@ class MRFController extends Controller
 
         $freshPOUrls = $this->generateFreshPOUrls($mrf);
         $profitAndLoss = app(LineItemBudgetService::class)->mrfProfitAndLoss($mrf);
+        $documentService = app(\App\Services\ProcurementDocumentService::class);
+        $vendorId = $documentService->resolveVendorId($mrf);
+        $vendorInvoiceDoc = $documentService->findActiveDocument(
+            $mrf,
+            \App\Models\ProcurementDocument::TYPE_VENDOR_INVOICE,
+            $vendorId
+        );
+        $vendorInvoice = $vendorInvoiceDoc ? $documentService->transform($vendorInvoiceDoc) : null;
 
         return response()->json(array_merge($mrf->scmTransactionApiFields(), [
             'id' => $mrf->mrf_id,
@@ -568,6 +576,8 @@ class MRFController extends Controller
             'profitAndLoss' => $profitAndLoss,
             'payment_milestones' => app(PaymentScheduleService::class)->paymentMilestonesForMrf($mrf),
             'paymentMilestones' => app(PaymentScheduleService::class)->paymentMilestonesForMrf($mrf),
+            'vendorInvoice' => $vendorInvoice,
+            'vendor_invoice' => $vendorInvoice,
         ]));
     }
 

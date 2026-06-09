@@ -110,11 +110,11 @@ class RFQWorkflowController extends Controller
                 'quantity' => $rfq->quantity,
                 'estimatedCost' => (float) $estimatedCost,
                 'budget' => (float) $estimatedCost, // Alias for estimatedCost for frontend compatibility
-                'paymentTerms' => $rfq->payment_terms,
+                ...$rfq->extendedDetailApiFields(),
                 'paymentSchedule' => $this->vendorPaymentSchedulePayload($rfq),
                 'payment_schedule' => $this->vendorPaymentSchedulePayload($rfq),
-                'notes' => $rfq->notes,
-                'supportingDocuments' => $rfq->supporting_documents ?? [],
+                'supportingDocuments' => app(\App\Services\RfqAttachmentService::class)->hydrateSupportingDocuments($rfq->supporting_documents),
+                'supporting_documents' => app(\App\Services\RfqAttachmentService::class)->hydrateSupportingDocuments($rfq->supporting_documents),
                 'deadline' => $rfq->deadline ? $rfq->deadline->format('Y-m-d') : null,
                 'status' => $rfq->status,
                 'workflowState' => $rfq->workflow_state,
@@ -234,6 +234,12 @@ class RFQWorkflowController extends Controller
             }
         }
 
+        $rfq->loadMissing(['mrf.paymentSchedule.milestones', 'items']);
+        $schedulePayload = $this->vendorPaymentSchedulePayload($rfq);
+        $paymentMilestones = $rfq->mrf
+            ? app(PaymentScheduleService::class)->paymentMilestonesForMrf($rfq->mrf)
+            : [];
+
         // Get all quotations with items and vendor details
         // Exclude rejected quotations from active view (they remain accessible for historical tracking via RFQ Management)
         // Rejected quotations should not be selectable or forwarded for approval
@@ -251,7 +257,7 @@ class RFQWorkflowController extends Controller
             })
             ->with(['vendor', 'items.rfqItem'])
             ->get()
-            ->map(function ($quotation) {
+            ->map(function ($quotation) use ($schedulePayload, $paymentMilestones) {
                 // Handle missing vendor gracefully
                 $vendor = $quotation->vendor;
 
@@ -418,10 +424,6 @@ class RFQWorkflowController extends Controller
 
         // Get MRF with all relationships
         $mrf = $rfq->mrf;
-        $schedulePayload = $this->vendorPaymentSchedulePayload($rfq);
-        $paymentMilestones = $mrf
-            ? app(PaymentScheduleService::class)->paymentMilestonesForMrf($mrf)
-            : [];
         $mrfEstimatedCost = $mrf ? (float) $mrf->estimated_cost : null;
         $rfqEstimatedCost = $rfq->estimated_cost !== null ? (float) $rfq->estimated_cost : null;
         $estimatedBudget = ($mrfEstimatedCost !== null && $mrfEstimatedCost > 0)
@@ -442,8 +444,9 @@ class RFQWorkflowController extends Controller
                     'estimatedCost' => (float) $rfq->estimated_cost,
                     'estimated_budget' => $estimatedBudget,
                     'estimatedBudget' => $estimatedBudget,
-                    'paymentTerms' => $rfq->payment_terms,
-                    'supportingDocuments' => $rfq->supporting_documents ?? [],
+                    ...$rfq->extendedDetailApiFields(),
+                    'supportingDocuments' => app(\App\Services\RfqAttachmentService::class)->hydrateSupportingDocuments($rfq->supporting_documents),
+                    'supporting_documents' => app(\App\Services\RfqAttachmentService::class)->hydrateSupportingDocuments($rfq->supporting_documents),
                     'items' => $rfq->items->map(function ($item) {
                         return [
                             'id' => $item->id,
@@ -776,8 +779,8 @@ class RFQWorkflowController extends Controller
             'totalAmount' => 'nullable|numeric|min:0',
             'deliveryDate' => 'required|date',
             'deliveryDays' => 'nullable|integer|min:0',
-            'paymentTerms' => 'nullable|string',
-            'payment_terms' => 'nullable|string',
+            'paymentTerms' => 'nullable|string|max:100',
+            'payment_terms' => 'nullable|string|max:100',
             'validityDays' => 'nullable|integer|min:0',
             'warrantyPeriod' => 'nullable|string',
             'notes' => 'nullable|string',
@@ -860,7 +863,7 @@ class RFQWorkflowController extends Controller
                     'currency' => $request->currency ?? 'NGN',
                     'delivery_date' => $request->deliveryDate,
                     'delivery_days' => $request->deliveryDays,
-                    'payment_terms' => $request->paymentTerms,
+                    'payment_terms' => $request->paymentTerms ?? $request->payment_terms,
                     'validity_days' => $validityDays,
                     'warranty_period' => $request->warrantyPeriod,
                     'notes' => $request->notes,

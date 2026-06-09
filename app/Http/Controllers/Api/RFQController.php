@@ -9,6 +9,7 @@ use App\Models\MRF;
 use App\Models\Vendor;
 use App\Services\FormattedIdGenerator;
 use App\Services\PaymentScheduleService;
+use App\Services\RfqAttachmentService;
 use App\Services\WorkflowNotificationService;
 use App\Support\PaymentMilestoneRequest;
 use Illuminate\Http\Request;
@@ -105,11 +106,11 @@ class RFQController extends Controller
                 'estimatedCost' => $rfq->estimated_cost !== null ? (float) $rfq->estimated_cost : null,
                 'estimated_budget' => $estimatedBudget,
                 'estimatedBudget' => $estimatedBudget,
-                'paymentTerms' => $rfq->payment_terms,
+                ...$rfq->extendedDetailApiFields(),
                 'paymentSchedule' => $this->paymentSchedulePayload($rfq->mrf),
                 'payment_schedule' => $this->paymentSchedulePayload($rfq->mrf),
-                'notes' => $rfq->notes,
-                'supportingDocuments' => $rfq->supporting_documents ?? [],
+                'supportingDocuments' => $this->supportingDocumentsPayload($rfq),
+                'supporting_documents' => $this->supportingDocumentsPayload($rfq),
                 'deadline' => $rfq->deadline->format('Y-m-d'),
                 'status' => $rfq->status,
                 'workflowState' => $rfq->workflow_state,
@@ -166,7 +167,7 @@ class RFQController extends Controller
             'estimatedCost' => $rfq->estimated_cost !== null ? (float) $rfq->estimated_cost : null,
             'estimated_budget' => $estimatedBudget,
             'estimatedBudget' => $estimatedBudget,
-            'paymentTerms' => $rfq->payment_terms,
+            ...$rfq->extendedDetailApiFields(),
             'paymentSchedule' => $this->paymentSchedulePayload($rfq->mrf),
             'payment_schedule' => $this->paymentSchedulePayload($rfq->mrf),
             'payment_milestones' => $rfq->mrf
@@ -175,8 +176,8 @@ class RFQController extends Controller
             'paymentMilestones' => $rfq->mrf
                 ? app(PaymentScheduleService::class)->paymentMilestonesForMrf($rfq->mrf)
                 : [],
-            'notes' => $rfq->notes,
-            'supportingDocuments' => $rfq->supporting_documents ?? [],
+            'supportingDocuments' => $this->supportingDocumentsPayload($rfq),
+            'supporting_documents' => $this->supportingDocumentsPayload($rfq),
             'deadline' => $rfq->deadline?->format('Y-m-d'),
             'status' => $rfq->status,
             'workflowState' => $rfq->workflow_state,
@@ -227,6 +228,14 @@ class RFQController extends Controller
             'vendorIds.*' => 'required|string|exists:vendors,vendor_id',
             'paymentTerms' => 'nullable|string',
             'payment_terms' => 'nullable|string',
+            'deliveryTerms' => 'nullable|string',
+            'delivery_terms' => 'nullable|string',
+            'technicalRequirements' => 'nullable|string',
+            'technical_requirements' => 'nullable|string',
+            'additionalNotes' => 'nullable|string',
+            'additional_notes' => 'nullable|string',
+            'termsAndConditions' => 'nullable|string',
+            'terms_and_conditions' => 'nullable|string',
             'notes' => 'nullable|string',
             'supportingDocuments' => 'nullable|array',
             'supportingDocuments.*' => 'nullable|string|url', // URLs to supporting documents
@@ -346,7 +355,11 @@ class RFQController extends Controller
             'estimated_cost' => $estimatedCost,
             'deadline' => $request->deadline,
             'payment_terms' => $this->resolvePaymentTermsForMrf($mrf, $request->paymentTerms ?? $request->payment_terms),
-            'notes' => $request->notes,
+            'delivery_terms' => $request->input('delivery_terms') ?? $request->input('deliveryTerms'),
+            'technical_requirements' => $request->input('technical_requirements') ?? $request->input('technicalRequirements'),
+            'additional_notes' => $request->input('additional_notes') ?? $request->input('additionalNotes') ?? $request->notes,
+            'terms_and_conditions' => $request->input('terms_and_conditions') ?? $request->input('termsAndConditions'),
+            'notes' => $request->notes ?? $request->input('additional_notes') ?? $request->input('additionalNotes'),
             'supporting_documents' => !empty($supportingDocuments) ? $supportingDocuments : null,
             'status' => 'Open',
             'workflow_state' => 'open',
@@ -417,7 +430,7 @@ class RFQController extends Controller
             'description' => $rfq->description,
             'quantity' => $rfq->quantity,
             'estimatedCost' => $rfq->estimated_cost !== null ? (float) $rfq->estimated_cost : null,
-            'paymentTerms' => $rfq->payment_terms,
+            ...$rfq->extendedDetailApiFields(),
             'paymentSchedule' => $this->paymentSchedulePayload($rfq->mrf),
             'payment_schedule' => $this->paymentSchedulePayload($rfq->mrf),
             'payment_milestones' => $mrf
@@ -426,13 +439,66 @@ class RFQController extends Controller
             'paymentMilestones' => $mrf
                 ? app(PaymentScheduleService::class)->paymentMilestonesForMrf($mrf)
                 : [],
-            'notes' => $rfq->notes,
-            'supportingDocuments' => $rfq->supporting_documents ?? [],
+            'supportingDocuments' => $this->supportingDocumentsPayload($rfq),
+            'supporting_documents' => $this->supportingDocumentsPayload($rfq),
             'deadline' => $rfq->deadline->format('Y-m-d'),
             'status' => $rfq->status,
             'workflowState' => $rfq->workflow_state,
             'vendorIds' => $rfq->vendors->pluck('vendor_id')->toArray(),
             'createdAt' => $rfq->created_at->toIso8601String(),
+        ], 201);
+    }
+
+    /**
+     * Upload supporting documents for an RFQ (multipart).
+     *
+     * POST /api/rfqs/{id}/attachments
+     */
+    public function uploadAttachments(Request $request, $id)
+    {
+        $rfq = $this->findRfqByAnyId((string) $id);
+
+        if (! $rfq) {
+            return response()->json([
+                'success' => false,
+                'error' => 'RFQ not found',
+                'code' => 'NOT_FOUND',
+            ], 404);
+        }
+
+        $files = [];
+        if ($request->hasFile('attachments')) {
+            $uploaded = $request->file('attachments');
+            $files = is_array($uploaded) ? $uploaded : [$uploaded];
+        } elseif ($request->hasFile('file')) {
+            $files = [$request->file('file')];
+        }
+
+        if ($files === []) {
+            return response()->json([
+                'success' => false,
+                'error' => 'No attachment files provided',
+                'code' => 'VALIDATION_ERROR',
+            ], 422);
+        }
+
+        $attachmentService = app(RfqAttachmentService::class);
+        $stored = $attachmentService->storeUploadedAttachments($files, $rfq->rfq_id);
+
+        $existing = is_array($rfq->supporting_documents) ? $rfq->supporting_documents : [];
+        $rfq->update([
+            'supporting_documents' => array_values(array_merge($existing, $stored)),
+        ]);
+
+        $payload = array_map(static fn (array $row) => [
+            'id' => $row['id'],
+            'filename' => $row['filename'],
+            'url' => $row['url'],
+        ], $stored);
+
+        return response()->json([
+            'success' => true,
+            'data' => $payload,
         ], 201);
     }
 
@@ -564,5 +630,13 @@ class RFQController extends Controller
         }
 
         return $fallback;
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    private function supportingDocumentsPayload(RFQ $rfq): array
+    {
+        return app(RfqAttachmentService::class)->hydrateSupportingDocuments($rfq->supporting_documents);
     }
 }

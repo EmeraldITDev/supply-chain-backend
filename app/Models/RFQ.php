@@ -23,7 +23,11 @@ class RFQ extends Model
         'estimated_cost',
         'deadline',
         'payment_terms',
+        'delivery_terms',
+        'technical_requirements',
         'notes',
+        'additional_notes',
+        'terms_and_conditions',
         'supporting_documents',
         'status',
         'workflow_state',
@@ -94,6 +98,30 @@ class RFQ extends Model
     public function selectedQuotation(): BelongsTo
     {
         return $this->belongsTo(Quotation::class, 'selected_quotation_id');
+    }
+
+    /**
+     * Extended RFQ detail fields for vendor portal and procurement views.
+     *
+     * @return array<string, mixed>
+     */
+    public function extendedDetailApiFields(): array
+    {
+        $additionalNotes = $this->additional_notes ?? $this->notes;
+
+        return [
+            'paymentTerms' => $this->payment_terms,
+            'payment_terms' => $this->payment_terms,
+            'deliveryTerms' => $this->delivery_terms,
+            'delivery_terms' => $this->delivery_terms,
+            'technicalRequirements' => $this->technical_requirements,
+            'technical_requirements' => $this->technical_requirements,
+            'additionalNotes' => $additionalNotes,
+            'additional_notes' => $additionalNotes,
+            'termsAndConditions' => $this->terms_and_conditions,
+            'terms_and_conditions' => $this->terms_and_conditions,
+            'notes' => $this->notes,
+        ];
     }
 
     /**
