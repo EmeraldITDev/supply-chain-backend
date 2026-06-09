@@ -4,6 +4,7 @@ namespace App\Models\Logistics;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\MorphMany;
 
 class FleetDriver extends Model
 {
@@ -22,4 +23,9 @@ class FleetDriver extends Model
     protected $casts = [
         'metadata' => 'array',
     ];
+
+    public function documents(): MorphMany
+    {
+        return $this->morphMany(Document::class, 'documentable');
+    }
 }
