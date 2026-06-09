@@ -457,6 +457,10 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // Quotation routes
     Route::get('/quotations', [QuotationController::class, 'index']);
+    Route::get('/quotations/rfq/{rfqId}', [QuotationController::class, 'byRfq']);
+    Route::get('/quotations/{id}', [QuotationController::class, 'show']);
+    Route::put('/quotations/{id}/evaluation', [QuotationController::class, 'saveEvaluation']);
+    Route::patch('/quotations/{id}/evaluation', [QuotationController::class, 'saveEvaluation']);
     Route::post('/quotations', [QuotationController::class, 'store']);
     Route::delete('/quotations/{id}', [QuotationController::class, 'destroy']); // Vendor can delete their own quotations
     Route::post('/quotations/{id}/approve', [QuotationController::class, 'approve']);

@@ -73,163 +73,326 @@ class QuotationController extends Controller
 
         return response()->json([
             'success' => true,
-            'data' => $quotations->map(function($quotation) {
-                // Calculate delivery_days from delivery_date if not provided
-                $deliveryDays = $quotation->delivery_days;
-
-                if ($deliveryDays === null && $quotation->delivery_date) {
-                    $deliveryDays = now()->startOfDay()->diffInDays(
-                        \Carbon\Carbon::parse($quotation->delivery_date)->startOfDay(),
-                        false
-                    );
-
-                    if ($deliveryDays < 0) {
-                        $deliveryDays = 0;
-                    }
-                }
-
-                $deliveryDays = (int) $deliveryDays;
-
-                // Get submitted date (prefer submitted_at, fallback to created_at)
-                $submittedDate = $quotation->submitted_at ?? $quotation->created_at;
-                $createdAt = $quotation->created_at;
-
-            return [
-                    // ID fields
-                'id' => $quotation->quotation_id,
-                'rfqId' => $quotation->rfq ? $quotation->rfq->rfq_id : null,
-                    'rfq_id' => $quotation->rfq ? $quotation->rfq->rfq_id : null,
-                'vendorId' => $quotation->vendor ? $quotation->vendor->vendor_id : null,
-                    'vendor_id' => $quotation->vendor ? $quotation->vendor->vendor_id : null,
-                'vendorName' => $quotation->vendor_name,
-                    'vendor_name' => $quotation->vendor_name,
-
-                    // Amount fields (both formats)
-                    'price' => (string) ($quotation->price ?? $quotation->total_amount),
-                    'totalAmount' => (float) $quotation->total_amount,
-                    'total_amount' => (float) $quotation->total_amount,
-                    'currency' => $quotation->currency ?? 'NGN',
-                    'price' => (string) ($quotation->price ?? $quotation->total_amount),
-                    'totalAmount' => (float) $quotation->total_amount,
-                    'total_amount' => (float) $quotation->total_amount,
-                    'total_order_value' => (float) $quotation->total_amount,
-                    'totalOrderValue' => (float) $quotation->total_amount,
-                    'currency' => $quotation->currency ?? 'NGN',
-
-                    // Delivery fields (both formats)
-                    'delivery_days' => $deliveryDays,
-                    'deliveryDays' => $deliveryDays,
-                    'delivery_date' => $quotation->delivery_date ? $quotation->delivery_date->format('Y-m-d') : null,
-                    'deliveryDate' => $quotation->delivery_date ? $quotation->delivery_date->format('Y-m-d') : null,
-
-                    // Payment terms (all variants)
-                    'payment_terms' => $quotation->payment_terms ?? null,
-                    'paymentTerms' => $quotation->payment_terms ?? null,
-                    'payment_terms_text' => $quotation->payment_terms ?? null,
-                    'paymentSchedule' => $this->paymentSchedulePayload($quotation),
-                    'payment_schedule' => $this->paymentSchedulePayload($quotation),
-
-                    // Validity and warranty
-                    'validity_days' => $quotation->validity_days ?? null,
-                    'validityDays' => $quotation->validity_days ?? null,
-                    'warranty_period' => $quotation->warranty_period ?? null,
-                    'warrantyPeriod' => $quotation->warranty_period ?? null,
-
-                    // Date fields (all formats)
-                    'submitted_date' => $submittedDate ? $submittedDate->toIso8601String() : null,
-                    'submittedDate' => $submittedDate ? $submittedDate->toIso8601String() : null,
-                    'submitted_at' => $submittedDate ? $submittedDate->toIso8601String() : null,
-                    'created_at' => $createdAt ? $createdAt->toIso8601String() : null,
-                    'createdAt' => $createdAt ? $createdAt->toIso8601String() : null,
-
-                    // Status fields
-                    'status' => $quotation->status ?? 'Pending',
-                    'reviewStatus' => $quotation->review_status ?? 'pending',
-                    'review_status' => $quotation->review_status ?? 'pending',
-
-                    // Notes and remarks
-                    'notes' => $quotation->notes ?? null,
-                    'remarks' => $quotation->approval_remarks ?? $quotation->notes ?? null,
-                    'rejectionReason' => $quotation->rejection_reason ?? null,
-                    'rejection_reason' => $quotation->rejection_reason ?? null,
-                    'revisionNotes' => $quotation->revision_notes ?? null,
-                    'revision_notes' => $quotation->revision_notes ?? null,
-                    'approvalRemarks' => $quotation->approval_remarks ?? null,
-                    'approval_remarks' => $quotation->approval_remarks ?? null,
-
-                    // Attachments - normalize to flat array
-                    'attachments' => app(QuotationAttachmentService::class)->hydrateAttachments((function($attachments) {
-                        if ($attachments === null || $attachments === '' || $attachments === []) {
-                            return [];
-                        }
-
-                        // If somehow a single string URL was stored
-                        if (is_string($attachments)) {
-                            return [$attachments];
-                        }
-
-                        if (!is_array($attachments)) {
-                            return [];
-                        }
-
-                        // If a single attachment object was stored as an associative array, wrap it
-                        $isAssoc = array_keys($attachments) !== range(0, count($attachments) - 1);
-                        if ($isAssoc) {
-                            return [$attachments];
-                        }
-
-                        // Otherwise, keep as a list. Do NOT merge associative arrays (that splits fields into "documents").
-                        $out = [];
-                        foreach ($attachments as $a) {
-                            if ($a === null || $a === '') {
-                                continue;
-                            }
-
-                            if (is_string($a)) {
-                                $out[] = $a;
-                                continue;
-                            }
-
-                            if (!is_array($a)) {
-                                continue;
-                            }
-
-                            $aIsAssoc = array_keys($a) !== range(0, count($a) - 1);
-                            if ($aIsAssoc) {
-                                $out[] = $a;
-                                continue;
-                            }
-
-                            // If a nested list of strings is present, flatten just that list
-                            foreach ($a as $inner) {
-                                if ($inner !== null && $inner !== '') {
-                                    $out[] = $inner;
-                                }
-                            }
-                        }
-
-                        return array_values($out);
-                    })($quotation->attachments)),
-
-                    // Items
-                    'items' => $quotation->items->map(function($item) {
-                        return [
-                            'id' => $item->id,
-                            'item_name' => $item->item_name,
-                            'name' => $item->item_name,
-                            'description' => $item->description ?? '',
-                            'quantity' => $item->quantity,
-                            'unit' => $item->unit ?? 'unit',
-                            'unit_price' => (float) $item->unit_price,
-                            'unitPrice' => (float) $item->unit_price,
-                            'total_price' => (float) $item->total_price,
-                            'totalPrice' => (float) $item->total_price,
-                            'specifications' => $item->specifications ?? '',
-                        ];
-                    }),
-                ];
-            })
+            'data' => $quotations->map(fn ($quotation) => $this->serializeQuotationForApi($quotation)),
         ]);
+    }
+
+    /**
+     * GET /api/quotations/rfq/{rfqId} — flat quotation list for an RFQ (PM fallback).
+     */
+    public function byRfq(string $rfqId)
+    {
+        $rfq = RFQ::query()
+            ->where('rfq_id', $rfqId)
+            ->orWhere('id', is_numeric($rfqId) ? (int) $rfqId : -1)
+            ->first();
+
+        if (! $rfq) {
+            return response()->json([
+                'success' => false,
+                'error' => 'RFQ not found',
+                'code' => 'NOT_FOUND',
+            ], 404);
+        }
+
+        $quotations = Quotation::query()
+            ->where('rfq_id', $rfq->id)
+            ->with(['rfq.mrf.paymentSchedule.milestones', 'vendor', 'items'])
+            ->orderByDesc('created_at')
+            ->get();
+
+        return response()->json([
+            'success' => true,
+            'data' => $quotations->map(fn (Quotation $quotation) => $this->serializeQuotationForApi($quotation))->values(),
+            'rfq' => [
+                'id' => $rfq->rfq_id,
+                'deadline' => $rfq->deadline?->format('Y-m-d'),
+            ],
+        ]);
+    }
+
+    /**
+     * GET /api/quotations/{id}
+     */
+    public function show(string $id)
+    {
+        $quotation = Quotation::query()
+            ->where('quotation_id', $id)
+            ->with(['rfq.mrf.paymentSchedule.milestones', 'vendor', 'items', 'approver'])
+            ->first();
+
+        if (! $quotation) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Quotation not found',
+                'code' => 'NOT_FOUND',
+            ], 404);
+        }
+
+        return response()->json([
+            'success' => true,
+            'data' => $this->serializeQuotationForApi($quotation),
+        ]);
+    }
+
+    /**
+     * PUT /api/quotations/{id}/evaluation — PM internal notes + score.
+     */
+    public function saveEvaluation(Request $request, string $id)
+    {
+        $user = $request->user();
+
+        if (! $user || ! in_array($user->role, ['procurement', 'procurement_manager', 'admin'], true)) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Only procurement managers can save quotation evaluations',
+                'code' => 'FORBIDDEN',
+            ], 403);
+        }
+
+        $quotation = Quotation::query()
+            ->where('quotation_id', $id)
+            ->with(['rfq.mrf', 'vendor'])
+            ->first();
+
+        if (! $quotation) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Quotation not found',
+                'code' => 'NOT_FOUND',
+            ], 404);
+        }
+
+        if ($request->has('evaluationNotes') && ! $request->has('evaluation_notes')) {
+            $request->merge(['evaluation_notes' => $request->input('evaluationNotes')]);
+        }
+        if ($request->has('evaluationScore') && ! $request->has('evaluation_score')) {
+            $request->merge(['evaluation_score' => $request->input('evaluationScore')]);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'evaluation_notes' => 'nullable|string|max:5000',
+            'evaluation_score' => 'nullable|numeric|min:0|max:10',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Validation failed',
+                'errors' => $validator->errors(),
+                'code' => 'VALIDATION_ERROR',
+            ], 422);
+        }
+
+        $updates = ['evaluation_updated_at' => now()];
+        $score = $quotation->evaluation_score;
+
+        if ($request->has('evaluation_notes') || $request->has('evaluationNotes')) {
+            $updates['evaluation_notes'] = $request->input('evaluation_notes');
+        }
+
+        if ($request->has('evaluation_score') || $request->has('evaluationScore')) {
+            $rawScore = $request->input('evaluation_score');
+            if ($rawScore === null || $rawScore === '') {
+                $score = null;
+                $updates['evaluation_score'] = null;
+            } else {
+                $score = round((float) $rawScore, 1);
+                $halfStep = abs(($score * 2) - round($score * 2)) < 0.001;
+                if (! $halfStep) {
+                    return response()->json([
+                        'success' => false,
+                        'error' => 'evaluation_score must be in 0.5 increments between 0 and 10',
+                        'code' => 'VALIDATION_ERROR',
+                    ], 422);
+                }
+                $updates['evaluation_score'] = $score;
+            }
+        }
+
+        $quotation->update($updates);
+
+        $quotation->refresh()->load(['rfq.mrf.paymentSchedule.milestones', 'vendor', 'items']);
+
+        $mrf = $quotation->rfq?->mrf;
+        $notesPreview = $quotation->evaluation_notes !== null && $quotation->evaluation_notes !== ''
+            ? mb_substr((string) $quotation->evaluation_notes, 0, 120)
+            : null;
+
+        try {
+            Activity::create([
+                'type' => 'quotation.evaluation_saved',
+                'title' => 'Quotation evaluation saved',
+                'description' => sprintf(
+                    'Evaluation saved for quotation %s%s',
+                    $quotation->quotation_id,
+                    $score !== null ? " (score {$score})" : ''
+                ),
+                'user_id' => $user->id,
+                'user_name' => $user->name,
+                'entity_type' => $mrf ? 'mrf' : 'quotation',
+                'entity_id' => $mrf?->mrf_id ?? $quotation->quotation_id,
+                'status' => 'saved',
+                'metadata' => [
+                    'actor_id' => $user->id,
+                    'quotation_id' => $quotation->quotation_id,
+                    'score' => $score,
+                    'notes_preview' => $notesPreview,
+                ],
+            ]);
+        } catch (\Throwable $e) {
+            \Log::warning('Failed to log quotation evaluation activity', [
+                'quotation_id' => $quotation->quotation_id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Quotation evaluation saved',
+            'data' => $this->serializeQuotationForApi($quotation),
+            'quotation' => $this->serializeQuotationForApi($quotation),
+        ]);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function serializeQuotationForApi(Quotation $quotation): array
+    {
+        $quotation->loadMissing(['rfq', 'vendor', 'items']);
+
+        $deliveryDays = $quotation->delivery_days;
+
+        if ($deliveryDays === null && $quotation->delivery_date) {
+            $deliveryDays = now()->startOfDay()->diffInDays(
+                \Carbon\Carbon::parse($quotation->delivery_date)->startOfDay(),
+                false
+            );
+
+            if ($deliveryDays < 0) {
+                $deliveryDays = 0;
+            }
+        }
+
+        $deliveryDays = (int) $deliveryDays;
+
+        $submittedDate = $quotation->submitted_at ?? $quotation->created_at;
+        $createdAt = $quotation->created_at;
+
+        return array_merge([
+            'id' => $quotation->quotation_id,
+            'rfqId' => $quotation->rfq ? $quotation->rfq->rfq_id : null,
+            'rfq_id' => $quotation->rfq ? $quotation->rfq->rfq_id : null,
+            'vendorId' => $quotation->vendor ? $quotation->vendor->vendor_id : null,
+            'vendor_id' => $quotation->vendor ? $quotation->vendor->vendor_id : null,
+            'vendorName' => $quotation->vendor_name,
+            'vendor_name' => $quotation->vendor_name,
+            'price' => (string) ($quotation->price ?? $quotation->total_amount),
+            'totalAmount' => (float) $quotation->total_amount,
+            'total_amount' => (float) $quotation->total_amount,
+            'total_order_value' => (float) $quotation->total_amount,
+            'totalOrderValue' => (float) $quotation->total_amount,
+            'currency' => $quotation->currency ?? 'NGN',
+            'delivery_days' => $deliveryDays,
+            'deliveryDays' => $deliveryDays,
+            'delivery_date' => $quotation->delivery_date ? $quotation->delivery_date->format('Y-m-d') : null,
+            'deliveryDate' => $quotation->delivery_date ? $quotation->delivery_date->format('Y-m-d') : null,
+            'payment_terms' => $quotation->payment_terms ?? null,
+            'paymentTerms' => $quotation->payment_terms ?? null,
+            'payment_terms_text' => $quotation->payment_terms ?? null,
+            'paymentSchedule' => $this->paymentSchedulePayload($quotation),
+            'payment_schedule' => $this->paymentSchedulePayload($quotation),
+            'validity_days' => $quotation->validity_days ?? null,
+            'validityDays' => $quotation->validity_days ?? null,
+            'warranty_period' => $quotation->warranty_period ?? null,
+            'warrantyPeriod' => $quotation->warranty_period ?? null,
+            'submitted_date' => $submittedDate ? $submittedDate->toIso8601String() : null,
+            'submittedDate' => $submittedDate ? $submittedDate->toIso8601String() : null,
+            'submitted_at' => $submittedDate ? $submittedDate->toIso8601String() : null,
+            'created_at' => $createdAt ? $createdAt->toIso8601String() : null,
+            'createdAt' => $createdAt ? $createdAt->toIso8601String() : null,
+            'status' => $quotation->status ?? 'Pending',
+            'reviewStatus' => $quotation->review_status ?? 'pending',
+            'review_status' => $quotation->review_status ?? 'pending',
+            'notes' => $quotation->notes ?? null,
+            'remarks' => $quotation->approval_remarks ?? $quotation->notes ?? null,
+            'rejectionReason' => $quotation->rejection_reason ?? null,
+            'rejection_reason' => $quotation->rejection_reason ?? null,
+            'revisionNotes' => $quotation->revision_notes ?? null,
+            'revision_notes' => $quotation->revision_notes ?? null,
+            'approvalRemarks' => $quotation->approval_remarks ?? null,
+            'approval_remarks' => $quotation->approval_remarks ?? null,
+            'attachments' => app(QuotationAttachmentService::class)->hydrateAttachments($this->normalizeAttachments($quotation->attachments)),
+            'items' => $quotation->items->map(function ($item) {
+                return [
+                    'id' => $item->id,
+                    'item_name' => $item->item_name,
+                    'name' => $item->item_name,
+                    'description' => $item->description ?? '',
+                    'quantity' => $item->quantity,
+                    'unit' => $item->unit ?? 'unit',
+                    'unit_price' => (float) $item->unit_price,
+                    'unitPrice' => (float) $item->unit_price,
+                    'total_price' => (float) $item->total_price,
+                    'totalPrice' => (float) $item->total_price,
+                    'specifications' => $item->specifications ?? '',
+                ];
+            }),
+        ], $quotation->evaluationApiFields());
+    }
+
+    /**
+     * @return list<mixed>
+     */
+    private function normalizeAttachments(mixed $attachments): array
+    {
+        if ($attachments === null || $attachments === '' || $attachments === []) {
+            return [];
+        }
+
+        if (is_string($attachments)) {
+            return [$attachments];
+        }
+
+        if (! is_array($attachments)) {
+            return [];
+        }
+
+        $isAssoc = array_keys($attachments) !== range(0, count($attachments) - 1);
+        if ($isAssoc) {
+            return [$attachments];
+        }
+
+        $out = [];
+        foreach ($attachments as $a) {
+            if ($a === null || $a === '') {
+                continue;
+            }
+
+            if (is_string($a)) {
+                $out[] = $a;
+                continue;
+            }
+
+            if (! is_array($a)) {
+                continue;
+            }
+
+            $aIsAssoc = array_keys($a) !== range(0, count($a) - 1);
+            if ($aIsAssoc) {
+                $out[] = $a;
+                continue;
+            }
+
+            foreach ($a as $inner) {
+                if ($inner !== null && $inner !== '') {
+                    $out[] = $inner;
+                }
+            }
+        }
+
+        return array_values($out);
     }
 
     /**

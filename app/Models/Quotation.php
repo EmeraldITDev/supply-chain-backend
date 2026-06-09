@@ -34,11 +34,16 @@ class Quotation extends Model
         'submitted_at',
         'reviewed_at',
         'reviewed_by',
+        'evaluation_notes',
+        'evaluation_score',
+        'evaluation_updated_at',
     ];
 
     protected $casts = [
         'price' => 'decimal:2',
         'total_amount' => 'decimal:2',
+        'evaluation_score' => 'decimal:1',
+        'evaluation_updated_at' => 'datetime',
         'delivery_date' => 'date',
         'approved_at' => 'datetime',
         'submitted_at' => 'datetime',
@@ -101,6 +106,34 @@ class Quotation extends Model
     {
         return $this->belongsTo(MRF::class, 'mrf_id');
     }
+
+    /**
+     * PM internal evaluation fields for comparison / award workflows.
+     *
+     * @return array{
+     *     evaluation_notes: ?string,
+     *     evaluationNotes: ?string,
+     *     evaluation_score: ?float,
+     *     evaluationScore: ?float,
+     *     evaluation_updated_at: ?string,
+     *     evaluationUpdatedAt: ?string
+     * }
+     */
+    public function evaluationApiFields(): array
+    {
+        $score = $this->evaluation_score !== null ? (float) $this->evaluation_score : null;
+        $updatedAt = $this->evaluation_updated_at?->toIso8601String();
+
+        return [
+            'evaluation_notes' => $this->evaluation_notes,
+            'evaluationNotes' => $this->evaluation_notes,
+            'evaluation_score' => $score,
+            'evaluationScore' => $score,
+            'evaluation_updated_at' => $updatedAt,
+            'evaluationUpdatedAt' => $updatedAt,
+        ];
+    }
+
     /**
      * Generate Quotation ID
      */

@@ -334,6 +334,8 @@ class RFQWorkflowController extends Controller
                         'notes' => $quotation->notes ?? null,
                         'remarks' => $quotation->approval_remarks ?? $quotation->notes ?? null,
 
+                        ...$quotation->evaluationApiFields(),
+
                         // Attachments - normalize to flat array
                         'attachments' => (function($attachments) {
                             if ($attachments === null || $attachments === '' || $attachments === []) {
