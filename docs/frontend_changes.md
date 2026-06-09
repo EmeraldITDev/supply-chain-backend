@@ -1016,3 +1016,83 @@ When `canDelete` is `false`, omit the delete button entirely (`ui.deleteDraft` i
 1. Show delete control on list row and detail only when `canDelete === true` (or `ui.deleteDraft.showButton`).
 2. On click, show `ui.deleteDraft.confirmMessage` in a confirmation dialog.
 3. On confirm, `DELETE` `ui.deleteDraft.path`, then remove the row from local state or refetch the list.
+
+---
+
+## Batch 3 — SMS / Termii (future frontend batch)
+
+**Backend contract:** `docs/BATCH3_SMS_TERMII.md`  
+**This batch:** documentation only — no SPA code, no SPA env vars.
+
+### What the SPA does NOT need
+
+- No `TERMII_*` or `SMS_ENABLED` in frontend `.env` / `.env.example`.
+- No direct calls to `POST /api/notifications/sms/send` (internal/backend only).
+
+### Future surfaces (when backend is live)
+
+#### 1. Settings → Notification Preferences
+
+Add an **SMS** toggle column per trigger alongside Email / In-app.
+
+| Trigger key | Label (example) |
+|-------------|-----------------|
+| `mrf.approval_required` | MRF needs your approval |
+| `mrf.rejected` | MRF rejected |
+| `po.signed` | PO signed |
+| `rfq.invitation` | RFQ invitation |
+| `trip.assigned` | Trip assigned |
+| `document.expiring` | Document expiring soon |
+
+- Persist via user notification-preferences API (to be added with backend implementation).
+- Default all SMS toggles **off** until user opts in.
+- Backend gates sends on `notification_preferences.sms_enabled` per trigger.
+
+#### 2. Admin → SMS Logs
+
+**Endpoint:** `GET /api/notifications/sms/logs`  
+**Roles:** `admin`, `supply_chain_director`
+
+**Query params:** `trigger`, `status`, `to`, `date_from`, `date_to`, `page`, `per_page`
+
+**Table columns:** timestamp, to, trigger, entity link (`entity_type` + `entity_id`), status, cost, error.
+
+**Resend (future):** admin-only action on `failed` rows — endpoint TBD (`POST …/logs/{id}/resend`).
+
+#### 3. User profile — phone requirement
+
+- When user enables SMS for **any** trigger, `users.phone` becomes required.
+- Validate E.164 (Nigerian `+234…`) before save; surface backend validation errors inline.
+- Phone is collected on profile edit, not on the SMS settings page alone.
+
+### TypeScript types (prepare when implementing UI)
+
+```typescript
+type SmsLogStatus = 'queued' | 'sent' | 'delivered' | 'failed' | 'expired';
+
+type SmsTrigger =
+  | 'mrf.approval_required'
+  | 'mrf.rejected'
+  | 'po.signed'
+  | 'rfq.invitation'
+  | 'trip.assigned'
+  | 'document.expiring';
+
+interface SmsLog {
+  id: string;
+  to: string;
+  message: string;
+  trigger: SmsTrigger;
+  entity_type: string | null;
+  entity_id: string | null;
+  status: SmsLogStatus;
+  termii_message_id: string | null;
+  error: string | null;
+  cost: string | null;
+  queued_at: string | null;
+  sent_at: string | null;
+  delivered_at: string | null;
+  failed_at: string | null;
+  created_at: string;
+}
+```
