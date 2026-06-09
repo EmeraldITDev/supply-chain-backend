@@ -17,8 +17,14 @@ class LineItemBudgetService
     public function mrfProfitAndLoss(MRF $mrf): array
     {
         $items = $mrf->items()->get();
+
         if ($items->isEmpty()) {
-            return ['items' => [], 'summary' => $this->emptySummary()];
+            $rows = $this->syntheticMrfPnLRows($mrf);
+
+            return $this->enrichPnlPayload([
+                'items' => $rows,
+                'summary' => $rows === [] ? $this->emptySummary() : $this->summarize($rows),
+            ]);
         }
 
         $quotedByName = $this->quotedTotalsByItemName($mrf);
@@ -31,7 +37,7 @@ class LineItemBudgetService
             return $this->formatPnLRow($item->id, $item->item_name, $budget, $quoted, $variance);
         })->all();
 
-        return ['items' => $rows, 'summary' => $this->summarize($rows)];
+        return $this->enrichPnlPayload(['items' => $rows, 'summary' => $this->summarize($rows)]);
     }
 
     /**
@@ -41,7 +47,17 @@ class LineItemBudgetService
     {
         $items = $srf->items()->get();
         if ($items->isEmpty()) {
-            return ['items' => [], 'summary' => $this->emptySummary()];
+            $name = trim((string) ($srf->title ?: $srf->description ?: 'SRF line'));
+            $budget = (float) ($srf->estimated_cost ?? 0);
+            $quoted = (float) ($srf->quoted_amount ?? $srf->total_price ?? 0);
+            $rows = ($budget > 0 || $quoted > 0)
+                ? [$this->formatPnLRow(0, $name, $budget, $quoted, round($budget - $quoted, 2))]
+                : [];
+
+            return $this->enrichPnlPayload([
+                'items' => $rows,
+                'summary' => $rows === [] ? $this->emptySummary() : $this->summarize($rows),
+            ]);
         }
 
         $rows = $items->map(function (SRFItem $item) {
@@ -52,7 +68,27 @@ class LineItemBudgetService
             return $this->formatPnLRow($item->id, $item->item_name, $budget, $quoted, $variance);
         })->all();
 
-        return ['items' => $rows, 'summary' => $this->summarize($rows)];
+        return $this->enrichPnlPayload(['items' => $rows, 'summary' => $this->summarize($rows)]);
+    }
+
+    /**
+     * Add aliases expected by frontend normalizeProfitAndLoss().
+     *
+     * @param  array{items: array<int, array<string, mixed>>, summary: array<string, float|int>}  $pnl
+     * @return array<string, mixed>
+     */
+    public function enrichPnlPayload(array $pnl): array
+    {
+        $items = $pnl['items'] ?? [];
+        $summary = $pnl['summary'] ?? $this->emptySummary();
+
+        return array_merge($pnl, [
+            'items' => $items,
+            'line_items' => $items,
+            'lineItems' => $items,
+            'rows' => $items,
+            'summary' => $this->enrichSummary($summary),
+        ]);
     }
 
     public function hydrateMrfQuotedAmounts(MRF $mrf, Quotation $quotation): void
@@ -192,14 +228,92 @@ class LineItemBudgetService
             'id' => $id,
             'itemName' => $name,
             'item_name' => $name,
+            'name' => $name,
+            'description' => $name,
             'budgetAmount' => $budget,
             'budget_amount' => $budget,
+            'budget' => $budget,
+            'estimated_amount' => $budget,
             'quotedAmount' => $quoted,
             'quoted_amount' => $quoted,
+            'actual_amount' => $quoted,
+            'total_price' => $quoted,
             'variance' => $variance,
             'varianceType' => $variance > 0 ? 'saving' : ($variance < 0 ? 'loss' : 'neutral'),
             'variance_type' => $variance > 0 ? 'saving' : ($variance < 0 ? 'loss' : 'neutral'),
         ];
+    }
+
+    /**
+     * Legacy/header-only MRFs often have no mrf_line_items rows. Build one synthetic
+     * P&L row from MRF header fields + winning quotation or price comparison.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function syntheticMrfPnLRows(MRF $mrf): array
+    {
+        $name = trim((string) ($mrf->title ?: $mrf->description ?: 'MRF line'));
+        $budget = (float) ($mrf->estimated_cost ?? 0);
+        $quoted = $this->resolveMrfQuotedTotal($mrf);
+
+        if ($budget <= 0 && $quoted <= 0) {
+            return [];
+        }
+
+        return [
+            $this->formatPnLRow(0, $name, $budget, $quoted, round($budget - $quoted, 2)),
+        ];
+    }
+
+    private function resolveMrfQuotedTotal(MRF $mrf): float
+    {
+        $quotedByName = $this->quotedTotalsByItemName($mrf);
+        if ($quotedByName !== []) {
+            return round(array_sum($quotedByName), 2);
+        }
+
+        $mrf->loadMissing(['priceComparisons', 'rfqs.quotations']);
+
+        $selectedComparison = $mrf->priceComparisons->firstWhere('is_selected', true);
+        if ($selectedComparison) {
+            return (float) ($selectedComparison->total_price ?? 0);
+        }
+
+        $quotations = $mrf->rfqs
+            ->flatMap(fn ($rfq) => $rfq->quotations)
+            ->filter();
+
+        if ($mrf->selected_vendor_id) {
+            $match = $quotations->firstWhere('vendor_id', $mrf->selected_vendor_id);
+            if ($match) {
+                return (float) ($match->total_amount ?? $match->price ?? 0);
+            }
+        }
+
+        $approved = $quotations->where('status', 'Approved')->sortBy('total_amount')->first();
+        if ($approved) {
+            return (float) ($approved->total_amount ?? $approved->price ?? 0);
+        }
+
+        $lowest = $quotations->sortBy('total_amount')->first();
+
+        return $lowest ? (float) ($lowest->total_amount ?? $lowest->price ?? 0) : 0.0;
+    }
+
+    /**
+     * @param  array<string, float|int>  $summary
+     * @return array<string, float|int>
+     */
+    private function enrichSummary(array $summary): array
+    {
+        return array_merge($summary, [
+            'total_budget' => $summary['totalBudget'] ?? 0,
+            'total_quoted' => $summary['totalQuoted'] ?? 0,
+            'net_variance' => $summary['netVariance'] ?? 0,
+            'total_savings' => $summary['totalSavings'] ?? 0,
+            'total_loss' => $summary['totalLoss'] ?? 0,
+            'line_count' => $summary['lineCount'] ?? 0,
+        ]);
     }
 
     /**

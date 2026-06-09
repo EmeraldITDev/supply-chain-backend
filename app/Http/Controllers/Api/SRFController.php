@@ -661,7 +661,11 @@ class SRFController extends Controller
             'success' => true,
             'srfId' => $srf->srf_id,
             'items' => $pnl['items'],
+            'line_items' => $pnl['line_items'] ?? $pnl['items'],
+            'lineItems' => $pnl['lineItems'] ?? $pnl['items'],
+            'rows' => $pnl['rows'] ?? $pnl['items'],
             'summary' => $pnl['summary'],
+            'profitAndLoss' => $pnl,
             'data' => $pnl,
         ]);
     }
