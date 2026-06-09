@@ -1385,7 +1385,8 @@ class MRFWorkflowController extends Controller
         $allowMissingRfq = $request->boolean('allow_missing_rfq');
         $rfq = RFQ::where('mrf_id', $mrf->id)->with('items')->first();
 
-        $saveAsDraft = $request->boolean('save_as_draft', false);
+        $saveAsDraft = $request->boolean('save_as_draft', false)
+            || $request->boolean('saveAsDraft', false);
         if ($saveAsDraft) {
             if ($request->hasFile('unsigned_po')) {
                 return response()->json([
@@ -1492,8 +1493,8 @@ class MRFWorkflowController extends Controller
                         ], 422);
         }
 
-            // Use provided PO number or auto-generate
-            $poNumber = $request->po_number ?? $this->generatePONumber($mrf);
+            // Use provided PO number, existing draft number, or auto-generate
+            $poNumber = $request->po_number ?? $mrf->po_number ?? $this->generatePONumber($mrf);
         } else {
             // Mode 2: Auto-Generation (JSON body)
             $validator = Validator::make($request->all(), [
@@ -1519,8 +1520,8 @@ class MRFWorkflowController extends Controller
                 ], 422);
             }
 
-            // Use provided PO number or auto-generate
-            $poNumber = $request->po_number ?? $this->generatePONumber($mrf);
+            // Use provided PO number, existing draft number, or auto-generate
+            $poNumber = $request->po_number ?? $mrf->po_number ?? $this->generatePONumber($mrf);
         }
 
         // Check if PO number already exists (for uniqueness)
@@ -2833,6 +2834,8 @@ class MRFWorkflowController extends Controller
             ? (float) $request->input('tax_amount')
             : ($mrf->tax_amount ?? 0);
 
+        $isDraftUpdate = $mrf->isPoDraft();
+
         $mrf->update([
             'po_number' => $poNumber ?: $mrf->po_number, // preserve any existing number
             'ship_to_address' => $request->input('ship_to_address', $mrf->ship_to_address),
@@ -2848,11 +2851,17 @@ class MRFWorkflowController extends Controller
         ]);
 
         try {
-            $draftRemark = 'PO draft saved';
+            $draftRemark = $isDraftUpdate ? 'PO draft updated' : 'PO draft saved';
             if ($fastTrack) {
                 $draftRemark .= ' (fast-tracked from Procurement Overview, executive review bypassed)';
             }
-            MRFApprovalHistory::record($mrf, 'saved_po_draft', 'procurement', $user, $draftRemark);
+            MRFApprovalHistory::record(
+                $mrf,
+                $isDraftUpdate ? 'updated_po_draft' : 'saved_po_draft',
+                'procurement',
+                $user,
+                $draftRemark
+            );
         } catch (\Throwable $e) {
             Log::warning('Failed to record PO draft approval history', [
                 'mrf_id' => $mrf->mrf_id,
@@ -2870,9 +2879,7 @@ class MRFWorkflowController extends Controller
                     'id' => $mrf->mrf_id,
                     'po_number' => $mrf->po_number,
                     'poNumber' => $mrf->po_number,
-                    'po_draft_saved_at' => $mrf->po_draft_saved_at?->toIso8601String(),
-                    'poDraftSavedAt' => $mrf->po_draft_saved_at?->toIso8601String(),
-                    'is_po_draft' => true,
+                    ...$mrf->poDraftApiFields(),
                     'workflow_state' => $mrf->workflow_state,
                     'status' => $mrf->status,
                     'current_stage' => $mrf->current_stage,

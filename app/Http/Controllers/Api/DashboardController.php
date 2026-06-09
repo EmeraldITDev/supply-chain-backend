@@ -77,7 +77,7 @@ class DashboardController extends Controller
             ->limit($listLimit)
             ->get()
             ->map(function($mrf) {
-                return array_merge($mrf->poOriginApiFields(), [
+                return array_merge($mrf->poOriginApiFields(), $mrf->poDraftApiFields(), [
                     'id' => $mrf->id,
                     'mrfId' => $mrf->mrf_id,
                     'title' => $mrf->title,
@@ -445,7 +445,7 @@ class DashboardController extends Controller
             $selectedQuotation = $rfq?->selectedQuotation;
             $meta = $routing->routingMeta($mrf);
 
-            return array_merge($meta, $mrf->poOriginApiFields(), [
+            return array_merge($meta, $mrf->poOriginApiFields(), $mrf->poDraftApiFields(), [
                 'id' => $mrf->id,
                 'mrfId' => $mrf->mrf_id,
                 'title' => $mrf->title,

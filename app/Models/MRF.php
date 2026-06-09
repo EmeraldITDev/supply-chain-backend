@@ -39,7 +39,31 @@ class MRF extends Model
         return array_merge([
             'scmTransactionId' => $this->scm_transaction_id,
             'scm_transaction_id' => $this->scm_transaction_id,
-        ], $this->poOriginApiFields());
+        ], $this->poOriginApiFields(), $this->poDraftApiFields());
+    }
+
+    public function isPoDraft(): bool
+    {
+        return $this->po_draft_saved_at !== null
+            && trim((string) ($this->unsigned_po_url ?? '')) === '';
+    }
+
+    /**
+     * Draft PO badge fields for list/detail responses.
+     *
+     * @return array{is_po_draft: bool, isPoDraft: bool, po_draft_saved_at: ?string, poDraftSavedAt: ?string}
+     */
+    public function poDraftApiFields(): array
+    {
+        $isDraft = $this->isPoDraft();
+        $savedAt = $this->po_draft_saved_at?->toIso8601String();
+
+        return [
+            'is_po_draft' => $isDraft,
+            'isPoDraft' => $isDraft,
+            'po_draft_saved_at' => $savedAt,
+            'poDraftSavedAt' => $savedAt,
+        ];
     }
 
     /**

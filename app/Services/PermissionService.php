@@ -205,6 +205,10 @@ class PermissionService
             return false;
         }
 
+        if ($mrf->isPoDraft()) {
+            return true;
+        }
+
         $statusLower = strtolower(trim((string) ($mrf->status ?? '')));
         if (in_array($statusLower, ['rejected', 'cancelled', 'closed'], true)) {
             return false;
@@ -292,6 +296,10 @@ class PermissionService
     {
         if (! $this->userActsAsProcurement($user)) {
             return false;
+        }
+
+        if ($mrf->isPoDraft() && trim((string) ($mrf->signed_po_url ?? '')) === '') {
+            return true;
         }
 
         $rfq = \App\Models\RFQ::where('mrf_id', $mrf->id)->first();
