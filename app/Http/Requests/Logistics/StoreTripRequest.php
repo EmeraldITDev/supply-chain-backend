@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests\Logistics;
 
+use App\Support\ExternalDriverRequest;
 use Illuminate\Foundation\Http\FormRequest;
 
 class StoreTripRequest extends FormRequest
@@ -13,6 +14,27 @@ class StoreTripRequest extends FormRequest
 
     protected function prepareForValidation(): void
     {
+        ExternalDriverRequest::mergeIntoRequest($this);
+
+        if ($this->has('passengerUserIds') && ! $this->has('passenger_user_ids')) {
+            $this->merge(['passenger_user_ids' => $this->input('passengerUserIds')]);
+        }
+
+        if ($this->has('driverUserId') && ! $this->has('driver_user_id')) {
+            $this->merge(['driver_user_id' => $this->input('driverUserId')]);
+        }
+
+        if ($this->filled('driver_user_id')) {
+            $this->merge(['external_driver' => null, 'externalDriver' => null]);
+        } elseif ($this->has('external_driver') || $this->has('externalDriver')) {
+            $external = ExternalDriverRequest::resolve($this);
+            $this->merge([
+                'external_driver' => $external,
+                'externalDriver' => $external,
+                'driver_user_id' => null,
+            ]);
+        }
+
         if ($this->has('title')) {
             return;
         }
@@ -52,7 +74,11 @@ class StoreTripRequest extends FormRequest
             'metadata' => 'nullable|array',
             'passenger_user_ids' => 'nullable|array',
             'passenger_user_ids.*' => 'integer|exists:users,id',
+            'passengerUserIds' => 'nullable|array',
+            'passengerUserIds.*' => 'integer|exists:users,id',
             'driver_user_id' => 'nullable|integer|exists:users,id',
+            'driverUserId' => 'nullable|integer|exists:users,id',
+            ...ExternalDriverRequest::validationRules(),
         ];
     }
 }

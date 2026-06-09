@@ -59,6 +59,7 @@ class Trip extends Model
         'passenger_user_ids',
         'external_passengers',
         'driver_user_id',
+        'external_driver',
         'po_number',
         'unsigned_po_url',
         'signed_po_url',
@@ -79,7 +80,45 @@ class Trip extends Model
         'metadata' => 'array',
         'passenger_user_ids' => 'array',
         'external_passengers' => 'array',
+        'external_driver' => 'array',
     ];
+
+    /**
+     * Driver fields for API round-trip (internal user or external contractor).
+     *
+     * @return array<string, mixed>
+     */
+    public function driverApiFields(): array
+    {
+        $ext = is_array($this->external_driver) ? $this->external_driver : null;
+        $hasExternal = $ext && (trim((string) ($ext['name'] ?? '')) !== '' || trim((string) ($ext['phone'] ?? '')) !== '');
+
+        if ($hasExternal) {
+            return [
+                'external_driver' => $ext,
+                'externalDriver' => $ext,
+                'driver_user_id' => null,
+                'driverUserId' => null,
+                'driverName' => $ext['name'] ?? null,
+                'driverPhone' => $ext['phone'] ?? null,
+                'driverLicenseNumber' => $ext['license_number'] ?? null,
+                'driver_license_number' => $ext['license_number'] ?? null,
+            ];
+        }
+
+        $this->loadMissing('driver');
+
+        return [
+            'external_driver' => null,
+            'externalDriver' => null,
+            'driver_user_id' => $this->driver_user_id,
+            'driverUserId' => $this->driver_user_id,
+            'driverName' => $this->driver?->name,
+            'driverPhone' => $this->driver?->phone,
+            'driverLicenseNumber' => null,
+            'driver_license_number' => null,
+        ];
+    }
 
     public const WORKFLOW_TRIP_REQUEST = 'trip_request';
     public const WORKFLOW_LOGISTICS_REVIEW = 'logistics_review';

@@ -11,6 +11,7 @@ use App\Models\Logistics\Vehicle;
 use App\Models\Vendor;
 use App\Services\Logistics\AuditLogger;
 use App\Services\Logistics\IdempotencyService;
+use App\Services\Logistics\TripSchedulingNotificationService;
 use App\Services\Logistics\TripService;
 use App\Services\Logistics\TripVendorSubmissionService;
 use App\Services\Logistics\FleetVehicleAssignmentGuard;
@@ -27,6 +28,7 @@ class TripController extends ApiController
         private IdempotencyService $idempotency,
         private UploadService $uploadService,
         private TripVendorSubmissionService $submissionService,
+        private TripSchedulingNotificationService $schedulingNotifications,
     ) {
     }
 
@@ -47,22 +49,25 @@ class TripController extends ApiController
         $data['created_by'] = $request->user()?->id;
 
         $trip = Trip::create($data);
-        // Use the 'purpose' from the request, fallback to a generated string
-        $logDescription = $request->input('purpose') 
-        ?? "Trip created from {$trip->origin} to {$trip->destination}";
+        $trip->load(['vendor', 'vehicle', 'driver']);
+
+        $this->schedulingNotifications->notifyTripCreated($trip);
+
+        $logDescription = $request->input('purpose')
+            ?? "Trip created from {$trip->origin} to {$trip->destination}";
 
         $this->auditLogger->log(
             'trip_created',
             $request->user(),
             'trip',
             (string) $trip->id,
-            $logDescription, // Pass the explicit description here
+            $logDescription,
             $trip->toArray(),
             $request
         );
-        
+
         $response = [
-            'trip' => $trip,
+            'trip' => $this->presentTrip($trip),
         ];
 
         $this->idempotency->storeResponse($request, ['success' => true, 'data' => $response], 201);
@@ -96,7 +101,7 @@ class TripController extends ApiController
         }
 
         return $this->success([
-            'trip' => $trip,
+            'trip' => $this->presentTrip($trip),
         ]);
     }
 
@@ -124,22 +129,55 @@ class TripController extends ApiController
             }
         }
 
+        $previousPassengerIds = $trip->passenger_user_ids ?? [];
+        $previousDriverUserId = $trip->driver_user_id ? (int) $trip->driver_user_id : null;
+        $previousExternalDriver = is_array($trip->external_driver) ? $trip->external_driver : null;
+
         $data['updated_by'] = $request->user()?->id;
         $trip->fill($data)->save();
+        $trip->load(['vendor', 'vehicle', 'driver']);
+
+        if (array_key_exists('passenger_user_ids', $data)) {
+            $this->schedulingNotifications->notifyPassengerListChanged(
+                $trip,
+                $previousPassengerIds,
+                $trip->passenger_user_ids ?? []
+            );
+        }
+
+        if (array_key_exists('driver_user_id', $data) || array_key_exists('external_driver', $data)) {
+            $this->schedulingNotifications->notifyDriverReassignment(
+                $trip,
+                $previousDriverUserId,
+                $previousExternalDriver,
+                $trip->driver_user_id ? (int) $trip->driver_user_id : null,
+                is_array($trip->external_driver) ? $trip->external_driver : null,
+            );
+        }
 
         $this->auditLogger->log(
             'trip_updated',
             $request->user(),
             'trip',
             (string) $trip->id,
-            $request->input('purpose') ?? "Updated trip details for {$trip->trip_code}", // Use a string!
-            $request->validated(), // Move the data array to the 6th argument (payload)
+            $request->input('purpose') ?? "Updated trip details for {$trip->trip_code}",
+            $request->validated(),
             $request
         );
 
         return $this->success([
-            'trip' => $trip,
+            'trip' => $this->presentTrip($trip),
         ]);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function presentTrip(Trip $trip): array
+    {
+        $trip->loadMissing(['vendor', 'vehicle', 'driver']);
+
+        return array_merge($trip->toArray(), $trip->driverApiFields());
     }
 
     /**
