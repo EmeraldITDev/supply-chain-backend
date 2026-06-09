@@ -234,7 +234,7 @@ class RFQWorkflowController extends Controller
             }
         }
 
-        $rfq->loadMissing(['mrf.paymentSchedule.milestones', 'items']);
+        $rfq->loadMissing(['mrf.paymentSchedule.milestones', 'mrf.executiveApprover', 'mrf.chairmanApprover', 'items']);
         $schedulePayload = $this->vendorPaymentSchedulePayload($rfq);
         $paymentMilestones = $rfq->mrf
             ? app(PaymentScheduleService::class)->paymentMilestonesForMrf($rfq->mrf)
@@ -403,24 +403,10 @@ class RFQWorkflowController extends Controller
                         'total_orders' => 0,
                         'orders' => 0,
                     ],
-                    'items' => $quotation->items->map(function ($item) {
-                        return [
-                            'id' => $item->id,
-                            'rfq_item_id' => $item->rfq_item_id,
-                            'item_name' => $item->item_name,
-                            'name' => $item->item_name,
-                            'description' => $item->description ?? '',
-                            'quantity' => $item->quantity,
-                            'unit' => $item->unit ?? 'unit',
-                            'unit_price' => (float) $item->unit_price,
-                            'unitPrice' => (float) $item->unit_price,
-                            'total_price' => (float) $item->total_price,
-                            'totalPrice' => (float) $item->total_price,
-                            'specifications' => $item->specifications ?? '',
-                        ];
-                    }),
+                    'items' => $this->serializeQuotationItemsForComparison($quotation),
                 ];
-            });
+            })
+            ->values();
 
         // Get MRF with all relationships
         $mrf = $rfq->mrf;
@@ -438,7 +424,7 @@ class RFQWorkflowController extends Controller
                     'title' => $rfq->getDisplayTitle(),
                     'description' => $rfq->description,
                     'category' => $rfq->category,
-                    'deadline' => $rfq->deadline->format('Y-m-d'),
+                    'deadline' => $rfq->deadline?->format('Y-m-d'),
                     'status' => $rfq->status,
                     'workflowState' => $rfq->workflow_state,
                     'estimatedCost' => (float) $rfq->estimated_cost,
@@ -482,12 +468,7 @@ class RFQWorkflowController extends Controller
                 'payment_milestones' => $paymentMilestones,
                 'paymentMilestones' => $paymentMilestones,
                 'quotations' => $quotations,
-                'statistics' => [
-                    'total_quotations' => $quotations->count(),
-                    'lowest_bid' => $quotations->min('quotation.total_amount'),
-                    'highest_bid' => $quotations->max('quotation.total_amount'),
-                    'average_bid' => $quotations->avg('quotation.total_amount'),
-                ],
+                'statistics' => $this->quotationComparisonStatistics($quotations),
             ],
         ]);
     }
@@ -734,8 +715,10 @@ class RFQWorkflowController extends Controller
             if (is_string($request->input('items'))) {
                 $items = json_decode($request->input('items'), true);
                 if (is_array($items)) {
-                    $request->merge(['items' => $items]);
+                    $request->merge(['items' => array_is_list($items) ? $items : array_values($items)]);
                 }
+            } elseif (is_array($request->input('items')) && ! array_is_list($request->input('items'))) {
+                $request->merge(['items' => array_values($request->input('items'))]);
             }
 
             // Handle attachments that may arrive as JSON string from FormData
@@ -1158,5 +1141,55 @@ class RFQWorkflowController extends Controller
         $schedule = app(PaymentScheduleService::class)->findForMrf($mrf);
 
         return $schedule ? app(PaymentScheduleService::class)->toApiArray($schedule) : null;
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    private function serializeQuotationItemsForComparison(Quotation $quotation): array
+    {
+        $rawItems = $quotation->relationLoaded('items')
+            ? $quotation->items
+            : $quotation->items()->get();
+
+        if (! $rawItems instanceof \Illuminate\Support\Collection) {
+            return [];
+        }
+
+        return $rawItems->map(function ($item) {
+            return [
+                'id' => $item->id,
+                'rfq_item_id' => $item->rfq_item_id,
+                'item_name' => $item->item_name ?? 'Item',
+                'name' => $item->item_name ?? 'Item',
+                'description' => $item->description ?? '',
+                'quantity' => $item->quantity ?? 1,
+                'unit' => $item->unit ?? 'unit',
+                'unit_price' => (float) ($item->unit_price ?? 0),
+                'unitPrice' => (float) ($item->unit_price ?? 0),
+                'total_price' => (float) ($item->total_price ?? 0),
+                'totalPrice' => (float) ($item->total_price ?? 0),
+                'specifications' => $item->specifications ?? '',
+            ];
+        })->values()->all();
+    }
+
+    /**
+     * @param  \Illuminate\Support\Collection<int, array<string, mixed>>  $quotations
+     * @return array{total_quotations: int, lowest_bid: ?float, highest_bid: ?float, average_bid: ?float}
+     */
+    private function quotationComparisonStatistics(\Illuminate\Support\Collection $quotations): array
+    {
+        $amounts = $quotations
+            ->map(fn (array $entry) => (float) ($entry['quotation']['total_amount'] ?? 0))
+            ->filter(fn (float $amount) => $amount > 0)
+            ->values();
+
+        return [
+            'total_quotations' => $quotations->count(),
+            'lowest_bid' => $amounts->isEmpty() ? null : $amounts->min(),
+            'highest_bid' => $amounts->isEmpty() ? null : $amounts->max(),
+            'average_bid' => $amounts->isEmpty() ? null : round((float) $amounts->avg(), 2),
+        ];
     }
 }

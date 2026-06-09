@@ -20,6 +20,7 @@ use App\Services\WorkflowStateService;
 use App\Services\PermissionService;
 use App\Services\PurchaseOrderPdfService;
 use App\Services\PaymentScheduleService;
+use App\Services\PriceComparisonPoLineService;
 use App\Services\ProcurementDocumentService;
 use App\Services\QuotationAttachmentService;
 use Illuminate\Http\Request;
@@ -2995,35 +2996,33 @@ class MRFWorkflowController extends Controller
             $vendor = Vendor::query()->find($mrf->selected_vendor_id);
         }
 
-        $rows = $mrf->priceComparisons()->orderByDesc('is_selected')->orderBy('id')->get();
-        if ($vendor && $rows->isNotEmpty()) {
-            $forVendor = $rows->where('vendor_id', $vendor->id)->values();
-            if ($forVendor->isNotEmpty()) {
-                $rows = $forVendor;
-            }
-        } elseif (! $vendor && $rows->isNotEmpty()) {
-            $firstVid = $rows->first()->vendor_id;
-            $vendor = Vendor::query()->find($firstVid);
-            $rows = $rows->where('vendor_id', $firstVid)->values();
-        }
+        $mrf->loadMissing('priceComparisons.vendor');
+        $poLineService = app(PriceComparisonPoLineService::class);
+        $selectedComparisonRows = $poLineService->selectedSupplierRows($mrf);
 
         $items = collect();
-        if ($rows->isNotEmpty()) {
-            $items = $rows->map(function ($r) {
-                $qty = max(1.0, (float) ($r->quantity ?? 1));
-                $unit = (float) ($r->unit_price ?? 0);
-                $total = (float) ($r->total_price ?? ($unit * $qty));
+        if ($selectedComparisonRows->isNotEmpty()) {
+            $comparisonVendor = $poLineService->resolveVendorFromRows($selectedComparisonRows);
+            if ($comparisonVendor) {
+                $vendor = $comparisonVendor;
+            }
+            $items = $poLineService->rowsToPoLineObjects($selectedComparisonRows);
+        } else {
+            $rows = $mrf->priceComparisons()->orderByDesc('is_selected')->orderBy('id')->get();
+            if ($vendor && $rows->isNotEmpty()) {
+                $forVendor = $rows->where('vendor_id', $vendor->id)->values();
+                if ($forVendor->isNotEmpty()) {
+                    $rows = $forVendor;
+                }
+            } elseif (! $vendor && $rows->isNotEmpty()) {
+                $firstVid = $rows->first()->vendor_id;
+                $vendor = Vendor::query()->find($firstVid);
+                $rows = $rows->where('vendor_id', $firstVid)->values();
+            }
 
-                return (object) [
-                    'item_name' => $r->item_description ?: 'Item',
-                    'description' => '',
-                    'quantity' => $qty,
-                    'unit' => 'unit',
-                    'unit_price' => $unit,
-                    'total_price' => $total,
-                    'specifications' => '',
-                ];
-            });
+            if ($rows->isNotEmpty()) {
+                $items = $poLineService->rowsToPoLineObjects($rows);
+            }
         }
 
         if ($items->isEmpty()) {
@@ -3195,28 +3194,33 @@ class MRFWorkflowController extends Controller
             ];
         }
 
-        // Get vendor
+        $mrf->loadMissing('priceComparisons.vendor');
+        $poLineService = app(PriceComparisonPoLineService::class);
+        $selectedComparisonRows = $poLineService->selectedSupplierRows($mrf);
+
         $vendor = $quotation->vendor;
-        if (!$vendor) {
+        if ($selectedComparisonRows->isNotEmpty()) {
+            $comparisonVendor = $poLineService->resolveVendorFromRows($selectedComparisonRows);
+            if ($comparisonVendor) {
+                $vendor = $comparisonVendor;
+            }
+        }
+
+        if (! $vendor) {
             return [
                 'success' => false,
                 'error' => 'Selected vendor not found',
                 'code' => 'VENDOR_NOT_FOUND',
-                'status' => 400
+                'status' => 400,
             ];
         }
 
-        // Validate: Ensure quotation belongs to the selected vendor
-        // This ensures we're using the correct vendor's quotation
-        if ($quotation->vendor_id != $vendor->id) {
-            return [
-                'success' => false,
-                'error' => 'Quotation vendor mismatch. The selected quotation does not belong to the expected vendor.',
-                'code' => 'VENDOR_MISMATCH',
-                'status' => 400
-            ];
-        }
-
+        if ($selectedComparisonRows->isNotEmpty()) {
+            $items = $poLineService->rowsToPoLineObjects($selectedComparisonRows);
+            $quotationItems = collect($items);
+            $rfqItems = collect();
+            $mrfItems = collect();
+        } else {
         // Fetch items in order: quotation_items -> RFQ items -> MRF items
         $items = [];
         $quotationItems = collect();
@@ -3290,6 +3294,7 @@ class MRFWorkflowController extends Controller
                     \Log::info('PO Generation: Using MRF items', ['count' => $items->count()]);
                 }
             }
+        }
         }
 
         // If no items found after all fallbacks
@@ -3393,7 +3398,7 @@ class MRFWorkflowController extends Controller
             ];
         });
 
-        return [
+        $result = [
             'success' => true,
             'data' => [
                 'mrf' => [
@@ -3413,7 +3418,9 @@ class MRFWorkflowController extends Controller
                 ],
                 'quotation' => [
                     'id' => $quotation->quotation_id,
-                    'total_amount' => $quotation->total_amount,
+                    'total_amount' => $selectedComparisonRows->isNotEmpty()
+                        ? $poLineService->subtotalForRows($selectedComparisonRows)
+                        : $quotation->total_amount,
                     'currency' => $quotation->currency ?? 'NGN',
                     'delivery_days' => $quotation->delivery_days,
                     'delivery_date' => $quotation->delivery_date ? ($quotation->delivery_date instanceof \DateTime || $quotation->delivery_date instanceof \Carbon\Carbon ? $quotation->delivery_date : \Carbon\Carbon::parse($quotation->delivery_date)) : null,
@@ -3438,7 +3445,7 @@ class MRFWorkflowController extends Controller
                     'tax_id' => $companyTaxId,
                     'website' => $companyWebsite,
                 ],
-            ]
+            ],
         ];
 
         $result['data'] = $this->enrichPoPayloadWithPaymentSchedule($mrf, $result['data']);

@@ -2671,6 +2671,10 @@ class MRFController extends Controller
      */
     private function resolveUnsignedPoStreamContextFromRfq(MRF $mrf, RFQ $rfq): array
     {
+        $mrf->loadMissing('priceComparisons.vendor');
+        $poLineService = app(\App\Services\PriceComparisonPoLineService::class);
+        $selectedComparisonRows = $poLineService->selectedSupplierRows($mrf);
+
         $quotation = null;
         if ($rfq->selected_quotation_id) {
             $quotation = \App\Models\Quotation::where('id', $rfq->selected_quotation_id)
@@ -2686,21 +2690,32 @@ class MRFController extends Controller
                 ->first();
         }
 
-        if (!$quotation || !$quotation->vendor) {
-            throw new \Exception('No approved quotation found for this MRF');
-        }
+        if ($selectedComparisonRows->isNotEmpty()) {
+            $vendor = $poLineService->resolveVendorFromRows($selectedComparisonRows);
+            if (!$vendor && $quotation?->vendor) {
+                $vendor = $quotation->vendor;
+            }
+            if (!$vendor) {
+                throw new \Exception('No vendor found for the selected price comparison supplier');
+            }
+            $items = $poLineService->rowsToPoLineObjects($selectedComparisonRows);
+        } else {
+            if (!$quotation || !$quotation->vendor) {
+                throw new \Exception('No approved quotation found for this MRF');
+            }
 
-        $vendor = $quotation->vendor;
+            $vendor = $quotation->vendor;
 
-        $items = \App\Models\QuotationItem::where('quotation_id', $quotation->id)->get();
+            $items = \App\Models\QuotationItem::where('quotation_id', $quotation->id)->get();
 
-        if ($items->isEmpty()) {
-            $rfq->load('items');
-            $items = $rfq->items;
-        }
+            if ($items->isEmpty()) {
+                $rfq->load('items');
+                $items = $rfq->items;
+            }
 
-        if ($items->isEmpty()) {
-            $items = $mrf->items;
+            if ($items->isEmpty()) {
+                $items = $mrf->items;
+            }
         }
 
         $vendorAddress = (string) ($vendor->address ?? '');
@@ -2713,8 +2728,8 @@ class MRFController extends Controller
             'tax_id' => $vendor->tax_id ?? '',
         ];
 
-        $currency = $quotation->currency ?? 'NGN';
-        $paymentTerms = $quotation->payment_terms ?? '30days after invoice submission.';
+        $currency = $quotation?->currency ?? $mrf->currency ?? 'NGN';
+        $paymentTerms = $quotation?->payment_terms ?? '30days after invoice submission.';
 
         return [$items, $currency, $paymentTerms, $vendorPdf];
     }
@@ -2732,35 +2747,33 @@ class MRFController extends Controller
             $vendorModel = Vendor::query()->find($mrf->selected_vendor_id);
         }
 
-        $rows = $mrf->priceComparisons()->orderByDesc('is_selected')->orderBy('id')->get();
-        if ($vendorModel && $rows->isNotEmpty()) {
-            $forVendor = $rows->where('vendor_id', $vendorModel->id)->values();
-            if ($forVendor->isNotEmpty()) {
-                $rows = $forVendor;
-            }
-        } elseif (! $vendorModel && $rows->isNotEmpty()) {
-            $firstVid = $rows->first()->vendor_id;
-            $vendorModel = Vendor::query()->find($firstVid);
-            $rows = $rows->where('vendor_id', $firstVid)->values();
-        }
+        $mrf->loadMissing('priceComparisons.vendor');
+        $poLineService = app(\App\Services\PriceComparisonPoLineService::class);
+        $selectedComparisonRows = $poLineService->selectedSupplierRows($mrf);
 
         $items = collect();
-        if ($rows->isNotEmpty()) {
-            $items = $rows->map(function ($r) {
-                $qty = max(1.0, (float) ($r->quantity ?? 1));
-                $unit = (float) ($r->unit_price ?? 0);
-                $total = (float) ($r->total_price ?? ($unit * $qty));
+        if ($selectedComparisonRows->isNotEmpty()) {
+            $comparisonVendor = $poLineService->resolveVendorFromRows($selectedComparisonRows);
+            if ($comparisonVendor) {
+                $vendorModel = $comparisonVendor;
+            }
+            $items = $poLineService->rowsToPoLineObjects($selectedComparisonRows);
+        } else {
+            $rows = $mrf->priceComparisons()->orderByDesc('is_selected')->orderBy('id')->get();
+            if ($vendorModel && $rows->isNotEmpty()) {
+                $forVendor = $rows->where('vendor_id', $vendorModel->id)->values();
+                if ($forVendor->isNotEmpty()) {
+                    $rows = $forVendor;
+                }
+            } elseif (! $vendorModel && $rows->isNotEmpty()) {
+                $firstVid = $rows->first()->vendor_id;
+                $vendorModel = Vendor::query()->find($firstVid);
+                $rows = $rows->where('vendor_id', $firstVid)->values();
+            }
 
-                return (object) [
-                    'item_name' => $r->item_description ?: 'Item',
-                    'description' => '',
-                    'quantity' => $qty,
-                    'unit' => 'unit',
-                    'unit_price' => $unit,
-                    'total_price' => $total,
-                    'specifications' => '',
-                ];
-            });
+            if ($rows->isNotEmpty()) {
+                $items = $poLineService->rowsToPoLineObjects($rows);
+            }
         }
 
         if ($items->isEmpty()) {
