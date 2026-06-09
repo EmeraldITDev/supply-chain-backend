@@ -1757,6 +1757,10 @@ class MRFWorkflowController extends Controller
             'invoice_submission_cc' => $request->invoice_submission_cc ?? null,
         ];
 
+        if ($mrf->is_po_linked || ($mrf->source ?? 'standard') === 'po_generated') {
+            $updateData['linked_po_id'] = $poNumber;
+        }
+
         // Add sharing URL if available (use web URL as fallback)
         if (isset($poShareUrl) && $poShareUrl) {
             $updateData['unsigned_po_share_url'] = $poShareUrl;
@@ -2837,7 +2841,7 @@ class MRFWorkflowController extends Controller
 
         $isDraftUpdate = $mrf->isPoDraft();
 
-        $mrf->update([
+        $draftUpdate = [
             'po_number' => $poNumber ?: $mrf->po_number, // preserve any existing number
             'ship_to_address' => $request->input('ship_to_address', $mrf->ship_to_address),
             'tax_rate' => $taxRate,
@@ -2849,7 +2853,17 @@ class MRFWorkflowController extends Controller
             'invoice_submission_cc' => $request->input('invoice_submission_cc', $mrf->invoice_submission_cc),
             'procurement_manager_id' => $user->id,
             'po_draft_saved_at' => now(),
-        ]);
+        ];
+
+        $resolvedPoNumber = $draftUpdate['po_number'];
+        if (
+            filled($resolvedPoNumber)
+            && ($mrf->is_po_linked || ($mrf->source ?? 'standard') === 'po_generated')
+        ) {
+            $draftUpdate['linked_po_id'] = $resolvedPoNumber;
+        }
+
+        $mrf->update($draftUpdate);
 
         try {
             $draftRemark = $isDraftUpdate ? 'PO draft updated' : 'PO draft saved';

@@ -69,7 +69,7 @@ class MRF extends Model
     /**
      * Flags for PO-generated / manual-PO MRFs used by frontend list filters.
      *
-     * @return array{source: string, is_po_linked: bool, isPoLinked: bool}
+     * @return array{source: string, is_po_linked: bool, isPoLinked: bool, linked_po_id: ?string, linkedPoId: ?string}
      */
     public function poOriginApiFields(): array
     {
@@ -79,12 +79,29 @@ class MRF extends Model
         }
 
         $isPoLinked = (bool) ($this->is_po_linked ?? false);
+        $linkedPoId = filled($this->linked_po_id) ? (string) $this->linked_po_id : null;
 
         return [
             'source' => $source,
             'is_po_linked' => $isPoLinked,
             'isPoLinked' => $isPoLinked,
+            'linked_po_id' => $linkedPoId,
+            'linkedPoId' => $linkedPoId,
         ];
+    }
+
+    /**
+     * Detect manual-PO quick-start payloads when explicit flags are omitted.
+     */
+    public static function inferPoGeneratedFromJustification(?string $justification): bool
+    {
+        $text = strtolower(trim((string) $justification));
+
+        return $text !== ''
+            && (
+                str_contains($text, 'manual po created without rfq')
+                || str_contains($text, 'vendor and pricing captured directly on the purchase order')
+            );
     }
 
     protected $fillable = [
@@ -185,6 +202,7 @@ class MRF extends Model
         'scm_transaction_id',
         'source',
         'is_po_linked',
+        'linked_po_id',
         'finance_ap_case_id',
         'finance_ap_status',
     ];

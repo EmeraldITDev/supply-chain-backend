@@ -1148,6 +1148,8 @@ class MRFController extends Controller
                 'source' => 'nullable|string|in:standard,po_generated',
                 'is_po_linked' => 'nullable|boolean',
                 'isPoLinked' => 'nullable|boolean',
+                'linked_po_id' => 'nullable|string|max:64',
+                'linkedPoId' => 'nullable|string|max:64',
                 'suppress_notifications' => 'nullable|boolean',
             ], RequestLineItemParser::validationRules(), PaymentMilestoneRequest::validationRules()));
 
@@ -1284,9 +1286,15 @@ class MRFController extends Controller
                 $mrfSource = 'standard';
             }
 
+            if ($mrfSource === 'standard' && MRF::inferPoGeneratedFromJustification($request->justification)) {
+                $mrfSource = 'po_generated';
+            }
+
             $isPoLinked = $request->boolean('is_po_linked')
                 || $request->boolean('isPoLinked')
                 || $mrfSource === 'po_generated';
+
+            $linkedPoId = trim((string) ($request->input('linked_po_id') ?? $request->input('linkedPoId') ?? ''));
 
             try {
             $mrf = MRF::create([
@@ -1314,6 +1322,7 @@ class MRFController extends Controller
                 'is_resubmission' => false,
                 'source' => $mrfSource,
                 'is_po_linked' => $isPoLinked,
+                'linked_po_id' => $linkedPoId !== '' ? $linkedPoId : null,
                 'pfi_url' => $pfiUrl,
                 'pfi_share_url' => $pfiShareUrl,
                 'attachment_url' => $attachmentUrl,
@@ -1340,6 +1349,11 @@ class MRFController extends Controller
                 }
                 // Re-throw if it's a different error
                 throw $e;
+            }
+
+            if ($isPoLinked && ! filled($mrf->linked_po_id)) {
+                $mrf->update(['linked_po_id' => $mrf->mrf_id]);
+                $mrf->refresh();
             }
 
             // Log activity
