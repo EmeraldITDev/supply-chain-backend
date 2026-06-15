@@ -390,6 +390,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/mrfs/{id}/workflow-gates', [\App\Http\Controllers\Api\WorkflowGateController::class, 'show']);
     Route::get('/mrfs/{id}/finance-sync', [\App\Http\Controllers\Api\FinanceSyncController::class, 'show']);
     Route::get('/mrfs/{id}/delivery-confirmation', [\App\Http\Controllers\Api\DeliveryConfirmationController::class, 'show']);
+    Route::get('/mrfs/{id}/grn/prefill', [\App\Http\Controllers\Api\GRNController::class, 'prefillGrn']);
     Route::get('/mrfs/{id}/grn/preview', [\App\Http\Controllers\Api\GRNController::class, 'previewGrn']);
     Route::post('/mrfs/{id}/grn/preview', [\App\Http\Controllers\Api\GRNController::class, 'previewGrn']);
     Route::post('/mrfs/{id}/grn/generate', [\App\Http\Controllers\Api\GRNController::class, 'generateGrn']);

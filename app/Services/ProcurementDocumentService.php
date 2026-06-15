@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\MRF;
 use App\Models\ProcurementDocument;
 use App\Models\User;
+use App\Support\DocumentDisplayPayload;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
@@ -89,6 +90,7 @@ class ProcurementDocumentService
         User $user,
         ?int $vendorId = null,
         ?string $storageDirectory = null,
+        ?array $metadata = null,
     ): ProcurementDocument {
         if (! in_array($type, ProcurementDocument::TYPES, true)) {
             throw new \InvalidArgumentException("Invalid procurement document type: {$type}");
@@ -104,7 +106,52 @@ class ProcurementDocumentService
         Storage::disk($disk)->put($path, $binaryContent);
         $url = $this->fileUrl($path, $disk);
 
-        return $this->createDocumentRecord($mrf, $type, $originalFileName, $path, $url, $user, $vendorId);
+        return $this->createDocumentRecord($mrf, $type, $originalFileName, $path, $url, $user, $vendorId, $metadata);
+    }
+
+    public function storePreviewBinary(
+        MRF $mrf,
+        string $binaryContent,
+        string $originalFileName,
+        string $type,
+        User $user,
+        ?array $metadata = null,
+    ): array {
+        $disk = config('filesystems.documents_disk', env('DOCUMENTS_DISK', 's3'));
+        $directory = 'procurement-documents/previews/' . date('Y/m') . '/' . $mrf->mrf_id;
+        $fileName = time() . '_' . preg_replace('/[^A-Za-z0-9._-]/', '_', $originalFileName);
+        $path = $directory . '/' . $fileName;
+
+        Storage::disk($disk)->put($path, $binaryContent);
+        $url = $this->fileUrl($path, $disk);
+
+        return [
+            'id' => null,
+            'mrfId' => $mrf->mrf_id,
+            'vendorId' => $this->resolveVendorId($mrf),
+            'type' => $type,
+            'fileName' => $originalFileName,
+            'filePath' => $path,
+            'fileUrl' => $url,
+            'uploadedBy' => [
+                'id' => $user->id,
+                'name' => $user->name,
+            ],
+            'uploadedAt' => now()->toIso8601String(),
+            'version' => null,
+            'isActive' => false,
+            'preview' => true,
+            'metadata' => $metadata,
+            'file_name' => $originalFileName,
+            'file_path' => $path,
+            'file_url' => $url,
+            'uploaded_by' => [
+                'id' => $user->id,
+                'name' => $user->name,
+            ],
+            'uploaded_at' => now()->toIso8601String(),
+            'is_active' => false,
+        ];
     }
 
     public function registerExistingStorageFile(
@@ -246,7 +293,7 @@ class ProcurementDocumentService
 
     public function transform(ProcurementDocument $document): array
     {
-        return [
+        return DocumentDisplayPayload::withCamelCaseAliases([
             'id' => $document->id,
             'mrfId' => $document->mrf_id,
             'vendorId' => $document->vendor_id,
@@ -261,7 +308,8 @@ class ProcurementDocumentService
             'uploadedAt' => $document->uploaded_at?->toIso8601String(),
             'version' => $document->version,
             'isActive' => $document->is_active,
-        ];
+            'metadata' => $document->metadata,
+        ]);
     }
 
     public function refreshFileUrl(string $filePath, ?string $disk = null): string
@@ -303,6 +351,7 @@ class ProcurementDocumentService
         string $url,
         User $user,
         ?int $vendorId = null,
+        ?array $metadata = null,
     ): ProcurementDocument {
         $nextVersion = (int) ProcurementDocument::query()
             ->where('mrf_id', $mrf->id)
@@ -327,6 +376,7 @@ class ProcurementDocumentService
             'uploaded_at' => now(),
             'version' => max(1, $nextVersion),
             'is_active' => true,
+            'metadata' => $metadata,
         ]);
     }
 

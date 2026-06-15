@@ -40,6 +40,11 @@ class JobCompletionCertificate extends Model
         'certification_text',
         'service_period_start',
         'service_period_end',
+        'currency',
+        'subtotal',
+        'vat',
+        'total_amount',
+        'date_issued',
         'metadata',
     ];
 
@@ -51,6 +56,10 @@ class JobCompletionCertificate extends Model
         'metadata' => 'array',
         'service_period_start' => 'date',
         'service_period_end' => 'date',
+        'date_issued' => 'date',
+        'subtotal' => 'decimal:2',
+        'vat' => 'decimal:2',
+        'total_amount' => 'decimal:2',
     ];
 
     protected static function boot()
@@ -132,6 +141,7 @@ class JobCompletionCertificate extends Model
         $this->update([
             'status' => self::STATUS_SUBMITTED,
             'issued_at' => now(),
+            'date_issued' => now()->toDateString(),
         ]);
 
         // Update trip status to 'pending_jcc_approval'

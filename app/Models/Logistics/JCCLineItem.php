@@ -27,6 +27,10 @@ class JCCLineItem extends Model
         'jcc_id',
         'line_number',
         'description',
+        'unit',
+        'quantity',
+        'unit_price',
+        'amount',
         'item_type',
         'details',
         'condition',
@@ -39,6 +43,9 @@ class JCCLineItem extends Model
     protected $casts = [
         'metadata' => 'array',
         'details' => 'array',
+        'quantity' => 'decimal:2',
+        'unit_price' => 'decimal:2',
+        'amount' => 'decimal:2',
     ];
 
     public function jcc(): BelongsTo

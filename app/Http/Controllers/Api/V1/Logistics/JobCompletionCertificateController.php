@@ -292,7 +292,7 @@ class JobCompletionCertificateController extends ApiController
         }
 
         try {
-            $jcc = $this->jccService->submitJCC($jcc);
+            $jcc = $this->jccService->submitJCC($jcc, $request->user());
 
             return $this->success([
                 'message' => 'JCC submitted for approval successfully',
@@ -325,7 +325,8 @@ class JobCompletionCertificateController extends ApiController
             $jcc = $this->jccService->approveJCC(
                 $jcc,
                 $request->user()->id,
-                $data['approval_remarks'] ?? null
+                $data['approval_remarks'] ?? null,
+                $request->user(),
             );
 
             return $this->success([
@@ -350,7 +351,7 @@ class JobCompletionCertificateController extends ApiController
      * - Signatory Section: Issued by, Approved by, Witness
      * - Footer: Reference number, printed date
      */
-    public function generatePdf(int $tripId)
+    public function generatePdf(Request $request, int $tripId)
     {
         $trip = Trip::find($tripId);
 
@@ -362,6 +363,12 @@ class JobCompletionCertificateController extends ApiController
 
         if (!$jcc) {
             return $this->error('No JCC found for this trip', 'NOT_FOUND', 404);
+        }
+
+        if ($request->boolean('json') || $request->query('format') === 'json') {
+            return $this->success([
+                'jcc' => $this->jccService->toDisplayRecord($jcc),
+            ]);
         }
 
         try {
@@ -429,10 +436,13 @@ class JobCompletionCertificateController extends ApiController
                 $request->input('file_name') ?? $file->getClientOriginalName()
             );
 
+            $jcc = $jcc->fresh();
+
             return $this->success([
                 'message' => 'Attachment uploaded successfully',
                 'file_path' => $path,
                 'file_name' => $file->getClientOriginalName(),
+                'jcc' => $this->jccService->toDisplayRecord($jcc),
             ], 201);
         } catch (\Exception $e) {
             return $this->error('Failed to upload attachment: ' . $e->getMessage(), 'UPLOAD_FAILED', 400);

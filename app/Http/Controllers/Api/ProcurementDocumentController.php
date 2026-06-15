@@ -44,6 +44,9 @@ class ProcurementDocumentController extends Controller
 
         $type = $request->query('type');
         $activeOnly = ! $request->boolean('include_inactive', false);
+        if (is_string($type) && $type === ProcurementDocument::TYPE_GRN) {
+            $activeOnly = false;
+        }
         $grouped = $this->documentService->listGroupedForMrf(
             $mrf,
             is_string($type) ? $type : null,

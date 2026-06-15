@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\MRF;
 use App\Models\ProcurementDocument;
 use App\Services\GrnPdfService;
+use App\Support\DocumentDisplayPayload;
 use App\Services\FinanceAp\FinanceApWorkflowOrchestrator;
 use App\Services\NotificationService;
 use App\Services\PermissionService;
@@ -39,6 +40,36 @@ class GRNController extends Controller
     }
 
     /**
+     * Prefill GRN form data from MRF/PO line items.
+     */
+    public function prefillGrn(Request $request, string $id)
+    {
+        $user = $request->user();
+        $mrf = $this->findMrfByAnyId($id);
+
+        if (! $mrf) {
+            return response()->json([
+                'success' => false,
+                'error' => 'MRF not found',
+                'code' => 'NOT_FOUND',
+            ], 404);
+        }
+
+        if (! $this->permissionService->canGenerateGRN($user, $mrf)) {
+            return response()->json([
+                'success' => false,
+                'error' => 'You do not have permission to prefill GRN for this MRF',
+                'code' => 'FORBIDDEN',
+            ], 403);
+        }
+
+        return response()->json([
+            'success' => true,
+            'data' => $this->grnPdfService->buildPrefillPayload($mrf, $user),
+        ]);
+    }
+
+    /**
      * Preview GRN PDF populated from MRF line items (not saved to registry).
      */
     public function previewGrn(Request $request, string $id)
@@ -62,7 +93,12 @@ class GRNController extends Controller
             ], 403);
         }
 
-        $resolved = $this->grnPdfService->resolveLineItems($mrf);
+        $resolved = $this->grnPdfService->resolveLineItems(
+            $mrf,
+            is_array($request->input('line_items') ?? $request->input('lineItems'))
+                ? ($request->input('line_items') ?? $request->input('lineItems'))
+                : null,
+        );
         if (! $resolved['success']) {
             return response()->json([
                 'success' => false,
@@ -74,11 +110,32 @@ class GRNController extends Controller
         try {
             $options = $this->grnOptionsFromRequest($request);
             $pdf = $this->grnPdfService->renderPdf($mrf, $user, $options);
-            $fileName = 'grn_preview_' . ($mrf->mrf_id ?? $id) . '.pdf';
+            $grnNumber = (string) ($options['grn_number'] ?? $this->grnPdfService->defaultGrnNumber($mrf));
+            $fileName = $grnNumber.'_preview.pdf';
+
+            if ($request->isMethod('post') || $request->boolean('json') || $request->query('format') === 'json' || $request->wantsJson()) {
+                $metadata = $this->grnPdfService->buildPersistedMetadata($mrf, $user, $options);
+                $document = $this->documentService->storePreviewBinary(
+                    $mrf,
+                    $pdf,
+                    $fileName,
+                    ProcurementDocument::TYPE_GRN,
+                    $user,
+                    $metadata,
+                );
+
+                return response()->json([
+                    'success' => true,
+                    'data' => [
+                        'document' => DocumentDisplayPayload::withCamelCaseAliases($document),
+                        'preview' => true,
+                    ],
+                ]);
+            }
 
             return response($pdf, 200, [
                 'Content-Type' => 'application/pdf',
-                'Content-Disposition' => 'inline; filename="' . $fileName . '"',
+                'Content-Disposition' => 'inline; filename="'.$fileName.'"',
             ]);
         } catch (\Throwable $e) {
             Log::error('GRN preview generation failed', [
@@ -88,7 +145,7 @@ class GRNController extends Controller
 
             return response()->json([
                 'success' => false,
-                'error' => 'Failed to generate GRN preview: ' . $e->getMessage(),
+                'error' => 'Failed to generate GRN preview: '.$e->getMessage(),
                 'code' => 'PDF_GENERATION_FAILED',
             ], 500);
         }
@@ -168,6 +225,7 @@ class GRNController extends Controller
             $pdf = $this->grnPdfService->renderPdf($mrf, $user, $options);
             $grnNumber = (string) ($options['grn_number'] ?? $this->grnPdfService->defaultGrnNumber($mrf));
             $fileName = $grnNumber . '.pdf';
+            $metadata = $this->grnPdfService->buildPersistedMetadata($mrf, $user, $options);
 
             $document = $this->documentService->storeBinaryContent(
                 $mrf,
@@ -177,6 +235,7 @@ class GRNController extends Controller
                 $user,
                 $this->documentService->resolveVendorId($mrf),
                 'procurement-documents/' . date('Y/m') . '/' . $mrf->mrf_id . '/grn',
+                $metadata,
             );
 
             $this->documentService->syncGrnLegacyFields($mrf, $document);
@@ -191,13 +250,18 @@ class GRNController extends Controller
                 ]);
             }
 
+            $freshMrf = $mrf->fresh();
+
             return response()->json([
                 'success' => true,
                 'message' => 'GRN generated and saved to document registry',
                 'data' => [
-                    'mrfId' => $mrf->mrf_id,
+                    'mrfId' => $freshMrf->mrf_id,
                     'grnNumber' => $grnNumber,
-                    'workflowState' => $mrf->fresh()->workflow_state,
+                    'grn_number' => $grnNumber,
+                    'workflowState' => $freshMrf->workflow_state,
+                    'mrf_grn_url' => $document->file_url,
+                    'mrfGrnUrl' => $document->file_url,
                     'document' => $this->documentService->transform($document),
                 ],
             ], 201);

@@ -9,6 +9,8 @@ use App\Models\QuotationItem;
 use App\Models\RFQ;
 use App\Models\User;
 use App\Models\Vendor;
+use App\Support\DocumentDisplayPayload;
+use App\Support\SignatureUrls;
 use Carbon\Carbon;
 use Dompdf\Dompdf;
 use Dompdf\Options;
@@ -131,6 +133,174 @@ class GrnPdfService
         }
 
         return sprintf('GRN-%s-%s-%03d', $mrfRef, $year, $sequence);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function buildPrefillPayload(MRF $mrf, ?User $actingUser = null): array
+    {
+        $mrf->loadMissing(['items', 'selectedVendor', 'requester', 'procurementManager']);
+        $vendor = $this->resolveVendor($mrf);
+        $resolved = $this->resolveLineItems($mrf);
+        $lineItems = [];
+
+        if ($resolved['success']) {
+            foreach ($resolved['line_items'] as $index => $row) {
+                $qtyOrdered = (float) str_replace(',', '', (string) ($row['quantity_ordered'] ?? '0'));
+                $unitPriceRaw = (float) str_replace(',', '', (string) ($row['unit_price'] ?? '0'));
+                $amount = round($qtyOrdered * $unitPriceRaw, 2);
+
+                $lineItems[] = DocumentDisplayPayload::withCamelCaseAliases([
+                    'index' => $index,
+                    'description' => DocumentDisplayPayload::nullIfEmpty($row['description'] ?? $row['name'] ?? null),
+                    'unit' => DocumentDisplayPayload::nullIfEmpty($row['uom'] ?? null),
+                    'quantity_ordered' => $qtyOrdered,
+                    'quantity_received_default' => $qtyOrdered,
+                    'unit_price' => $unitPriceRaw > 0 ? $unitPriceRaw : null,
+                    'amount' => $amount > 0 ? $amount : null,
+                    'remarks' => null,
+                ]);
+            }
+        }
+
+        $payload = [
+            'grn_number' => $this->defaultGrnNumber($mrf),
+            'vendor' => [
+                'name' => DocumentDisplayPayload::nullIfEmpty($vendor?->name),
+                'address' => DocumentDisplayPayload::nullIfEmpty($vendor?->address),
+                'contact' => DocumentDisplayPayload::nullIfEmpty($vendor?->contact_person),
+                'phone' => DocumentDisplayPayload::nullIfEmpty($vendor?->phone),
+            ],
+            'po' => [
+                'po_number' => DocumentDisplayPayload::nullIfEmpty($mrf->po_number),
+                'date' => $mrf->po_generated_at?->format('Y-m-d') ?? ($mrf->date ? Carbon::parse($mrf->date)->format('Y-m-d') : null),
+                'currency' => 'NGN',
+            ],
+            'delivery_location' => DocumentDisplayPayload::nullIfEmpty($mrf->ship_to_address),
+            'project' => DocumentDisplayPayload::nullIfEmpty($mrf->title),
+            'department' => DocumentDisplayPayload::nullIfEmpty($mrf->department),
+            'line_items' => $lineItems,
+            'authorised_signatories' => $this->authorisedSignatoryBlocks($mrf, $actingUser, $vendor),
+        ];
+
+        return DocumentDisplayPayload::withCamelCaseAliases(
+            DocumentDisplayPayload::nullifyEmptyStrings($payload) ?? []
+        );
+    }
+
+    /**
+     * @param  array<string, mixed>  $options
+     * @return array<string, mixed>
+     */
+    public function buildPersistedMetadata(MRF $mrf, User $actingUser, array $options = []): array
+    {
+        $resolved = $this->resolveLineItems($mrf, is_array($options['line_items'] ?? null) ? $options['line_items'] : null);
+        $lineItemsReceived = [];
+
+        if ($resolved['success']) {
+            foreach ($resolved['line_items'] as $index => $row) {
+                $lineItemsReceived[] = [
+                    'index' => $index,
+                    'description' => $row['description'] ?? $row['name'] ?? null,
+                    'unit' => $row['uom'] ?? null,
+                    'quantity_ordered' => (float) str_replace(',', '', (string) ($row['quantity_ordered'] ?? '0')),
+                    'quantity_received' => (float) str_replace(',', '', (string) ($row['quantity_received'] ?? '0')),
+                    'unit_price' => (float) str_replace(',', '', (string) ($row['unit_price'] ?? '0')),
+                    'amount' => (float) str_replace(',', '', (string) ($row['total'] ?? '0')),
+                    'remarks' => null,
+                ];
+            }
+        }
+
+        $receivedAt = $options['date_of_receipt'] ?? $options['received_at'] ?? now()->toDateString();
+        $vendor = $this->resolveVendor($mrf);
+
+        return [
+            'grn_number' => (string) ($options['grn_number'] ?? $options['grnNumber'] ?? $this->defaultGrnNumber($mrf)),
+            'received_at' => Carbon::parse($receivedAt)->toIso8601String(),
+            'received_by' => [
+                'id' => $actingUser->id,
+                'name' => $actingUser->name,
+            ],
+            'delivery_note_number' => DocumentDisplayPayload::nullIfEmpty($options['delivery_note_number'] ?? $options['deliveryNoteNumber'] ?? null),
+            'delivery_date' => DocumentDisplayPayload::nullIfEmpty($options['delivery_date'] ?? $options['deliveryDate'] ?? null),
+            'carrier_name' => DocumentDisplayPayload::nullIfEmpty($options['carrier_name'] ?? $options['carrierName'] ?? null),
+            'driver_number' => DocumentDisplayPayload::nullIfEmpty($options['driver_number'] ?? $options['driverNumber'] ?? null),
+            'vehicle_plate_number' => DocumentDisplayPayload::nullIfEmpty($options['vehicle_plate_number'] ?? $options['vehiclePlateNumber'] ?? null),
+            'comments' => DocumentDisplayPayload::nullIfEmpty($options['comments'] ?? $options['remarks'] ?? null),
+            'line_items_received' => $lineItemsReceived,
+            'authorised_signatories' => $this->authorisedSignatoryBlocks($mrf, $actingUser, $vendor, signWarehouse: true),
+            'vendor' => [
+                'name' => DocumentDisplayPayload::nullIfEmpty($vendor?->name),
+                'address' => DocumentDisplayPayload::nullIfEmpty($vendor?->address),
+                'contact' => DocumentDisplayPayload::nullIfEmpty($vendor?->contact_person),
+                'phone' => DocumentDisplayPayload::nullIfEmpty($vendor?->phone),
+            ],
+            'po' => [
+                'po_number' => DocumentDisplayPayload::nullIfEmpty($mrf->po_number),
+                'date' => $mrf->po_generated_at?->format('Y-m-d'),
+                'currency' => 'NGN',
+            ],
+            'delivery_location' => DocumentDisplayPayload::nullIfEmpty($mrf->ship_to_address),
+            'project' => DocumentDisplayPayload::nullIfEmpty($mrf->title),
+            'department' => DocumentDisplayPayload::nullIfEmpty($mrf->department),
+        ];
+    }
+
+    /**
+     * @return array<string, array<string, mixed>>
+     */
+    private function authorisedSignatoryBlocks(
+        MRF $mrf,
+        ?User $actingUser,
+        ?Vendor $vendor,
+        bool $signWarehouse = false,
+    ): array {
+        $procurementManager = $mrf->procurementManager
+            ?? User::query()->whereIn('role', ['procurement_manager', 'procurement'])->orderBy('id')->first();
+        $financeUser = User::query()->whereIn('role', ['finance', 'finance_officer'])->orderBy('id')->first();
+        $logisticsUser = User::query()->whereIn('role', ['logistics', 'warehouse'])->orderBy('id')->first();
+
+        $blocks = [
+            'warehouse' => $this->signatorySlot($signWarehouse ? ($actingUser ?? $logisticsUser) : null, 'Warehouse Officer'),
+            'logistics' => $this->signatorySlot($logisticsUser, 'Logistics Officer'),
+            'procurement' => $this->signatorySlot($procurementManager, 'Procurement Manager'),
+            'finance' => $this->signatorySlot($financeUser, 'Finance Officer'),
+        ];
+
+        if ($vendor && $signWarehouse) {
+            $blocks['vendor_delivered'] = DocumentDisplayPayload::withCamelCaseAliases([
+                'name' => DocumentDisplayPayload::nullIfEmpty($vendor->contact_person ?: $vendor->name),
+                'title' => 'Vendor',
+                'signature_url' => null,
+                'signed_at' => null,
+            ]);
+        }
+
+        return $blocks;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function signatorySlot(?User $user, string $defaultTitle): array
+    {
+        if (! $user) {
+            return DocumentDisplayPayload::withCamelCaseAliases([
+                'name' => null,
+                'title' => $defaultTitle,
+                'signature_url' => null,
+                'signed_at' => null,
+            ]);
+        }
+
+        return DocumentDisplayPayload::withCamelCaseAliases([
+            'name' => DocumentDisplayPayload::nullIfEmpty($user->name),
+            'title' => DocumentDisplayPayload::nullIfEmpty($user->department ?? $defaultTitle),
+            'signature_url' => SignatureUrls::forUser($user),
+            'signed_at' => null,
+        ]);
     }
 
     /**

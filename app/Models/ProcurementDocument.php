@@ -48,12 +48,14 @@ class ProcurementDocument extends Model
         'uploaded_at',
         'version',
         'is_active',
+        'metadata',
     ];
 
     protected $casts = [
         'uploaded_at' => 'datetime',
         'is_active' => 'boolean',
         'version' => 'integer',
+        'metadata' => 'array',
     ];
 
     public function mrf(): BelongsTo

@@ -18,9 +18,19 @@ class UpdateJobCompletionCertificateRequest extends FormRequest
             'delivery_confirmed' => 'nullable|boolean',
             'condition_of_goods' => 'nullable|string',
             'certification_text' => 'nullable|string',
+            'certification_statement' => 'nullable|string',
             'po_number' => 'nullable|string|max:100',
             'service_period_start' => 'nullable|date',
             'service_period_end' => 'nullable|date',
+            'currency' => 'nullable|string|size:3',
+            'line_items' => 'nullable|array',
+            'line_items.*.description' => 'required_with:line_items|string|max:2000',
+            'line_items.*.unit' => 'nullable|string|max:50',
+            'line_items.*.quantity' => 'nullable|numeric|min:0',
+            'line_items.*.unit_price' => 'nullable|numeric|min:0',
+            'line_items.*.unitPrice' => 'nullable|numeric|min:0',
+            'line_items.*.amount' => 'nullable|numeric|min:0',
+            'line_items.*.remarks' => 'nullable|string|max:2000',
         ];
     }
 
