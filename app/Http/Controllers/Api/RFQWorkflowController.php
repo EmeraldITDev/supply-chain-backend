@@ -483,7 +483,7 @@ class RFQWorkflowController extends Controller
         $user = $request->user();
 
         // Check role
-        if (!in_array($user->role, ['procurement_manager', 'procurement', 'admin'])) {
+        if (!in_array($user->scmRole(), ['procurement_manager', 'procurement', 'admin'])) {
             return response()->json([
                 'success' => false,
                 'error' => 'Only procurement managers can select vendors',
@@ -678,7 +678,7 @@ class RFQWorkflowController extends Controller
             // Include debug info only in debug mode
             if (config('app.debug')) {
                 $response['debug'] = [
-                    'user_role' => $user->role,
+                    'user_role' => $user->scmRole(),
                     'has_vendor_role' => method_exists($user, 'hasRole') ? $user->hasRole('vendor') : 'method_not_available',
                     'user_id' => $user->id,
                     'user_email' => $user->email,
@@ -1015,7 +1015,7 @@ class RFQWorkflowController extends Controller
         $user = $request->user();
 
         // Check role
-        if (!in_array($user->role, ['procurement_manager', 'procurement', 'admin'])) {
+        if (!in_array($user->scmRole(), ['procurement_manager', 'procurement', 'admin'])) {
             return response()->json([
                 'success' => false,
                 'error' => 'Only procurement managers can close RFQs',
@@ -1078,7 +1078,7 @@ class RFQWorkflowController extends Controller
 
     private function vendorUserActsAsVendor(\App\Models\User $user): bool
     {
-        if ($user->role !== null && strcasecmp((string) $user->role, 'vendor') === 0) {
+        if ($user->scmRole() !== null && strcasecmp((string) $user->scmRole(), 'vendor') === 0) {
             return true;
         }
         if (method_exists($user, 'hasRole')) {
@@ -1100,7 +1100,7 @@ class RFQWorkflowController extends Controller
             'finance', 'finance_officer',
             'executive', 'chairman',
         ];
-        $r = strtolower((string) ($user->role ?? ''));
+        $r = strtolower((string) ($user->scmRole() ?? ''));
         if (in_array($r, $roles, true)) {
             return true;
         }

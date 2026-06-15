@@ -47,14 +47,14 @@ class NotificationService
 
             // Non-standard contract types go directly to Supply Chain Director
             if (!$isStandardType) {
-                $notifiables = User::whereIn('role', [
+                $notifiables = User::whereIn('supply_chain_role', [
                     'supply_chain_director',
                     'supply_chain',
                     'admin',
                 ])->get();
             } elseif ($normalizedType === 'emerald' && LogisticsMrfRouting::mrfShouldStartAtSupplyChainDirector($mrf)) {
                 // Emerald with logistics exception
-                $notifiables = User::whereIn('role', [
+                $notifiables = User::whereIn('supply_chain_role', [
                     'supply_chain_director',
                     'supply_chain',
                     'admin',
@@ -69,11 +69,11 @@ class NotificationService
                     Log::warning('Configured Emerald executive approver not found by email; falling back to executive role.', [
                         'mrf_id' => $mrf->mrf_id,
                     ]);
-                    $notifiables = User::whereIn('role', ['executive', 'admin'])->get();
+                    $notifiables = User::whereIn('supply_chain_role', ['executive', 'admin'])->get();
                 }
             } else {
                 // Other standard types (oando, dangote, heritage) go to Supply Chain Director
-                $notifiables = User::whereIn('role', [
+                $notifiables = User::whereIn('supply_chain_role', [
                     'supply_chain_director',
                     'supply_chain',
                     'admin',
@@ -249,7 +249,7 @@ class NotificationService
                 ->get();
 
             $fromRoles = User::query()
-                ->whereIn('role', [
+                ->whereIn('supply_chain_role', [
                     'procurement_manager',
                     'procurement',
                     'logistics_manager',
@@ -288,7 +288,7 @@ class NotificationService
     {
         try {
             // Get procurement managers and admins
-            $notifiables = User::whereIn('role', [
+            $notifiables = User::whereIn('supply_chain_role', [
                 'procurement_manager',
                 'supply_chain_director',
                 'supply_chain',
@@ -322,7 +322,7 @@ class NotificationService
     ): void {
         try {
             // Notify procurement managers and vendor
-            $notifiables = User::whereIn('role', [
+            $notifiables = User::whereIn('supply_chain_role', [
                 'procurement_manager',
                 'supply_chain_director',
                 'supply_chain',
@@ -372,7 +372,7 @@ class NotificationService
             $query = User::query();
 
             if ($roles) {
-                $query->whereIn('role', $roles);
+                $query->whereIn('supply_chain_role', $roles);
             }
 
             $users = $query->get();
@@ -429,7 +429,7 @@ class NotificationService
     public function notifyMRFPendingChairmanApproval(MRF $mrf): void
     {
         try {
-            $chairmen = User::whereIn('role', ['chairman', 'admin'])->get();
+            $chairmen = User::whereIn('supply_chain_role', ['chairman', 'admin'])->get();
 
             foreach ($chairmen as $chairman) {
                 $chairman->notifyNow(new SystemAnnouncementNotification(
@@ -457,7 +457,7 @@ class NotificationService
     public function notifyMRFPendingProcurement(MRF $mrf): void
     {
         try {
-            $procurementManagers = User::whereIn('role', ['procurement_manager', 'procurement', 'admin'])->get();
+            $procurementManagers = User::whereIn('supply_chain_role', ['procurement_manager', 'procurement', 'admin'])->get();
 
             foreach ($procurementManagers as $manager) {
                 $manager->notifyNow(new SystemAnnouncementNotification(
@@ -508,7 +508,7 @@ class NotificationService
                 ]);
 
                 // Fallback: notify supply chain directors if Lazarus not found
-                $supplyChainDirectors = User::whereIn('role', ['supply_chain_director', 'supply_chain', 'admin'])->get();
+                $supplyChainDirectors = User::whereIn('supply_chain_role', ['supply_chain_director', 'supply_chain', 'admin'])->get();
                 foreach ($supplyChainDirectors as $director) {
                     $director->notifyNow(new SystemAnnouncementNotification(
                         'High-Value Custom Contract MRF - Director Approval Required',
@@ -533,7 +533,7 @@ class NotificationService
     public function notifyPOReadyForSignature(MRF $mrf): void
     {
         try {
-            $supplyChainDirectors = User::whereIn('role', ['supply_chain_director', 'supply_chain', 'admin'])->get();
+            $supplyChainDirectors = User::whereIn('supply_chain_role', ['supply_chain_director', 'supply_chain', 'admin'])->get();
 
             foreach ($supplyChainDirectors as $director) {
                 $director->notifyNow(new SystemAnnouncementNotification(
@@ -559,7 +559,7 @@ class NotificationService
     public function notifyPOSignedToFinance(MRF $mrf): void
     {
         try {
-            $financeTeam = User::whereIn('role', ['finance', 'admin'])->get();
+            $financeTeam = User::whereIn('supply_chain_role', ['finance', 'admin'])->get();
 
             foreach ($financeTeam as $finance) {
                 $finance->notifyNow(new SystemAnnouncementNotification(
@@ -585,7 +585,7 @@ class NotificationService
     public function notifyPORejectedToProcurement(MRF $mrf, string $reason): void
     {
         try {
-            $procurementManagers = User::whereIn('role', ['procurement_manager', 'procurement', 'admin'])->get();
+            $procurementManagers = User::whereIn('supply_chain_role', ['procurement_manager', 'procurement', 'admin'])->get();
 
             foreach ($procurementManagers as $manager) {
                 $manager->notifyNow(new SystemAnnouncementNotification(
@@ -611,7 +611,7 @@ class NotificationService
     public function notifyPaymentPendingChairman(MRF $mrf): void
     {
         try {
-            $chairmen = User::whereIn('role', ['chairman', 'admin'])->get();
+            $chairmen = User::whereIn('supply_chain_role', ['chairman', 'admin'])->get();
 
             foreach ($chairmen as $chairman) {
                 $chairman->notifyNow(new SystemAnnouncementNotification(
@@ -640,7 +640,7 @@ class NotificationService
     {
         try {
             // Notify executives
-            $executives = User::whereIn('role', ['executive', 'admin'])->get();
+            $executives = User::whereIn('supply_chain_role', ['executive', 'admin'])->get();
 
             foreach ($executives as $executive) {
                 $executive->notifyNow(new SystemAnnouncementNotification(
@@ -683,7 +683,7 @@ class NotificationService
             }
 
             // Notify procurement, finance, and admins
-            $stakeholders = User::whereIn('role', [
+            $stakeholders = User::whereIn('supply_chain_role', [
                 'procurement_manager',
                 'procurement',
                 'finance',
@@ -729,7 +729,7 @@ class NotificationService
             }
 
             // Notify procurement team
-            $procurementTeam = User::whereIn('role', ['procurement_manager', 'procurement', 'admin'])->get();
+            $procurementTeam = User::whereIn('supply_chain_role', ['procurement_manager', 'procurement', 'admin'])->get();
             foreach ($procurementTeam as $manager) {
                 $manager->notifyNow(new SystemAnnouncementNotification(
                     'Vendor Selected',
@@ -817,7 +817,7 @@ class NotificationService
     public function notifyGRNRequested(MRF $mrf, User $requestedBy): void
     {
         try {
-            $procurementManagers = User::whereIn('role', ['procurement_manager', 'procurement', 'admin'])->get();
+            $procurementManagers = User::whereIn('supply_chain_role', ['procurement_manager', 'procurement', 'admin'])->get();
 
             foreach ($procurementManagers as $manager) {
                 $manager->notifyNow(new SystemAnnouncementNotification(
@@ -847,7 +847,7 @@ class NotificationService
     public function notifyGRNCompleted(MRF $mrf, User $completedBy): void
     {
         try {
-            $financeTeam = User::whereIn('role', ['finance', 'finance_officer', 'admin'])->get();
+            $financeTeam = User::whereIn('supply_chain_role', ['finance', 'finance_officer', 'admin'])->get();
 
             foreach ($financeTeam as $finance) {
                 $finance->notifyNow(new SystemAnnouncementNotification(
@@ -888,7 +888,7 @@ class NotificationService
             $message = "Vendor invoice submitted for MRF {$mrf->mrf_id}. Document: {$document->file_name}.";
 
             $recipients = User::query()
-                ->whereIn('role', [
+                ->whereIn('supply_chain_role', [
                     'procurement_manager',
                     'procurement',
                     'supply_chain_director',

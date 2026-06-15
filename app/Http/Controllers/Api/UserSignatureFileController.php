@@ -26,7 +26,7 @@ class UserSignatureFileController extends Controller
                 return response()->json(['success' => false, 'error' => 'Unauthorized'], 401);
             }
 
-            $isAdmin = $this->permissionService->canManageUsers($actor) || $actor->role === 'admin';
+            $isAdmin = $this->permissionService->canManageUsers($actor) || $actor->scmRole() === 'admin';
             if (!$isAdmin && $actor->id !== $user->id) {
                 return response()->json(['success' => false, 'error' => 'Forbidden'], 403);
             }

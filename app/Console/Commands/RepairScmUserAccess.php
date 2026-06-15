@@ -29,24 +29,24 @@ class RepairScmUserAccess extends Command
 
         $query->chunkById(100, function ($users) use ($dryRun, &$repaired, &$stillBlocked): void {
             foreach ($users as $user) {
-                $beforeRole = $user->role;
+                $beforeRole = $user->scmRole();
                 $hadAccess = UserRoleNormalizer::hasSupplyChainLoginAccess($user);
 
                 if ($dryRun) {
                     $inferred = UserRoleNormalizer::inferCanonicalRoleFromProfile($user);
-                    $normalized = UserRoleNormalizer::normalize($user->role);
-                    $wouldChange = ($inferred !== null && $inferred !== $user->role)
-                        || ($normalized !== null && $normalized !== $user->role);
+                    $normalized = UserRoleNormalizer::normalize($user->scmRole());
+                    $wouldChange = ($inferred !== null && $inferred !== $user->scmRole())
+                        || ($normalized !== null && $normalized !== $user->scmRole());
 
                     if (UserRoleNormalizer::isVendorAccount($user)) {
                         continue;
                     }
 
                     if (! $hadAccess) {
-                        $this->line("BLOCKED: {$user->email} role={$user->role} dept={$user->department} inferred={$inferred}");
+                        $this->line("BLOCKED: {$user->email} role={$user->scmRole()} dept={$user->department} inferred={$inferred}");
                         $stillBlocked++;
                     } elseif ($wouldChange) {
-                        $this->line("WOULD FIX: {$user->email} {$user->role} -> ".($inferred ?? $normalized));
+                        $this->line("WOULD FIX: {$user->email} {$user->scmRole()} -> ".($inferred ?? $normalized));
                         $repaired++;
                     }
 
@@ -55,7 +55,7 @@ class RepairScmUserAccess extends Command
 
                 if (UserRoleNormalizer::repairUserAccess($user)) {
                     $repaired++;
-                    $this->info("Repaired: {$user->email} (was: {$beforeRole}, now: {$user->fresh()->role})");
+                    $this->info("Repaired: {$user->email} (was: {$beforeRole}, now: {$user->fresh()->scmRole()})");
                 }
 
                 $fresh = $user->fresh(['employee']);
@@ -68,7 +68,7 @@ class RepairScmUserAccess extends Command
 
                 if (! UserRoleNormalizer::hasSupplyChainLoginAccess($fresh)) {
                     $stillBlocked++;
-                    $this->warn("Still blocked after repair: {$fresh->email} role={$fresh->role}");
+                    $this->warn("Still blocked after repair: {$fresh->email} supply_chain_role={$fresh->scmRole()}");
                 }
             }
         });

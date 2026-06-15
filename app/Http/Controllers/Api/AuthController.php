@@ -66,8 +66,8 @@ class AuthController extends Controller
         $tokenName = $rememberMe ? 'remember-token' : 'session-token';
         $token = $user->createToken($tokenName, ['*'], $expiresAt)->plainTextToken;
 
-        // Get user role (from Spatie or fallback to role field)
-        $role = $user->getRoleNames()->first() ?? $user->role ?? 'employee';
+        // SCM permissions use supply_chain_role exclusively
+        $scmRole = $user->getRoleNames()->first() ?? $user->scmRole() ?? 'employee';
         
         // Get department from employee or user
         $department = $user->employee->department ?? $user->department ?? null;
@@ -78,21 +78,7 @@ class AuthController extends Controller
         $signatureUrl = SignatureUrls::forUser($user);
 
         return response()->json([
-            'user' => [
-                'id' => $user->id,
-                'email' => $user->email,
-                'name' => $user->name,
-                'role' => $role,
-                'department' => $department,
-                'employeeId' => $user->employee_id,
-                'createdAt' => $user->created_at->toIso8601String(),
-                'signature_image_path' => $user->signature_image_path,
-                'signatureImagePath' => $user->signature_image_path,
-                'signature_url' => $signatureUrl,
-                'signatureUrl' => $signatureUrl,
-                'has_signature' => !empty($user->signature_image_path),
-                'hasSignature' => !empty($user->signature_image_path),
-            ],
+            'user' => $this->authUserPayload($user, $scmRole, $department, $signatureUrl),
             'token' => $token,
             'expiresAt' => $expiresAt->toIso8601String(),
             'requiresPasswordChange' => $requiresPasswordChange,
@@ -119,8 +105,8 @@ class AuthController extends Controller
         $user = $request->user()->load('employee');
         $token = $request->user()->currentAccessToken();
 
-        // Get user role (from Spatie or fallback to role field)
-        $role = $user->getRoleNames()->first() ?? $user->role ?? 'employee';
+        // SCM permissions use supply_chain_role exclusively
+        $scmRole = $user->getRoleNames()->first() ?? $user->scmRole() ?? 'employee';
 
         // Get department from employee or user
         $department = $user->employee->department ?? $user->department ?? null;
@@ -130,23 +116,13 @@ class AuthController extends Controller
         // separate endpoint.
         $signatureUrl = SignatureUrls::forUser($user);
 
-        return response()->json([
-            'id' => $user->id,
-            'email' => $user->email,
-            'name' => $user->name,
-            'role' => $role,
-            'department' => $department,
-            'employeeId' => $user->employee_id,
-            'createdAt' => $user->created_at->toIso8601String(),
-            'requiresPasswordChange' => $user->must_change_password ?? false,
-            'tokenExpiresAt' => $token->expires_at ? $token->expires_at->toIso8601String() : null,
-            'signatureImagePath' => $user->signature_image_path,
-            'signature_image_path' => $user->signature_image_path,
-            'signatureUrl' => $signatureUrl,
-            'signature_url' => $signatureUrl,
-            'hasSignature' => !empty($user->signature_image_path),
-            'has_signature' => !empty($user->signature_image_path),
-        ]);
+        return response()->json(array_merge(
+            $this->authUserPayload($user, $scmRole, $department, $signatureUrl),
+            [
+                'requiresPasswordChange' => $user->must_change_password ?? false,
+                'tokenExpiresAt' => $token->expires_at ? $token->expires_at->toIso8601String() : null,
+            ]
+        ));
     }
 
     /**
@@ -252,13 +228,19 @@ class AuthController extends Controller
         return response()->json([
             'success' => true,
             'message' => 'Profile updated successfully',
-            'data' => [
-                'id' => $user->id,
-                'name' => $user->name,
-                'email' => $user->email,
-                'role' => $user->role,
-                'department' => $user->department,
-            ]
+            'data' => array_merge(
+                [
+                    'id' => $user->id,
+                    'name' => $user->name,
+                    'email' => $user->email,
+                    'department' => $user->department,
+                ],
+                [
+                    'supply_chain_role' => $user->scmRole(),
+                    'hris_role' => $user->hris_role,
+                    'role' => $user->scmRole(),
+                ]
+            )
         ]);
     }
 
@@ -465,5 +447,29 @@ class AuthController extends Controller
             'success' => true,
             'message' => 'Signature removed.',
         ]);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function authUserPayload(User $user, string $scmRole, ?string $department, ?string $signatureUrl): array
+    {
+        return [
+            'id' => $user->id,
+            'email' => $user->email,
+            'name' => $user->name,
+            'supply_chain_role' => $scmRole,
+            'hris_role' => $user->hris_role,
+            'role' => $scmRole,
+            'department' => $department,
+            'employeeId' => $user->employee_id,
+            'createdAt' => $user->created_at->toIso8601String(),
+            'signature_image_path' => $user->signature_image_path,
+            'signatureImagePath' => $user->signature_image_path,
+            'signature_url' => $signatureUrl,
+            'signatureUrl' => $signatureUrl,
+            'has_signature' => ! empty($user->signature_image_path),
+            'hasSignature' => ! empty($user->signature_image_path),
+        ];
     }
 }

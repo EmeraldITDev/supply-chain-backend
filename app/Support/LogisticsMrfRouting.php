@@ -19,7 +19,7 @@ final class LogisticsMrfRouting
         ?string $description
     ): bool {
         if ($requester) {
-            $role = strtolower((string) ($requester->role ?? ''));
+            $role = strtolower((string) ($requester->scmRole() ?? ''));
             if (in_array($role, ['logistics_manager', 'logistics_officer', 'logistics'], true)) {
                 return true;
             }

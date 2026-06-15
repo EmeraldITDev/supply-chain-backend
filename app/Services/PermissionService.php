@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Support\UserRoleNormalizer;
 use App\Models\Employee;
 use App\Models\User;
 use App\Models\MRF;
@@ -22,7 +23,7 @@ class PermissionService
      */
     public function canCreateMRF(User $user): bool
     {
-        return in_array($user->role, ['employee', 'staff', 'regular_staff']);
+        return in_array($user->scmRole(), ['employee', 'staff', 'regular_staff']);
     }
 
     /**
@@ -31,7 +32,7 @@ class PermissionService
     public function canEditMRF(User $user, MRF $mrf): bool
     {
         // Staff can only edit their own MRF before submission
-        if (in_array($user->role, ['employee', 'staff', 'regular_staff'])) {
+        if (in_array($user->scmRole(), ['employee', 'staff', 'regular_staff'])) {
             $currentState = $mrf->workflow_state ?? WorkflowStateService::STATE_MRF_CREATED;
             return $mrf->requester_id === $user->id && 
                    $currentState === WorkflowStateService::STATE_MRF_CREATED;
@@ -52,14 +53,14 @@ class PermissionService
         $isEmeraldContract = strtolower(trim((string) $mrf->contract_type)) === 'emerald';
 
         if ($isEmeraldContract) {
-            if (!in_array($user->role, ['executive', 'admin'])) {
+            if (!in_array($user->scmRole(), ['executive', 'admin'])) {
                 return false;
             }
 
             return $currentState === WorkflowStateService::STATE_EXECUTIVE_REVIEW;
         }
 
-        if (!in_array($user->role, ['supply_chain_director', 'supply_chain', 'admin'])) {
+        if (!in_array($user->scmRole(), ['supply_chain_director', 'supply_chain', 'admin'])) {
             return false;
         }
 
@@ -71,7 +72,7 @@ class PermissionService
      */
     public function canSelectVendors(User $user, MRF $mrf): bool
     {
-        if (!in_array($user->role, ['procurement', 'procurement_manager', 'admin'])) {
+        if (!in_array($user->scmRole(), ['procurement', 'procurement_manager', 'admin'])) {
             return false;
         }
 
@@ -85,7 +86,7 @@ class PermissionService
      */
     public function canApproveInvoice(User $user, MRF $mrf): bool
     {
-        if (!in_array($user->role, ['supply_chain_director', 'supply_chain', 'admin'])) {
+        if (!in_array($user->scmRole(), ['supply_chain_director', 'supply_chain', 'admin'])) {
             return false;
         }
 
@@ -133,8 +134,8 @@ class PermissionService
     {
         $out = [];
 
-        if (! empty($user->role)) {
-            $out[] = $this->slugifyRoleLabel((string) $user->role);
+        if (! empty(UserRoleNormalizer::supplyChainRole($user))) {
+            $out[] = $this->slugifyRoleLabel((string) UserRoleNormalizer::supplyChainRole($user));
         }
 
         if (method_exists($user, 'getRoleNames')) {
@@ -377,7 +378,7 @@ class PermissionService
      */
     public function canViewInvoices(User $user, MRF $mrf): bool
     {
-        if (in_array($user->role, ['procurement', 'procurement_manager', 'finance', 'finance_officer', 'admin'])) {
+        if (in_array($user->scmRole(), ['procurement', 'procurement_manager', 'finance', 'finance_officer', 'admin'])) {
             $currentState = $mrf->workflow_state ?? WorkflowStateService::STATE_MRF_CREATED;
             return in_array($currentState, [
                 WorkflowStateService::STATE_INVOICE_RECEIVED,
@@ -398,7 +399,7 @@ class PermissionService
      */
     public function canProcessPayment(User $user, MRF $mrf): bool
     {
-        if (! in_array($user->role, ['finance', 'finance_officer', 'admin'], true)) {
+        if (! in_array($user->scmRole(), ['finance', 'finance_officer', 'admin'], true)) {
             return false;
         }
 
@@ -424,7 +425,7 @@ class PermissionService
             return false;
         }
 
-        return in_array($user->role, ['finance', 'finance_officer', 'admin'], true);
+        return in_array($user->scmRole(), ['finance', 'finance_officer', 'admin'], true);
     }
 
     /**
@@ -432,7 +433,7 @@ class PermissionService
      */
     public function canRequestGRN(User $user, MRF $mrf): bool
     {
-        if (! in_array($user->role, ['finance', 'finance_officer', 'admin'], true)) {
+        if (! in_array($user->scmRole(), ['finance', 'finance_officer', 'admin'], true)) {
             return false;
         }
 
@@ -466,7 +467,7 @@ class PermissionService
      */
     public function canCompleteGRN(User $user, MRF $mrf): bool
     {
-        if (! in_array($user->role, ['procurement', 'procurement_manager', 'admin'], true)) {
+        if (! in_array($user->scmRole(), ['procurement', 'procurement_manager', 'admin'], true)) {
             return false;
         }
 
@@ -490,7 +491,7 @@ class PermissionService
             return $this->canCompleteGRN($user, $mrf);
         }
 
-        if (! in_array($user->role, ['procurement', 'procurement_manager', 'admin'], true)) {
+        if (! in_array($user->scmRole(), ['procurement', 'procurement_manager', 'admin'], true)) {
             return false;
         }
 
@@ -507,7 +508,7 @@ class PermissionService
             return false;
         }
 
-        if (! in_array($user->role, ['procurement', 'procurement_manager', 'admin'], true)) {
+        if (! in_array($user->scmRole(), ['procurement', 'procurement_manager', 'admin'], true)) {
             return false;
         }
 
@@ -578,7 +579,7 @@ class PermissionService
     {
         return $user->can_manage_users === true || 
                $user->is_admin === true ||
-               in_array($user->role, ['procurement', 'procurement_manager', 'executive', 'supply_chain_director', 'admin']);
+               in_array($user->scmRole(), ['procurement', 'procurement_manager', 'executive', 'supply_chain_director', 'admin']);
     }
 
     /**
@@ -591,7 +592,7 @@ class PermissionService
             return true;
         }
 
-        return in_array($user->role, [
+        return in_array($user->scmRole(), [
             'logistics',
             'logistics_manager',
             'logistics_officer',
@@ -604,12 +605,12 @@ class PermissionService
     public function canViewDocument(User $user, MRF $mrf, string $documentType): bool
     {
         // Executive, Procurement, Finance can view all documents
-        if (in_array($user->role, ['executive', 'procurement', 'procurement_manager', 'finance', 'finance_officer', 'supply_chain_director', 'admin'])) {
+        if (in_array($user->scmRole(), ['executive', 'procurement', 'procurement_manager', 'finance', 'finance_officer', 'supply_chain_director', 'admin'])) {
             return true;
         }
 
         // Regular staff can only view their own MRF documents
-        if (in_array($user->role, ['employee', 'staff', 'regular_staff'])) {
+        if (in_array($user->scmRole(), ['employee', 'staff', 'regular_staff'])) {
             return $mrf->requester_id === $user->id && $documentType === 'mrf';
         }
 
@@ -732,7 +733,7 @@ class PermissionService
      */
     public function getDashboardData(User $user): array
     {
-        $role = strtolower($user->role);
+        $role = strtolower((string) (UserRoleNormalizer::supplyChainRole($user) ?? ''));
         
         return match($role) {
             'employee', 'staff', 'regular_staff' => [

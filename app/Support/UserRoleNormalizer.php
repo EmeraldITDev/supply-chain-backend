@@ -106,14 +106,51 @@ class UserRoleNormalizer
     }
 
     /**
+     * Read the Supply Chain role exclusively. Falls back to legacy users.role only
+     * when supply_chain_role has not been populated yet (pre-migration rows).
+     */
+    public static function supplyChainRole(User $user): ?string
+    {
+        $role = $user->supply_chain_role ?? null;
+        if ($role !== null && trim((string) $role) !== '') {
+            return (string) $role;
+        }
+
+        $legacy = $user->getAttribute('role');
+        if ($legacy !== null && trim((string) $legacy) !== '') {
+            return (string) $legacy;
+        }
+
+        return null;
+    }
+
+    /**
+     * @param  string|list<string>  $roles
+     */
+    public static function hasSupplyChainRole(User $user, string|array $roles): bool
+    {
+        $role = self::normalize(self::supplyChainRole($user));
+        if ($role === null) {
+            return false;
+        }
+
+        $allowed = array_map(
+            static fn (string $r) => self::normalize($r) ?? $r,
+            is_array($roles) ? $roles : [$roles]
+        );
+
+        return in_array($role, $allowed, true);
+    }
+
+    /**
      * @return list<string>
      */
     public static function candidateRoleKeys(User $user): array
     {
         $keys = [];
 
-        if (! empty($user->role)) {
-            $normalized = self::normalize((string) $user->role);
+        if (! empty(self::supplyChainRole($user))) {
+            $normalized = self::normalize(self::supplyChainRole($user));
             if ($normalized !== null) {
                 $keys[] = $normalized;
             }
@@ -141,7 +178,7 @@ class UserRoleNormalizer
             return true;
         }
 
-        return $user->role === 'vendor'
+        return self::supplyChainRole($user) === 'vendor'
             || (method_exists($user, 'hasRole') && $user->hasRole('vendor'));
     }
 
@@ -233,12 +270,13 @@ class UserRoleNormalizer
     }
 
     /**
-     * Persist canonical users.role and align Spatie role assignment.
+     * Persist canonical supply_chain_role and align Spatie role assignment.
+     * Never writes hris_role or the legacy role column.
      */
     public static function repairUserAccess(User $user): bool
     {
         $changed = false;
-        $canonical = self::normalize($user->role);
+        $canonical = self::normalize(self::supplyChainRole($user));
 
         if ($canonical === null || ! self::hasSupplyChainLoginAccess($user)) {
             $inferred = self::inferCanonicalRoleFromProfile($user);
@@ -247,8 +285,8 @@ class UserRoleNormalizer
             }
         }
 
-        if ($canonical !== null && $canonical !== $user->role) {
-            $user->role = $canonical;
+        if ($canonical !== null && $canonical !== self::supplyChainRole($user)) {
+            $user->supply_chain_role = $canonical;
             $user->save();
             $changed = true;
         }
@@ -262,7 +300,7 @@ class UserRoleNormalizer
 
     public static function syncSpatieRole(User $user, ?string $canonical = null): void
     {
-        $canonical ??= self::normalize($user->role);
+        $canonical ??= self::normalize(self::supplyChainRole($user));
         if ($canonical === null || ! in_array($canonical, self::SPATIE_SYNC_ROLES, true)) {
             return;
         }

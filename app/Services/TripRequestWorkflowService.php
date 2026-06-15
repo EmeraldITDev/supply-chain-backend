@@ -13,7 +13,7 @@ class TripRequestWorkflowService
     {
         $query = User::query();
         if ($roleFilters !== []) {
-            $query->whereIn('role', $roleFilters);
+            $query->whereIn('supply_chain_role', $roleFilters);
         }
 
         $users = $query->whereNotNull('email')->get();

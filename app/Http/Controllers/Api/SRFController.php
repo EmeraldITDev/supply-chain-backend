@@ -67,20 +67,20 @@ class SRFController extends Controller
         // If user is a vendor, they typically don't need direct access to SRFs
         // Allow access but return empty array
         $isVendor = false;
-        if ($user && ($user->role === 'vendor' || (method_exists($user, 'hasRole') && $user->hasRole('vendor')))) {
+        if ($user && ($user->scmRole() === 'vendor' || (method_exists($user, 'hasRole') && $user->hasRole('vendor')))) {
             $isVendor = true;
             // Vendors don't typically need SRFs - return empty array
             return response()->json([]);
         }
 
-        if ($user && in_array($user->role, ['employee', 'general_employee', 'staff', 'regular_staff'], true)) {
+        if ($user && in_array($user->scmRole(), ['employee', 'general_employee', 'staff', 'regular_staff'], true)) {
             $query->where('requester_id', $user->id);
         }
 
         // Logistics manager/officer see SRFs they originated plus all SRFs
         // attached to the logistics department (so they can track the end-to-
         // end progress of fleet/maintenance requests they initiated).
-        if ($user && in_array($user->role, ['logistics_manager', 'logistics_officer'], true)) {
+        if ($user && in_array($user->scmRole(), ['logistics_manager', 'logistics_officer'], true)) {
             $logisticsDepartment = $user->department;
             $query->where(function ($q) use ($user, $logisticsDepartment) {
                 $q->where('requester_id', $user->id)
@@ -275,7 +275,7 @@ class SRFController extends Controller
             return false;
         }
 
-        if (in_array($user->role, [
+        if (in_array($user->scmRole(), [
             'logistics_manager', 'logistics_officer', 'supply_chain_director', 'supply_chain',
             'procurement_manager', 'procurement', 'admin', 'executive', 'chairman',
         ], true)) {
@@ -304,8 +304,8 @@ class SRFController extends Controller
         }
 
         $logisticsAuthors = ['logistics_manager', 'logistics_officer'];
-        $isLogisticsAuthor = in_array($user->role, $logisticsAuthors, true);
-        $isDepartmentEmployee = in_array($user->role, ['employee', 'staff', 'regular_staff'], true);
+        $isLogisticsAuthor = in_array($user->scmRole(), $logisticsAuthors, true);
+        $isDepartmentEmployee = in_array($user->scmRole(), ['employee', 'staff', 'regular_staff'], true);
 
         if (!$isLogisticsAuthor && !$isDepartmentEmployee) {
             return response()->json([
@@ -843,7 +843,7 @@ class SRFController extends Controller
             ], 404);
         }
 
-        $isAdmin = $user->role === 'admin';
+        $isAdmin = $user->scmRole() === 'admin';
         $statusLower = strtolower(trim((string) $srf->status));
         $stageLower = strtolower(trim((string) $srf->current_stage));
 
@@ -874,13 +874,13 @@ class SRFController extends Controller
             $allowed = false;
             if ($isRequester) {
                 $allowed = true;
-            } elseif (in_array($user->role, $logisticsRoles, true)) {
+            } elseif (in_array($user->scmRole(), $logisticsRoles, true)) {
                 $allowed = true;
-            } elseif (in_array($user->role, $scdRoles, true)
+            } elseif (in_array($user->scmRole(), $scdRoles, true)
                 && $stageLower === 'supply_chain_director_review'
                 && $statusLower === 'pending') {
                 $allowed = true;
-            } elseif (in_array($user->role, $procurementRoles, true)
+            } elseif (in_array($user->scmRole(), $procurementRoles, true)
                 && $stageLower === 'procurement'
                 && $statusLower === 'pending') {
                 $allowed = true;
@@ -924,7 +924,7 @@ class SRFController extends Controller
     public function supplyChainDirectorApprove(Request $request, $id)
     {
         $user = $request->user();
-        if (!$user || !in_array($user->role, ['supply_chain_director', 'supply_chain', 'admin'], true)) {
+        if (!$user || !in_array($user->scmRole(), ['supply_chain_director', 'supply_chain', 'admin'], true)) {
             return response()->json([
                 'success' => false,
                 'error' => 'Only the Supply Chain Director can approve at this stage.',
@@ -986,7 +986,7 @@ class SRFController extends Controller
     public function supplyChainDirectorReject(Request $request, $id)
     {
         $user = $request->user();
-        if (!$user || !in_array($user->role, ['supply_chain_director', 'supply_chain', 'admin'], true)) {
+        if (!$user || !in_array($user->scmRole(), ['supply_chain_director', 'supply_chain', 'admin'], true)) {
             return response()->json([
                 'success' => false,
                 'error' => 'Only the Supply Chain Director can reject at this stage.',

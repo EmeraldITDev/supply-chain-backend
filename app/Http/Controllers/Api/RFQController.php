@@ -53,7 +53,7 @@ class RFQController extends Controller
         // If user is a vendor, only show RFQs assigned to them
         $isVendor = false;
         $vendor = null;
-        if ($user && ($user->role === 'vendor' || (method_exists($user, 'hasRole') && $user->hasRole('vendor')))) {
+        if ($user && ($user->scmRole() === 'vendor' || (method_exists($user, 'hasRole') && $user->hasRole('vendor')))) {
             $isVendor = true;
             // Get vendor from user
             if ($user->vendor_id) {

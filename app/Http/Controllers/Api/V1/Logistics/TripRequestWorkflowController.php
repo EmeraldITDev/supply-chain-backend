@@ -305,7 +305,7 @@ class TripRequestWorkflowController extends ApiController
     public function confirm(Request $request, int $id)
     {
         $user = $request->user();
-        if (! $user || ! in_array($user->role, ['logistics_manager', 'logistics_officer', 'admin'], true)) {
+        if (! $user || ! in_array($user->scmRole(), ['logistics_manager', 'logistics_officer', 'admin'], true)) {
             return $this->error('Only logistics managers can confirm trip requests', 'FORBIDDEN', 403);
         }
 
@@ -375,7 +375,7 @@ class TripRequestWorkflowController extends ApiController
     public function convertToLogisticsRequest(Request $request, int $id)
     {
         $user = $request->user();
-        if (! $user || ! in_array($user->role, ['logistics_manager', 'logistics_officer', 'admin'], true)) {
+        if (! $user || ! in_array($user->scmRole(), ['logistics_manager', 'logistics_officer', 'admin'], true)) {
             return $this->error('Only logistics managers can convert trip requests', 'FORBIDDEN', 403);
         }
 
@@ -415,7 +415,7 @@ class TripRequestWorkflowController extends ApiController
     public function procurementApproveQuote(Request $request, int $id)
     {
         $user = $request->user();
-        if (! $user || ! in_array($user->role, ['procurement_manager', 'procurement', 'admin'], true)) {
+        if (! $user || ! in_array($user->scmRole(), ['procurement_manager', 'procurement', 'admin'], true)) {
             return $this->error('Procurement role required', 'FORBIDDEN', 403);
         }
 
@@ -441,7 +441,7 @@ class TripRequestWorkflowController extends ApiController
     public function scdApprove(Request $request, int $id)
     {
         $user = $request->user();
-        if (! $user || ! in_array($user->role, ['supply_chain_director', 'supply_chain', 'admin'], true)) {
+        if (! $user || ! in_array($user->scmRole(), ['supply_chain_director', 'supply_chain', 'admin'], true)) {
             return $this->error('Supply Chain Director role required', 'FORBIDDEN', 403);
         }
 
@@ -467,7 +467,7 @@ class TripRequestWorkflowController extends ApiController
     public function generatePo(Request $request, int $id)
     {
         $user = $request->user();
-        if (! $user || ! in_array($user->role, ['procurement_manager', 'procurement', 'admin'], true)) {
+        if (! $user || ! in_array($user->scmRole(), ['procurement_manager', 'procurement', 'admin'], true)) {
             return $this->error('Procurement role required', 'FORBIDDEN', 403);
         }
 
@@ -503,7 +503,7 @@ class TripRequestWorkflowController extends ApiController
     public function uploadSignedPo(Request $request, int $id)
     {
         $user = $request->user();
-        if (! $user || ! in_array($user->role, ['supply_chain_director', 'supply_chain', 'admin'], true)) {
+        if (! $user || ! in_array($user->scmRole(), ['supply_chain_director', 'supply_chain', 'admin'], true)) {
             return $this->error('Supply Chain Director role required', 'FORBIDDEN', 403);
         }
 
@@ -542,7 +542,7 @@ class TripRequestWorkflowController extends ApiController
             return false;
         }
 
-        if (in_array($user->role, [
+        if (in_array($user->scmRole(), [
             'logistics_manager', 'logistics_officer', 'procurement_manager', 'procurement',
             'supply_chain_director', 'supply_chain', 'admin',
         ], true)) {
@@ -659,7 +659,7 @@ class TripRequestWorkflowController extends ApiController
                 'email' => $u->email,
                 'phone' => $u->phone,
                 'department' => $u->department,
-                'role' => $u->role,
+                'role' => $u->scmRole(),
             ])
             ->values()
             ->all();

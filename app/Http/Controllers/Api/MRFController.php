@@ -236,14 +236,14 @@ class MRFController extends Controller
         // If user is a vendor, they typically don't need direct access to MRFs
         // But allow access and return empty array or MRFs related to their RFQs
         $isVendor = false;
-        if ($user && ($user->role === 'vendor' || (method_exists($user, 'hasRole') && $user->hasRole('vendor')))) {
+        if ($user && ($user->scmRole() === 'vendor' || (method_exists($user, 'hasRole') && $user->hasRole('vendor')))) {
             $isVendor = true;
             // Vendors can see MRFs that are linked to RFQs assigned to them
             // For now, return empty array - vendors should access MRFs through RFQs
             return response()->json([]);
         }
 
-        if ($user && in_array($user->role, ['employee', 'general_employee'])) {
+        if ($user && in_array($user->scmRole(), ['employee', 'general_employee'])) {
             $query->where('requester_id', $user->id);
         }
 
@@ -626,7 +626,7 @@ class MRFController extends Controller
             'finance_officer',
             'executive',
         ];
-        if (!in_array($user->role, $allowedRoles, true)) {
+        if (!in_array($user->scmRole(), $allowedRoles, true)) {
             return response()->json([
                 'success' => false,
                 'error' => 'Insufficient permissions',
@@ -1102,8 +1102,8 @@ class MRFController extends Controller
         $logisticsAuthors = ['logistics_manager', 'logistics_officer'];
         $procurementAuthors = ['procurement_manager', 'procurement'];
         $privilegedAuthors = array_merge($logisticsAuthors, $procurementAuthors);
-        $isPrivilegedAuthor = in_array($user->role, $privilegedAuthors, true);
-        $isDepartmentEmployee = in_array($user->role, ['employee', 'staff', 'regular_staff'], true);
+        $isPrivilegedAuthor = in_array($user->scmRole(), $privilegedAuthors, true);
+        $isDepartmentEmployee = in_array($user->scmRole(), ['employee', 'staff', 'regular_staff'], true);
 
         if (!$isPrivilegedAuthor && !$isDepartmentEmployee) {
             return response()->json([
@@ -1660,7 +1660,7 @@ class MRFController extends Controller
         $user = $request->user();
 
         // Check if user has permission (procurement or finance role)
-        if (!in_array($user->role, ['procurement', 'finance', 'admin'])) {
+        if (!in_array($user->scmRole(), ['procurement', 'finance', 'admin'])) {
             return response()->json([
                 'success' => false,
                 'error' => 'Insufficient permissions',
@@ -1748,7 +1748,7 @@ class MRFController extends Controller
         $user = $request->user();
 
         // Check if user has permission
-        if (!in_array($user->role, ['procurement', 'finance', 'admin'])) {
+        if (!in_array($user->scmRole(), ['procurement', 'finance', 'admin'])) {
             return response()->json([
                 'success' => false,
                 'error' => 'Insufficient permissions',
@@ -1817,7 +1817,7 @@ class MRFController extends Controller
         $user = $request->user();
 
         // Check if user has procurement permission
-        if (!in_array($user->role, ['procurement', 'admin'])) {
+        if (!in_array($user->scmRole(), ['procurement', 'admin'])) {
             return response()->json([
                 'success' => false,
                 'error' => 'Only Procurement Managers can generate POs',
@@ -1920,7 +1920,7 @@ class MRFController extends Controller
         $user = $request->user();
 
         // Check if user has supply chain permission
-        if (!in_array($user->role, ['supply_chain', 'admin'])) {
+        if (!in_array($user->scmRole(), ['supply_chain', 'admin'])) {
             return response()->json([
                 'success' => false,
                 'error' => 'Only Supply Chain Directors can upload signed POs',
@@ -2017,7 +2017,7 @@ class MRFController extends Controller
         $user = $request->user();
 
         // Check if user has supply chain permission
-        if (!in_array($user->role, ['supply_chain', 'admin'])) {
+        if (!in_array($user->scmRole(), ['supply_chain', 'admin'])) {
             return response()->json([
                 'success' => false,
                 'error' => 'Only Supply Chain Directors can reject POs',
@@ -2114,8 +2114,8 @@ class MRFController extends Controller
         $isRequester = $mrf->requester_id == $user->id;
 
         // Check if user is a procurement manager or admin (admin can always delete)
-        $isAdmin = $user->role === 'admin';
-        $isProcurementManager = in_array($user->role, ['procurement_manager', 'procurement', 'admin']);
+        $isAdmin = $user->scmRole() === 'admin';
+        $isProcurementManager = in_array($user->scmRole(), ['procurement_manager', 'procurement', 'admin']);
 
         // Admin can always delete any MRF (force delete capability)
         if ($isAdmin) {
@@ -2312,7 +2312,7 @@ class MRFController extends Controller
 
         $allowedRoles = ['executive', 'chairman', 'admin'];
 
-        if (!in_array($user->role, $allowedRoles)) {
+        if (!in_array($user->scmRole(), $allowedRoles)) {
             return response()->json([
                 'success' => false,
                 'message' => 'You do not have permission to reject this MRF.'
@@ -2360,7 +2360,7 @@ class MRFController extends Controller
         $mrf->executive_approved_by = null;
         $mrf->executive_approved_at = null;
         $mrf->executive_remarks = $request->reason;
-        $mrf->last_action_by_role = in_array($user->role, ['admin']) ? 'admin' : 'executive';
+        $mrf->last_action_by_role = in_array($user->scmRole(), ['admin']) ? 'admin' : 'executive';
 
         $mrf->save();
 
@@ -2469,7 +2469,7 @@ class MRFController extends Controller
 
         $allowedRoles = ['supply_chain_director', 'director', 'admin'];
 
-        if (!in_array($user->role, $allowedRoles)) {
+        if (!in_array($user->scmRole(), $allowedRoles)) {
             return response()->json([
                 'success' => false,
                 'message' => 'You do not have permission to reject this MRF.'
@@ -2514,7 +2514,7 @@ class MRFController extends Controller
         $mrf->rejected_by = $user->id;
         $mrf->rejected_at = now();
         $mrf->remarks = $request->reason;
-        $mrf->last_action_by_role = in_array($user->role, ['admin']) ? 'admin' : 'supply_chain_director';
+        $mrf->last_action_by_role = in_array($user->scmRole(), ['admin']) ? 'admin' : 'supply_chain_director';
 
         $mrf->save();
 

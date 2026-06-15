@@ -11,7 +11,7 @@ class EligiblePassengersController extends Controller
     public function index(Request $request)
     {
         $users = PassengerEligibility::eligibleUsersQuery()
-            ->select(['id', 'name', 'email', 'phone', 'department', 'role'])
+            ->select(['id', 'name', 'email', 'phone', 'department', 'supply_chain_role'])
             ->when($request->filled('q'), function ($q) use ($request): void {
                 $term = '%' . $request->get('q') . '%';
                 $q->where(function ($b) use ($term): void {
@@ -20,9 +20,16 @@ class EligiblePassengersController extends Controller
             })
             ->paginate(50);
 
+        $items = collect($users->items())->map(function ($user) {
+            $row = $user->toArray();
+            $row['role'] = $user->supply_chain_role ?? $user->scmRole();
+
+            return $row;
+        })->all();
+
         return response()->json([
             'success' => true,
-            'users' => $users->items(),
+            'users' => $items,
             'pagination' => [
                 'currentPage' => $users->currentPage(),
                 'lastPage' => $users->lastPage(),

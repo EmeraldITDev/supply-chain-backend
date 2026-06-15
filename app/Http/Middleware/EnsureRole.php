@@ -2,6 +2,7 @@
 
 namespace App\Http\Middleware;
 
+use App\Support\UserRoleNormalizer;
 use Closure;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -80,7 +81,7 @@ class EnsureRole
             Log::warning('EnsureRole denying request', [
                 'path' => $request->path(),
                 'user_id' => $user->id ?? null,
-                'user_role_column' => $user->role ?? null,
+                'user_supply_chain_role' => UserRoleNormalizer::supplyChainRole($user),
                 'user_role_keys' => $userRoleKeys,
                 'required_role_list' => $roleList,
             ]);
@@ -102,10 +103,11 @@ class EnsureRole
     {
         $keys = [];
 
-        if (!empty($user->role)) {
-            $keys[] = $user->role;
-            $normalized = $this->normalizeRoleKey($user->role);
-            if ($normalized !== null && $normalized !== $user->role) {
+        $scmRole = UserRoleNormalizer::supplyChainRole($user);
+        if (! empty($scmRole)) {
+            $keys[] = $scmRole;
+            $normalized = $this->normalizeRoleKey($scmRole);
+            if ($normalized !== null && $normalized !== $scmRole) {
                 $keys[] = $normalized;
             }
         }

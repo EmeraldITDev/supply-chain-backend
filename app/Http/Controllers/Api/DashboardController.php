@@ -12,6 +12,7 @@ use App\Models\Vendor;
 use App\Models\VendorRegistration;
 use App\Services\Finance\FinanceRoutingService;
 use App\Services\WorkflowStateService;
+use App\Support\UserRoleNormalizer;
 use App\Support\VendorCategoryDisplay;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -41,7 +42,7 @@ class DashboardController extends Controller
         ];
         
         $hasAllowedRole =
-            (isset($user->role) && in_array($user->role, $allowedRoles)) ||
+            (UserRoleNormalizer::supplyChainRole($user) !== null && in_array($user->scmRole(), $allowedRoles)) ||
             (method_exists($user, 'hasAnyRole') && $user->hasAnyRole($allowedRoles));
 
         if (!$hasAllowedRole) {
@@ -187,7 +188,7 @@ class DashboardController extends Controller
         // Check permission (include `supply_chain` — same alias used on SRF/MRF approval routes)
         $allowedRoles = ['supply_chain_director', 'supply_chain', 'director', 'admin'];
         $hasAllowedRole =
-            (isset($user->role) && in_array($user->role, $allowedRoles)) ||
+            (UserRoleNormalizer::supplyChainRole($user) !== null && in_array($user->scmRole(), $allowedRoles)) ||
             (method_exists($user, 'hasAnyRole') && $user->hasAnyRole($allowedRoles));
 
         if (!$hasAllowedRole) {
@@ -300,7 +301,7 @@ class DashboardController extends Controller
 
         // Check permission
         $isVendor =
-            ($user->role === 'vendor') ||
+            ($user->scmRole() === 'vendor') ||
             (method_exists($user, 'hasRole') && $user->hasRole('vendor'));
 
         if (!$isVendor) {
@@ -425,7 +426,7 @@ class DashboardController extends Controller
 
         $allowedRoles = ['finance', 'finance_officer', 'admin'];
         $hasAllowedRole =
-            (isset($user->role) && in_array($user->role, $allowedRoles)) ||
+            (UserRoleNormalizer::supplyChainRole($user) !== null && in_array($user->scmRole(), $allowedRoles)) ||
             (method_exists($user, 'hasAnyRole') && $user->hasAnyRole($allowedRoles));
 
         if (! $hasAllowedRole) {
@@ -588,7 +589,7 @@ class DashboardController extends Controller
         
         // Get vendor ID if user is a vendor
         $vendorId = null;
-        if ($user->role === 'vendor') {
+        if ($user->scmRole() === 'vendor') {
             $vendor = Vendor::where('email', $user->email)->first();
             if ($vendor) {
                 $vendorId = $vendor->id;
@@ -599,7 +600,7 @@ class DashboardController extends Controller
         $relevantMRFIds = $userMRFIds;
         
         // Procurement managers see all MRFs in procurement stage
-        if (in_array($user->role, ['procurement_manager', 'procurement', 'admin'])) {
+        if (in_array($user->scmRole(), ['procurement_manager', 'procurement', 'admin'])) {
             $procurementMRFIds = MRF::whereIn('status', ['procurement', 'pending_po_upload', 'procurement_review', 'revision_required'])
                 ->orWhere('current_stage', 'procurement')
                 ->pluck('mrf_id')->toArray();
@@ -607,7 +608,7 @@ class DashboardController extends Controller
         }
         
         // Finance team sees MRFs in finance stage
-        if (in_array($user->role, ['finance', 'admin'])) {
+        if (in_array($user->scmRole(), ['finance', 'admin'])) {
             $financeMRFIds = MRF::whereIn('status', ['finance', 'chairman_payment'])
                 ->orWhere('current_stage', 'finance')
                 ->orWhere('workflow_state', 'like', '%finance%')
@@ -616,7 +617,7 @@ class DashboardController extends Controller
         }
         
         // Supply Chain Directors see MRFs they need to approve
-        if (in_array($user->role, ['supply_chain_director', 'supply_chain', 'admin'])) {
+        if (in_array($user->scmRole(), ['supply_chain_director', 'supply_chain', 'admin'])) {
             $scdMRFIds = MRF::whereIn('status', ['supply_chain', 'vendor_selected', 'vendor_approved', 'awaiting_scd_signature'])
                 ->orWhere('current_stage', 'supply_chain')
                 ->pluck('mrf_id')->toArray();

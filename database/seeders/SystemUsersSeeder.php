@@ -69,7 +69,7 @@ class SystemUsersSeeder extends Seeder
                 $existingUser->update([
                     'name' => $userData['name'],
                     'password' => Hash::make($userData['password']),
-                    'role' => $userData['role'],
+                    'supply_chain_role' => $userData['role'],
                     'email_verified_at' => now(),
                     'must_change_password' => true, // Force password change on first login
                 ]);
@@ -91,7 +91,7 @@ class SystemUsersSeeder extends Seeder
                     'name' => $userData['name'],
                     'email' => $userData['email'],
                     'password' => Hash::make($userData['password']),
-                    'role' => $userData['role'],
+                    'supply_chain_role' => $userData['role'],
                     'email_verified_at' => now(),
                     'must_change_password' => true, // Force password change on first login
                 ]);

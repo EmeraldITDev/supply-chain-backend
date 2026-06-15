@@ -689,7 +689,7 @@ class VendorController extends Controller
             'admin'
         ];
 
-        if (!in_array($user->role, $allowedRoles)) {
+        if (!in_array($user->scmRole(), $allowedRoles)) {
             return response()->json([
                 'success' => false,
                 'error' => 'Insufficient permissions',
@@ -749,7 +749,7 @@ class VendorController extends Controller
             'admin'
         ];
 
-        if (!in_array($user->role, $allowedRoles)) {
+        if (!in_array($user->scmRole(), $allowedRoles)) {
             return response()->json([
                 'success' => false,
                 'error' => 'Insufficient permissions',
@@ -930,7 +930,7 @@ class VendorController extends Controller
         ];
 
         $hasAllowedRole =
-            (isset($user->role) && in_array($user->role, $allowedRoles)) ||
+            (isset($user->scmRole()) && in_array($user->scmRole(), $allowedRoles)) ||
             (method_exists($user, 'hasAnyRole') && $user->hasAnyRole($allowedRoles));
 
         if (!$hasAllowedRole) {
@@ -1069,7 +1069,7 @@ class VendorController extends Controller
         ];
 
         $hasAllowedRole =
-            (isset($user->role) && in_array($user->role, $allowedRoles)) ||
+            (isset($user->scmRole()) && in_array($user->scmRole(), $allowedRoles)) ||
             (method_exists($user, 'hasAnyRole') && $user->hasAnyRole($allowedRoles));
 
         if (!$hasAllowedRole) {
@@ -1148,7 +1148,7 @@ class VendorController extends Controller
             'admin'
         ];
 
-        if (!in_array($user->role, $allowedRoles)) {
+        if (!in_array($user->scmRole(), $allowedRoles)) {
             return response()->json([
                 'success' => false,
                 'error' => 'Insufficient permissions',
@@ -1252,7 +1252,7 @@ class VendorController extends Controller
             'supply_chain_director',
         ];
 
-        if (!in_array($user->role, $allowedRoles)) {
+        if (!in_array($user->scmRole(), $allowedRoles)) {
             return response()->json([
                 'success' => false,
                 'error' => 'Insufficient permissions',
@@ -1315,7 +1315,7 @@ class VendorController extends Controller
             'admin'
         ];
 
-        if (!in_array($user->role, $allowedRoles)) {
+        if (!in_array($user->scmRole(), $allowedRoles)) {
             return response()->json([
                 'success' => false,
                 'error' => 'Insufficient permissions',
@@ -1394,7 +1394,7 @@ class VendorController extends Controller
             'admin'
         ];
 
-        if (!in_array($user->role, $allowedRoles)) {
+        if (!in_array($user->scmRole(), $allowedRoles)) {
             return response()->json([
                 'success' => false,
                 'error' => 'Insufficient permissions',
@@ -1632,7 +1632,7 @@ class VendorController extends Controller
 
         // Verify user is a vendor - check both direct role field and Spatie roles
         $isVendor = false;
-        if ($user->role === 'vendor') {
+        if ($user->scmRole() === 'vendor') {
             $isVendor = true;
         } elseif (method_exists($user, 'hasRole') && $user->hasRole('vendor')) {
             $isVendor = true;
@@ -1837,7 +1837,7 @@ class VendorController extends Controller
             'admin',
         ];
 
-        if (!in_array($user->role, $allowedRoles)) {
+        if (!in_array($user->scmRole(), $allowedRoles)) {
             return response()->json([
                 'success' => false,
                 'error' => 'Insufficient permissions to invite vendors',

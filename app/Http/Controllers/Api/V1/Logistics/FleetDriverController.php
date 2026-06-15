@@ -71,7 +71,7 @@ class FleetDriverController extends ApiController
     public function destroy(Request $request, int $id)
     {
         $user = $request->user();
-        if (!$user || !in_array($user->role, ['logistics_manager', 'admin'], true)) {
+        if (!$user || !in_array($user->scmRole(), ['logistics_manager', 'admin'], true)) {
             return $this->error('Only logistics managers or admins can delete drivers', 'FORBIDDEN', 403);
         }
 
@@ -89,7 +89,7 @@ class FleetDriverController extends ApiController
     public function assign(Request $request, int $id)
     {
         $user = $request->user();
-        if (!$user || !in_array($user->role, ['logistics_manager', 'logistics_officer', 'admin'], true)) {
+        if (!$user || !in_array($user->scmRole(), ['logistics_manager', 'logistics_officer', 'admin'], true)) {
             return $this->error('Insufficient permissions', 'FORBIDDEN', 403);
         }
 
@@ -120,7 +120,7 @@ class FleetDriverController extends ApiController
             Mail::to($driver->email)->send(new DriverAssignedMail($driver, $vehicleLabel));
         }
 
-        $managers = User::whereIn('role', ['logistics_manager', 'logistics_officer'])
+        $managers = User::whereIn('supply_chain_role', ['logistics_manager', 'logistics_officer'])
             ->whereNotNull('email')
             ->get();
         foreach ($managers as $manager) {

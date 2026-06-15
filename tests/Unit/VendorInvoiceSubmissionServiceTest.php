@@ -44,7 +44,7 @@ class VendorInvoiceSubmissionServiceTest extends TestCase
         });
 
         $service = app(VendorInvoiceSubmissionService::class);
-        $user = new User(['id' => 10, 'role' => 'vendor']);
+        $user = new User(['id' => 10, 'supply_chain_role' => 'vendor']);
         $file = UploadedFile::fake()->create('invoice.pdf', 100, 'application/pdf');
 
         $this->expectException(\RuntimeException::class);
@@ -76,7 +76,7 @@ class VendorInvoiceSubmissionServiceTest extends TestCase
         });
 
         $service = app(VendorInvoiceSubmissionService::class);
-        $user = new User(['id' => 10, 'role' => 'vendor']);
+        $user = new User(['id' => 10, 'supply_chain_role' => 'vendor']);
         $file = UploadedFile::fake()->create('invoice.pdf', 100, 'application/pdf');
 
         $this->expectException(\RuntimeException::class);

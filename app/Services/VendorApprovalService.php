@@ -61,7 +61,7 @@ class VendorApprovalService
 
         if ($existingUser) {
             // If user exists and is already a vendor, update the vendor_id and password
-            if ($existingUser->role === 'vendor' || $existingUser->hasRole('vendor')) {
+            if ($existingUser->scmRole() === 'vendor' || $existingUser->hasRole('vendor')) {
                 $existingUser->update([
                     'vendor_id' => $vendor->id,
                     'password' => Hash::make($temporaryPassword),
@@ -92,7 +92,7 @@ class VendorApprovalService
                 'name' => $registration->contact_person,
                 'email' => $registration->email,
                 'password' => Hash::make($temporaryPassword),
-                'role' => 'vendor',
+                'supply_chain_role' => 'vendor',
                 'must_change_password' => true,
                 'password_changed_at' => null,
             ];

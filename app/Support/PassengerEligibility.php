@@ -18,7 +18,7 @@ class PassengerEligibility
     public static function eligibleUsersQuery(): Builder
     {
         return User::query()
-            ->whereNotIn('role', self::EXCLUDED_ROLES)
+            ->whereNotIn('supply_chain_role', self::EXCLUDED_ROLES)
             ->where(function (Builder $q): void {
                 $q->whereNull('vendor_id')->orWhere('vendor_id', 0);
             })
@@ -27,10 +27,10 @@ class PassengerEligibility
 
     public static function canCreateTripRequest(User $user): bool
     {
-        if ($user->vendor_id || ($user->role === 'vendor')) {
+        if ($user->vendor_id || ($user->scmRole() === 'vendor')) {
             return false;
         }
 
-        return !in_array($user->role, self::EXCLUDED_ROLES, true);
+        return !in_array($user->scmRole(), self::EXCLUDED_ROLES, true);
     }
 }

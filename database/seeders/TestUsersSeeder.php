@@ -19,7 +19,7 @@ class TestUsersSeeder extends Seeder
             [
                 'name' => 'Test Staff',
                 'password' => Hash::make('Staff@2026'),
-                'role' => 'employee',
+                'supply_chain_role' => 'employee',
                 'department' => 'Operations',
                 'is_admin' => false,
                 'can_manage_users' => false,
@@ -32,7 +32,7 @@ class TestUsersSeeder extends Seeder
             [
                 'name' => 'Test Executive',
                 'password' => Hash::make('Executive@2026'),
-                'role' => 'executive',
+                'supply_chain_role' => 'executive',
                 'department' => 'Executive',
                 'is_admin' => true,
                 'can_manage_users' => true,
@@ -45,7 +45,7 @@ class TestUsersSeeder extends Seeder
             [
                 'name' => 'Test Procurement Manager',
                 'password' => Hash::make('Procurement@2026'),
-                'role' => 'procurement',
+                'supply_chain_role' => 'procurement',
                 'department' => 'Procurement',
                 'is_admin' => true,
                 'can_manage_users' => true,
@@ -58,7 +58,7 @@ class TestUsersSeeder extends Seeder
             [
                 'name' => 'Test Supply Chain Director',
                 'password' => Hash::make('SupplyChain@2026'),
-                'role' => 'supply_chain_director',
+                'supply_chain_role' => 'supply_chain_director',
                 'department' => 'Supply Chain',
                 'is_admin' => true,
                 'can_manage_users' => true,
@@ -71,7 +71,7 @@ class TestUsersSeeder extends Seeder
             [
                 'name' => 'Test Finance Officer',
                 'password' => Hash::make('Finance@2026'),
-                'role' => 'finance',
+                'supply_chain_role' => 'finance',
                 'department' => 'Finance',
                 'is_admin' => false,
                 'can_manage_users' => false,

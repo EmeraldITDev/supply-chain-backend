@@ -28,7 +28,7 @@ class MRFApprovedMail extends Mailable
         $recipient = $this->getRecipientEmail();
         $user = User::where('email', $recipient)->first();
 
-        if ($user && in_array($user->role, [
+        if ($user && in_array($user->scmRole(), [
             'procurement',
             'procurement_manager',
             'supply_chain_director',

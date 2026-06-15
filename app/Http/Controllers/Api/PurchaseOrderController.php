@@ -35,7 +35,7 @@ class PurchaseOrderController extends Controller
         ];
 
         $hasAllowedRole =
-            (isset($user->role) && in_array($user->role, $allowedRoles, true))
+            (isset($user->scmRole()) && in_array($user->scmRole(), $allowedRoles, true))
             || (method_exists($user, 'hasAnyRole') && $user->hasAnyRole($allowedRoles));
 
         if (! $hasAllowedRole) {

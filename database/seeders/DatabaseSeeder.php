@@ -33,7 +33,7 @@ class DatabaseSeeder extends Seeder
                 [
                     'name' => 'Test User',
                     'password' => Hash::make('password'),
-                    'role' => 'admin',
+                    'supply_chain_role' => 'admin',
                     'department' => 'Information Technology',
                 ]
             );

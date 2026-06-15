@@ -47,7 +47,7 @@ class FleetComplianceNotificationService
     public function logisticsRecipients(): Collection
     {
         $users = User::query()
-            ->whereIn('role', ['logistics_officer', 'logistics_manager'])
+            ->whereIn('supply_chain_role', ['logistics_officer', 'logistics_manager'])
             ->get();
 
         $cc = collect(config('scm.logistics_notification_cc_emails', []));

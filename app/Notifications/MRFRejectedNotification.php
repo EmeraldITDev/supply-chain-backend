@@ -37,7 +37,7 @@ class MRFRejectedNotification extends Notification implements ShouldQueue
     public function toMail($notifiable): MailMessage
     {
         // Check if recipient has procurement module access
-        $hasProcurementAccess = in_array($notifiable->role, [
+        $hasProcurementAccess = in_array($notifiable->scmRole(), [
             'procurement',
             'procurement_manager',
             'supply_chain_director',

@@ -100,7 +100,7 @@ class MRFWorkflowController extends Controller
         $user = $request->user();
 
         // Check role - only supply chain directors can approve
-        if (!in_array($user->role, ['supply_chain_director', 'director', 'admin'])) {
+        if (!in_array($user->scmRole(), ['supply_chain_director', 'director', 'admin'])) {
             return response()->json([
                 'success' => false,
                 'error' => 'Only Supply Chain Directors can approve at this stage',
@@ -179,7 +179,7 @@ class MRFWorkflowController extends Controller
             'director_approved_by' => $isApproved ? $user->name : null,
             'director_remarks' => $isApproved ? $request->remarks : null,
             'procurement_review_started_at' => $isApproved && !$isHighValueCustomType ? now() : null,
-            'last_action_by_role' => in_array($user->role, ['admin']) ? 'admin' : 'supply_chain_director',
+            'last_action_by_role' => in_array($user->scmRole(), ['admin']) ? 'admin' : 'supply_chain_director',
         ]);
 
         try {
@@ -208,7 +208,7 @@ class MRFWorkflowController extends Controller
             'approver_email' => $user->email,
             'remarks' => $request->remarks,
             'performer_name' => $user->name,
-            'performer_role' => $user->role,
+            'performer_role' => $user->scmRole(),
             'performed_by' => $user->id
         ]);
 
@@ -255,7 +255,7 @@ class MRFWorkflowController extends Controller
         $user = $request->user();
 
         // Check role - only Lazarus Angbazo or admin can approve at this stage
-        if (!in_array($user->role, ['director', 'admin']) && $user->email !== 'lazarus.angbazo@emeraldcfze.com') {
+        if (!in_array($user->scmRole(), ['director', 'admin']) && $user->email !== 'lazarus.angbazo@emeraldcfze.com') {
             return response()->json([
                 'success' => false,
                 'error' => 'Only Lazarus Angbazo (Director) can approve high-value custom contract MRFs at this stage',
@@ -311,7 +311,7 @@ class MRFWorkflowController extends Controller
             'director_approved_by' => $isApproved ? $user->name : null,
             'director_remarks' => $isApproved ? $request->remarks : null,
             'procurement_review_started_at' => $isApproved ? now() : null,
-            'last_action_by_role' => in_array($user->role, ['admin']) ? 'admin' : 'director',
+            'last_action_by_role' => in_array($user->scmRole(), ['admin']) ? 'admin' : 'director',
         ]);
 
         try {
@@ -336,7 +336,7 @@ class MRFWorkflowController extends Controller
             'approver_email' => $user->email,
             'remarks' => $request->remarks,
             'performer_name' => $user->name,
-            'performer_role' => $user->role,
+            'performer_role' => $user->scmRole(),
             'performed_by' => $user->id
         ]);
 
@@ -383,7 +383,7 @@ class MRFWorkflowController extends Controller
         $user = $request->user();
 
         // Check role - only procurement managers/team can approve
-        if (!in_array($user->role, ['procurement_manager', 'procurement', 'admin'])) {
+        if (!in_array($user->scmRole(), ['procurement_manager', 'procurement', 'admin'])) {
             return response()->json([
                 'success' => false,
                 'error' => 'Only procurement managers can approve at this stage',
@@ -526,7 +526,7 @@ class MRFWorkflowController extends Controller
         $user = $request->user();
 
         // Check role - only procurement can send vendor for approval
-        if (!in_array($user->role, ['procurement', 'procurement_manager', 'admin'])) {
+        if (!in_array($user->scmRole(), ['procurement', 'procurement_manager', 'admin'])) {
             return response()->json([
                 'success' => false,
                 'error' => 'Only procurement can send vendor for approval',
@@ -821,7 +821,7 @@ class MRFWorkflowController extends Controller
 
         // Notify Supply Chain Director with complete information
         try {
-            $scdUsers = \App\Models\User::whereIn('role', ['supply_chain_director', 'supply_chain', 'admin'])->get();
+            $scdUsers = \App\Models\User::whereIn('supply_chain_role', ['supply_chain_director', 'supply_chain', 'admin'])->get();
             foreach ($scdUsers as $scdUser) {
                 $scdUser->notifyNow(new \App\Notifications\SystemAnnouncementNotification(
                     'Vendor Selection Pending Approval',
@@ -862,7 +862,7 @@ class MRFWorkflowController extends Controller
         $user = $request->user();
 
         // Check role - only Supply Chain Director can approve
-        if (!in_array($user->role, ['supply_chain_director', 'supply_chain', 'admin'])) {
+        if (!in_array($user->scmRole(), ['supply_chain_director', 'supply_chain', 'admin'])) {
             return response()->json([
                 'success' => false,
                 'error' => 'Only Supply Chain Director can approve vendor selection',
@@ -949,7 +949,7 @@ class MRFWorkflowController extends Controller
         // Notify Procurement that vendor is approved and PO upload is required
         // Provide clear actionable guidance: "Upload PO" is the next step
         try {
-            $procurementUsers = \App\Models\User::whereIn('role', ['procurement', 'procurement_manager', 'admin'])->get();
+            $procurementUsers = \App\Models\User::whereIn('supply_chain_role', ['procurement', 'procurement_manager', 'admin'])->get();
             foreach ($procurementUsers as $procUser) {
                 $procUser->notifyNow(new \App\Notifications\SystemAnnouncementNotification(
                     'Vendor Selection Approved - PO Upload Required',
@@ -989,7 +989,7 @@ class MRFWorkflowController extends Controller
         $user = $request->user();
 
         // Check role - only Supply Chain Director can reject
-        if (!in_array($user->role, ['supply_chain_director', 'supply_chain', 'admin'])) {
+        if (!in_array($user->scmRole(), ['supply_chain_director', 'supply_chain', 'admin'])) {
             return response()->json([
                 'success' => false,
                 'error' => 'Only Supply Chain Director can reject vendor selection',
@@ -1057,7 +1057,7 @@ class MRFWorkflowController extends Controller
 
         // Notify Procurement
         try {
-            $procurementUsers = \App\Models\User::whereIn('role', ['procurement', 'procurement_manager', 'admin'])->get();
+            $procurementUsers = \App\Models\User::whereIn('supply_chain_role', ['procurement', 'procurement_manager', 'admin'])->get();
             foreach ($procurementUsers as $procUser) {
                 $procUser->notifyNow(new \App\Notifications\SystemAnnouncementNotification(
                     'Vendor Selection Rejected',
@@ -1088,7 +1088,7 @@ class MRFWorkflowController extends Controller
         $user = $request->user();
 
         // Check role
-        if (!in_array($user->role, ['executive', 'admin'])) {
+        if (!in_array($user->scmRole(), ['executive', 'admin'])) {
             return response()->json([
                 'success' => false,
                 'error' => 'Only executives can approve at this stage',
@@ -1145,7 +1145,7 @@ class MRFWorkflowController extends Controller
             'executive_approved_by' => $user->id,
             'executive_approved_at' => now(),
             'executive_remarks' => $request->remarks,
-            'last_action_by_role' => in_array($user->role, ['admin']) ? 'admin' : 'executive',
+            'last_action_by_role' => in_array($user->scmRole(), ['admin']) ? 'admin' : 'executive',
         ]);
 
         try {
@@ -1202,7 +1202,7 @@ class MRFWorkflowController extends Controller
             'status' => 'procurement_review',
             'current_stage' => 'procurement',
             'procurement_review_started_at' => now(),
-            'last_action_by_role' => in_array($user->role, ['admin']) ? 'admin' : 'executive',
+            'last_action_by_role' => in_array($user->scmRole(), ['admin']) ? 'admin' : 'executive',
         ]);
 
         // Record in approval history
@@ -1253,7 +1253,7 @@ class MRFWorkflowController extends Controller
         $user = $request->user();
 
         // Check role
-        if (!in_array($user->role, ['chairman', 'admin'])) {
+        if (!in_array($user->scmRole(), ['chairman', 'admin'])) {
             return response()->json([
                 'success' => false,
                 'error' => 'Only chairman can approve at this stage',
@@ -1451,7 +1451,7 @@ class MRFWorkflowController extends Controller
             || ($hasExistingPO && ! $hasSignedPO);
 
         // Once a PO is signed, only admins may regenerate.
-        if ($hasSignedPO && ! in_array(strtolower($user->role ?? ''), ['admin'], true)) {
+        if ($hasSignedPO && ! in_array(strtolower($user->scmRole() ?? ''), ['admin'], true)) {
             return response()->json([
                 'success' => false,
                 'error' => 'Cannot regenerate PO that has already been signed. Please contact an administrator.',
@@ -1835,7 +1835,7 @@ class MRFWorkflowController extends Controller
 
         // Notify Finance team about PO generation
         try {
-            $financeTeam = \App\Models\User::whereIn('role', ['finance', 'admin'])->get();
+            $financeTeam = \App\Models\User::whereIn('supply_chain_role', ['finance', 'admin'])->get();
 
             foreach ($financeTeam as $finance) {
                 $finance->notifyNow(new \App\Notifications\SystemAnnouncementNotification(
@@ -1951,7 +1951,7 @@ class MRFWorkflowController extends Controller
         $user = $request->user();
 
         // Check role
-        if (!in_array($user->role, ['supply_chain_director', 'supply_chain', 'admin'])) {
+        if (!in_array($user->scmRole(), ['supply_chain_director', 'supply_chain', 'admin'])) {
             return response()->json([
                 'success' => false,
                 'error' => 'Only Supply Chain Director can sign POs',
@@ -2075,7 +2075,7 @@ class MRFWorkflowController extends Controller
     public function signPurchaseOrder(Request $request, string $po)
     {
         $user = $request->user();
-        if (!$user || !in_array($user->role, ['supply_chain_director', 'supply_chain', 'admin'])) {
+        if (!$user || !in_array($user->scmRole(), ['supply_chain_director', 'supply_chain', 'admin'])) {
             return response()->json([
                 'success' => false,
                 'error' => 'Only Supply Chain Director can sign purchase orders.',
@@ -2172,7 +2172,7 @@ class MRFWorkflowController extends Controller
         $user = $request->user();
 
         // Check role
-        if (!in_array($user->role, ['supply_chain_director', 'supply_chain', 'admin'])) {
+        if (!in_array($user->scmRole(), ['supply_chain_director', 'supply_chain', 'admin'])) {
             return response()->json([
                 'success' => false,
                 'error' => 'Only Supply Chain Director can reject POs',
@@ -2262,7 +2262,7 @@ class MRFWorkflowController extends Controller
         $user = $request->user();
 
         // Check role
-        if (!in_array($user->role, ['finance', 'admin'])) {
+        if (!in_array($user->scmRole(), ['finance', 'admin'])) {
             return response()->json([
                 'success' => false,
                 'error' => 'Only Finance team can process payments',
@@ -2329,7 +2329,7 @@ class MRFWorkflowController extends Controller
         $user = $request->user();
 
         // Check role
-        if (!in_array($user->role, ['chairman', 'admin'])) {
+        if (!in_array($user->scmRole(), ['chairman', 'admin'])) {
             return response()->json([
                 'success' => false,
                 'error' => 'Only Chairman can approve payments',
@@ -2399,7 +2399,7 @@ class MRFWorkflowController extends Controller
         $user = $request->user();
 
         // Check if user has permission to reject (executive, chairman, or admin)
-        if (!in_array($user->role, ['executive', 'chairman', 'admin'])) {
+        if (!in_array($user->scmRole(), ['executive', 'chairman', 'admin'])) {
             return response()->json([
                 'success' => false,
                 'error' => 'Insufficient permissions to reject MRF',
@@ -2487,13 +2487,13 @@ class MRFWorkflowController extends Controller
 
         // Check role - procurement managers and admin can delete POs
         // Use case-insensitive comparison for role
-        $userRole = strtolower(trim($user->role ?? ''));
+        $userRole = strtolower(trim($user->scmRole() ?? ''));
         $allowedRoles = ['procurement_manager', 'procurement', 'admin'];
 
         if (!in_array($userRole, array_map('strtolower', $allowedRoles))) {
             Log::warning('Unauthorized PO deletion attempt', [
                 'user_id' => $user->id,
-                'user_role' => $user->role,
+                'user_role' => $user->scmRole(),
                 'mrf_id' => $id
             ]);
 
@@ -2547,7 +2547,7 @@ class MRFWorkflowController extends Controller
                 'current_stage' => $mrf->current_stage,
                 'po_number' => $mrf->po_number,
                 'deleted_by' => $user->id,
-                'deleted_by_role' => $user->role
+                'deleted_by_role' => $user->scmRole()
             ]);
         }
 
@@ -2709,7 +2709,7 @@ class MRFWorkflowController extends Controller
                 'old_stage' => $mrf->getOriginal('current_stage'),
                 'new_stage' => $newStage,
                 'deleted_by' => $user->id,
-                'deleted_by_role' => $user->role,
+                'deleted_by_role' => $user->scmRole(),
                 'was_admin' => $isAdmin
             ]);
 

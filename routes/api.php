@@ -320,7 +320,9 @@ Route::middleware('auth:sanctum')->group(function () {
                 'id' => $user->id,
                 'name' => $user->name,
                 'email' => $user->email,
-                'role' => $user->role,
+                'supply_chain_role' => $user->scmRole(),
+                'hris_role' => $user->hris_role,
+                'role' => $user->scmRole(),
             ],
             'session_timeout_minutes' => 5,
             'message' => 'User is authenticated and session is active'

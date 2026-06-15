@@ -35,7 +35,7 @@ class NotificationService
     public function resolveRecipientsByRoles(array $roles): array
     {
         return User::query()
-            ->whereIn('role', $roles)
+            ->whereIn('supply_chain_role', $roles)
             ->get()
             ->all();
     }

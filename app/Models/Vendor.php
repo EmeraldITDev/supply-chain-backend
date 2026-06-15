@@ -147,7 +147,7 @@ class Vendor extends Model
             }
         }
 
-        $actsAsVendor = $user->role !== null && strcasecmp((string) $user->role, 'vendor') === 0;
+        $actsAsVendor = $user->scmRole() !== null && strcasecmp((string) $user->scmRole(), 'vendor') === 0;
         if (!$actsAsVendor && method_exists($user, 'hasRole')) {
             try {
                 $actsAsVendor = $user->hasRole('vendor');

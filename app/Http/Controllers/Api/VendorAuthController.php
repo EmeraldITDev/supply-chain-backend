@@ -180,7 +180,7 @@ class VendorAuthController extends Controller
                     'id' => $user->id,
                     'name' => $user->name,
                     'email' => $user->email,
-                    'role' => $user->role,
+                    'role' => $user->scmRole(),
                     'mustChangePassword' => $user->must_change_password ?? false,
                 ],
                 'tokenExpiresAt' => $currentToken->expires_at
@@ -208,7 +208,7 @@ class VendorAuthController extends Controller
         $user = $request->user();
 
         // Ensure user is a vendor
-        if ($user->role !== 'vendor' && !$user->hasRole('vendor')) {
+        if ($user->scmRole() !== 'vendor' && !$user->hasRole('vendor')) {
             return response()->json([
                 'success' => false,
                 'error' => 'Only vendors can access this endpoint',
@@ -284,7 +284,7 @@ class VendorAuthController extends Controller
         $user = $request->user();
 
         // Ensure user is a vendor
-        if ($user->role !== 'vendor' && !$user->hasRole('vendor')) {
+        if ($user->scmRole() !== 'vendor' && !$user->hasRole('vendor')) {
             return response()->json([
                 'success' => false,
                 'error' => 'Only vendors can access this endpoint',
@@ -316,7 +316,7 @@ class VendorAuthController extends Controller
         $user = $request->user();
 
         // Ensure user is a vendor
-        if ($user->role !== 'vendor' && !$user->hasRole('vendor')) {
+        if ($user->scmRole() !== 'vendor' && !$user->hasRole('vendor')) {
             return response()->json([
                 'success' => false,
                 'error' => 'Only vendors can access this endpoint',
@@ -430,7 +430,7 @@ class VendorAuthController extends Controller
             $notificationService = app(\App\Services\NotificationService::class);
 
             // Get all procurement managers and supply chain directors
-            $procurementManagers = User::whereIn('role', [
+            $procurementManagers = User::whereIn('supply_chain_role', [
                 'procurement_manager',
                 'supply_chain_director',
                 'supply_chain',

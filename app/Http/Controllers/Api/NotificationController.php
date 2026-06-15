@@ -243,7 +243,7 @@ class NotificationController extends Controller
         try {
             $user = $request->user();
 
-            if (! in_array($user->role, ['admin', 'chairman', 'executive'])) {
+            if (! in_array($user->scmRole(), ['admin', 'chairman', 'executive'])) {
                 return response()->json([
                     'success' => false,
                     'message' => 'Unauthorized. Only administrators can send announcements.',

@@ -508,16 +508,16 @@ class FinanceIntegrationService
     private function systemActor(): User
     {
         return User::query()
-            ->whereIn('role', ['admin', 'finance', 'finance_officer'])
+            ->whereIn('supply_chain_role', ['admin', 'finance', 'finance_officer'])
             ->orderBy('id')
-            ->first() ?? new User(['id' => 0, 'role' => 'admin', 'name' => 'System']);
+            ->first() ?? new User(['id' => 0, 'supply_chain_role' => 'admin', 'name' => 'System']);
     }
 
     private function notifyProcurementRoles(string $title, string $message, string $url, string $priority = 'normal'): void
     {
         try {
             $users = User::query()
-                ->whereIn('role', ['procurement_manager', 'procurement', 'admin'])
+                ->whereIn('supply_chain_role', ['procurement_manager', 'procurement', 'admin'])
                 ->get();
 
             foreach ($users as $user) {

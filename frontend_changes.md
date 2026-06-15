@@ -8,6 +8,110 @@ This document is the source of truth for the React/Lovable frontend. **Before wi
 
 ---
 
+## 0. HRIS / SCM Role Separation (BREAKING — update all role UI)
+
+### Problem
+HRIS and Supply Chain previously shared a single `users.role` column. Updating a user's HRIS role (e.g. `corporate_hr`) overwrote their SCM role (e.g. `procurement_manager`), breaking SCM permissions.
+
+### Model change (`users` table)
+
+| Column | Owner | Purpose |
+|--------|-------|---------|
+| `hris_role` | **HRIS only** | HR system permissions. SCM backend **never writes** this field. |
+| `supply_chain_role` | **SCM only** | Supply Chain permissions. HRIS **never writes** this field. |
+| `role` | **Deprecated** | Legacy column; backfilled into `supply_chain_role` on migration. Do not use in new frontend code. |
+
+Credentials (`email`, `password`) remain shared on the same user record.
+
+### SCM permission source of truth
+All SCM gates (middleware `role:`, `PermissionService`, dashboards, workflow actions) now read **`supply_chain_role` exclusively** via `User::scmRole()`.
+
+The legacy `role` field is only used as a read fallback for rows not yet backfilled.
+
+### Auth responses (MODIFIED)
+
+#### `POST /api/auth/login`
+#### `GET /api/auth/me`
+#### `GET /api/auth/session-status`
+
+**User object now includes:**
+
+```json
+{
+  "id": 1,
+  "email": "user@example.com",
+  "name": "Jane Doe",
+  "supply_chain_role": "procurement_manager",
+  "hris_role": "corporate_hr",
+  "role": "procurement_manager",
+  "department": "Procurement",
+  "employeeId": 42
+}
+```
+
+| Field | Frontend usage |
+|-------|----------------|
+| `supply_chain_role` | **Use this** for all SCM route guards, nav visibility, and action buttons. |
+| `hris_role` | Display-only in SCM (if shown at all). Do not use for SCM permissions. |
+| `role` | **Deprecated alias** of `supply_chain_role` for backward compatibility. Migrate UI to `supply_chain_role`. |
+
+**Frontend:** Replace every SCM check like `user.role === 'procurement_manager'` with `user.supply_chain_role === 'procurement_manager'`. Do not send or edit `hris_role` from the SCM app.
+
+### User management (SCM admin — MODIFIED)
+
+SCM Settings / User Management must **only** expose and edit `supply_chain_role`. Never send `hris_role` in create/update payloads.
+
+| Endpoint | Change |
+|----------|--------|
+| `GET /api/users` | Each user includes `supply_chain_role`, `hris_role` (read-only), and deprecated `role` alias. Filter: `?supply_chain_role=` (preferred) or legacy `?role=`. |
+| `POST /api/users` | Accept `supply_chain_role` (preferred) or legacy `role` in body. Writes `supply_chain_role` only. |
+| `PUT /api/users/{id}` | Same as create. Writes `supply_chain_role` only. |
+| `GET /api/users/eligible-passengers` | Returns `supply_chain_role` per user; `role` is an alias in the response. |
+
+**Create/update request (preferred):**
+```json
+{
+  "name": "Jane Doe",
+  "email": "jane@example.com",
+  "password": "SecurePass123",
+  "supply_chain_role": "procurement_manager",
+  "department": "Procurement"
+}
+```
+
+**Allowed SCM roles** (unchanged): `admin`, `employee`, `executive`, `procurement_manager`, `supply_chain_director`, `finance`, `chairman`, `logistics_manager`, `logistics_officer`, `vendor`, plus legacy aliases `logistics`, `procurement`, `supply_chain`.
+
+### Endpoints gated by SCM role (unchanged role values, new field source)
+
+All existing `role:` middleware routes still use the same role **values**; authorization now checks `supply_chain_role`:
+
+- Logistics module routes (`procurement_manager`, `logistics_manager`, `logistics_officer`, `supply_chain_director`, `admin`, `executive`, `chairman`, `finance`)
+- `role:admin` — `/api/admin/department-codes`, `/api/admin/category-codes`
+- `role:procurement_manager,supply_chain_director` — vendor updates
+- MRF/SRF/RFQ workflow actions via `PermissionService` and `GET /api/mrfs/{id}/available-actions`
+- Dashboard role-specific stats (`DashboardController`)
+- Finance AP reports (`finance`, `admin`)
+- Procurement reports and price comparisons
+- Vendor portal (`vendor` role on `supply_chain_role`)
+
+### Password / profile (unchanged)
+
+These endpoints continue to sync credentials across systems and **do not** modify either role field:
+
+- `POST /api/auth/change-password`
+- `PUT /api/auth/profile` (name, department, phone only)
+- `POST /api/vendors/auth/*` password flows
+
+### Migration / deployment
+
+Run: `php artisan migrate`
+
+Migration `2026_06_15_120000_separate_hris_and_supply_chain_roles` adds columns and copies existing `role` → `supply_chain_role`.
+
+Repair command (optional): `php artisan scm:repair-user-access` — normalizes `supply_chain_role` and syncs Spatie roles.
+
+---
+
 ## 1. MRF Contract Type — Free Text + Routing
 
 ### GET `/api/mrfs/contract-types` (NEW)

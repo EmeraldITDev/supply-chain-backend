@@ -19,7 +19,7 @@ class ProcurementReportController extends Controller
     {
         $user = $request->user();
         $allowed = ['procurement_manager', 'procurement', 'supply_chain_director', 'supply_chain', 'admin', 'finance', 'finance_officer'];
-        if (!$user || !in_array($user->role, $allowed, true)) {
+        if (!$user || !in_array($user->scmRole(), $allowed, true)) {
             return response()->json(['success' => false, 'error' => 'Insufficient permissions', 'code' => 'FORBIDDEN'], 403);
         }
 
@@ -36,7 +36,7 @@ class ProcurementReportController extends Controller
     {
         $user = $request->user();
         $allowed = ['procurement_manager', 'procurement', 'supply_chain_director', 'supply_chain', 'admin', 'finance', 'finance_officer'];
-        if (!$user || !in_array($user->role, $allowed, true)) {
+        if (!$user || !in_array($user->scmRole(), $allowed, true)) {
             return response()->json(['success' => false, 'error' => 'Insufficient permissions', 'code' => 'FORBIDDEN'], 403);
         }
 

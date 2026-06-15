@@ -258,9 +258,9 @@ class GrnPdfService
         bool $signWarehouse = false,
     ): array {
         $procurementManager = $mrf->procurementManager
-            ?? User::query()->whereIn('role', ['procurement_manager', 'procurement'])->orderBy('id')->first();
-        $financeUser = User::query()->whereIn('role', ['finance', 'finance_officer'])->orderBy('id')->first();
-        $logisticsUser = User::query()->whereIn('role', ['logistics', 'warehouse'])->orderBy('id')->first();
+            ?? User::query()->whereIn('supply_chain_role', ['procurement_manager', 'procurement'])->orderBy('id')->first();
+        $financeUser = User::query()->whereIn('supply_chain_role', ['finance', 'finance_officer'])->orderBy('id')->first();
+        $logisticsUser = User::query()->whereIn('supply_chain_role', ['logistics', 'warehouse'])->orderBy('id')->first();
 
         $blocks = [
             'warehouse' => $this->signatorySlot($signWarehouse ? ($actingUser ?? $logisticsUser) : null, 'Warehouse Officer'),
@@ -521,9 +521,9 @@ class GrnPdfService
         $receivedBy = $this->resolveReceivedByUser($mrf, $actingUser);
         $procurementManager = $mrf->procurementManager
             ?? User::query()
-                ->whereIn('role', ['procurement_manager', 'procurement'])
+                ->whereIn('supply_chain_role', ['procurement_manager', 'procurement'])
                 ->when($mrf->procurement_manager_id, fn ($q) => $q->orWhere('id', $mrf->procurement_manager_id))
-                ->orderByRaw("CASE WHEN role = 'procurement_manager' THEN 0 ELSE 1 END")
+                ->orderByRaw("CASE WHEN supply_chain_role = 'procurement_manager' THEN 0 ELSE 1 END")
                 ->first();
 
         return [
@@ -560,7 +560,7 @@ class GrnPdfService
 
     private function resolveReceivedByUser(MRF $mrf, User $actingUser): ?User
     {
-        if (in_array($actingUser->role, ['procurement', 'procurement_manager', 'admin'], true)) {
+        if (in_array($actingUser->scmRole(), ['procurement', 'procurement_manager', 'admin'], true)) {
             return $actingUser;
         }
 
@@ -577,7 +577,7 @@ class GrnPdfService
             return (string) $user->department;
         }
 
-        return ucwords(str_replace('_', ' ', (string) ($user->role ?? 'Staff')));
+        return ucwords(str_replace('_', ' ', (string) ($user->scmRole() ?? 'Staff')));
     }
 
     /**

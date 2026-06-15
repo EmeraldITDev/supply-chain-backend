@@ -81,7 +81,7 @@ class FinanceApReportController extends Controller
     {
         $user = $request->user();
 
-        if (! $user || ! in_array($user->role, self::ALLOWED_ROLES, true)) {
+        if (! $user || ! in_array($user->scmRole(), self::ALLOWED_ROLES, true)) {
             return response()->json([
                 'success' => false,
                 'error' => 'Insufficient permissions',

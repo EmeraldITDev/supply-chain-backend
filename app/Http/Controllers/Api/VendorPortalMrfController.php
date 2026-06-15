@@ -200,7 +200,7 @@ class VendorPortalMrfController extends Controller
             return false;
         }
 
-        if ($user->role === 'vendor') {
+        if ($user->scmRole() === 'vendor') {
             return true;
         }
 

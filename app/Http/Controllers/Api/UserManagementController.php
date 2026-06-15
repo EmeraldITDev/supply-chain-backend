@@ -40,9 +40,10 @@ class UserManagementController extends Controller
 
         $query = User::query();
 
-        // Filter by role if provided
-        if ($request->has('role')) {
-            $query->where('role', $request->role);
+        // Filter by SCM role if provided (?supply_chain_role= or legacy ?role=)
+        $roleFilter = $request->input('supply_chain_role', $request->input('role'));
+        if ($roleFilter !== null && $roleFilter !== '') {
+            $query->where('supply_chain_role', $roleFilter);
         }
 
         // Search
@@ -54,20 +55,7 @@ class UserManagementController extends Controller
             });
         }
 
-        $users = $query->get()->map(function($user) {
-            return [
-                'id' => $user->id,
-                'name' => $user->name,
-                'email' => $user->email,
-                'role' => $user->role,
-                'department' => $user->department,
-                'designated_requisition_creator' => (bool) $user->designated_requisition_creator,
-                'signature_image_path' => $user->signature_image_path,
-                'is_admin' => $user->is_admin ?? false,
-                'can_manage_users' => $user->can_manage_users ?? false,
-                'created_at' => $user->created_at,
-            ];
-        });
+        $users = $query->get()->map(fn (User $user) => $this->serializeUser($user));
 
         return response()->json([
             'success' => true,
@@ -128,6 +116,46 @@ class UserManagementController extends Controller
     }
 
     /**
+     * Accept legacy `role` or canonical `supply_chain_role` from the request body.
+     * SCM user management must never read or write hris_role.
+     */
+    private function supplyChainRoleFromRequest(Request $request): ?string
+    {
+        if ($request->has('supply_chain_role')) {
+            return $this->normaliseRole((string) $request->input('supply_chain_role'));
+        }
+
+        if ($request->has('role')) {
+            return $this->normaliseRole((string) $request->input('role'));
+        }
+
+        return null;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function serializeUser(User $user): array
+    {
+        $scmRole = $user->scmRole();
+
+        return [
+            'id' => $user->id,
+            'name' => $user->name,
+            'email' => $user->email,
+            'supply_chain_role' => $scmRole,
+            'hris_role' => $user->hris_role,
+            'role' => $scmRole,
+            'department' => $user->department,
+            'designated_requisition_creator' => (bool) $user->designated_requisition_creator,
+            'signature_image_path' => $user->signature_image_path,
+            'is_admin' => $user->is_admin ?? false,
+            'can_manage_users' => $user->can_manage_users ?? false,
+            'created_at' => $user->created_at,
+        ];
+    }
+
+    /**
      * Create new user (admin only)
      */
     public function store(Request $request)
@@ -142,14 +170,24 @@ class UserManagementController extends Controller
             ], 403);
         }
 
-        if ($request->has('role')) {
-            $request->merge(['role' => $this->normaliseRole((string) $request->input('role'))]);
+        if ($request->has('hris_role')) {
+            return response()->json([
+                'success' => false,
+                'error' => 'hris_role is managed by HRIS and cannot be set from Supply Chain.',
+                'code' => 'FORBIDDEN_FIELD',
+            ], 422);
+        }
+
+        $supplyChainRole = $this->supplyChainRoleFromRequest($request);
+        if ($supplyChainRole !== null) {
+            $request->merge(['supply_chain_role' => $supplyChainRole]);
         }
 
         $validator = Validator::make($request->all(), [
             'name' => 'required|string|max:255',
             'email' => 'required|email|unique:users,email',
-            'role' => 'required|in:' . implode(',', self::ALLOWED_ROLES),
+            'supply_chain_role' => 'required_without:role|in:' . implode(',', self::ALLOWED_ROLES),
+            'role' => 'required_without:supply_chain_role|in:' . implode(',', self::ALLOWED_ROLES),
             'department' => 'nullable|string|max:255',
             'password' => 'required|string|min:8',
             'is_admin' => 'nullable|boolean',
@@ -166,8 +204,8 @@ class UserManagementController extends Controller
             ], 422);
         }
 
-        // Set admin flags based on role
-        $role = $request->role;
+        // Set admin flags based on SCM role
+        $role = $supplyChainRole ?? $this->supplyChainRoleFromRequest($request);
         $isAdmin = $request->is_admin ?? false;
         $canManageUsers = $request->can_manage_users ?? false;
 
@@ -181,7 +219,7 @@ class UserManagementController extends Controller
             'name' => $request->name,
             'email' => $request->email,
             'password' => Hash::make($request->password),
-            'role' => $role,
+            'supply_chain_role' => $role,
             'department' => $request->department,
             'designated_requisition_creator' => (bool) $request->boolean('designated_requisition_creator', false),
             'is_admin' => $isAdmin,
@@ -194,23 +232,13 @@ class UserManagementController extends Controller
             'created_by' => $user->id,
             'new_user_id' => $newUser->id,
             'new_user_email' => $newUser->email,
-            'role' => $newUser->role,
+            'supply_chain_role' => $newUser->scmRole(),
         ]);
 
         return response()->json([
             'success' => true,
             'message' => 'User created successfully',
-            'data' => [
-                'id' => $newUser->id,
-                'name' => $newUser->name,
-                'email' => $newUser->email,
-                'role' => $newUser->role,
-                'department' => $newUser->department,
-                'designated_requisition_creator' => (bool) $newUser->designated_requisition_creator,
-                'signature_image_path' => $newUser->signature_image_path,
-                'is_admin' => $newUser->is_admin,
-                'can_manage_users' => $newUser->can_manage_users,
-            ]
+            'data' => $this->serializeUser($newUser),
         ], 201);
     }
 
@@ -239,14 +267,24 @@ class UserManagementController extends Controller
             ], 404);
         }
 
-        if ($request->has('role')) {
-            $request->merge(['role' => $this->normaliseRole((string) $request->input('role'))]);
+        if ($request->has('hris_role')) {
+            return response()->json([
+                'success' => false,
+                'error' => 'hris_role is managed by HRIS and cannot be set from Supply Chain.',
+                'code' => 'FORBIDDEN_FIELD',
+            ], 422);
+        }
+
+        $supplyChainRole = $this->supplyChainRoleFromRequest($request);
+        if ($supplyChainRole !== null) {
+            $request->merge(['supply_chain_role' => $supplyChainRole]);
         }
 
         $validator = Validator::make($request->all(), [
             'name' => 'sometimes|string|max:255',
             'email' => 'sometimes|email|unique:users,email,' . $id,
-            'role' => 'required|in:' . implode(',', self::ALLOWED_ROLES),
+            'supply_chain_role' => 'required_without:role|in:' . implode(',', self::ALLOWED_ROLES),
+            'role' => 'required_without:supply_chain_role|in:' . implode(',', self::ALLOWED_ROLES),
             'department' => 'nullable|string|max:255',
             'password' => 'sometimes|string|min:8',
             'is_admin' => 'nullable|boolean',
@@ -273,11 +311,11 @@ class UserManagementController extends Controller
             $updateData['email'] = $request->email;
         }
 
-        if ($request->has('role')) {
-            $updateData['role'] = $request->role;
-            
-            // Auto-set admin flags based on role
-            $role = $request->role;
+        if ($request->has('supply_chain_role') || $request->has('role')) {
+            $role = $supplyChainRole ?? $this->supplyChainRoleFromRequest($request);
+            $updateData['supply_chain_role'] = $role;
+
+            // Auto-set admin flags based on SCM role
             if (in_array($role, ['procurement', 'procurement_manager', 'executive', 'supply_chain_director', 'supply_chain', 'admin'])) {
                 $updateData['is_admin'] = true;
                 $updateData['can_manage_users'] = true;
@@ -305,8 +343,8 @@ class UserManagementController extends Controller
 
         $targetUser->update($updateData);
 
-        if (isset($updateData['role'])) {
-            UserRoleNormalizer::syncSpatieRole($targetUser->fresh(), $updateData['role']);
+        if (isset($updateData['supply_chain_role'])) {
+            UserRoleNormalizer::syncSpatieRole($targetUser->fresh(), $updateData['supply_chain_role']);
         }
 
         Log::info('User updated by admin', [
@@ -318,17 +356,7 @@ class UserManagementController extends Controller
         return response()->json([
             'success' => true,
             'message' => 'User updated successfully',
-            'data' => [
-                'id' => $targetUser->id,
-                'name' => $targetUser->name,
-                'email' => $targetUser->email,
-                'role' => $targetUser->role,
-                'department' => $targetUser->department,
-                'designated_requisition_creator' => (bool) $targetUser->designated_requisition_creator,
-                'signature_image_path' => $targetUser->signature_image_path,
-                'is_admin' => $targetUser->is_admin,
-                'can_manage_users' => $targetUser->can_manage_users,
-            ]
+            'data' => $this->serializeUser($targetUser->fresh()),
         ]);
     }
 
@@ -363,7 +391,7 @@ class UserManagementController extends Controller
             ->values();
 
         $allUsers = User::query()
-            ->whereIn('role', ['employee', 'staff', 'regular_staff'])
+            ->whereIn('supply_chain_role', ['employee', 'staff', 'regular_staff'])
             ->orderBy('name')
             ->get(['id', 'name', 'email', 'department', 'designated_requisition_creator']);
 
@@ -440,7 +468,7 @@ class UserManagementController extends Controller
             ], 422);
         }
 
-        if (! in_array($targetUser->role, ['employee', 'staff', 'regular_staff'], true)) {
+        if (! in_array($targetUser->scmRole(), ['employee', 'staff', 'regular_staff'], true)) {
             return response()->json([
                 'success' => false,
                 'error' => 'Only staff in the employee role group can be designated requisition creators.',
@@ -482,7 +510,7 @@ class UserManagementController extends Controller
             return response()->json(['success' => false, 'error' => 'Unauthorized'], 401);
         }
 
-        $isAdmin = $this->permissionService->canManageUsers($actor) || $actor->role === 'admin';
+        $isAdmin = $this->permissionService->canManageUsers($actor) || $actor->scmRole() === 'admin';
         if (!$isAdmin && $actor->id !== $id) {
             return response()->json([
                 'success' => false,
@@ -569,7 +597,7 @@ class UserManagementController extends Controller
             return response()->json(['success' => false, 'error' => 'Unauthorized'], 401);
         }
 
-        $isAdmin = $this->permissionService->canManageUsers($actor) || $actor->role === 'admin';
+        $isAdmin = $this->permissionService->canManageUsers($actor) || $actor->scmRole() === 'admin';
         if (!$isAdmin && $actor->id !== $id) {
             return response()->json([
                 'success' => false,

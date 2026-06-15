@@ -54,7 +54,7 @@ class MRFApprovalHistory extends Model
             'stage' => $stage,
             'performed_by' => $user->id,
             'performer_name' => $user->name,
-            'performer_role' => $user->role,
+            'performer_role' => $user->scmRole(),
             'remarks' => $remarks,
         ]);
     }

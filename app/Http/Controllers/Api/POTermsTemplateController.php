@@ -37,7 +37,7 @@ class POTermsTemplateController extends Controller
             'executive',
             'admin',
         ];
-        if (! $user || ! in_array($user->role, $allowedRoles, true)) {
+        if (! $user || ! in_array($user->scmRole(), $allowedRoles, true)) {
             return response()->json([
                 'success' => false,
                 'error' => 'Insufficient permissions',

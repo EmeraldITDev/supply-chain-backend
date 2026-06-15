@@ -512,7 +512,7 @@ class JobCompletionCertificateService
     {
         return DocumentDisplayPayload::withCamelCaseAliases([
             'name' => DocumentDisplayPayload::nullIfEmpty($user->name),
-            'title' => DocumentDisplayPayload::nullIfEmpty($user->department ?? ucwords(str_replace('_', ' ', (string) ($user->role ?? '')))),
+            'title' => DocumentDisplayPayload::nullIfEmpty($user->department ?? ucwords(str_replace('_', ' ', (string) ($user->scmRole() ?? '')))),
             'signature_url' => SignatureUrls::forUser($user),
             'signed_at' => $signedAt ? Carbon::parse($signedAt)->toIso8601String() : null,
         ]);

@@ -44,7 +44,7 @@ class StorePriceComparisonsRequest extends FormRequest
         $user = $this->user();
 
         return $user !== null
-            && in_array($user->role, ['procurement_manager', 'procurement', 'supply_chain_director', 'admin'], true);
+            && in_array($user->scmRole(), ['procurement_manager', 'procurement', 'supply_chain_director', 'admin'], true);
     }
 
     public function rules(): array

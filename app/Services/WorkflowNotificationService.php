@@ -54,7 +54,7 @@ class WorkflowNotificationService
         if ($stage === 'supply_chain_director_review' || ($srf->origin ?? null) === 'fleet_dashboard') {
             $emails = $emails->merge(
                 User::query()
-                    ->whereIn('role', ['supply_chain_director', 'supply_chain'])
+                    ->whereIn('supply_chain_role', ['supply_chain_director', 'supply_chain'])
                     ->whereNotNull('email')
                     ->pluck('email')
             );
@@ -62,7 +62,7 @@ class WorkflowNotificationService
 
         $emails = $emails->merge(
             User::query()
-                ->whereIn('role', ['logistics_manager', 'logistics_officer'])
+                ->whereIn('supply_chain_role', ['logistics_manager', 'logistics_officer'])
                 ->whereNotNull('email')
                 ->pluck('email')
         );
@@ -266,7 +266,7 @@ class WorkflowNotificationService
 
     private function getEmailsByRoles(array $roles): array
     {
-        return User::whereIn('role', $roles)
+        return User::whereIn('supply_chain_role', $roles)
             ->whereNotNull('email')
             ->pluck('email')
             ->unique()

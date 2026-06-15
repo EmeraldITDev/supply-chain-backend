@@ -26,7 +26,7 @@ class QuotationController extends Controller
         // If user is a vendor, only show their quotations
         $isVendor = false;
         $vendor = null;
-        if ($user && ($user->role === 'vendor' || (method_exists($user, 'hasRole') && $user->hasRole('vendor')))) {
+        if ($user && ($user->scmRole() === 'vendor' || (method_exists($user, 'hasRole') && $user->hasRole('vendor')))) {
             $isVendor = true;
             // Get vendor from user
             if ($user->vendor_id) {
@@ -142,7 +142,7 @@ class QuotationController extends Controller
     {
         $user = $request->user();
 
-        if (! $user || ! in_array($user->role, ['procurement', 'procurement_manager', 'admin'], true)) {
+        if (! $user || ! in_array($user->scmRole(), ['procurement', 'procurement_manager', 'admin'], true)) {
             return response()->json([
                 'success' => false,
                 'error' => 'Only procurement managers can save quotation evaluations',
@@ -619,7 +619,7 @@ class QuotationController extends Controller
         $user = $request->user();
 
         // Check permission (procurement or admin)
-        if (!in_array($user->role, ['procurement', 'admin'])) {
+        if (!in_array($user->scmRole(), ['procurement', 'admin'])) {
             return response()->json([
                 'success' => false,
                 'error' => 'Insufficient permissions',
@@ -696,7 +696,7 @@ class QuotationController extends Controller
         $user = $request->user();
 
         // Check permission - procurement managers can reject quotations
-        if (!in_array($user->role, ['procurement', 'procurement_manager', 'admin'])) {
+        if (!in_array($user->scmRole(), ['procurement', 'procurement_manager', 'admin'])) {
             return response()->json([
                 'success' => false,
                 'error' => 'Only procurement managers can reject quotations',
@@ -821,7 +821,7 @@ class QuotationController extends Controller
         $user = $request->user();
 
         // Only Procurement Manager can request revision
-        if (!in_array($user->role, ['procurement', 'procurement_manager', 'admin'])) {
+        if (!in_array($user->scmRole(), ['procurement', 'procurement_manager', 'admin'])) {
             return response()->json([
                 'success' => false,
                 'error' => 'Unauthorized. Only Procurement Managers can request revisions.',
@@ -883,7 +883,7 @@ class QuotationController extends Controller
 
         // Verify user is a vendor - check both direct role field and Spatie roles
         $isVendor = false;
-        if ($user->role === 'vendor') {
+        if ($user->scmRole() === 'vendor') {
             $isVendor = true;
         } elseif (method_exists($user, 'hasRole') && $user->hasRole('vendor')) {
             $isVendor = true;
@@ -973,7 +973,7 @@ class QuotationController extends Controller
         $user = $request->user();
 
         // Authorization check - only procurement can close
-        if (!in_array($user->role, ['procurement_manager', 'procurement', 'admin'])) {
+        if (!in_array($user->scmRole(), ['procurement_manager', 'procurement', 'admin'])) {
             return response()->json([
                 'success' => false,
                 'error' => 'Unauthorized',
@@ -1035,7 +1035,7 @@ class QuotationController extends Controller
         $user = $request->user();
 
         // Authorization check - only procurement can reopen
-        if (!in_array($user->role, ['procurement_manager', 'procurement', 'admin'])) {
+        if (!in_array($user->scmRole(), ['procurement_manager', 'procurement', 'admin'])) {
             return response()->json([
                 'success' => false,
                 'error' => 'Unauthorized',

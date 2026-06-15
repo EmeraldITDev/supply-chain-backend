@@ -15,7 +15,7 @@ class FinanceRoutingPermissionTest extends TestCase
     {
         config(['finance_ap.cutover_date' => '2026-01-01']);
 
-        $user = new User(['role' => 'finance']);
+        $user = new User(['supply_chain_role' => 'finance']);
         $mrf = new MRF([
             'created_at' => Carbon::parse('2026-06-01'),
             'workflow_state' => WorkflowStateService::STATE_PO_SIGNED,
@@ -32,7 +32,7 @@ class FinanceRoutingPermissionTest extends TestCase
     {
         config(['finance_ap.cutover_date' => '2026-06-01']);
 
-        $user = new User(['role' => 'finance']);
+        $user = new User(['supply_chain_role' => 'finance']);
         $mrf = new MRF([
             'created_at' => Carbon::parse('2026-05-01'),
             'status' => 'finance',

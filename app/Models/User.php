@@ -6,6 +6,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
+use App\Support\UserRoleNormalizer;
 use Laravel\Sanctum\HasApiTokens;
 use Spatie\Permission\Traits\HasRoles;
 
@@ -23,7 +24,7 @@ class User extends Authenticatable
         'name',
         'email',
         'password',
-        'role',
+        'supply_chain_role',
         'department',
         'designated_requisition_creator',
         'signature_image_path',
@@ -60,6 +61,25 @@ class User extends Authenticatable
             'must_change_password' => 'boolean',
             'designated_requisition_creator' => 'boolean',
         ];
+    }
+
+    /**
+     * Supply Chain role used for all SCM permission checks.
+     * Never reads or writes hris_role — that field is owned by HRIS.
+     */
+    public function scmRole(): ?string
+    {
+        return UserRoleNormalizer::supplyChainRole($this);
+    }
+
+    /**
+     * Check whether the user holds one of the given SCM roles.
+     *
+     * @param  string|list<string>  $roles
+     */
+    public function hasScmRole(string|array $roles): bool
+    {
+        return UserRoleNormalizer::hasSupplyChainRole($this, $roles);
     }
 
     /**
@@ -134,7 +154,8 @@ class User extends Authenticatable
         $byUserEmail = self::query()
             ->whereRaw('LOWER(TRIM(email)) = ?', [$normalized])
             ->where(function ($query) {
-                $query->where('role', 'vendor')
+                $query->where('supply_chain_role', 'vendor')
+                    ->orWhere('role', 'vendor')
                     ->orWhereHas('roles', function ($q) {
                         $q->where('name', 'vendor');
                     });
@@ -163,7 +184,8 @@ class User extends Authenticatable
         return self::query()
             ->where('vendor_id', $vendor->id)
             ->where(function ($query) {
-                $query->where('role', 'vendor')
+                $query->where('supply_chain_role', 'vendor')
+                    ->orWhere('role', 'vendor')
                     ->orWhereHas('roles', function ($q) {
                         $q->where('name', 'vendor');
                     });

@@ -32,7 +32,7 @@ class GrnPdfServiceTest extends TestCase
             'name' => 'Asuku Onukaba',
             'email' => 'asuku.onukaba@emeraldcfze.com',
             'phone' => '08121573451',
-            'role' => 'procurement_manager',
+            'supply_chain_role' => 'procurement_manager',
             'department' => 'Technical Specialist',
         ]);
 

@@ -33,7 +33,7 @@ class PriceComparisonController extends Controller
         $user = $request->user();
         $allowed = ['procurement_manager', 'procurement', 'supply_chain_director', 'admin'];
 
-        if (!$user || !in_array($user->role, $allowed, true)) {
+        if (!$user || !in_array($user->scmRole(), $allowed, true)) {
             return response()->json([
                 'success' => false,
                 'error' => 'Insufficient permissions',

@@ -94,7 +94,7 @@ class AuthController extends ApiController
         ], [
             'name' => $request->vendor_name,
             'password' => Hash::make(Str::random(24)),
-            'role' => 'vendor',
+            'supply_chain_role' => 'vendor',
             'vendor_id' => $vendor->id,
         ]);
 
