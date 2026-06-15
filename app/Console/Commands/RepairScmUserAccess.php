@@ -68,7 +68,9 @@ class RepairScmUserAccess extends Command
 
                 if (! UserRoleNormalizer::hasSupplyChainLoginAccess($fresh)) {
                     $stillBlocked++;
-                    $this->warn("Still blocked after repair: {$fresh->email} supply_chain_role={$fresh->scmRole()}");
+                    $spatie = implode(', ', UserRoleNormalizer::spatieScmRoleCandidates($fresh));
+                    $inferred = UserRoleNormalizer::inferCanonicalRoleFromProfile($fresh);
+                    $this->warn("Still blocked after repair: {$fresh->email} supply_chain_role={$fresh->supply_chain_role} hris_role={$fresh->hris_role} spatie=[{$spatie}] inferred={$inferred}");
                 }
             }
         });

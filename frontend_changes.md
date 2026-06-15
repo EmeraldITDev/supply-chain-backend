@@ -108,7 +108,9 @@ Run: `php artisan migrate`
 
 Migration `2026_06_15_120000_separate_hris_and_supply_chain_roles` adds columns and copies existing `role` → `supply_chain_role`.
 
-Repair command (optional): `php artisan scm:repair-user-access` — normalizes `supply_chain_role` and syncs Spatie roles.
+Repair command (optional): `php artisan scm:repair-user-access` — relocates HRIS-only roles (e.g. `corporate_hr`) from `supply_chain_role` → `hris_role`, recovers SCM role from Spatie/legacy/profile, and syncs Spatie.
+
+If a user still shows as blocked after repair, set their SCM role explicitly via User Management (`supply_chain_role`).
 
 ---
 

@@ -119,4 +119,31 @@ class UserRoleNormalizerTest extends TestCase
 
         $this->assertSame('finance', UserRoleNormalizer::supplyChainRole($user));
     }
+
+    public function test_hris_only_role_in_supply_chain_role_is_ignored_at_read_time(): void
+    {
+        $user = new User([
+            'supply_chain_role' => 'corporate_hr',
+            'role' => 'procurement_manager',
+        ]);
+
+        $this->assertSame('procurement_manager', UserRoleNormalizer::supplyChainRole($user));
+    }
+
+    public function test_is_hris_only_role_detects_corporate_hr(): void
+    {
+        $this->assertTrue(UserRoleNormalizer::isHrisOnlyRole('corporate_hr'));
+        $this->assertFalse(UserRoleNormalizer::isHrisOnlyRole('procurement_manager'));
+    }
+
+    public function test_resolve_scm_role_defaults_employee_for_hris_linked_staff(): void
+    {
+        $user = new User([
+            'hris_role' => 'corporate_hr',
+            'supply_chain_role' => null,
+            'employee_id' => 99,
+        ]);
+
+        $this->assertSame('employee', UserRoleNormalizer::resolveScmRoleForRepair($user));
+    }
 }

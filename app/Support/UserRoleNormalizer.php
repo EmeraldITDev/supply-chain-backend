@@ -47,6 +47,22 @@ class UserRoleNormalizer
         'vendor',
     ];
 
+    /**
+     * HRIS-only role keys that must live on hris_role, never supply_chain_role.
+     * When found on supply_chain_role (legacy shared-column contamination), repair
+     * relocates them to hris_role and recovers the SCM role from other sources.
+     *
+     * @var list<string>
+     */
+    public const HRIS_ONLY_ROLES = [
+        'corporate_hr',
+        'hr_officer',
+        'human_resources',
+        'hr_admin',
+        'hr_specialist',
+        'people_operations',
+    ];
+
     /** @var list<string> */
     private const EMPLOYEE_JOB_TITLES = [
         'Procurement Manager',
@@ -112,12 +128,12 @@ class UserRoleNormalizer
     public static function supplyChainRole(User $user): ?string
     {
         $role = $user->supply_chain_role ?? null;
-        if ($role !== null && trim((string) $role) !== '') {
+        if ($role !== null && trim((string) $role) !== '' && ! self::isHrisOnlyRole($role)) {
             return (string) $role;
         }
 
         $legacy = $user->getAttribute('role');
-        if ($legacy !== null && trim((string) $legacy) !== '') {
+        if ($legacy !== null && trim((string) $legacy) !== '' && ! self::isHrisOnlyRole($legacy)) {
             return (string) $legacy;
         }
 
@@ -140,6 +156,56 @@ class UserRoleNormalizer
         );
 
         return in_array($role, $allowed, true);
+    }
+
+    public static function isHrisOnlyRole(?string $role): bool
+    {
+        $normalized = self::normalize($role);
+        if ($normalized === null) {
+            return false;
+        }
+
+        return in_array($normalized, self::HRIS_ONLY_ROLES, true);
+    }
+
+    /**
+     * True when the role key is a recognised SCM role (not HRIS-only).
+     */
+    public static function isValidScmRoleKey(?string $role): bool
+    {
+        $normalized = self::normalize($role);
+        if ($normalized === null || self::isHrisOnlyRole($normalized)) {
+            return false;
+        }
+
+        if (in_array($normalized, self::SCM_LOGIN_ROLES, true)) {
+            return true;
+        }
+
+        return self::roleKeywordGrantsAccess($normalized);
+    }
+
+    /**
+     * @return list<string>
+     */
+    public static function spatieScmRoleCandidates(User $user): array
+    {
+        if (! method_exists($user, 'getRoleNames')) {
+            return [];
+        }
+
+        $keys = [];
+        try {
+            foreach ($user->getRoleNames() as $name) {
+                $normalized = self::normalize((string) $name);
+                if ($normalized !== null && self::isValidScmRoleKey($normalized)) {
+                    $keys[] = $normalized;
+                }
+            }
+        } catch (\Throwable) {
+        }
+
+        return array_values(array_unique($keys));
     }
 
     /**
@@ -271,19 +337,19 @@ class UserRoleNormalizer
 
     /**
      * Persist canonical supply_chain_role and align Spatie role assignment.
-     * Never writes hris_role or the legacy role column.
+     * Relocates HRIS-only roles from supply_chain_role → hris_role when contaminated.
+     * Never writes the legacy role column.
      */
     public static function repairUserAccess(User $user): bool
     {
         $changed = false;
-        $canonical = self::normalize(self::supplyChainRole($user));
 
-        if ($canonical === null || ! self::hasSupplyChainLoginAccess($user)) {
-            $inferred = self::inferCanonicalRoleFromProfile($user);
-            if ($inferred !== null) {
-                $canonical = $inferred;
-            }
+        if (self::relocateHrisRoleContamination($user)) {
+            $changed = true;
+            $user = $user->fresh();
         }
+
+        $canonical = self::resolveScmRoleForRepair($user);
 
         if ($canonical !== null && $canonical !== self::supplyChainRole($user)) {
             $user->supply_chain_role = $canonical;
@@ -296,6 +362,65 @@ class UserRoleNormalizer
         }
 
         return $changed;
+    }
+
+    /**
+     * Move HRIS-only values out of supply_chain_role into hris_role.
+     */
+    public static function relocateHrisRoleContamination(User $user): bool
+    {
+        $scmRaw = $user->supply_chain_role ?? null;
+        if ($scmRaw === null || trim((string) $scmRaw) === '') {
+            return false;
+        }
+
+        if (! self::isHrisOnlyRole($scmRaw)) {
+            return false;
+        }
+
+        $hrisKey = self::normalize($scmRaw);
+        $updates = ['supply_chain_role' => null];
+
+        if (empty($user->hris_role) && $hrisKey !== null) {
+            $updates['hris_role'] = $hrisKey;
+        }
+
+        $user->update($updates);
+
+        return true;
+    }
+
+    /**
+     * Best-effort SCM role recovery after HRIS contamination or missing data.
+     */
+    public static function resolveScmRoleForRepair(User $user): ?string
+    {
+        $current = self::normalize(self::supplyChainRole($user));
+        if ($current !== null && self::isValidScmRoleKey($current)) {
+            return $current;
+        }
+
+        foreach (self::spatieScmRoleCandidates($user) as $spatieRole) {
+            return $spatieRole;
+        }
+
+        $legacy = self::normalize($user->getAttribute('role'));
+        if ($legacy !== null && self::isValidScmRoleKey($legacy)) {
+            return $legacy;
+        }
+
+        $inferred = self::inferCanonicalRoleFromProfile($user);
+        if ($inferred !== null) {
+            return $inferred;
+        }
+
+        // HRIS role was wrongly on supply_chain_role; user is linked to HR employee
+        // but may still need baseline SCM access (e.g. submit MRFs).
+        if (! empty($user->employee_id) && self::isHrisOnlyRole($user->hris_role)) {
+            return 'employee';
+        }
+
+        return null;
     }
 
     public static function syncSpatieRole(User $user, ?string $canonical = null): void

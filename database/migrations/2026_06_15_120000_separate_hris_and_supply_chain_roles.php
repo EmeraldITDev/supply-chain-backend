@@ -19,12 +19,35 @@ return new class extends Migration
         });
 
         // Backfill SCM roles from the legacy shared column. HRIS owns hris_role separately.
+        // Skip HRIS-only values — those belong on hris_role, not supply_chain_role.
         DB::table('users')
             ->whereNull('supply_chain_role')
             ->whereNotNull('role')
             ->where('role', '!=', '')
+            ->whereNotIn('role', [
+                'corporate_hr',
+                'hr_officer',
+                'human_resources',
+                'hr_admin',
+                'hr_specialist',
+                'people_operations',
+            ])
             ->update([
                 'supply_chain_role' => DB::raw('role'),
+            ]);
+
+        DB::table('users')
+            ->whereNull('hris_role')
+            ->whereIn('role', [
+                'corporate_hr',
+                'hr_officer',
+                'human_resources',
+                'hr_admin',
+                'hr_specialist',
+                'people_operations',
+            ])
+            ->update([
+                'hris_role' => DB::raw('role'),
             ]);
     }
 
