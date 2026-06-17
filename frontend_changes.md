@@ -504,7 +504,10 @@ Every authenticated staff member, regardless of department or role, can browse *
         "scheduledDepartureAt": "2026-06-20T08:00:00Z",
         "scheduledArrivalAt": "2026-06-20T18:00:00Z",
         "status": "submitted",
+        "displayStatus": "approved",
+        "displayStatusLabel": "Approved",
         "logisticsTripId": 87,
+        "linkedTripStatus": "scheduled",
         "viewer": { "isInvolved": false, "canManage": false, "readOnly": true }
       }
     ],
@@ -513,7 +516,11 @@ Every authenticated staff member, regardless of department or role, can browse *
 }
 ```
 
-**Distinct from** `GET /api/trip-requests` — that endpoint still returns the Logistics Manager's pending queue (default `status=submitted`) for managers, and only own/passenger requests for regular staff. Use `/trip-requests/all` for the general browsing list.
+**`displayStatus`** (use this for the list status column, not raw `status`): resolves the request's own state combined with the linked logistics trip's operational progress. Values: `draft`, `pending` (submitted, awaiting LM), `approved` (confirmed, trip scheduled), `in_progress`, `completed`, `rejected`. `displayStatusLabel` is the title-cased version. Raw `status`/`workflow_stage` and `linkedTripStatus` are still included for advanced use.
+
+**Distinct from** `GET /api/trip-requests` — that endpoint still returns the Logistics Manager's **actionable** pending queue and only own/passenger requests for regular staff. Use `/trip-requests/all` for the general browsing list.
+
+**LM pending inbox semantics:** `GET /api/trip-requests` (or `?status=submitted`) for a logistics role now returns only requests **still awaiting first action** (`status=submitted` AND `workflow_stage=trip_request`). Once a request is confirmed (advances to `logistics_review`) or rejected (`cancelled`), it automatically drops out of the pending panel — so approved/rejected requests no longer linger in the LM's queue. Pass an explicit non-pending `status` (e.g. `?status=cancelled`) to query those subsets.
 
 ### Detail endpoints relaxed to read-only org-wide
 These now allow **any authenticated user** to read (mutating actions remain gated separately):

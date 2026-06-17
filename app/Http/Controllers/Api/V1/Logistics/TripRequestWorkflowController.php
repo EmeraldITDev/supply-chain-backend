@@ -51,10 +51,16 @@ class TripRequestWorkflowController extends ApiController
             ->orderByDesc('created_at');
 
         if ($isLogisticsInbox) {
-            if ($request->filled('status')) {
-                $query->where('status', $request->status);
+            $statusFilter = strtolower((string) $request->input('status'));
+
+            if ($statusFilter !== '' && ! in_array($statusFilter, ['submitted', 'pending'], true)) {
+                $query->where('status', $statusFilter);
             } else {
-                $query->where('status', Trip::STATUS_SUBMITTED);
+                // Pending approval inbox: submitted requests still awaiting the first logistics
+                // action. Once confirmed (workflow_stage advances) or rejected (status cancelled)
+                // they drop out so the queue stays focused on actionable items.
+                $query->where('status', Trip::STATUS_SUBMITTED)
+                    ->where('workflow_stage', Trip::WORKFLOW_TRIP_REQUEST);
             }
         } else {
             $query->where(function ($q) use ($user) {
@@ -841,9 +847,15 @@ class TripRequestWorkflowController extends ApiController
         $canDelete = $viewer && $this->isDeletableDraft($trip) && (int) $trip->created_by === (int) $viewer->id;
         $logisticsTripId = $trip->logisticsTripIdFromMetadata();
 
+        $linkedTrip = $logisticsTripId
+            ? Trip::with(['vehicle', 'driver'])->find($logisticsTripId)
+            : null;
+
         $requester = $trip->relationLoaded('creator') ? $trip->creator : null;
         $canManage = $this->isLogisticsInternal($viewer);
         $isInvolved = $this->isInvolved($viewer, $trip);
+
+        $displayStatus = $this->resolveDisplayStatus($trip, $linkedTrip);
 
         $payload = [
             'id' => $trip->id,
@@ -888,6 +900,10 @@ class TripRequestWorkflowController extends ApiController
             'workflowStage' => $trip->workflow_stage,
             'workflow_stage' => $trip->workflow_stage,
             'status' => $trip->status,
+            'displayStatus' => $displayStatus,
+            'display_status' => $displayStatus,
+            'displayStatusLabel' => $this->displayStatusLabel($displayStatus),
+            'display_status_label' => $this->displayStatusLabel($displayStatus),
             'approvalStatus' => $trip->approval_status,
             'createdBy' => $trip->created_by,
             'createdAt' => $trip->created_at?->toIso8601String(),
@@ -923,16 +939,50 @@ class TripRequestWorkflowController extends ApiController
             ];
         }
 
-        if ($logisticsTripId) {
-            $linkedTrip = Trip::with(['vehicle', 'driver'])->find($logisticsTripId);
-            if ($linkedTrip) {
-                $payload['vehicle'] = $linkedTrip->vehicle;
-                $payload['driver'] = $linkedTrip->driver;
-                $payload = array_merge($payload, $linkedTrip->driverApiFields());
-            }
+        if ($linkedTrip) {
+            $payload['vehicle'] = $linkedTrip->vehicle;
+            $payload['driver'] = $linkedTrip->driver;
+            $payload['linkedTripStatus'] = $linkedTrip->status;
+            $payload['linked_trip_status'] = $linkedTrip->status;
+            $payload = array_merge($payload, $linkedTrip->driverApiFields());
         }
 
         return $payload;
+    }
+
+    /**
+     * Resolve a single user-facing status for the org-wide trips list, combining the request's
+     * own state with the linked logistics trip's operational progress once confirmed.
+     */
+    private function resolveDisplayStatus(Trip $trip, ?Trip $linkedTrip): string
+    {
+        if (strtolower((string) $trip->status) === Trip::STATUS_CANCELLED) {
+            return 'rejected';
+        }
+
+        if ($linkedTrip) {
+            return match (strtolower((string) $linkedTrip->status)) {
+                Trip::STATUS_COMPLETED, Trip::STATUS_CLOSED => 'completed',
+                Trip::STATUS_IN_PROGRESS => 'in_progress',
+                Trip::STATUS_CANCELLED => 'rejected',
+                default => 'approved',
+            };
+        }
+
+        if ($this->isDeletableDraft($trip)) {
+            return 'draft';
+        }
+
+        if (strtolower((string) $trip->status) === Trip::STATUS_SUBMITTED) {
+            return 'pending';
+        }
+
+        return (string) $trip->status;
+    }
+
+    private function displayStatusLabel(string $status): string
+    {
+        return ucwords(str_replace('_', ' ', $status));
     }
 
     /**
