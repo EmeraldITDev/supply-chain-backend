@@ -2,17 +2,18 @@
 
 namespace App\Http\Controllers\Api\V1\Logistics;
 
-use App\Mail\TripExternalPassengerConfirmedMail;
+use App\Models\Logistics\Journey;
 use App\Models\Logistics\Trip;
 use App\Models\User;
+use App\Services\Logistics\TripCommentService;
+use App\Services\Logistics\TripRequestNotificationService;
 use App\Services\Logistics\TripRequestProgressTrackerService;
 use App\Services\TripRequestWorkflowService;
 use App\Support\ExternalPassengerRequest;
 use App\Support\PassengerEligibility;
 use App\Support\TripBookingRules;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
 
@@ -21,16 +22,24 @@ class TripRequestWorkflowController extends ApiController
     public function __construct(
         private TripRequestWorkflowService $workflow,
         private TripRequestProgressTrackerService $progressTracker,
+        private TripRequestNotificationService $tripRequestNotifications,
+        private TripCommentService $commentService,
     ) {
     }
 
     /**
-     * List trip requests for the authenticated staff user (creator or passenger).
+     * List trip requests for staff (own requests) or logistics inbox (all pending).
      */
     public function index(Request $request)
     {
         $user = $request->user();
-        if (! $user || ! PassengerEligibility::canCreateTripRequest($user)) {
+        if (! $user) {
+            return $this->error('Unauthenticated', 'UNAUTHENTICATED', 401);
+        }
+
+        $isLogisticsInbox = $this->isLogisticsInternal($user);
+
+        if (! $isLogisticsInbox && ! PassengerEligibility::canCreateTripRequest($user)) {
             return $this->error('You are not allowed to view trip requests', 'FORBIDDEN', 403);
         }
 
@@ -38,14 +47,23 @@ class TripRequestWorkflowController extends ApiController
 
         $query = Trip::query()
             ->where('trip_code', 'like', 'TRQ-%')
-            ->where(function ($q) use ($user) {
-                $q->where('created_by', $user->id)
-                    ->orWhereJsonContains('passenger_user_ids', $user->id);
-            })
             ->orderByDesc('created_at');
 
-        if ($request->filled('status')) {
-            $query->where('status', $request->status);
+        if ($isLogisticsInbox) {
+            if ($request->filled('status')) {
+                $query->where('status', $request->status);
+            } else {
+                $query->where('status', Trip::STATUS_SUBMITTED);
+            }
+        } else {
+            $query->where(function ($q) use ($user) {
+                $q->where('created_by', $user->id)
+                    ->orWhereJsonContains('passenger_user_ids', $user->id);
+            });
+
+            if ($request->filled('status')) {
+                $query->where('status', $request->status);
+            }
         }
 
         $paginator = $query->paginate($perPage);
@@ -181,6 +199,10 @@ class TripRequestWorkflowController extends ApiController
             ]);
         }
 
+        $isDraft = $request->boolean('save_as_draft')
+            || $request->boolean('saveAsDraft')
+            || $request->boolean('isDraft');
+
         $trip = Trip::create([
             'trip_code' => 'TRQ-' . now()->format('Ymd') . '-' . Str::upper(Str::random(6)),
             'title' => 'Trip request: ' . $request->destination,
@@ -191,19 +213,17 @@ class TripRequestWorkflowController extends ApiController
             'scheduled_arrival_at' => $request->scheduled_arrival_at,
             'passenger_user_ids' => $request->passenger_user_ids,
             'external_passengers' => ExternalPassengerRequest::resolve($request),
-            'status' => Trip::STATUS_DRAFT,
+            'status' => $isDraft ? Trip::STATUS_DRAFT : Trip::STATUS_SUBMITTED,
             'workflow_stage' => Trip::WORKFLOW_TRIP_REQUEST,
-            'approval_status' => 'draft',
+            'approval_status' => $isDraft ? 'draft' : 'submitted',
             'trip_type' => Trip::TYPE_PERSONNEL,
             'booking_scope' => $bookingScope,
             'created_by' => $user->id,
         ]);
 
-        $this->workflow->advance(
-            $trip,
-            Trip::WORKFLOW_TRIP_REQUEST,
-            "New trip request {$trip->trip_code} submitted by {$user->name}"
-        );
+        if (! $isDraft) {
+            $this->tripRequestNotifications->notifySubmitted($trip, $user);
+        }
 
         return $this->success([
             'trip' => $this->presentTripRequest($trip->load(['creator']), includeProgressSummary: true, viewer: $user),
@@ -300,13 +320,122 @@ class TripRequestWorkflowController extends ApiController
     }
 
     /**
-     * Logistics manager confirms trip details; notifies external passengers by email.
+     * Logistics manager approves a trip request, assigns vehicle/driver, and creates a linked logistics trip.
      */
     public function confirm(Request $request, int $id)
     {
         $user = $request->user();
-        if (! $user || ! in_array($user->scmRole(), ['logistics_manager', 'logistics_officer', 'admin'], true)) {
+        if (! $user || ! $this->isLogisticsInternal($user)) {
             return $this->error('Only logistics managers can confirm trip requests', 'FORBIDDEN', 403);
+        }
+
+        $tripRequest = Trip::with('creator')->find($id);
+        if (! $tripRequest || ! str_starts_with((string) $tripRequest->trip_code, 'TRQ-')) {
+            return $this->error('Trip request not found', 'NOT_FOUND', 404);
+        }
+
+        $metadata = is_array($tripRequest->metadata) ? $tripRequest->metadata : [];
+        $existingLogisticsTripId = $metadata['logistics_trip_id'] ?? $metadata['logisticsTripId'] ?? null;
+
+        if ($existingLogisticsTripId) {
+            $logisticsTrip = Trip::with(['vendor', 'vehicle', 'driver'])->find($existingLogisticsTripId);
+
+            return $this->success([
+                'trip' => $this->presentTripRequest($tripRequest, includeProgressSummary: true, viewer: $user),
+                'logistics_trip_id' => (int) $existingLogisticsTripId,
+                'logisticsTripId' => (int) $existingLogisticsTripId,
+                'logisticsTrip' => $logisticsTrip,
+                'message' => 'Trip request was already confirmed',
+            ]);
+        }
+
+        if ($tripRequest->status === Trip::STATUS_CANCELLED) {
+            return $this->error('Cannot confirm a rejected trip request', 'INVALID_STATE', 422);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'vehicle_id' => 'required|exists:logistics_vehicles,id',
+            'driver_type' => 'required|in:internal,external',
+            'driver_user_id' => 'required_if:driver_type,internal|nullable|integer|exists:users,id',
+            'external_driver' => 'required_if:driver_type,external|nullable|array',
+            'external_driver.name' => 'required_if:driver_type,external|nullable|string|max:255',
+            'external_driver.phone' => 'nullable|string|max:50',
+            'external_driver.email' => 'nullable|email|max:255',
+            'notes' => 'nullable|string|max:1000',
+        ]);
+
+        if ($validator->fails()) {
+            return $this->error('Validation failed', 'VALIDATION_ERROR', 422, $validator->errors()->toArray());
+        }
+
+        $driverType = (string) $request->input('driver_type');
+        $driverUserId = $driverType === 'internal' ? (int) $request->input('driver_user_id') : null;
+        $externalDriver = $driverType === 'external' ? $request->input('external_driver') : null;
+
+        $logisticsTrip = DB::transaction(function () use ($tripRequest, $user, $request, $metadata, $driverUserId, $externalDriver) {
+            $logisticsTrip = Trip::create([
+                'trip_code' => 'TRIP-' . now()->format('Ymd') . '-' . Str::upper(Str::random(6)),
+                'title' => $tripRequest->title ?? ('Trip: ' . $tripRequest->destination),
+                'purpose' => $tripRequest->purpose,
+                'origin' => $tripRequest->origin,
+                'destination' => $tripRequest->destination,
+                'scheduled_departure_at' => $tripRequest->scheduled_departure_at,
+                'scheduled_arrival_at' => $tripRequest->scheduled_arrival_at,
+                'passenger_user_ids' => $tripRequest->passenger_user_ids,
+                'external_passengers' => $tripRequest->external_passengers,
+                'booking_scope' => $tripRequest->booking_scope,
+                'trip_type' => Trip::TYPE_PERSONNEL,
+                'status' => Trip::STATUS_SCHEDULED,
+                'vehicle_id' => (int) $request->input('vehicle_id'),
+                'driver_user_id' => $driverUserId,
+                'external_driver' => $externalDriver,
+                'notes' => $request->input('notes'),
+                'created_by' => $user->id,
+                'metadata' => [
+                    'trip_request_id' => $tripRequest->id,
+                    'trip_request_code' => $tripRequest->trip_code,
+                ],
+            ]);
+
+            $tripRequest->metadata = array_merge($metadata, [
+                'logistics_confirmed_at' => now()->toIso8601String(),
+                'logistics_confirmed_by' => $user->id,
+                'logistics_trip_id' => $logisticsTrip->id,
+            ]);
+            $tripRequest->workflow_stage = Trip::WORKFLOW_LOGISTICS_REVIEW;
+            $tripRequest->status = Trip::STATUS_SUBMITTED;
+            $tripRequest->updated_by = $user->id;
+            $tripRequest->save();
+
+            Journey::create([
+                'trip_id' => $logisticsTrip->id,
+                'status' => Journey::STATUS_NOT_STARTED,
+                'created_by' => $user->id,
+            ]);
+
+            return $logisticsTrip;
+        });
+
+        $logisticsTrip->load(['vendor', 'vehicle', 'driver']);
+        $this->tripRequestNotifications->notifyConfirmed($tripRequest->fresh(['creator']), $logisticsTrip, $user);
+
+        return $this->success([
+            'trip' => $this->presentTripRequest($tripRequest->fresh(['creator']), includeProgressSummary: true, viewer: $user),
+            'logistics_trip_id' => $logisticsTrip->id,
+            'logisticsTripId' => $logisticsTrip->id,
+            'logisticsTrip' => $logisticsTrip,
+            'message' => 'Trip request confirmed; logistics trip and journey created',
+        ]);
+    }
+
+    /**
+     * Logistics manager rejects a pending trip request.
+     */
+    public function reject(Request $request, int $id)
+    {
+        $user = $request->user();
+        if (! $user || ! $this->isLogisticsInternal($user)) {
+            return $this->error('Only logistics managers can reject trip requests', 'FORBIDDEN', 403);
         }
 
         $trip = Trip::with('creator')->find($id);
@@ -314,52 +443,93 @@ class TripRequestWorkflowController extends ApiController
             return $this->error('Trip request not found', 'NOT_FOUND', 404);
         }
 
-        $metadata = is_array($trip->metadata) ? $trip->metadata : [];
-        if (! empty($metadata['logistics_confirmed_at'])) {
+        if ($trip->status === Trip::STATUS_CANCELLED) {
             return $this->success([
                 'trip' => $this->presentTripRequest($trip, includeProgressSummary: true, viewer: $user),
-                'message' => 'Trip request was already confirmed',
+                'message' => 'Trip request was already rejected',
             ]);
         }
 
-        $metadata['logistics_confirmed_at'] = now()->toIso8601String();
-        $metadata['logistics_confirmed_by'] = $user->id;
-        $trip->metadata = $metadata;
-        $trip->workflow_stage = Trip::WORKFLOW_LOGISTICS_REVIEW;
+        $metadata = is_array($trip->metadata) ? $trip->metadata : [];
+        if (! empty($metadata['logistics_trip_id'])) {
+            return $this->error('Cannot reject a trip request that has already been confirmed', 'INVALID_STATE', 422);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'reason' => 'nullable|string|max:1000',
+        ]);
+
+        if ($validator->fails()) {
+            return $this->error('Validation failed', 'VALIDATION_ERROR', 422, $validator->errors()->toArray());
+        }
+
+        $reason = $request->input('reason');
+        $trip->status = Trip::STATUS_CANCELLED;
+        $trip->metadata = array_merge($metadata, [
+            'rejected_at' => now()->toIso8601String(),
+            'rejected_by' => $user->id,
+            'rejection_reason' => $reason,
+        ]);
         $trip->updated_by = $user->id;
         $trip->save();
 
         $requester = $trip->creator ?? User::find($trip->created_by);
         if ($requester) {
-            foreach ($trip->external_passengers ?? [] as $passenger) {
-                if (empty($passenger['email'])) {
-                    continue;
-                }
-                try {
-                    Mail::to($passenger['email'])->send(
-                        new TripExternalPassengerConfirmedMail($trip, $passenger, $requester)
-                    );
-                } catch (\Throwable $e) {
-                    Log::warning('Failed to email external trip passenger', [
-                        'trip_id' => $trip->id,
-                        'email' => $passenger['email'],
-                        'error' => $e->getMessage(),
-                    ]);
-                }
-            }
+            $this->tripRequestNotifications->notifyRejected($trip, $requester, $reason);
         }
-
-        $this->workflow->notifyStage(
-            $trip,
-            'trip_request_confirmed',
-            "Trip request {$trip->trip_code} confirmed by logistics",
-            ['procurement_manager', 'procurement']
-        );
 
         return $this->success([
             'trip' => $this->presentTripRequest($trip->fresh(['creator']), includeProgressSummary: true, viewer: $user),
-            'message' => 'Trip request confirmed; external passengers notified where applicable',
+            'message' => 'Trip request rejected',
         ]);
+    }
+
+    public function getComments(Request $request, int $id)
+    {
+        $trip = Trip::find($id);
+        if (! $trip) {
+            return $this->error('Trip request not found', 'NOT_FOUND', 404);
+        }
+
+        if (! $this->canAccessTripRequest($request->user(), $trip)) {
+            return $this->error('You are not allowed to view comments on this trip request', 'FORBIDDEN', 403);
+        }
+
+        return $this->success([
+            'comments' => $this->commentService->listForTrip($trip),
+        ]);
+    }
+
+    public function addComment(Request $request, int $id)
+    {
+        $user = $request->user();
+        if (! $user) {
+            return $this->error('Unauthenticated', 'UNAUTHENTICATED', 401);
+        }
+
+        $trip = Trip::find($id);
+        if (! $trip) {
+            return $this->error('Trip request not found', 'NOT_FOUND', 404);
+        }
+
+        if (! $this->canAccessTripRequest($user, $trip)) {
+            return $this->error('You are not allowed to comment on this trip request', 'FORBIDDEN', 403);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'body' => 'required|string|max:5000',
+        ]);
+
+        if ($validator->fails()) {
+            return $this->error('Validation failed', 'VALIDATION_ERROR', 422, $validator->errors()->toArray());
+        }
+
+        $comment = $this->commentService->add($trip, $user, (string) $request->input('body'));
+        $this->tripRequestNotifications->notifyComment($trip, $user, $comment->body, true);
+
+        return $this->success([
+            'comment' => $this->commentService->present($comment),
+        ], 201);
     }
 
     /**
@@ -375,7 +545,7 @@ class TripRequestWorkflowController extends ApiController
     public function convertToLogisticsRequest(Request $request, int $id)
     {
         $user = $request->user();
-        if (! $user || ! in_array($user->scmRole(), ['logistics_manager', 'logistics_officer', 'admin'], true)) {
+        if (! $user || ! $this->isLogisticsInternal($user)) {
             return $this->error('Only logistics managers can convert trip requests', 'FORBIDDEN', 403);
         }
 
@@ -536,6 +706,15 @@ class TripRequestWorkflowController extends ApiController
         return $this->success(['trip' => $trip]);
     }
 
+    private function isLogisticsInternal(?User $user): bool
+    {
+        if (! $user) {
+            return false;
+        }
+
+        return in_array($user->scmRole(), ['logistics_manager', 'logistics_officer', 'admin'], true);
+    }
+
     private function canAccessTripRequest(?User $user, Trip $trip): bool
     {
         if (! $user) {
@@ -575,9 +754,14 @@ class TripRequestWorkflowController extends ApiController
     {
         $scope = $trip->booking_scope;
         $canDelete = $viewer && $this->isDeletableDraft($trip) && (int) $trip->created_by === (int) $viewer->id;
+        $logisticsTripId = $trip->logisticsTripIdFromMetadata();
 
         $payload = [
             'id' => $trip->id,
+            'tripId' => $logisticsTripId,
+            'trip_id' => $logisticsTripId,
+            'logisticsTripId' => $logisticsTripId,
+            'logistics_trip_id' => $logisticsTripId,
             'tripCode' => $trip->trip_code,
             'trip_code' => $trip->trip_code,
             'title' => $trip->title,
@@ -635,6 +819,15 @@ class TripRequestWorkflowController extends ApiController
                 'currentStepLabel' => $current['label'] ?? null,
                 'progressPercent' => $progress['progressPercent'],
             ];
+        }
+
+        if ($logisticsTripId) {
+            $linkedTrip = Trip::with(['vehicle', 'driver'])->find($logisticsTripId);
+            if ($linkedTrip) {
+                $payload['vehicle'] = $linkedTrip->vehicle;
+                $payload['driver'] = $linkedTrip->driver;
+                $payload = array_merge($payload, $linkedTrip->driverApiFields());
+            }
         }
 
         return $payload;

@@ -147,6 +147,9 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/trips/{id}/assign-vendor', [LogisticsTripController::class, 'assignVendor'])->middleware($logisticsInternalRoles);
     Route::put('/trips/{id}/assign-vendor', [LogisticsTripController::class, 'assignVendor'])->middleware($logisticsInternalRoles);
     Route::post('/trips/{id}/cancel', [LogisticsTripController::class, 'cancel'])->middleware($logisticsInternalRoles);
+    Route::post('/trips/{id}/assign-resources', [LogisticsTripController::class, 'assignResources'])->middleware($logisticsInternalRoles);
+    Route::get('/trips/{id}/comments', [LogisticsTripController::class, 'getComments']);
+    Route::post('/trips/{id}/comments', [LogisticsTripController::class, 'addComment']);
     Route::post('/trips/bulk-upload', [LogisticsTripController::class, 'bulkUpload'])->middleware($logisticsInternalRoles);
 
     Route::post('/trips/{tripId}/invite-vendors', [LogisticsTripVendorSubmissionController::class, 'inviteVendors'])->middleware($logisticsInternalRoles);
@@ -185,6 +188,7 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // Journey routes - forward to logistics controllers
     Route::post('/journeys', [LogisticsJourneyController::class, 'store'])->middleware($logisticsInternalRoles);
+    Route::get('/journeys', [LogisticsJourneyController::class, 'index'])->middleware($logisticsInternalRoles);
     Route::get('/journeys/{trip_id}', [LogisticsJourneyController::class, 'listByTrip'])->middleware($logisticsInternalRoles);
     Route::put('/journeys/{id}', [LogisticsJourneyController::class, 'update'])->middleware($logisticsInternalRoles);
     Route::post('/journeys/{id}/update-status', [LogisticsJourneyController::class, 'updateStatus'])->middleware('role:vendor,logistics_officer,logistics_manager,procurement_manager,supply_chain_director,admin');
@@ -217,6 +221,9 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/trip-requests', [TripRequestWorkflowController::class, 'store']);
     Route::put('/trip-requests/{id}', [TripRequestWorkflowController::class, 'update']);
     Route::post('/trip-requests/{id}/confirm', [TripRequestWorkflowController::class, 'confirm']);
+    Route::post('/trip-requests/{id}/reject', [TripRequestWorkflowController::class, 'reject']);
+    Route::get('/trip-requests/{id}/comments', [TripRequestWorkflowController::class, 'getComments']);
+    Route::post('/trip-requests/{id}/comments', [TripRequestWorkflowController::class, 'addComment']);
     Route::get('/trip-requests/{id}', [TripRequestWorkflowController::class, 'show']);
     Route::get('/trip-requests/{id}/progress-tracker', [TripRequestWorkflowController::class, 'progressTracker']);
     Route::delete('/trip-requests/{id}', [TripRequestWorkflowController::class, 'destroy']);
@@ -572,10 +579,14 @@ Route::prefix('v1/logistics')->group(function () {
         Route::patch('/trips/{id}', [LogisticsTripController::class, 'update'])->middleware($logisticsInternalRoles);
         Route::post('/trips/{id}/assign-vendor', [LogisticsTripController::class, 'assignVendor'])->middleware($logisticsInternalRoles);
         Route::post('/trips/{id}/cancel', [LogisticsTripController::class, 'cancel'])->middleware($logisticsInternalRoles);
+        Route::post('/trips/{id}/assign-resources', [LogisticsTripController::class, 'assignResources'])->middleware($logisticsInternalRoles);
+        Route::get('/trips/{id}/comments', [LogisticsTripController::class, 'getComments']);
+        Route::post('/trips/{id}/comments', [LogisticsTripController::class, 'addComment']);
         Route::post('/trips/bulk-upload', [LogisticsTripController::class, 'bulkUpload'])->middleware($logisticsInternalRoles);
 
         // Journey Management
         Route::post('/journeys', [LogisticsJourneyController::class, 'store'])->middleware($logisticsInternalRoles);
+        Route::get('/journeys', [LogisticsJourneyController::class, 'index'])->middleware($logisticsInternalRoles);
         Route::get('/journeys/{trip_id}', [LogisticsJourneyController::class, 'listByTrip'])->middleware($logisticsInternalRoles);
         Route::put('/journeys/{id}', [LogisticsJourneyController::class, 'update'])->middleware($logisticsInternalRoles);
         Route::post('/journeys/{id}/update-status', [LogisticsJourneyController::class, 'updateStatus'])->middleware('role:vendor,logistics_officer,logistics_manager,procurement_manager,supply_chain_director,admin');
@@ -651,6 +662,9 @@ Route::prefix('v1/logistics')->group(function () {
         Route::post('/trip-requests', [TripRequestWorkflowController::class, 'store']);
         Route::put('/trip-requests/{id}', [TripRequestWorkflowController::class, 'update']);
         Route::post('/trip-requests/{id}/confirm', [TripRequestWorkflowController::class, 'confirm']);
+        Route::post('/trip-requests/{id}/reject', [TripRequestWorkflowController::class, 'reject']);
+        Route::get('/trip-requests/{id}/comments', [TripRequestWorkflowController::class, 'getComments']);
+        Route::post('/trip-requests/{id}/comments', [TripRequestWorkflowController::class, 'addComment']);
         Route::get('/trip-requests/{id}', [TripRequestWorkflowController::class, 'show']);
         Route::get('/trip-requests/{id}/progress-tracker', [TripRequestWorkflowController::class, 'progressTracker']);
         Route::delete('/trip-requests/{id}', [TripRequestWorkflowController::class, 'destroy']);
@@ -719,6 +733,9 @@ Route::prefix('logistics')->group(function () {
         Route::post('/trips/{id}/assign-vendor', [LogisticsTripController::class, 'assignVendor'])->middleware($logisticsInternalRoles);
         Route::put('/trips/{id}/assign-vendor', [LogisticsTripController::class, 'assignVendor'])->middleware($logisticsInternalRoles);
         Route::post('/trips/{id}/cancel', [LogisticsTripController::class, 'cancel'])->middleware($logisticsInternalRoles);
+        Route::post('/trips/{id}/assign-resources', [LogisticsTripController::class, 'assignResources'])->middleware($logisticsInternalRoles);
+        Route::get('/trips/{id}/comments', [LogisticsTripController::class, 'getComments']);
+        Route::post('/trips/{id}/comments', [LogisticsTripController::class, 'addComment']);
         Route::post('/trips/bulk-upload', [LogisticsTripController::class, 'bulkUpload'])->middleware($logisticsInternalRoles);
 
         Route::post('/trips/{tripId}/invite-vendors', [LogisticsTripVendorSubmissionController::class, 'inviteVendors'])->middleware($logisticsInternalRoles);
@@ -756,6 +773,7 @@ Route::prefix('logistics')->group(function () {
         Route::get('/trips/{tripId}/jcc/pdf', [LogisticsJobCompletionCertificateController::class, 'generatePdf'])->middleware($logisticsInternalRoles);
 
         Route::post('/journeys', [LogisticsJourneyController::class, 'store'])->middleware($logisticsInternalRoles);
+        Route::get('/journeys', [LogisticsJourneyController::class, 'index'])->middleware($logisticsInternalRoles);
         Route::get('/journeys/{trip_id}', [LogisticsJourneyController::class, 'listByTrip'])->middleware($logisticsInternalRoles);
         Route::put('/journeys/{id}', [LogisticsJourneyController::class, 'update'])->middleware($logisticsInternalRoles);
         Route::post('/journeys/{id}/update-status', [LogisticsJourneyController::class, 'updateStatus'])->middleware('role:vendor,logistics_officer,logistics_manager,procurement_manager,supply_chain_director,admin');
@@ -796,6 +814,9 @@ Route::prefix('logistics')->group(function () {
         Route::post('/trip-requests', [TripRequestWorkflowController::class, 'store']);
         Route::put('/trip-requests/{id}', [TripRequestWorkflowController::class, 'update']);
         Route::post('/trip-requests/{id}/confirm', [TripRequestWorkflowController::class, 'confirm']);
+        Route::post('/trip-requests/{id}/reject', [TripRequestWorkflowController::class, 'reject']);
+        Route::get('/trip-requests/{id}/comments', [TripRequestWorkflowController::class, 'getComments']);
+        Route::post('/trip-requests/{id}/comments', [TripRequestWorkflowController::class, 'addComment']);
         Route::get('/trip-requests/{id}', [TripRequestWorkflowController::class, 'show']);
         Route::get('/trip-requests/{id}/progress-tracker', [TripRequestWorkflowController::class, 'progressTracker']);
         Route::delete('/trip-requests/{id}', [TripRequestWorkflowController::class, 'destroy']);

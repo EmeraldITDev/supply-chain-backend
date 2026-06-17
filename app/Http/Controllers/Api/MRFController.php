@@ -551,6 +551,14 @@ class MRFController extends Controller
                 'item_name' => $item->item_name,
                 'quantity' => $item->quantity,
                 'unit' => $item->unit,
+                'unitPrice' => $item->unit_price !== null ? (float) $item->unit_price : null,
+                'unit_price' => $item->unit_price !== null ? (float) $item->unit_price : null,
+                'totalPrice' => $item->total_price !== null
+                    ? (float) $item->total_price
+                    : ($item->unit_price !== null ? (float) $item->unit_price * (float) $item->quantity : null),
+                'total_price' => $item->total_price !== null
+                    ? (float) $item->total_price
+                    : ($item->unit_price !== null ? (float) $item->unit_price * (float) $item->quantity : null),
                 'budgetAmount' => $item->budget_amount !== null ? (float) $item->budget_amount : null,
                 'budget_amount' => $item->budget_amount !== null ? (float) $item->budget_amount : null,
                 'quotedAmount' => $item->quoted_amount !== null ? (float) $item->quoted_amount : null,
@@ -562,6 +570,14 @@ class MRFController extends Controller
                 'item_name' => $item->item_name,
                 'quantity' => $item->quantity,
                 'unit' => $item->unit,
+                'unitPrice' => $item->unit_price !== null ? (float) $item->unit_price : null,
+                'unit_price' => $item->unit_price !== null ? (float) $item->unit_price : null,
+                'totalPrice' => $item->total_price !== null
+                    ? (float) $item->total_price
+                    : ($item->unit_price !== null ? (float) $item->unit_price * (float) $item->quantity : null),
+                'total_price' => $item->total_price !== null
+                    ? (float) $item->total_price
+                    : ($item->unit_price !== null ? (float) $item->unit_price * (float) $item->quantity : null),
                 'budgetAmount' => $item->budget_amount !== null ? (float) $item->budget_amount : null,
                 'budget_amount' => $item->budget_amount !== null ? (float) $item->budget_amount : null,
                 'quotedAmount' => $item->quoted_amount !== null ? (float) $item->quoted_amount : null,

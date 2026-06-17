@@ -18,6 +18,31 @@ class JourneyController extends ApiController
     {
     }
 
+    public function index(Request $request)
+    {
+        $perPage = min(100, max(1, (int) $request->input('limit', $request->input('per_page', 20))));
+
+        $query = Journey::query()
+            ->with(['trip' => fn ($q) => $q->with(['vehicle', 'driver', 'vendor'])])
+            ->orderByDesc('created_at');
+
+        if ($request->filled('status')) {
+            $query->where('status', $request->status);
+        }
+
+        $paginator = $query->paginate($perPage);
+
+        return $this->success([
+            'journeys' => $paginator->items(),
+            'pagination' => [
+                'total' => $paginator->total(),
+                'per_page' => $paginator->perPage(),
+                'current_page' => $paginator->currentPage(),
+                'last_page' => $paginator->lastPage(),
+            ],
+        ]);
+    }
+
     public function store(StoreJourneyRequest $request)
     {
         $data = $request->validated();

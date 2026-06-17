@@ -9,8 +9,10 @@ use App\Mail\POGeneratedMail;
 use App\Mail\QuotationSubmittedMail;
 use App\Mail\RFQSentMail;
 use App\Mail\SRFCreatedMail;
+use App\Mail\TripRequestSubmittedMail;
 use App\Mail\VendorQuoteApprovedMail;
 use App\Mail\VendorSelectedMail;
+use App\Models\Logistics\Trip;
 use App\Models\MRF;
 use App\Models\Quotation;
 use App\Models\RFQ;
@@ -40,6 +42,16 @@ class WorkflowNotificationService
                 mailableFactory: static fn () => new MRFCreatedMail($mrf)
             );
         }
+    }
+
+    public function notifyTripRequestSubmittedToEmail(Trip $trip, User $requester, string $email): void
+    {
+        $this->deliverMailable(
+            event: 'trip_request_submitted',
+            recipient: $email,
+            modelId: $trip->trip_code,
+            mailableFactory: static fn () => new TripRequestSubmittedMail($trip, $requester)
+        );
     }
 
     public function notifySRFSubmitted(SRF $srf): void

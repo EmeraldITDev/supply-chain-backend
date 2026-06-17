@@ -16,6 +16,7 @@ class Trip extends Model
     protected $table = 'logistics_trips';
 
     public const STATUS_DRAFT = 'draft';
+    public const STATUS_SUBMITTED = 'submitted';
     public const STATUS_SCHEDULED = 'scheduled';
     public const STATUS_VENDOR_ASSIGNED = 'vendor_assigned';
     public const STATUS_IN_PROGRESS = 'in_progress';
@@ -181,5 +182,18 @@ class Trip extends Model
     public function jobCompletionCertificate()
     {
         return $this->hasOne(JobCompletionCertificate::class, 'trip_id');
+    }
+
+    public function comments(): HasMany
+    {
+        return $this->hasMany(TripComment::class, 'trip_id');
+    }
+
+    public function logisticsTripIdFromMetadata(): ?int
+    {
+        $metadata = is_array($this->metadata) ? $this->metadata : [];
+        $id = $metadata['logistics_trip_id'] ?? $metadata['logisticsTripId'] ?? null;
+
+        return $id !== null ? (int) $id : null;
     }
 }

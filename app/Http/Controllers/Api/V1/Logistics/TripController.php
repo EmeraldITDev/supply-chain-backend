@@ -8,9 +8,12 @@ use App\Http\Requests\Logistics\StoreTripRequest;
 use App\Http\Requests\Logistics\UpdateTripRequest;
 use App\Models\Logistics\Trip;
 use App\Models\Logistics\Vehicle;
+use App\Models\User;
 use App\Models\Vendor;
 use App\Services\Logistics\AuditLogger;
 use App\Services\Logistics\IdempotencyService;
+use App\Services\Logistics\TripCommentService;
+use App\Services\Logistics\TripRequestNotificationService;
 use App\Services\Logistics\TripSchedulingNotificationService;
 use App\Services\Logistics\TripService;
 use App\Services\Logistics\TripVendorSubmissionService;
@@ -18,6 +21,7 @@ use App\Services\Logistics\FleetVehicleAssignmentGuard;
 use App\Services\Logistics\UploadService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
 
 class TripController extends ApiController
@@ -29,6 +33,8 @@ class TripController extends ApiController
         private UploadService $uploadService,
         private TripVendorSubmissionService $submissionService,
         private TripSchedulingNotificationService $schedulingNotifications,
+        private TripCommentService $commentService,
+        private TripRequestNotificationService $tripRequestNotifications,
     ) {
     }
 
@@ -168,16 +174,6 @@ class TripController extends ApiController
         return $this->success([
             'trip' => $this->presentTrip($trip),
         ]);
-    }
-
-    /**
-     * @return array<string, mixed>
-     */
-    private function presentTrip(Trip $trip): array
-    {
-        $trip->loadMissing(['vendor', 'vehicle', 'driver']);
-
-        return array_merge($trip->toArray(), $trip->driverApiFields());
     }
 
     /**
@@ -342,6 +338,104 @@ class TripController extends ApiController
         ], count($errors) > 0 ? 207 : 201);
     }
 
+    public function assignResources(Request $request, int $id)
+    {
+        $trip = Trip::find($id);
+
+        if (! $trip) {
+            return $this->error('Trip not found', 'NOT_FOUND', 404);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'vehicle_id' => 'required|exists:logistics_vehicles,id',
+            'driver_type' => 'required|in:internal,external',
+            'driver_user_id' => 'required_if:driver_type,internal|nullable|integer|exists:users,id',
+            'external_driver' => 'required_if:driver_type,external|nullable|array',
+            'external_driver.name' => 'required_if:driver_type,external|nullable|string|max:255',
+            'external_driver.phone' => 'nullable|string|max:50',
+            'external_driver.email' => 'nullable|email|max:255',
+            'notes' => 'nullable|string|max:1000',
+        ]);
+
+        if ($validator->fails()) {
+            return $this->error('Validation failed', 'VALIDATION_ERROR', 422, $validator->errors()->toArray());
+        }
+
+        $driverType = (string) $request->input('driver_type');
+        $previousDriverUserId = $trip->driver_user_id ? (int) $trip->driver_user_id : null;
+        $previousExternalDriver = is_array($trip->external_driver) ? $trip->external_driver : null;
+
+        $trip->vehicle_id = (int) $request->input('vehicle_id');
+        $trip->driver_user_id = $driverType === 'internal' ? (int) $request->input('driver_user_id') : null;
+        $trip->external_driver = $driverType === 'external' ? $request->input('external_driver') : null;
+        if ($request->has('notes')) {
+            $trip->notes = $request->input('notes');
+        }
+        $trip->updated_by = $request->user()?->id;
+        $trip->save();
+        $trip->load(['vendor', 'vehicle', 'driver']);
+
+        $this->schedulingNotifications->notifyDriverReassignment(
+            $trip,
+            $previousDriverUserId,
+            $previousExternalDriver,
+            $trip->driver_user_id ? (int) $trip->driver_user_id : null,
+            is_array($trip->external_driver) ? $trip->external_driver : null,
+        );
+
+        return $this->success([
+            'trip' => $this->presentTrip($trip),
+        ]);
+    }
+
+    public function getComments(Request $request, int $id)
+    {
+        $trip = Trip::find($id);
+        if (! $trip) {
+            return $this->error('Trip not found', 'NOT_FOUND', 404);
+        }
+
+        if (! $this->canAccessTrip($request->user(), $trip)) {
+            return $this->error('You are not allowed to view comments on this trip', 'FORBIDDEN', 403);
+        }
+
+        return $this->success([
+            'comments' => $this->commentService->listForTrip($trip),
+        ]);
+    }
+
+    public function addComment(Request $request, int $id)
+    {
+        $user = $request->user();
+        if (! $user) {
+            return $this->error('Unauthenticated', 'UNAUTHENTICATED', 401);
+        }
+
+        $trip = Trip::find($id);
+        if (! $trip) {
+            return $this->error('Trip not found', 'NOT_FOUND', 404);
+        }
+
+        if (! $this->canAccessTrip($user, $trip)) {
+            return $this->error('You are not allowed to comment on this trip', 'FORBIDDEN', 403);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'body' => 'required|string|max:5000',
+        ]);
+
+        if ($validator->fails()) {
+            return $this->error('Validation failed', 'VALIDATION_ERROR', 422, $validator->errors()->toArray());
+        }
+
+        $comment = $this->commentService->add($trip, $user, (string) $request->input('body'));
+        $this->tripRequestNotifications->notifyComment($trip, $user, $comment->body, false);
+
+        return $this->success([
+            'comment' => $this->commentService->present($comment),
+        ], 201);
+    }
+
     public function cancel(int $id, Request $request)
     {
         $trip = Trip::find($id);
@@ -382,6 +476,39 @@ class TripController extends ApiController
         return $this->success([
             'message' => 'Trip deleted successfully',
         ]);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function presentTrip(Trip $trip): array
+    {
+        $trip->loadMissing(['vendor', 'vehicle', 'driver']);
+
+        return array_merge($trip->toArray(), $trip->driverApiFields());
+    }
+
+    private function canAccessTrip(?User $user, Trip $trip): bool
+    {
+        if (! $user) {
+            return false;
+        }
+
+        if (in_array($user->scmRole(), [
+            'logistics_manager', 'logistics_officer', 'procurement_manager', 'procurement',
+            'supply_chain_director', 'supply_chain', 'admin',
+        ], true)) {
+            return true;
+        }
+
+        if ((int) $trip->created_by === (int) $user->id) {
+            return true;
+        }
+
+        $passengers = $trip->passenger_user_ids ?? [];
+
+        return in_array($user->id, $passengers, true)
+            || (int) $trip->driver_user_id === (int) $user->id;
     }
     
 }
