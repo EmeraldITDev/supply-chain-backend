@@ -434,6 +434,29 @@ class PermissionService
     }
 
     /**
+     * Roles that may generate/upload GRN and manage delivery confirmation documents (JCC, waybill, etc.).
+     *
+     * @return list<string>
+     */
+    private function deliveryDocumentManagerRoles(): array
+    {
+        return [
+            'procurement',
+            'procurement_manager',
+            'supply_chain_director',
+            'supply_chain',
+            'logistics_manager',
+            'logistics',
+            'admin',
+        ];
+    }
+
+    private function canManageDeliveryDocuments(User $user): bool
+    {
+        return in_array($user->scmRole(), $this->deliveryDocumentManagerRoles(), true);
+    }
+
+    /**
      * Check if user can request GRN
      */
     public function canRequestGRN(User $user, MRF $mrf): bool
@@ -468,11 +491,11 @@ class PermissionService
     }
 
     /**
-     * Check if user can complete/upload GRN (Procurement only).
+     * Check if user can complete/upload GRN.
      */
     public function canCompleteGRN(User $user, MRF $mrf): bool
     {
-        if (! in_array($user->scmRole(), ['procurement', 'procurement_manager', 'admin'], true)) {
+        if (! $this->canManageDeliveryDocuments($user)) {
             return false;
         }
 
@@ -496,7 +519,7 @@ class PermissionService
             return $this->canCompleteGRN($user, $mrf);
         }
 
-        if (! in_array($user->scmRole(), ['procurement', 'procurement_manager', 'admin'], true)) {
+        if (! $this->canManageDeliveryDocuments($user)) {
             return false;
         }
 
@@ -513,7 +536,7 @@ class PermissionService
             return false;
         }
 
-        if (! in_array($user->scmRole(), ['procurement', 'procurement_manager', 'admin'], true)) {
+        if (! $this->canManageDeliveryDocuments($user)) {
             return false;
         }
 
@@ -762,11 +785,20 @@ class PermissionService
             'showDeliveryConfirmationPanel',
         ];
 
+        $deliveryDocumentFlags = [
+            'canGenerateGRN',
+            'canUploadGRN',
+            'canManageDeliveryConfirmation',
+            'canUploadWaybill',
+            'canUploadJcc',
+            'canUploadDeliveryConfirmation',
+        ];
+
         foreach ($actions as $key => $value) {
             if (! is_string($key) || ! str_starts_with($key, 'can')) {
                 continue;
             }
-            if (in_array($key, $readFlags, true)) {
+            if (in_array($key, $readFlags, true) || in_array($key, $deliveryDocumentFlags, true)) {
                 continue;
             }
             if (str_starts_with($key, 'canView') || str_starts_with($key, 'show')) {
@@ -786,6 +818,12 @@ class PermissionService
                 'view_finance_sync',
                 'view_grn',
                 'view_delivery_confirmation',
+                'generate_grn',
+                'upload_grn',
+                'manage_delivery_confirmation',
+                'upload_waybill',
+                'upload_jcc',
+                'upload_delivery_confirmation',
             ], true)
         )));
 

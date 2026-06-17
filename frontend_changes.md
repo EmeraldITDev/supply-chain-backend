@@ -567,7 +567,7 @@ Each detail payload includes a `viewer` block and top-level `canManage` / `readO
 
 ### Blocked for LM on procurement overview (403)
 
-All workflow mutations remain blocked: approve/reject MRF, generate/sign PO, GRN generate/upload, payment, price comparison `PUT`/`POST`, procurement document uploads, etc. LM may still **create MRFs** from logistics flows via `POST /api/mrfs` when not on the overview-only path.
+All workflow mutations remain blocked: approve/reject MRF, generate/sign PO, payment, price comparison `PUT`/`POST`, etc. **GRN preview/generate and JCC/waybill uploads** are allowed for LM when the MRF is at the correct workflow stage. LM may still **create MRFs** from logistics flows via `POST /api/mrfs`.
 
 ### Backend helper
 
