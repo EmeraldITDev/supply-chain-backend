@@ -185,7 +185,7 @@ class UserManagementController extends Controller
 
         $validator = Validator::make($request->all(), [
             'name' => 'required|string|max:255',
-            'email' => 'required|email|unique:users,email',
+            'email' => 'required|email',
             'supply_chain_role' => 'required_without:role|in:' . implode(',', self::ALLOWED_ROLES),
             'role' => 'required_without:supply_chain_role|in:' . implode(',', self::ALLOWED_ROLES),
             'department' => 'nullable|string|max:255',
@@ -204,6 +204,15 @@ class UserManagementController extends Controller
             ], 422);
         }
 
+        if (User::emailExistsCaseInsensitive($request->email)) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Validation failed',
+                'errors' => ['email' => ['The email has already been taken.']],
+                'code' => 'VALIDATION_ERROR',
+            ], 422);
+        }
+
         // Set admin flags based on SCM role
         $role = $supplyChainRole ?? $this->supplyChainRoleFromRequest($request);
         $isAdmin = $request->is_admin ?? false;
@@ -217,10 +226,10 @@ class UserManagementController extends Controller
 
         $newUser = User::create([
             'name' => $request->name,
-            'email' => $request->email,
+            'email' => User::normalizeEmail($request->email),
             'password' => Hash::make($request->password),
             'supply_chain_role' => $role,
-            'department' => $request->department,
+            'department' => DepartmentMatcher::storageLabel($request->department),
             'designated_requisition_creator' => (bool) $request->boolean('designated_requisition_creator', false),
             'is_admin' => $isAdmin,
             'can_manage_users' => $canManageUsers,
@@ -282,7 +291,7 @@ class UserManagementController extends Controller
 
         $validator = Validator::make($request->all(), [
             'name' => 'sometimes|string|max:255',
-            'email' => 'sometimes|email|unique:users,email,' . $id,
+            'email' => 'sometimes|email',
             'supply_chain_role' => 'required_without:role|in:' . implode(',', self::ALLOWED_ROLES),
             'role' => 'required_without:supply_chain_role|in:' . implode(',', self::ALLOWED_ROLES),
             'department' => 'nullable|string|max:255',
@@ -301,6 +310,15 @@ class UserManagementController extends Controller
             ], 422);
         }
 
+        if ($request->has('email') && User::emailExistsCaseInsensitive($request->email, (int) $id)) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Validation failed',
+                'errors' => ['email' => ['The email has already been taken.']],
+                'code' => 'VALIDATION_ERROR',
+            ], 422);
+        }
+
         $updateData = [];
 
         if ($request->has('name')) {
@@ -308,7 +326,7 @@ class UserManagementController extends Controller
         }
 
         if ($request->has('email')) {
-            $updateData['email'] = $request->email;
+            $updateData['email'] = User::normalizeEmail($request->email);
         }
 
         if ($request->has('supply_chain_role') || $request->has('role')) {
@@ -323,7 +341,7 @@ class UserManagementController extends Controller
         }
 
         if ($request->has('department')) {
-            $updateData['department'] = $request->department;
+            $updateData['department'] = DepartmentMatcher::storageLabel($request->department);
         }
 
         if ($request->has('password')) {

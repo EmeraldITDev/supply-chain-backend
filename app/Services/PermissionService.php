@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Support\ProcurementOverviewAccess;
 use App\Support\UserRoleNormalizer;
 use App\Models\Employee;
 use App\Models\User;
@@ -378,6 +379,10 @@ class PermissionService
      */
     public function canViewInvoices(User $user, MRF $mrf): bool
     {
+        if (ProcurementOverviewAccess::isProcurementOverviewOnly($user)) {
+            return true;
+        }
+
         if (in_array($user->scmRole(), ['procurement', 'procurement_manager', 'finance', 'finance_officer', 'admin'])) {
             $currentState = $mrf->workflow_state ?? WorkflowStateService::STATE_MRF_CREATED;
             return in_array($currentState, [
@@ -604,6 +609,10 @@ class PermissionService
      */
     public function canViewDocument(User $user, MRF $mrf, string $documentType): bool
     {
+        if (ProcurementOverviewAccess::isProcurementOverviewOnly($user)) {
+            return in_array($documentType, ProcurementOverviewAccess::readOnlyDocumentTypes(), true);
+        }
+
         // Executive, Procurement, Finance can view all documents
         if (in_array($user->scmRole(), ['executive', 'procurement', 'procurement_manager', 'finance', 'finance_officer', 'supply_chain_director', 'admin'])) {
             return true;
@@ -629,7 +638,7 @@ class PermissionService
         if ($isClosed) {
             $routing = app(FinanceRoutingService::class)->routingMeta($mrf);
 
-            return [
+            $actions = [
                 'usesFinanceAp' => $routing['usesFinanceAp'],
                 'financeRoute' => $routing['financeRoute'],
                 'cutoverDate' => $routing['cutoverDate'],
@@ -654,6 +663,12 @@ class PermissionService
                 'canUploadDeliveryConfirmation' => false,
                 'availableActions' => ['view'],
             ];
+
+            if (ProcurementOverviewAccess::isProcurementOverviewOnly($user)) {
+                return $this->applyProcurementOverviewReadOnly($actions);
+            }
+
+            return $actions;
         }
 
         $canManageDeliveryConfirmation = $this->canManageDeliveryConfirmation($user, $mrf);
@@ -724,7 +739,60 @@ class PermissionService
         if ($actions['canUploadDeliveryConfirmation']) $availableActions[] = 'upload_delivery_confirmation';
         
         $actions['availableActions'] = $availableActions;
-        
+
+        if (ProcurementOverviewAccess::isProcurementOverviewOnly($user)) {
+            return $this->applyProcurementOverviewReadOnly($actions);
+        }
+
+        return $actions;
+    }
+
+    /**
+     * Strip mutation rights for logistics_manager procurement overview (view-only).
+     *
+     * @param  array<string, mixed>  $actions
+     * @return array<string, mixed>
+     */
+    private function applyProcurementOverviewReadOnly(array $actions): array
+    {
+        $readFlags = [
+            'canViewInvoices',
+            'canViewFinanceSync',
+            'canViewGRN',
+            'showDeliveryConfirmationPanel',
+        ];
+
+        foreach ($actions as $key => $value) {
+            if (! is_string($key) || ! str_starts_with($key, 'can')) {
+                continue;
+            }
+            if (in_array($key, $readFlags, true)) {
+                continue;
+            }
+            if (str_starts_with($key, 'canView') || str_starts_with($key, 'show')) {
+                continue;
+            }
+            $actions[$key] = false;
+        }
+
+        $actions['readOnly'] = true;
+        $actions['isProcurementOverviewOnly'] = true;
+        $actions['canManageProcurement'] = false;
+        $actions['availableActions'] = array_values(array_unique(array_filter(
+            $actions['availableActions'] ?? ['view'],
+            fn (string $action) => in_array($action, [
+                'view',
+                'view_invoices',
+                'view_finance_sync',
+                'view_grn',
+                'view_delivery_confirmation',
+            ], true)
+        )));
+
+        if ($actions['availableActions'] === []) {
+            $actions['availableActions'] = ['view'];
+        }
+
         return $actions;
     }
 

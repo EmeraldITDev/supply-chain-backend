@@ -543,6 +543,38 @@ Each detail payload includes a `viewer` block and top-level `canManage` / `readO
 
 ---
 
+## 11. Procurement Overview — Logistics Manager (read-only)
+
+**Role:** `logistics_manager` (alias `logistics`)  
+**Frontend route:** `/procurement` — **Procurement Overview** (view-only; hide **Create PO** when `isProcurementOverviewOnly()`).
+
+### List + dashboard (must return **200**)
+
+| Method | Path | Notes |
+|--------|------|-------|
+| `GET` | `/api/mrfs` | Full org MRF list (no requester filter for LM) |
+| `GET` | `/api/srfs` | Full org SRF list by default; optional `?scope=logistics` or `?logistics_only=1` for fleet-scoped list |
+| `GET` | `/api/dashboard/procurement-manager` | Same payload as procurement manager; includes `readOnly`, `isProcurementOverviewOnly`, `canManageProcurement` flags |
+
+### Detail reads allowed
+
+- `GET /api/mrfs/{id}`, `full-details`, `progress-tracker`, `available-actions`
+- `GET /api/mrfs/{id}/price-comparisons`
+- `GET /api/srfs/{id}`, `progress-tracker`, line items
+- `GET` procurement documents, finance sync, delivery confirmation (existing read endpoints)
+
+`GET /api/mrfs/{id}/available-actions` returns `readOnly: true` and strips all mutation flags for LM.
+
+### Blocked for LM on procurement overview (403)
+
+All workflow mutations remain blocked: approve/reject MRF, generate/sign PO, GRN generate/upload, payment, price comparison `PUT`/`POST`, procurement document uploads, etc. LM may still **create MRFs** from logistics flows via `POST /api/mrfs` when not on the overview-only path.
+
+### Backend helper
+
+`App\Support\ProcurementOverviewAccess` mirrors frontend `src/utils/procurementAccess.ts`.
+
+---
+
 ## Migration Required (DevOps)
 
 ```bash

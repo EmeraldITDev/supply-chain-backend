@@ -25,6 +25,25 @@ class DepartmentMatcher
     }
 
     /**
+     * Canonical label for persisting a department on users/MRFs so "finance" and
+     * "Finance" resolve to the same stored value when possible.
+     */
+    public static function storageLabel(?string $label): ?string
+    {
+        $label = trim((string) $label);
+        if ($label === '') {
+            return null;
+        }
+
+        $row = self::resolveDepartmentCodeRow($label);
+        if ($row !== null) {
+            return (string) $row->department_name;
+        }
+
+        return mb_convert_case($label, MB_CASE_TITLE, 'UTF-8');
+    }
+
+    /**
      * Whether a user's department matches the department label from the settings UI / route.
      */
     public static function matches(?string $userDepartment, ?string $requestedDepartment): bool

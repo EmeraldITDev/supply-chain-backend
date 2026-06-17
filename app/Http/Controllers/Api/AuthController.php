@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\User;
 use App\Models\Employee;
+use App\Support\DepartmentMatcher;
 use App\Support\SignatureUrls;
 use App\Support\UserRoleNormalizer;
 use Illuminate\Http\Request;
@@ -34,7 +35,7 @@ class AuthController extends Controller
             'remember_me' => 'nullable|boolean',
         ]);
 
-        $user = User::with('employee')->where('email', $request->email)->first();
+        $user = User::with('employee')->findByEmailCaseInsensitive($request->email);
 
         if (!$user || !Hash::check($request->password, $user->password)) {
             throw ValidationException::withMessages([
@@ -207,7 +208,8 @@ class AuthController extends Controller
         }
 
         if ($request->has('department')) {
-            $updateData['department'] = $request->department;
+            $department = DepartmentMatcher::storageLabel($request->department);
+            $updateData['department'] = $department;
         }
 
         // If user has employee record, update it too
@@ -218,7 +220,7 @@ class AuthController extends Controller
                     $employee->update(['full_name' => $request->name]);
                 }
                 if ($request->has('department')) {
-                    $employee->update(['department' => $request->department]);
+                    $employee->update(['department' => $updateData['department'] ?? DepartmentMatcher::storageLabel($request->department)]);
                 }
             }
         }

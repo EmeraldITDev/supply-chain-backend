@@ -8,6 +8,7 @@ use App\Models\MRF;
 use App\Models\PriceComparison;
 use App\Models\Vendor;
 use App\Services\PaymentScheduleService;
+use App\Support\ProcurementOverviewAccess;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -31,7 +32,10 @@ class PriceComparisonController extends Controller
     private function ensureViewPermissions(Request $request): ?JsonResponse
     {
         $user = $request->user();
-        $allowed = ['procurement_manager', 'procurement', 'supply_chain_director', 'admin'];
+        $allowed = array_merge(
+            ['procurement_manager', 'procurement', 'supply_chain_director', 'admin'],
+            ProcurementOverviewAccess::OVERVIEW_ROLES,
+        );
 
         if (!$user || !in_array($user->scmRole(), $allowed, true)) {
             return response()->json([
@@ -83,6 +87,14 @@ class PriceComparisonController extends Controller
 
     public function bulkReplace(StorePriceComparisonsRequest $request, string $id): JsonResponse
     {
+        if (ProcurementOverviewAccess::isProcurementOverviewOnly($request->user())) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Procurement overview access is read-only',
+                'code' => 'FORBIDDEN',
+            ], 403);
+        }
+
         $mrf = $this->findMrfByAnyId($id);
         if (!$mrf) {
             return response()->json([

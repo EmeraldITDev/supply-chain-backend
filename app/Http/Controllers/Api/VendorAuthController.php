@@ -35,8 +35,8 @@ class VendorAuthController extends Controller
                 ], 422);
             }
 
-            // Find vendor by email
-            $vendor = Vendor::where('email', $request->email)->first();
+            // Find vendor by email (case-insensitive)
+            $vendor = Vendor::findByEmailCaseInsensitive($request->email);
 
             if (!$vendor) {
                 Log::warning('Vendor login failed: vendor not found', ['email' => $request->email]);

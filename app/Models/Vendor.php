@@ -124,6 +124,27 @@ class Vendor extends Model
         return "V{$newNumber}";
     }
 
+    public static function normalizeEmail(?string $email): string
+    {
+        return mb_strtolower(trim((string) $email));
+    }
+
+    public static function findByEmailCaseInsensitive(string $email): ?self
+    {
+        $normalized = self::normalizeEmail($email);
+        if ($normalized === '') {
+            return null;
+        }
+
+        return self::query()
+            ->where(function ($query) use ($normalized) {
+                $query->whereRaw('LOWER(TRIM(email)) = ?', [$normalized])
+                    ->orWhereRaw('LOWER(TRIM(COALESCE(contact_person_email, \'\'))) = ?', [$normalized]);
+            })
+            ->orderBy('id')
+            ->first();
+    }
+
     /**
      * Resolve the vendors row for a portal login (role vendor). Uses
      * users.vendor_id when set; otherwise matches approved/active vendor by

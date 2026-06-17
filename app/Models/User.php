@@ -72,6 +72,36 @@ class User extends Authenticatable
         return UserRoleNormalizer::supplyChainRole($this);
     }
 
+    public static function normalizeEmail(?string $email): string
+    {
+        return mb_strtolower(trim((string) $email));
+    }
+
+    public static function findByEmailCaseInsensitive(string $email): ?self
+    {
+        $normalized = self::normalizeEmail($email);
+        if ($normalized === '') {
+            return null;
+        }
+
+        return self::query()
+            ->whereRaw('LOWER(TRIM(email)) = ?', [$normalized])
+            ->first();
+    }
+
+    public static function emailExistsCaseInsensitive(string $email, ?int $ignoreUserId = null): bool
+    {
+        $normalized = self::normalizeEmail($email);
+        if ($normalized === '') {
+            return false;
+        }
+
+        return self::query()
+            ->whereRaw('LOWER(TRIM(email)) = ?', [$normalized])
+            ->when($ignoreUserId !== null, fn ($query) => $query->where('id', '!=', $ignoreUserId))
+            ->exists();
+    }
+
     /**
      * Check whether the user holds one of the given SCM roles.
      *
@@ -146,7 +176,7 @@ class User extends Authenticatable
      */
     public static function findVendorPortalUserByEmail(string $email): ?self
     {
-        $normalized = mb_strtolower(trim($email));
+        $normalized = self::normalizeEmail($email);
         if ($normalized === '') {
             return null;
         }

@@ -12,6 +12,7 @@ use App\Models\Vendor;
 use App\Models\VendorRegistration;
 use App\Services\Finance\FinanceRoutingService;
 use App\Services\WorkflowStateService;
+use App\Support\ProcurementOverviewAccess;
 use App\Support\UserRoleNormalizer;
 use App\Support\VendorCategoryDisplay;
 use Illuminate\Http\Request;
@@ -26,20 +27,12 @@ class DashboardController extends Controller
     {
         $user = $request->user();
 
-        // Check permission - allow procurement manager and executive-level roles
-        // Support both direct role column AND Spatie roles
-        $allowedRoles = [
-            'procurement_manager',
-            'procurement',           // allow test users with simple 'procurement' role
-            'supply_chain_director',
-            'supply_chain',          // alias for supply_chain_director
-            'executive',
-            'chairman',
-            'logistics_manager',
-            'logistics_officer',
-            'logistics',             // legacy; same access intent as logistics_manager
-            'admin',
-        ];
+        // Check permission - procurement managers, executives, and logistics overview roles
+        $allowedRoles = array_merge(
+            ProcurementOverviewAccess::MANAGEMENT_ROLES,
+            ProcurementOverviewAccess::OVERVIEW_ROLES,
+            ['logistics_officer'],
+        );
         
         $hasAllowedRole =
             (UserRoleNormalizer::supplyChainRole($user) !== null && in_array($user->scmRole(), $allowedRoles)) ||
@@ -175,6 +168,9 @@ class DashboardController extends Controller
             'pendingMRFs' => $pendingMRFs,
             'pendingSRFs' => $pendingSRFs,
             'pendingQuotations' => $pendingQuotations,
+            'readOnly' => ProcurementOverviewAccess::isProcurementOverviewOnly($user),
+            'isProcurementOverviewOnly' => ProcurementOverviewAccess::isProcurementOverviewOnly($user),
+            'canManageProcurement' => ! ProcurementOverviewAccess::isProcurementOverviewOnly($user),
         ]);
     }
 

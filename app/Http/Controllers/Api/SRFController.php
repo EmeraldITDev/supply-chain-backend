@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\SRF;
 use App\Models\Logistics\VehicleMaintenance;
+use App\Support\ProcurementOverviewAccess;
 use App\Services\FormattedIdGenerator;
 use App\Services\LineItemBudgetService;
 use App\Support\PaymentMilestoneRequest;
@@ -77,10 +78,22 @@ class SRFController extends Controller
             $query->where('requester_id', $user->id);
         }
 
-        // Logistics manager/officer see SRFs they originated plus all SRFs
-        // attached to the logistics department (so they can track the end-to-
-        // end progress of fleet/maintenance requests they initiated).
-        if ($user && in_array($user->scmRole(), ['logistics_manager', 'logistics_officer'], true)) {
+        // Logistics officer: scoped list for fleet / logistics department work.
+        // Logistics manager (procurement overview): full org list unless explicitly scoped.
+        $logisticsScope = $request->input('scope') === 'logistics' || $request->boolean('logistics_only');
+
+        if ($user && $user->scmRole() === 'logistics_officer') {
+            $logisticsDepartment = $user->department;
+            $query->where(function ($q) use ($user, $logisticsDepartment) {
+                $q->where('requester_id', $user->id)
+                  ->orWhere('service_type', 'like', 'Fleet%')
+                  ->orWhere('title', 'like', 'Fleet Maintenance SRF%');
+                if (!empty($logisticsDepartment)) {
+                    $q->orWhereRaw('LOWER(department) = ?', [strtolower((string) $logisticsDepartment)]);
+                }
+                $q->orWhereRaw('LOWER(department) LIKE ?', ['%logistics%']);
+            });
+        } elseif ($user && ProcurementOverviewAccess::isProcurementOverviewOnly($user) && $logisticsScope) {
             $logisticsDepartment = $user->department;
             $query->where(function ($q) use ($user, $logisticsDepartment) {
                 $q->where('requester_id', $user->id)

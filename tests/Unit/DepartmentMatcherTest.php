@@ -18,6 +18,18 @@ class DepartmentMatcherTest extends TestCase
         $this->assertTrue(DepartmentMatcher::matches('Human Resources', 'HR'));
     }
 
+    public function test_matches_case_insensitive_finance_department(): void
+    {
+        $this->assertTrue(DepartmentMatcher::matches('finance', 'Finance'));
+        $this->assertTrue(DepartmentMatcher::matches('FINANCE', 'finance'));
+    }
+
+    public function test_storage_label_normalizes_finance_casing(): void
+    {
+        $this->assertSame('Finance', DepartmentMatcher::storageLabel('finance'));
+        $this->assertSame('Finance', DepartmentMatcher::storageLabel('FINANCE'));
+    }
+
     public function test_rejects_unrelated_departments(): void
     {
         $this->assertFalse(DepartmentMatcher::matches('Finance', 'Human Resources'));

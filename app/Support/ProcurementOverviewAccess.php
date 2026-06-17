@@ -1,0 +1,69 @@
+<?php
+
+namespace App\Support;
+
+use App\Models\User;
+
+/**
+ * Logistics Manager procurement overview — read-only access to procurement dashboards
+ * and listings without workflow mutation rights.
+ */
+class ProcurementOverviewAccess
+{
+    /** Roles that may open /procurement (read-only overview). */
+    public const OVERVIEW_ROLES = [
+        'logistics_manager',
+        'logistics',
+    ];
+
+    /** Roles with full procurement management (not read-only). */
+    public const MANAGEMENT_ROLES = [
+        'procurement_manager',
+        'procurement',
+        'supply_chain_director',
+        'supply_chain',
+        'executive',
+        'chairman',
+        'admin',
+    ];
+
+    public static function isProcurementOverviewOnly(?User $user): bool
+    {
+        if (! $user) {
+            return false;
+        }
+
+        return in_array($user->scmRole(), self::OVERVIEW_ROLES, true);
+    }
+
+    public static function canAccessProcurementPage(?User $user): bool
+    {
+        if (! $user) {
+            return false;
+        }
+
+        $role = $user->scmRole();
+
+        return in_array($role, array_merge(self::MANAGEMENT_ROLES, self::OVERVIEW_ROLES), true)
+            || in_array($role, ['logistics_officer'], true);
+    }
+
+    /**
+     * @return list<string>
+     */
+    public static function readOnlyDocumentTypes(): array
+    {
+        return [
+            'mrf',
+            'grn',
+            'waybill',
+            'jcc',
+            'vendor_invoice',
+            'delivery_confirmation',
+            'pfi',
+            'po_pdf',
+            'signed_po',
+            'other',
+        ];
+    }
+}
