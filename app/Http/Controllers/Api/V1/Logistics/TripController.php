@@ -98,7 +98,7 @@ class TripController extends ApiController
         ]);
     }
 
-    public function show(int $id)
+    public function show(Request $request, int $id)
     {
         $trip = Trip::with(['vendor', 'vehicle', 'journeys', 'materials'])->find($id);
 
@@ -106,8 +106,26 @@ class TripController extends ApiController
             return $this->error('Trip not found', 'NOT_FOUND', 404);
         }
 
+        // Organization-wide read-only visibility: any authenticated staff member may view full
+        // trip detail. Mutating actions remain gated on their own endpoints; the `viewer`/`canManage`
+        // flags tell the client whether to render action controls.
+        $user = $request->user();
+        if (! $user) {
+            return $this->error('Unauthenticated', 'UNAUTHENTICATED', 401);
+        }
+
+        $canManage = $this->canManageTrip($user);
+
         return $this->success([
-            'trip' => $this->presentTrip($trip),
+            'trip' => array_merge($this->presentTrip($trip), [
+                'viewer' => [
+                    'isInvolved' => $this->canAccessTrip($user, $trip),
+                    'canManage' => $canManage,
+                    'readOnly' => ! $canManage,
+                ],
+                'canManage' => $canManage,
+                'readOnly' => ! $canManage,
+            ]),
         ]);
     }
 
@@ -395,12 +413,16 @@ class TripController extends ApiController
             return $this->error('Trip not found', 'NOT_FOUND', 404);
         }
 
-        if (! $this->canAccessTrip($request->user(), $trip)) {
-            return $this->error('You are not allowed to view comments on this trip', 'FORBIDDEN', 403);
+        // Organization-wide read-only visibility: any authenticated staff member may read the
+        // comment thread. Posting stays restricted to involved parties (addComment).
+        $user = $request->user();
+        if (! $user) {
+            return $this->error('Unauthenticated', 'UNAUTHENTICATED', 401);
         }
 
         return $this->success([
             'comments' => $this->commentService->listForTrip($trip),
+            'canComment' => $this->canAccessTrip($user, $trip),
         ]);
     }
 
@@ -486,6 +508,18 @@ class TripController extends ApiController
         $trip->loadMissing(['vendor', 'vehicle', 'driver']);
 
         return array_merge($trip->toArray(), $trip->driverApiFields());
+    }
+
+    private function canManageTrip(?User $user): bool
+    {
+        if (! $user) {
+            return false;
+        }
+
+        return in_array($user->scmRole(), [
+            'logistics_manager', 'logistics_officer', 'procurement_manager', 'procurement',
+            'supply_chain_director', 'supply_chain', 'admin',
+        ], true);
     }
 
     private function canAccessTrip(?User $user, Trip $trip): bool

@@ -141,7 +141,7 @@ Route::middleware('auth:sanctum')->group(function () {
     // Trip routes - forward to logistics controllers
     Route::post('/trips', [LogisticsTripController::class, 'store'])->middleware($logisticsInternalRoles);
     Route::get('/trips', [LogisticsTripController::class, 'index'])->middleware($logisticsInternalRoles);
-    Route::get('/trips/{id}', [LogisticsTripController::class, 'show'])->middleware($logisticsInternalRoles);
+    Route::get('/trips/{id}', [LogisticsTripController::class, 'show']);
     Route::put('/trips/{id}', [LogisticsTripController::class, 'update'])->middleware($logisticsInternalRoles);
     Route::patch('/trips/{id}', [LogisticsTripController::class, 'update'])->middleware($logisticsInternalRoles);
     Route::post('/trips/{id}/assign-vendor', [LogisticsTripController::class, 'assignVendor'])->middleware($logisticsInternalRoles);
@@ -217,6 +217,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::delete('/fleet/drivers/{driverId}/documents/{documentId}', [LogisticsFleetDriverDocumentController::class, 'destroy'])->middleware($logisticsInternalRoles);
     Route::delete('/fleet/drivers/{driverId}/documents', [LogisticsFleetDriverDocumentController::class, 'destroy'])->middleware($logisticsInternalRoles);
     Route::get('/trip-requests/booking-rules', [TripRequestWorkflowController::class, 'bookingRules']);
+    Route::get('/trip-requests/all', [TripRequestWorkflowController::class, 'allTrips']);
     Route::get('/trip-requests', [TripRequestWorkflowController::class, 'index']);
     Route::post('/trip-requests', [TripRequestWorkflowController::class, 'store']);
     Route::put('/trip-requests/{id}', [TripRequestWorkflowController::class, 'update']);
@@ -574,7 +575,7 @@ Route::prefix('v1/logistics')->group(function () {
         // Trip Management
         Route::post('/trips', [LogisticsTripController::class, 'store'])->middleware($logisticsInternalRoles);
         Route::get('/trips', [LogisticsTripController::class, 'index'])->middleware($logisticsInternalRoles);
-        Route::get('/trips/{id}', [LogisticsTripController::class, 'show'])->middleware($logisticsInternalRoles);
+        Route::get('/trips/{id}', [LogisticsTripController::class, 'show']);
         Route::put('/trips/{id}', [LogisticsTripController::class, 'update'])->middleware($logisticsInternalRoles);
         Route::patch('/trips/{id}', [LogisticsTripController::class, 'update'])->middleware($logisticsInternalRoles);
         Route::post('/trips/{id}/assign-vendor', [LogisticsTripController::class, 'assignVendor'])->middleware($logisticsInternalRoles);
@@ -658,6 +659,7 @@ Route::prefix('v1/logistics')->group(function () {
         Route::delete('/fleet/drivers/{driverId}/documents/{documentId}', [LogisticsFleetDriverDocumentController::class, 'destroy'])->middleware($logisticsInternalRoles);
         Route::delete('/fleet/drivers/{driverId}/documents', [LogisticsFleetDriverDocumentController::class, 'destroy'])->middleware($logisticsInternalRoles);
         Route::get('/trip-requests/booking-rules', [TripRequestWorkflowController::class, 'bookingRules']);
+        Route::get('/trip-requests/all', [TripRequestWorkflowController::class, 'allTrips']);
         Route::get('/trip-requests', [TripRequestWorkflowController::class, 'index']);
         Route::post('/trip-requests', [TripRequestWorkflowController::class, 'store']);
         Route::put('/trip-requests/{id}', [TripRequestWorkflowController::class, 'update']);
@@ -727,7 +729,7 @@ Route::prefix('logistics')->group(function () {
 
         Route::post('/trips', [LogisticsTripController::class, 'store'])->middleware($logisticsInternalRoles);
         Route::get('/trips', [LogisticsTripController::class, 'index'])->middleware($logisticsInternalRoles);
-        Route::get('/trips/{id}', [LogisticsTripController::class, 'show'])->middleware($logisticsInternalRoles);
+        Route::get('/trips/{id}', [LogisticsTripController::class, 'show']);
         Route::put('/trips/{id}', [LogisticsTripController::class, 'update'])->middleware($logisticsInternalRoles);
         Route::patch('/trips/{id}', [LogisticsTripController::class, 'update'])->middleware($logisticsInternalRoles);
         Route::post('/trips/{id}/assign-vendor', [LogisticsTripController::class, 'assignVendor'])->middleware($logisticsInternalRoles);
@@ -810,6 +812,7 @@ Route::prefix('logistics')->group(function () {
         Route::delete('/fleet/drivers/{driverId}/documents/{documentId}', [LogisticsFleetDriverDocumentController::class, 'destroy'])->middleware($logisticsInternalRoles);
         Route::delete('/fleet/drivers/{driverId}/documents', [LogisticsFleetDriverDocumentController::class, 'destroy'])->middleware($logisticsInternalRoles);
         Route::get('/trip-requests/booking-rules', [TripRequestWorkflowController::class, 'bookingRules']);
+        Route::get('/trip-requests/all', [TripRequestWorkflowController::class, 'allTrips']);
         Route::get('/trip-requests', [TripRequestWorkflowController::class, 'index']);
         Route::post('/trip-requests', [TripRequestWorkflowController::class, 'store']);
         Route::put('/trip-requests/{id}', [TripRequestWorkflowController::class, 'update']);

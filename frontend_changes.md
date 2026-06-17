@@ -480,6 +480,62 @@ Same as §2: each line item in `items[]` must include `budgetAmount` on create.
 
 ---
 
+## 10. Organization-Wide Trip Visibility (NEW — all staff, read-only)
+
+Every authenticated staff member, regardless of department or role, can browse **all** trip requests across the organization (pending and approved) and open any trip's full detail read-only. This is a **separate** view from the Logistics Manager's actionable pending-approval inbox.
+
+### GET `/api/trip-requests/all` (NEW)
+**Roles:** Any authenticated user.
+
+**Query params (optional):** `status`, `q` (search destination/origin/purpose/code), `limit`/`per_page`.
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "trips": [
+      {
+        "id": 42,
+        "tripCode": "TRQ-20260617-AB12CD",
+        "requesterName": "Frank Procurement",
+        "requesterDepartment": "Procurement",
+        "destination": "Lagos Airport",
+        "scheduledDepartureAt": "2026-06-20T08:00:00Z",
+        "scheduledArrivalAt": "2026-06-20T18:00:00Z",
+        "status": "submitted",
+        "logisticsTripId": 87,
+        "viewer": { "isInvolved": false, "canManage": false, "readOnly": true }
+      }
+    ],
+    "pagination": { "total": 25, "per_page": 50, "current_page": 1, "last_page": 1 }
+  }
+}
+```
+
+**Distinct from** `GET /api/trip-requests` — that endpoint still returns the Logistics Manager's pending queue (default `status=submitted`) for managers, and only own/passenger requests for regular staff. Use `/trip-requests/all` for the general browsing list.
+
+### Detail endpoints relaxed to read-only org-wide
+These now allow **any authenticated user** to read (mutating actions remain gated separately):
+- `GET /api/trip-requests/{id}` — full request detail
+- `GET /api/trip-requests/{id}/progress-tracker`
+- `GET /api/trip-requests/{id}/comments` — returns `canComment` flag
+- `GET /api/trips/{id}` — full logistics trip detail (passengers, vehicle, driver, journeys)
+- `GET /api/trips/{id}/comments` — returns `canComment` flag
+
+Each detail payload includes a `viewer` block and top-level `canManage` / `readOnly` flags:
+```json
+"viewer": { "isInvolved": false, "canManage": false, "readOnly": true }
+```
+
+- `canManage` = `true` only for logistics/internal roles (LM, officer, admin, procurement, SCD).
+- `isInvolved` = requester, assigned passenger, or assigned driver.
+- **Comments are read-only for non-involved staff** (confirmed product decision): `POST /trip-requests/{id}/comments` and `POST /trips/{id}/comments` still return 403 unless the user is involved or logistics. Use the `canComment` flag to show/hide the comment composer.
+
+**Frontend:** Add a dedicated **All Trips** page/section (e.g. `/trips` browse or a dashboard tab) visible to every staff member, listing requester name + department, destination, trip dates, and status. Clicking a row opens the existing trip detail view in read-only mode when `readOnly === true` — hide approve/reject/assign/edit controls and the comment composer (`canComment === false`). Keep this clearly separate from the LM's **Pending Trip Requests** approval queue.
+
+---
+
 ## Migration Required (DevOps)
 
 ```bash
@@ -490,6 +546,7 @@ Migrations:
 - `2026_05_20_160000_scm_platform_feature_enhancements.php`
 - `2026_05_21_120000_rename_line_item_tables.php` (renames `mrf_items` → `mrf_line_items`, adds `quoted_amount`)
 - `2026_05_19_000001_contract_type_free_text.php` (if not applied)
+- `2026_06_17_100000_create_logistics_trip_comments_table.php` (trip comments)
 
 ---
 

@@ -47,6 +47,7 @@ class TripRequestWorkflowController extends ApiController
 
         $query = Trip::query()
             ->where('trip_code', 'like', 'TRQ-%')
+            ->with('creator')
             ->orderByDesc('created_at');
 
         if ($isLogisticsInbox) {
@@ -83,6 +84,58 @@ class TripRequestWorkflowController extends ApiController
         ]);
     }
 
+    /**
+     * Organization-wide trip visibility list available to every authenticated staff member.
+     *
+     * Returns all staff trip requests (pending and approved) across all departments,
+     * regardless of who submitted them. This is a separate, broader, read-only view
+     * distinct from the Logistics Manager's actionable pending-approval inbox (index()).
+     */
+    public function allTrips(Request $request)
+    {
+        $user = $request->user();
+        if (! $user) {
+            return $this->error('Unauthenticated', 'UNAUTHENTICATED', 401);
+        }
+
+        $perPage = min(100, max(1, (int) $request->input('limit', $request->input('per_page', 50))));
+
+        $query = Trip::query()
+            ->where('trip_code', 'like', 'TRQ-%')
+            ->with('creator')
+            ->orderByDesc('created_at');
+
+        if ($request->filled('status')) {
+            $query->where('status', $request->status);
+        }
+
+        if ($request->filled('q')) {
+            $term = '%' . $request->input('q') . '%';
+            $query->where(function ($q) use ($term) {
+                $q->where('destination', 'like', $term)
+                    ->orWhere('origin', 'like', $term)
+                    ->orWhere('purpose', 'like', $term)
+                    ->orWhere('trip_code', 'like', $term);
+            });
+        }
+
+        $paginator = $query->paginate($perPage);
+        $trips = collect($paginator->items())
+            ->map(fn (Trip $trip) => $this->presentTripRequest($trip, includeProgressSummary: true, viewer: $user))
+            ->values()
+            ->all();
+
+        return $this->success([
+            'trips' => $trips,
+            'pagination' => [
+                'total' => $paginator->total(),
+                'per_page' => $paginator->perPage(),
+                'current_page' => $paginator->currentPage(),
+                'last_page' => $paginator->lastPage(),
+            ],
+        ]);
+    }
+
     public function show(Request $request, int $id)
     {
         $trip = Trip::find($id);
@@ -90,8 +143,11 @@ class TripRequestWorkflowController extends ApiController
             return $this->error('Trip request not found', 'NOT_FOUND', 404);
         }
 
-        if (! $this->canAccessTripRequest($request->user(), $trip)) {
-            return $this->error('You are not allowed to view this trip request', 'FORBIDDEN', 403);
+        // Organization-wide read-only visibility: any authenticated staff member may view full
+        // trip detail. Action capabilities (approve/reject/assign/edit) are gated separately on
+        // their own endpoints and surfaced via the `viewer`/`canManage` flags in the payload.
+        if (! $request->user()) {
+            return $this->error('Unauthenticated', 'UNAUTHENTICATED', 401);
         }
 
         return $this->success([
@@ -141,8 +197,8 @@ class TripRequestWorkflowController extends ApiController
             return $this->error('Trip request not found', 'NOT_FOUND', 404);
         }
 
-        if (! $this->canAccessTripRequest($request->user(), $trip)) {
-            return $this->error('You are not allowed to view this trip request', 'FORBIDDEN', 403);
+        if (! $request->user()) {
+            return $this->error('Unauthenticated', 'UNAUTHENTICATED', 401);
         }
 
         return $this->success([
@@ -491,12 +547,15 @@ class TripRequestWorkflowController extends ApiController
             return $this->error('Trip request not found', 'NOT_FOUND', 404);
         }
 
-        if (! $this->canAccessTripRequest($request->user(), $trip)) {
-            return $this->error('You are not allowed to view comments on this trip request', 'FORBIDDEN', 403);
+        // Organization-wide read-only visibility: any authenticated staff member may read the
+        // comment thread for full context. Posting remains restricted to involved parties (addComment).
+        if (! $request->user()) {
+            return $this->error('Unauthenticated', 'UNAUTHENTICATED', 401);
         }
 
         return $this->success([
             'comments' => $this->commentService->listForTrip($trip),
+            'canComment' => $this->canAccessTripRequest($request->user(), $trip),
         ]);
     }
 
@@ -738,6 +797,32 @@ class TripRequestWorkflowController extends ApiController
     }
 
     /**
+     * Whether the viewer is directly involved in the trip (requester, passenger, driver,
+     * or a logistics/internal role). Drives whether action controls are surfaced; non-involved
+     * staff still have full read-only visibility.
+     */
+    private function isInvolved(?User $user, Trip $trip): bool
+    {
+        if (! $user) {
+            return false;
+        }
+
+        if ($this->isLogisticsInternal($user)) {
+            return true;
+        }
+
+        if ((int) $trip->created_by === (int) $user->id) {
+            return true;
+        }
+
+        if ($trip->driver_user_id && (int) $trip->driver_user_id === (int) $user->id) {
+            return true;
+        }
+
+        return in_array($user->id, $trip->passenger_user_ids ?? [], true);
+    }
+
+    /**
      * @return array<string, mixed>
      */
     private function isDeletableDraft(Trip $trip): bool
@@ -756,6 +841,10 @@ class TripRequestWorkflowController extends ApiController
         $canDelete = $viewer && $this->isDeletableDraft($trip) && (int) $trip->created_by === (int) $viewer->id;
         $logisticsTripId = $trip->logisticsTripIdFromMetadata();
 
+        $requester = $trip->relationLoaded('creator') ? $trip->creator : null;
+        $canManage = $this->isLogisticsInternal($viewer);
+        $isInvolved = $this->isInvolved($viewer, $trip);
+
         $payload = [
             'id' => $trip->id,
             'tripId' => $logisticsTripId,
@@ -768,6 +857,19 @@ class TripRequestWorkflowController extends ApiController
             'purpose' => $trip->purpose,
             'origin' => $trip->origin,
             'destination' => $trip->destination,
+            'requesterName' => $requester?->name,
+            'requester_name' => $requester?->name,
+            'requesterDepartment' => $requester?->department,
+            'requester_department' => $requester?->department,
+            'requesterEmail' => $requester?->email,
+            'requester_email' => $requester?->email,
+            'viewer' => [
+                'isInvolved' => $isInvolved,
+                'canManage' => $canManage,
+                'readOnly' => ! $canManage,
+            ],
+            'canManage' => $canManage,
+            'readOnly' => ! $canManage,
             'bookingScope' => $scope,
             'booking_scope' => $scope,
             'bookingScopeLabel' => $scope ? TripBookingRules::label($scope) : null,
