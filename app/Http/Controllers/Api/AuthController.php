@@ -35,7 +35,11 @@ class AuthController extends Controller
             'remember_me' => 'nullable|boolean',
         ]);
 
-        $user = User::with('employee')->findByEmailCaseInsensitive($request->email);
+        $user = User::findByEmailCaseInsensitive($request->email);
+
+        if ($user) {
+            $user->loadMissing('employee');
+        }
 
         if (!$user || !Hash::check($request->password, $user->password)) {
             throw ValidationException::withMessages([
