@@ -27,6 +27,36 @@ class ProcurementOverviewAccess
         'admin',
     ];
 
+    /** Roles that may generate/upload GRN and delivery confirmation documents (JCC, waybill, etc.). */
+    public const DELIVERY_DOCUMENT_ROLES = [
+        'procurement',
+        'procurement_manager',
+        'supply_chain_director',
+        'supply_chain',
+        'logistics_manager',
+        'logistics',
+        'logistics_officer',
+        'admin',
+    ];
+
+    public static function canManageDeliveryDocuments(?User $user): bool
+    {
+        if (! $user) {
+            return false;
+        }
+
+        return in_array($user->scmRole(), self::DELIVERY_DOCUMENT_ROLES, true);
+    }
+
+    /**
+     * GRN preview/generate is allowed for delivery document roles even when
+     * {@see isProcurementOverviewOnly()} is true (procurement overview is otherwise read-only).
+     */
+    public static function canGenerateGrnDocuments(?User $user): bool
+    {
+        return self::canManageDeliveryDocuments($user);
+    }
+
     public static function isProcurementOverviewOnly(?User $user): bool
     {
         if (! $user) {

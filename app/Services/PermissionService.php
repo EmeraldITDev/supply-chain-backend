@@ -440,15 +440,7 @@ class PermissionService
      */
     private function deliveryDocumentManagerRoles(): array
     {
-        return [
-            'procurement',
-            'procurement_manager',
-            'supply_chain_director',
-            'supply_chain',
-            'logistics_manager',
-            'logistics',
-            'admin',
-        ];
+        return ProcurementOverviewAccess::DELIVERY_DOCUMENT_ROLES;
     }
 
     private function canManageDeliveryDocuments(User $user): bool

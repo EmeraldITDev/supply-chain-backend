@@ -565,6 +565,18 @@ Each detail payload includes a `viewer` block and top-level `canManage` / `readO
 
 `GET /api/mrfs/{id}/available-actions` returns `readOnly: true` and strips all mutation flags for LM.
 
+### GRN / JCC delivery documents (logistics + procurement)
+
+| Method | Path | Roles |
+|--------|------|-------|
+| `GET` | `/api/mrfs/{id}/grn/prefill` | `ProcurementOverviewAccess::DELIVERY_DOCUMENT_ROLES` |
+| `GET`/`POST` | `/api/mrfs/{id}/grn/preview` | same |
+| `POST` | `/api/mrfs/{id}/grn/generate` | same |
+
+Includes `logistics_manager`, `logistics_officer`, `supply_chain_director`, and procurement roles. Workflow stage must satisfy `canGenerateGRN` (PO signed onward). LM procurement overview remains read-only for approve/PO/payment, **not** for GRN/JCC delivery docs.
+
+`GET /api/mrfs/{id}/grn/prefill` returns `vendor`, `supplier`, `lineItems`, `po`, `grnNumber`, `mrfRef`, `category` — sourced from price comparisons (same as PO), MRF line items, linked SRF items, or MRF header fallback.
+
 ### Blocked for LM on procurement overview (403)
 
 All workflow mutations remain blocked: approve/reject MRF, generate/sign PO, payment, price comparison `PUT`/`POST`, etc. **GRN preview/generate and JCC/waybill uploads** are allowed for LM when the MRF is at the correct workflow stage. LM may still **create MRFs** from logistics flows via `POST /api/mrfs`.

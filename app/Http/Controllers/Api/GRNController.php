@@ -29,7 +29,8 @@ class GRNController extends Controller
 
     private function findMrfByAnyId(string $id): ?MRF
     {
-        return MRF::where(function ($query) use ($id) {
+        return MRF::with(['items', 'priceComparisons.vendor', 'selectedVendor', 'requester'])
+            ->where(function ($query) use ($id) {
             $query->where('formatted_id', $id)
                 ->orWhere('mrf_id', $id);
 

@@ -7,6 +7,7 @@ use App\Models\ProcurementDocument;
 use App\Models\Quotation;
 use App\Models\QuotationItem;
 use App\Models\RFQ;
+use App\Models\SRF;
 use App\Models\User;
 use App\Models\Vendor;
 use App\Support\DocumentDisplayPayload;
@@ -21,6 +22,7 @@ class GrnPdfService
 {
     public function __construct(
         private PurchaseOrderPdfService $purchaseOrderPdfService,
+        private PriceComparisonPoLineService $priceComparisonPoLineService,
     ) {
     }
 
@@ -110,7 +112,7 @@ class GrnPdfService
             'carrier_name' => $this->fieldValue($options, ['carrier_name', 'carrierName', 'carrier_driver_name', 'carrierDriverName'], 'N/A'),
             'driver_number' => $this->fieldValue($options, ['driver_number', 'driverNumber', 'carrier_number', 'carrierNumber'], 'N/A'),
             'vehicle_plate_number' => $this->fieldValue($options, ['vehicle_plate_number', 'vehiclePlateNumber'], 'N/A'),
-            'supplier_name' => (string) ($options['supplier_name'] ?? $vendor?->name ?? 'Supplier'),
+            'supplier_name' => (string) ($options['supplier_name'] ?? $vendor?->vendor_name ?? $vendor?->name ?? 'Supplier'),
             'supplier_address' => (string) ($options['supplier_address'] ?? $vendor?->address ?? ''),
             'line_items' => $lineItems,
             'comments' => trim((string) ($options['comments'] ?? $options['remarks'] ?? '')),
@@ -166,11 +168,18 @@ class GrnPdfService
 
         $payload = [
             'grn_number' => $this->defaultGrnNumber($mrf),
+            'mrf_ref' => DocumentDisplayPayload::nullIfEmpty($mrf->mrf_id ?? $mrf->formatted_id),
+            'category' => DocumentDisplayPayload::nullIfEmpty($mrf->category),
             'vendor' => [
-                'name' => DocumentDisplayPayload::nullIfEmpty($vendor?->name),
+                'name' => DocumentDisplayPayload::nullIfEmpty($vendor?->vendor_name ?? $vendor?->name),
                 'address' => DocumentDisplayPayload::nullIfEmpty($vendor?->address),
                 'contact' => DocumentDisplayPayload::nullIfEmpty($vendor?->contact_person),
                 'phone' => DocumentDisplayPayload::nullIfEmpty($vendor?->phone),
+                'email' => DocumentDisplayPayload::nullIfEmpty($vendor?->email),
+            ],
+            'supplier' => [
+                'name' => DocumentDisplayPayload::nullIfEmpty($vendor?->vendor_name ?? $vendor?->name),
+                'address' => DocumentDisplayPayload::nullIfEmpty($vendor?->address),
             ],
             'po' => [
                 'po_number' => DocumentDisplayPayload::nullIfEmpty($mrf->po_number),
@@ -309,63 +318,174 @@ class GrnPdfService
      */
     private function buildLineItems(MRF $mrf, ?array $overrides = null): array
     {
-        $quotationItems = $this->resolveQuotationItems($mrf);
+        $sourceLines = $this->resolveSourceLineObjects($mrf);
         $rows = [];
 
-        if ($mrf->items->isNotEmpty()) {
-            foreach ($mrf->items->values() as $index => $item) {
-                $quoteItem = $this->matchQuotationItem($quotationItems, $item->item_name, $index);
-                $qtyOrdered = (float) ($item->quantity ?? 1);
-                $unitPrice = (float) ($quoteItem?->unit_price ?? $item->unit_price ?? 0);
-                $uom = (string) ($item->unit ?? $quoteItem?->unit ?? 'unit');
-                $description = trim((string) ($item->description ?? $item->specifications ?? $quoteItem?->description ?? ''));
+        foreach ($sourceLines as $index => $source) {
+            $qtyOrdered = (float) ($source->quantity ?? 1);
+            $unitPrice = (float) ($source->unit_price ?? 0);
+            $uom = (string) ($source->unit ?? 'unit');
+            $name = (string) ($source->item_name ?? 'Item');
+            $description = trim((string) ($source->description ?? $source->specifications ?? ''));
 
-                $rows[] = $this->composeLineRow(
-                    $index + 1,
-                    (string) ($item->item_name ?? 'Item'),
-                    $description,
-                    $uom,
-                    $qtyOrdered,
-                    $unitPrice,
-                    $overrides,
-                    $index,
-                );
-            }
-        } elseif ($quotationItems->isNotEmpty()) {
-            foreach ($quotationItems->values() as $index => $quoteItem) {
-                $qtyOrdered = (float) ($quoteItem->quantity ?? 1);
-                $rows[] = $this->composeLineRow(
-                    $index + 1,
-                    (string) ($quoteItem->item_name ?? 'Item'),
-                    trim((string) ($quoteItem->description ?? $quoteItem->specifications ?? '')),
-                    (string) ($quoteItem->unit ?? 'unit'),
-                    $qtyOrdered,
-                    (float) ($quoteItem->unit_price ?? 0),
-                    $overrides,
-                    $index,
-                );
-            }
-        } else {
-            $rfq = RFQ::query()->where('mrf_id', $mrf->id)->with('items')->first();
-            if (! $rfq || $rfq->items->isEmpty()) {
-                throw new \RuntimeException('No line items found on this MRF. Add MRF line items before generating a GRN.');
-            }
-
-            foreach ($rfq->items->values() as $index => $item) {
-                $rows[] = $this->composeLineRow(
-                    $index + 1,
-                    (string) ($item->item_name ?? 'Item'),
-                    trim((string) ($item->description ?? $item->specifications ?? '')),
-                    (string) ($item->unit ?? 'unit'),
-                    (float) ($item->quantity ?? 1),
-                    0.0,
-                    $overrides,
-                    $index,
-                );
-            }
+            $rows[] = $this->composeLineRow(
+                $index + 1,
+                $name,
+                $description !== '' ? $description : $name,
+                $uom,
+                $qtyOrdered,
+                $unitPrice,
+                $overrides,
+                $index,
+            );
         }
 
         return $rows;
+    }
+
+    /**
+     * Resolve PO/MRF line sources in the same order as unsigned PO PDF generation.
+     *
+     * @return list<object{item_name: string, description: string, quantity: float, unit: string, unit_price: float, total_price: float, specifications: string}>
+     */
+    private function resolveSourceLineObjects(MRF $mrf): array
+    {
+        $mrf->loadMissing(['items', 'priceComparisons.vendor']);
+
+        $selectedRows = $this->priceComparisonPoLineService->selectedSupplierRows($mrf);
+        if ($selectedRows->isNotEmpty()) {
+            return $this->priceComparisonPoLineService->rowsToPoLineObjects($selectedRows)->all();
+        }
+
+        $comparisonRows = $mrf->relationLoaded('priceComparisons')
+            ? $mrf->priceComparisons->sortBy('id')->values()
+            : $mrf->priceComparisons()->orderBy('id')->get();
+
+        if ($comparisonRows->isNotEmpty()) {
+            $vendor = $mrf->selected_vendor_id
+                ? Vendor::query()->find($mrf->selected_vendor_id)
+                : $this->priceComparisonPoLineService->resolveVendorFromRows($comparisonRows);
+
+            if ($vendor) {
+                $forVendor = $comparisonRows->where('vendor_id', $vendor->id)->values();
+                if ($forVendor->isNotEmpty()) {
+                    return $this->priceComparisonPoLineService->rowsToPoLineObjects($forVendor)->all();
+                }
+            }
+
+            return $this->priceComparisonPoLineService->rowsToPoLineObjects($comparisonRows)->all();
+        }
+
+        if ($mrf->items->isNotEmpty()) {
+            return $mrf->items->values()->map(function ($item) {
+                $qty = max(1.0, (float) ($item->quantity ?? 1));
+
+                return (object) [
+                    'item_name' => (string) ($item->item_name ?? 'Item'),
+                    'description' => (string) ($item->description ?? ''),
+                    'quantity' => $qty,
+                    'unit' => (string) ($item->unit ?? 'unit'),
+                    'unit_price' => (float) ($item->unit_price ?? 0),
+                    'total_price' => (float) ($item->total_price ?? (($item->unit_price ?? 0) * $qty)),
+                    'specifications' => (string) ($item->specifications ?? ''),
+                ];
+            })->all();
+        }
+
+        $quotationItems = $this->resolveQuotationItems($mrf);
+        if ($quotationItems->isNotEmpty()) {
+            return $quotationItems->values()->map(function (QuotationItem $quoteItem) {
+                return (object) [
+                    'item_name' => (string) ($quoteItem->item_name ?? 'Item'),
+                    'description' => trim((string) ($quoteItem->description ?? $quoteItem->specifications ?? '')),
+                    'quantity' => (float) ($quoteItem->quantity ?? 1),
+                    'unit' => (string) ($quoteItem->unit ?? 'unit'),
+                    'unit_price' => (float) ($quoteItem->unit_price ?? 0),
+                    'total_price' => (float) ($quoteItem->total_price ?? 0),
+                    'specifications' => (string) ($quoteItem->specifications ?? ''),
+                ];
+            })->all();
+        }
+
+        $srfLines = $this->resolveLinkedSrfLineObjects($mrf);
+        if ($srfLines !== []) {
+            return $srfLines;
+        }
+
+        $rfq = RFQ::query()->where('mrf_id', $mrf->id)->with('items')->first();
+        if ($rfq && $rfq->items->isNotEmpty()) {
+            return $rfq->items->values()->map(function ($item) {
+                return (object) [
+                    'item_name' => (string) ($item->item_name ?? 'Item'),
+                    'description' => trim((string) ($item->description ?? $item->specifications ?? '')),
+                    'quantity' => (float) ($item->quantity ?? 1),
+                    'unit' => (string) ($item->unit ?? 'unit'),
+                    'unit_price' => 0.0,
+                    'total_price' => 0.0,
+                    'specifications' => (string) ($item->specifications ?? ''),
+                ];
+            })->all();
+        }
+
+        $qty = max(1.0, (float) ($mrf->quantity ?? 1));
+        $estimated = (float) ($mrf->estimated_cost ?? 0);
+        $unitPrice = $qty > 0 ? $estimated / $qty : $estimated;
+
+        if ($estimated <= 0 && trim((string) ($mrf->title ?? '')) === '') {
+            throw new \RuntimeException('No line items found on this MRF. Add MRF line items or price comparisons before generating a GRN.');
+        }
+
+        return [
+            (object) [
+                'item_name' => (string) ($mrf->title ?: 'Goods / services'),
+                'description' => (string) ($mrf->description ?? ''),
+                'quantity' => $qty,
+                'unit' => 'unit',
+                'unit_price' => $unitPrice,
+                'total_price' => $estimated,
+                'specifications' => '',
+            ],
+        ];
+    }
+
+    /**
+     * @return list<object{item_name: string, description: string, quantity: float, unit: string, unit_price: float, total_price: float, specifications: string}>
+     */
+    private function resolveLinkedSrfLineObjects(MRF $mrf): array
+    {
+        $haystack = implode(' ', array_filter([
+            (string) $mrf->title,
+            (string) $mrf->description,
+            (string) $mrf->justification,
+        ]));
+
+        if (! preg_match('/SRF-\d{4}-\d+/i', $haystack, $matches)) {
+            return [];
+        }
+
+        $srf = SRF::query()
+            ->where('srf_id', strtoupper((string) $matches[0]))
+            ->with('items')
+            ->first();
+
+        if (! $srf || $srf->items->isEmpty()) {
+            return [];
+        }
+
+        return $srf->items->values()->map(function ($item) {
+            $qty = max(1.0, (float) ($item->quantity ?? 1));
+            $unitPrice = (float) ($item->unit_price ?? $item->budget_amount ?? 0);
+
+            return (object) [
+                'item_name' => (string) ($item->item_name ?? $item->description ?? 'Item'),
+                'description' => trim((string) ($item->description ?? $item->specifications ?? '')),
+                'quantity' => $qty,
+                'unit' => (string) ($item->unit ?? 'unit'),
+                'unit_price' => $unitPrice,
+                'total_price' => (float) ($item->total_price ?? ($unitPrice * $qty)),
+                'specifications' => (string) ($item->specifications ?? ''),
+            ];
+        })->all();
     }
 
     /**
@@ -468,28 +588,31 @@ class GrnPdfService
             ->get();
     }
 
-    private function matchQuotationItem(Collection $quotationItems, ?string $itemName, int $index): ?QuotationItem
+    private function resolveVendor(MRF $mrf): ?Vendor
     {
-        if ($quotationItems->isEmpty()) {
-            return null;
+        $mrf->loadMissing(['selectedVendor', 'priceComparisons.vendor']);
+
+        if ($mrf->selectedVendor) {
+            return $mrf->selectedVendor;
         }
 
-        if ($itemName) {
-            $matched = $quotationItems->first(
-                fn (QuotationItem $item) => strcasecmp((string) $item->item_name, (string) $itemName) === 0
-            );
-            if ($matched) {
-                return $matched;
+        $selectedRows = $this->priceComparisonPoLineService->selectedSupplierRows($mrf);
+        if ($selectedRows->isNotEmpty()) {
+            $vendor = $this->priceComparisonPoLineService->resolveVendorFromRows($selectedRows);
+            if ($vendor) {
+                return $vendor;
             }
         }
 
-        return $quotationItems->get($index);
-    }
+        $comparisonRows = $mrf->relationLoaded('priceComparisons')
+            ? $mrf->priceComparisons->sortBy('id')->values()
+            : $mrf->priceComparisons()->with('vendor')->orderBy('id')->get();
 
-    private function resolveVendor(MRF $mrf): ?Vendor
-    {
-        if ($mrf->selectedVendor) {
-            return $mrf->selectedVendor;
+        if ($comparisonRows->isNotEmpty()) {
+            $vendor = $this->priceComparisonPoLineService->resolveVendorFromRows($comparisonRows);
+            if ($vendor) {
+                return $vendor;
+            }
         }
 
         $rfq = RFQ::query()->where('mrf_id', $mrf->id)->first();
@@ -560,7 +683,7 @@ class GrnPdfService
 
     private function resolveReceivedByUser(MRF $mrf, User $actingUser): ?User
     {
-        if (in_array($actingUser->scmRole(), ['procurement', 'procurement_manager', 'admin'], true)) {
+        if (\App\Support\ProcurementOverviewAccess::canManageDeliveryDocuments($actingUser)) {
             return $actingUser;
         }
 

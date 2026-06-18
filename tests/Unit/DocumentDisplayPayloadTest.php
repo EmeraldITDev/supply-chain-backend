@@ -61,6 +61,46 @@ class DocumentDisplayPayloadTest extends TestCase
         $this->assertArrayHasKey('warehouse', $payload['authorisedSignatories']);
     }
 
+    public function test_grn_prefill_uses_price_comparison_rows_when_mrf_items_empty(): void
+    {
+        $service = app(GrnPdfService::class);
+        $vendor = new Vendor([
+            'id' => 99,
+            'name' => 'Fleet Vendor Ltd',
+            'vendor_name' => 'Fleet Vendor Ltd',
+            'address' => '12 Marina Road',
+        ]);
+
+        $mrf = new \App\Models\MRF([
+            'id' => 6,
+            'mrf_id' => 'MRF-EMERALD-2026-006',
+            'formatted_id' => 'MRF-EMERALD-2026-006',
+            'title' => 'Fleet service',
+            'category' => 'services',
+            'po_number' => 'PO-2026-0617-115051-26006',
+        ]);
+        $mrf->setRelation('items', collect());
+        $mrf->setRelation('selectedVendor', null);
+        $mrf->setRelation('priceComparisons', collect([
+            new \App\Models\PriceComparison([
+                'vendor_id' => 99,
+                'item_description' => 'Vehicle servicing',
+                'unit_price' => 150000,
+                'quantity' => 1,
+                'total_price' => 150000,
+                'is_selected' => true,
+            ]),
+        ]));
+        $mrf->priceComparisons->first()->setRelation('vendor', $vendor);
+
+        $payload = $service->buildPrefillPayload($mrf);
+
+        $this->assertSame('Fleet Vendor Ltd', $payload['vendor']['name']);
+        $this->assertSame('Fleet Vendor Ltd', $payload['supplier']['name']);
+        $this->assertCount(1, $payload['lineItems']);
+        $this->assertSame('Vehicle servicing', $payload['lineItems'][0]['description']);
+    }
+
     public function test_jcc_display_record_exposes_pdf_fields(): void
     {
         $service = app(JobCompletionCertificateService::class);
