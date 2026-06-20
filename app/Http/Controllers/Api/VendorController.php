@@ -930,7 +930,7 @@ class VendorController extends Controller
         ];
 
         $hasAllowedRole =
-            (isset($user->scmRole()) && in_array($user->scmRole(), $allowedRoles)) ||
+            ($user->scmRole() !== null && in_array($user->scmRole(), $allowedRoles)) ||
             (method_exists($user, 'hasAnyRole') && $user->hasAnyRole($allowedRoles));
 
         if (!$hasAllowedRole) {
@@ -1069,7 +1069,7 @@ class VendorController extends Controller
         ];
 
         $hasAllowedRole =
-            (isset($user->scmRole()) && in_array($user->scmRole(), $allowedRoles)) ||
+            ($user->scmRole() !== null && in_array($user->scmRole(), $allowedRoles)) ||
             (method_exists($user, 'hasAnyRole') && $user->hasAnyRole($allowedRoles));
 
         if (!$hasAllowedRole) {
