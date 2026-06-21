@@ -136,6 +136,77 @@ class VendorApprovalService
     }
 
     /**
+     * Create or refresh a portal user for an existing vendor (manual PO onboarding).
+     */
+    public function createPortalUserForVendor(Vendor $vendor, string $temporaryPassword): User
+    {
+        $email = trim((string) $vendor->email);
+        if ($email === '') {
+            throw new \InvalidArgumentException('Vendor email is required to provision portal access.');
+        }
+
+        $existingUser = User::findByEmailCaseInsensitive($email);
+
+        if ($existingUser) {
+            if ($existingUser->scmRole() !== 'vendor' && ! $existingUser->hasRole('vendor')) {
+                throw new \Exception("A user with email {$email} already exists and is not a vendor.");
+            }
+
+            $update = [
+                'password' => Hash::make($temporaryPassword),
+                'must_change_password' => true,
+                'password_changed_at' => null,
+                'supply_chain_role' => 'vendor',
+            ];
+
+            if (Schema::hasColumn('users', 'vendor_id')) {
+                $update['vendor_id'] = $vendor->id;
+            }
+
+            if (trim((string) ($existingUser->name ?? '')) === '' && $vendor->contact_person) {
+                $update['name'] = $vendor->contact_person;
+            }
+
+            $existingUser->update($update);
+
+            try {
+                $vendorRole = \Spatie\Permission\Models\Role::firstOrCreate(['name' => 'vendor', 'guard_name' => 'web']);
+                if (! $existingUser->hasRole('vendor')) {
+                    $existingUser->assignRole($vendorRole);
+                }
+            } catch (\Exception $e) {
+                \Log::warning('Failed to assign vendor role during manual PO onboarding: '.$e->getMessage());
+            }
+
+            return $existingUser->fresh();
+        }
+
+        $userData = [
+            'name' => $vendor->contact_person ?: $vendor->name,
+            'email' => $email,
+            'password' => Hash::make($temporaryPassword),
+            'supply_chain_role' => 'vendor',
+            'must_change_password' => true,
+            'password_changed_at' => null,
+        ];
+
+        if (Schema::hasColumn('users', 'vendor_id')) {
+            $userData['vendor_id'] = $vendor->id;
+        }
+
+        $user = User::create($userData);
+
+        try {
+            $vendorRole = \Spatie\Permission\Models\Role::firstOrCreate(['name' => 'vendor', 'guard_name' => 'web']);
+            $user->assignRole($vendorRole);
+        } catch (\Exception $e) {
+            \Log::warning('Failed to assign vendor role to new portal user: '.$e->getMessage());
+        }
+
+        return $user;
+    }
+
+    /**
      * Send approval email with temporary password to vendor
      *
      * @param VendorRegistration $registration

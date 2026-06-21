@@ -50,12 +50,17 @@ class Vendor extends Model
         'number_of_employees',
         'annual_revenue',
         'notes',
+        'profile_completed',
+        'onboarding_source',
+        'onboarding_email_sent_at',
     ];
 
     protected $casts = [
         'rating' => 'decimal:2',
         'total_orders' => 'integer',
         'annual_revenue' => 'string',
+        'profile_completed' => 'boolean',
+        'onboarding_email_sent_at' => 'datetime',
     ];
 
     /**
@@ -141,6 +146,26 @@ class Vendor extends Model
                 $query->whereRaw('LOWER(TRIM(email)) = ?', [$normalized])
                     ->orWhereRaw('LOWER(TRIM(COALESCE(contact_person_email, \'\'))) = ?', [$normalized]);
             })
+            ->orderBy('id')
+            ->first();
+    }
+
+    public static function normalizeName(?string $name): string
+    {
+        $normalized = mb_strtolower(trim((string) $name));
+
+        return (string) preg_replace('/\s+/', ' ', $normalized);
+    }
+
+    public static function findByNormalizedName(string $name): ?self
+    {
+        $normalized = self::normalizeName($name);
+        if ($normalized === '') {
+            return null;
+        }
+
+        return self::query()
+            ->whereRaw('LOWER(TRIM(name)) = ?', [$normalized])
             ->orderBy('id')
             ->first();
     }

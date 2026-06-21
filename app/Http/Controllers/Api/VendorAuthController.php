@@ -232,6 +232,13 @@ class VendorAuthController extends Controller
             'phone' => 'sometimes|string|max:20',
             'address' => 'sometimes|string|max:500',
             'email' => 'sometimes|email|max:255|unique:vendors,email,' . $vendor->id,
+            'category' => 'sometimes|string|max:255',
+            'category_other' => 'sometimes|nullable|string|max:255',
+            'website' => 'sometimes|nullable|string|max:255',
+            'tax_id' => 'sometimes|nullable|string|max:100',
+            'year_established' => 'sometimes|nullable|string|max:20',
+            'number_of_employees' => 'sometimes|nullable|string|max:50',
+            'annual_revenue' => 'sometimes|nullable|string|max:100',
         ]);
 
         if ($validator->fails()) {
@@ -252,22 +259,22 @@ class VendorAuthController extends Controller
             $user->update(['name' => $request->contact_person]);
         }
 
-        if ($request->has('phone')) {
-            $updateData['phone'] = $request->phone;
-        }
-
-        if ($request->has('address')) {
-            $updateData['address'] = $request->address;
+        foreach ([
+            'phone', 'address', 'email', 'category', 'category_other',
+            'website', 'tax_id', 'year_established', 'number_of_employees', 'annual_revenue',
+        ] as $field) {
+            if ($request->has($field)) {
+                $updateData[$field] = $request->input($field);
+            }
         }
 
         if ($request->has('email')) {
-            // Update both vendor and user email
-            $updateData['email'] = $request->email;
             $user->update(['email' => $request->email]);
         }
 
         // Update vendor profile
         $vendor->update($updateData);
+        $vendor = app(\App\Services\ManualVendorOnboardingService::class)->refreshProfileCompleted($vendor);
 
         return response()->json([
             'success' => true,
@@ -569,6 +576,10 @@ class VendorAuthController extends Controller
             // Status and rating
             'status' => $vendor->status,
             'rating' => (float) ($vendor->rating ?? 0),
+            'profileCompleted' => (bool) ($vendor->profile_completed ?? true),
+            'profile_completed' => (bool) ($vendor->profile_completed ?? true),
+            'onboardingSource' => $vendor->onboarding_source,
+            'onboarding_source' => $vendor->onboarding_source,
 
             // Statistics
             'totalOrders' => $vendor->total_orders ?? 0,

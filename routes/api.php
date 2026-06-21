@@ -482,6 +482,7 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // Vendor routes - specific routes must come before parameterized routes
     Route::get('/vendors', [VendorController::class, 'index']);
+    Route::get('/vendors/lookup', [VendorController::class, 'lookup']);
     Route::get('/vendors/quotations', [VendorController::class, 'getVendorQuotations']);
     Route::delete('/vendors/quotations/{id}', [QuotationController::class, 'destroy']); // Vendor can delete their own quotations
     Route::delete('/vendors/{id}', [VendorController::class, 'destroy']);

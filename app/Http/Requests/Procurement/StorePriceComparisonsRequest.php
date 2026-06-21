@@ -109,6 +109,22 @@ class StorePriceComparisonsRequest extends FormRequest
                         'rows.'.$i.'.vendor_id',
                         'No supplier exists with this code. Use manual_vendor to add a new supplier, or pick a valid vendor_id.'
                     );
+                    continue;
+                }
+
+                if ($vid === '' && $manualName !== '') {
+                    $email = trim((string) ($row['manual_vendor']['email'] ?? ''));
+                    $phone = trim((string) ($row['manual_vendor']['phone'] ?? ''));
+
+                    if ($email === '') {
+                        $v->errors()->add('rows.'.$i.'.manual_vendor.email', 'Supplier email is required for manual vendors.');
+                    } elseif (! filter_var($email, FILTER_VALIDATE_EMAIL)) {
+                        $v->errors()->add('rows.'.$i.'.manual_vendor.email', 'Supplier email must be a valid email address.');
+                    }
+
+                    if ($phone === '') {
+                        $v->errors()->add('rows.'.$i.'.manual_vendor.phone', 'Supplier phone is required for manual vendors.');
+                    }
                 }
             }
 

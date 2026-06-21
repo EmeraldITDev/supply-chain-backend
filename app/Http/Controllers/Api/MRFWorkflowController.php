@@ -1881,6 +1881,9 @@ class MRFWorkflowController extends Controller
         // Refresh MRF to get updated values
         $mrf->refresh();
 
+        $resolvedVendors = app(\App\Services\ManualVendorOnboardingService::class)
+            ->finalizeVendorsForPoGeneration($mrf, $isRegeneration);
+
         $poStreamUrl = $mrf->freshUnsignedPoStreamUrl() ?? $mrf->unsigned_po_url;
 
         $paymentMilestones = app(PaymentScheduleService::class)->paymentMilestonesForMrf($mrf);
@@ -1917,6 +1920,8 @@ class MRFWorkflowController extends Controller
                 'po_url' => $poStreamUrl,
                 'fast_tracked' => $fastTrack,
                 'synthetic_po' => ! $rfq && ($fastTrack || $allowMissingRfq),
+                'resolvedVendors' => $resolvedVendors,
+                'resolved_vendors' => $resolvedVendors,
             ]
         ]);
     }

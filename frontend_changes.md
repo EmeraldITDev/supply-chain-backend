@@ -587,6 +587,43 @@ All workflow mutations remain blocked: approve/reject MRF, generate/sign PO, pay
 
 ---
 
+## 12. Manual PO vendor creation — dedupe & onboarding
+
+**Problem:** Manual/fast-track PO price comparison rows were creating duplicate vendor records (V001, V002, V003) for the same supplier.
+
+### Authoritative lookup
+
+```
+GET /api/vendors/lookup?email={email}&name={name}
+```
+
+Returns `{ success, data: { match: { id, name, email, phone, status, matchedOn } | null } }`. Email match wins over name (case-insensitive).
+
+### Price comparison save (`PUT /api/mrfs/{id}/price-comparisons`)
+
+- `manual_vendor.email` and `manual_vendor.phone` are **required** (422 if missing).
+- Backend **find-or-create**: case-insensitive email, then normalized name; fills blank fields only on existing vendors.
+- Same email in multiple rows in one save → single vendor record.
+- Portal onboarding is deferred until PO finalisation.
+
+### PO finalisation (`POST /api/mrfs/{id}/generate-po`)
+
+- Selected supplier with `onboarding_source=manual_po` and no portal user → creates portal account + sends onboarding email (temporary password, `must_change_password`).
+- Response includes `resolvedVendors` / `resolved_vendors` array with `action` (`created` | `linked_existing`), `onboardingEmailSent`, `vendorId`, `input`.
+- Regenerating a PO does **not** re-send onboarding emails.
+
+### Vendor portal profile (`PUT /api/vendors/auth/profile`)
+
+Accepts: `category`, `category_other`, `website`, `tax_id`, `year_established`, `number_of_employees`, `annual_revenue` (plus existing contact fields). Sets `profile_completed` when business fields are filled.
+
+### Vendor model fields
+
+- `profile_completed` (bool, default `true` for existing rows)
+- `onboarding_source` (`registration` | `invite` | `manual_po`)
+- `onboarding_email_sent_at`
+
+---
+
 ## Migration Required (DevOps)
 
 ```bash

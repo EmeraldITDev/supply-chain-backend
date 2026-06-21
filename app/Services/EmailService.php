@@ -38,6 +38,41 @@ class EmailService
     }
 
     /**
+     * Send manual-PO vendor onboarding email with portal credentials.
+     */
+    public function sendManualPoVendorOnboardingEmail(
+        string $email,
+        string $companyName,
+        string $temporaryPassword,
+    ): bool {
+        try {
+            Mail::send('emails.vendor-manual-po-onboarding', [
+                'companyName' => $companyName,
+                'email' => $email,
+                'temporaryPassword' => $temporaryPassword,
+                'loginUrl' => config('app.frontend_url').'/vendor-portal',
+            ], function ($message) use ($email, $companyName) {
+                $message->to($email)
+                    ->subject('Welcome to the Vendor Portal — Complete Your Profile - '.config('app.name'));
+            });
+
+            Log::info('Manual PO vendor onboarding email sent', [
+                'email' => $email,
+                'company' => $companyName,
+            ]);
+
+            return true;
+        } catch (\Exception $e) {
+            Log::error('Failed to send manual PO vendor onboarding email', [
+                'email' => $email,
+                'error' => $e->getMessage(),
+            ]);
+
+            return false;
+        }
+    }
+
+    /**
      * Send vendor approval notification with credentials
      */
     public function sendVendorApprovalEmail(

@@ -129,6 +129,35 @@ class VendorController extends Controller
     }
 
     /**
+     * Authoritative vendor lookup for manual PO duplicate detection.
+     */
+    public function lookup(Request $request)
+    {
+        $email = $request->query('email');
+        $name = $request->query('name');
+
+        if (trim((string) $email) === '' && trim((string) $name) === '') {
+            return response()->json([
+                'success' => false,
+                'error' => 'Provide at least one of email or name.',
+                'code' => 'VALIDATION_ERROR',
+            ], 422);
+        }
+
+        $match = app(\App\Services\ManualVendorOnboardingService::class)->lookup(
+            is_string($email) ? $email : null,
+            is_string($name) ? $name : null,
+        );
+
+        return response()->json([
+            'success' => true,
+            'data' => [
+                'match' => $match,
+            ],
+        ]);
+    }
+
+    /**
      * Get vendor by ID
      */
     public function show($id)
