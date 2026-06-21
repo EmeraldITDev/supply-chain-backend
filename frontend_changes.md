@@ -589,60 +589,20 @@ All workflow mutations remain blocked: approve/reject MRF, generate/sign PO, pay
 
 ## 12. Manual PO vendor creation — dedupe & onboarding
 
-**Problem:** Manual/fast-track PO price comparison rows were creating duplicate vendor records (V001, V002, V003) for the same supplier.
+Full contract (frontend + backend, merge cleanup, acceptance criteria):
+**[`docs/manual-po-vendor-spec.md`](docs/manual-po-vendor-spec.md)**
 
-### Authoritative lookup
+Quick reference:
 
-```
-GET /api/vendors/lookup?email={email}&name={name}
-```
+| Step | Endpoint | Backend |
+|------|----------|---------|
+| Duplicate lookup | `GET /api/vendors/lookup?email=&name=` | Authoritative match; email wins over name |
+| Save price sheet | `PUT /api/mrfs/{id}/price-comparisons` | Find-or-create vendor; email + phone required (422) |
+| Finalise PO | `POST /api/mrfs/{id}/generate-po` | Portal user + onboarding email; `resolvedVendors` in response |
+| Complete profile | `PUT /api/vendors/auth/profile` | Extended fields; sets `profile_completed` |
 
-Returns `{ success, data: { match: { id, name, email, phone, status, matchedOn } | null } }`. Email match wins over name (case-insensitive).
-
-### Price comparison save (`PUT /api/mrfs/{id}/price-comparisons`)
-
-- `manual_vendor.email` and `manual_vendor.phone` are **required** (422 if missing).
-- Backend **find-or-create**: case-insensitive email, then normalized name; fills blank fields only on existing vendors.
-- Same email in multiple rows in one save → single vendor record.
-- Portal onboarding is deferred until PO finalisation.
-
-### PO finalisation (`POST /api/mrfs/{id}/generate-po`)
-
-- Selected supplier with `onboarding_source=manual_po` and no portal user → creates portal account + sends onboarding email (temporary password, `must_change_password`).
-- Response includes `resolvedVendors` / `resolved_vendors` array with `action` (`created` | `linked_existing`), `onboardingEmailSent`, `vendorId`, `input`.
-- Regenerating a PO does **not** re-send onboarding emails.
-
-### Vendor portal profile (`PUT /api/vendors/auth/profile`)
-
-Accepts: `category`, `category_other`, `website`, `tax_id`, `year_established`, `number_of_employees`, `annual_revenue` (plus existing contact fields). Sets `profile_completed` when business fields are filled.
-
-### Vendor model fields
-
-- `profile_completed` (bool, default `true` for existing rows)
-- `onboarding_source` (`registration` | `invite` | `manual_po`)
-- `onboarding_email_sent_at`
-
-### Cleanup after merge
-
-Only **Active** rows with the same name count as unresolved duplicates in `--list`.
-
-```bash
-# 1. See what still needs merging (Active duplicates only)
-php artisan vendors:merge-duplicates --list
-
-# 2. Merge a group (example)
-php artisan vendors:merge-duplicates --canonical=V023 --merge=V020 --force
-
-# 3. Remove inactive merged ghost rows from the database
-php artisan vendors:merge-duplicates --purge-merged --force
-
-# 4. Fix any row marked merged but still Active
-php artisan vendors:merge-duplicates --repair-inactive --force
-```
-
-Keeper selection prefers **real email** (not `@supplier.placeholder`), then portal user, then lowest vendor code.
-
-`GET /api/vendors` excludes `Inactive` vendors by default. After merge + purge, refresh the Vendor Directory.
+- `GET /api/vendors` excludes `Inactive` by default; `?include_inactive=1` for merged-row audit.
+- Legacy duplicate cleanup: `php artisan vendors:merge-duplicates --list` then `--purge-merged --force`.
 
 ---
 
