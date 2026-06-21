@@ -622,15 +622,27 @@ Accepts: `category`, `category_other`, `website`, `tax_id`, `year_established`, 
 - `onboarding_source` (`registration` | `invite` | `manual_po`)
 - `onboarding_email_sent_at`
 
-`GET /api/vendors` now **excludes `Inactive` vendors by default** (merged duplicates). Pass `?include_inactive=1` to audit all rows.
-
 ### Cleanup after merge
 
+Only **Active** rows with the same name count as unresolved duplicates in `--list`.
+
 ```bash
+# 1. See what still needs merging (Active duplicates only)
+php artisan vendors:merge-duplicates --list
+
+# 2. Merge a group (example)
+php artisan vendors:merge-duplicates --canonical=V023 --merge=V020 --force
+
+# 3. Remove inactive merged ghost rows from the database
+php artisan vendors:merge-duplicates --purge-merged --force
+
+# 4. Fix any row marked merged but still Active
 php artisan vendors:merge-duplicates --repair-inactive --force
 ```
 
-If the directory still shows similar names (e.g. `MIJEKENDY GLOBAL SERVICES` vs `... LIMITED`), those are separate name groups — merge each with `--canonical` / `--merge` as needed.
+Keeper selection prefers **real email** (not `@supplier.placeholder`), then portal user, then lowest vendor code.
+
+`GET /api/vendors` excludes `Inactive` vendors by default. After merge + purge, refresh the Vendor Directory.
 
 ---
 

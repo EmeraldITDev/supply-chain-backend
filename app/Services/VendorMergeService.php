@@ -13,9 +13,13 @@ class VendorMergeService
     /**
      * @return Collection<string, Collection<int, Vendor>>
      */
-    public function findDuplicateGroups(?string $nameFilter = null): Collection
+    public function findDuplicateGroups(?string $nameFilter = null, bool $activeOnly = true): Collection
     {
         $query = Vendor::query()->orderBy('id');
+
+        if ($activeOnly) {
+            $query->where('status', '!=', 'Inactive');
+        }
 
         if ($nameFilter !== null && trim($nameFilter) !== '') {
             $needle = '%'.mb_strtolower(trim($nameFilter)).'%';
@@ -30,6 +34,7 @@ class VendorMergeService
     public function pickCanonical(Collection $group): Vendor
     {
         return $group->sortBy([
+            fn (Vendor $vendor) => $this->hasRealEmail($vendor) ? 0 : 1,
             fn (Vendor $vendor) => $this->hasPortalUser($vendor) ? 0 : 1,
             fn (Vendor $vendor) => $this->vendorCodeNumber($vendor->vendor_id),
             fn (Vendor $vendor) => $vendor->id,
@@ -37,15 +42,22 @@ class VendorMergeService
     }
 
     /**
-     * @return array{canonical: Vendor, merged: list<string>, skipped: list<string>}
+     * @return array{canonical: Vendor, merged: list<string>, skipped: list<string>, already_merged: list<string>}
      */
     public function mergeGroup(Vendor $canonical, Collection $duplicates, bool $dryRun = true): array
     {
         $merged = [];
         $skipped = [];
+        $alreadyMerged = [];
 
         foreach ($duplicates as $duplicate) {
             if ($duplicate->id === $canonical->id) {
+                continue;
+            }
+
+            if ($this->isAlreadyMergedInto($duplicate, $canonical)) {
+                $alreadyMerged[] = $duplicate->vendor_id;
+
                 continue;
             }
 
@@ -55,15 +67,15 @@ class VendorMergeService
                 continue;
             }
 
-            DB::transaction(function () use ($canonical, $duplicate, &$merged, &$skipped) {
-                try {
+            try {
+                DB::transaction(function () use ($canonical, $duplicate, &$merged, &$skipped) {
                     $this->reassignReferences($canonical, $duplicate);
                     $this->deactivateDuplicate($canonical, $duplicate);
                     $merged[] = $duplicate->vendor_id;
-                } catch (\Throwable $e) {
-                    $skipped[] = $duplicate->vendor_id.' ('.$e->getMessage().')';
-                }
-            });
+                });
+            } catch (\Throwable $e) {
+                $skipped[] = $duplicate->vendor_id.' ('.$e->getMessage().')';
+            }
         }
 
         if (! $dryRun) {
@@ -74,11 +86,54 @@ class VendorMergeService
             'canonical' => $canonical->fresh(),
             'merged' => $merged,
             'skipped' => $skipped,
+            'already_merged' => $alreadyMerged,
         ];
     }
 
     /**
-     * @return array{canonical: Vendor, merged: list<string>, skipped: list<string>}
+     * @return array{deleted: list<string>, skipped: list<string>}
+     */
+    public function purgeInactiveMergedDuplicates(bool $dryRun = true): array
+    {
+        $deleted = [];
+        $skipped = [];
+
+        $candidates = Vendor::query()
+            ->where('status', 'Inactive')
+            ->where('notes', 'like', '%Merged into V%')
+            ->orderBy('id')
+            ->get();
+
+        foreach ($candidates as $vendor) {
+            $refs = $this->countReferences($vendor->id);
+            if ($refs > 0) {
+                $skipped[] = $vendor->vendor_id.' ('.$refs.' reference(s) remain)';
+
+                continue;
+            }
+
+            if ($dryRun) {
+                $deleted[] = $vendor->vendor_id;
+
+                continue;
+            }
+
+            try {
+                $vendor->delete();
+                $deleted[] = $vendor->vendor_id;
+            } catch (\Throwable $e) {
+                $skipped[] = $vendor->vendor_id.' ('.$e->getMessage().')';
+            }
+        }
+
+        return [
+            'deleted' => $deleted,
+            'skipped' => $skipped,
+        ];
+    }
+
+    /**
+     * @return array{canonical: Vendor, merged: list<string>, skipped: list<string>, already_merged: list<string>}
      */
     public function mergeIntoCanonical(string $canonicalCode, array $duplicateCodes, bool $dryRun = true): array
     {
@@ -86,6 +141,41 @@ class VendorMergeService
         $duplicates = Vendor::query()->whereIn('vendor_id', $duplicateCodes)->get();
 
         return $this->mergeGroup($canonical, $duplicates->push($canonical), $dryRun);
+    }
+
+    public function countReferences(int $vendorId): int
+    {
+        $total = 0;
+
+        foreach ($this->referenceColumns() as $table => $column) {
+            $total += (int) DB::table($table)->where($column, $vendorId)->count();
+        }
+
+        if (Schema::hasColumn('users', 'vendor_id')) {
+            $total += (int) User::query()->where('vendor_id', $vendorId)->count();
+        }
+
+        return $total;
+    }
+
+    private function isAlreadyMergedInto(Vendor $duplicate, Vendor $canonical): bool
+    {
+        if ($duplicate->status !== 'Inactive') {
+            return false;
+        }
+
+        $notes = (string) $duplicate->notes;
+
+        return str_contains($notes, 'Merged into '.$canonical->vendor_id);
+    }
+
+    private function hasRealEmail(Vendor $vendor): bool
+    {
+        $email = trim((string) $vendor->email);
+
+        return $email !== ''
+            && filter_var($email, FILTER_VALIDATE_EMAIL)
+            && ! str_contains(strtolower($email), '@supplier.placeholder');
     }
 
     private function hasPortalUser(Vendor $vendor): bool
@@ -108,28 +198,51 @@ class VendorMergeService
         return PHP_INT_MAX;
     }
 
+    /**
+     * @return array<string, string>
+     */
+    private function referenceColumns(): array
+    {
+        return [
+            'price_comparisons' => 'vendor_id',
+            'quotations' => 'vendor_id',
+            'vendor_registrations' => 'vendor_id',
+            'vendor_ratings' => 'vendor_id',
+            'procurement_documents' => 'vendor_id',
+            'm_r_f_s' => 'selected_vendor_id',
+            'r_f_q_s' => 'selected_vendor_id',
+            'logistics_trips' => 'vendor_id',
+            'logistics_vehicles' => 'vendor_id',
+            'logistics_material_movements' => 'vendor_id',
+            'logistics_material_jccs' => 'vendor_id',
+            'job_completion_certificates' => 'vendor_id',
+            'trip_vendor_submissions' => 'vendor_id',
+            'rfq_vendors' => 'vendor_id',
+        ];
+    }
+
     private function reassignReferences(Vendor $canonical, Vendor $duplicate): void
     {
         $fromId = $duplicate->id;
         $toId = $canonical->id;
 
-        $this->updateColumn('price_comparisons', 'vendor_id', $fromId, $toId);
-        $this->updateColumn('quotations', 'vendor_id', $fromId, $toId);
-        $this->updateColumn('vendor_registrations', 'vendor_id', $fromId, $toId);
-        $this->updateColumn('vendor_ratings', 'vendor_id', $fromId, $toId);
-        $this->updateColumn('procurement_documents', 'vendor_id', $fromId, $toId);
-        $this->updateColumn('m_r_f_s', 'selected_vendor_id', $fromId, $toId);
-        $this->updateColumn('r_f_q_s', 'selected_vendor_id', $fromId, $toId);
-        $this->updateColumn('users', 'vendor_id', $fromId, $toId);
-        $this->updateColumn('logistics_trips', 'vendor_id', $fromId, $toId);
-        $this->updateColumn('logistics_trips', 'selected_vendor_id', $fromId, $toId);
-        $this->updateColumn('logistics_vehicles', 'vendor_id', $fromId, $toId);
-        $this->updateColumn('logistics_material_movements', 'vendor_id', $fromId, $toId);
-        $this->updateColumn('logistics_material_jccs', 'vendor_id', $fromId, $toId);
-        $this->updateColumn('job_completion_certificates', 'vendor_id', $fromId, $toId);
-        $this->updateColumn('trip_vendor_submissions', 'vendor_id', $fromId, $toId);
+        foreach ($this->referenceColumns() as $table => $column) {
+            if ($table === 'rfq_vendors') {
+                $this->mergeRfqVendorRows($fromId, $toId);
 
-        $this->mergeRfqVendorRows($fromId, $toId);
+                continue;
+            }
+
+            if ($table === 'logistics_trips' && Schema::hasColumn('logistics_trips', 'selected_vendor_id')) {
+                $this->updateColumn('logistics_trips', 'selected_vendor_id', $fromId, $toId);
+            }
+
+            $this->updateColumn($table, $column, $fromId, $toId);
+        }
+
+        if (Schema::hasColumn('users', 'vendor_id')) {
+            $this->updateColumn('users', 'vendor_id', $fromId, $toId);
+        }
     }
 
     private function updateColumn(string $table, string $column, int $fromId, int $toId): void
@@ -189,12 +302,20 @@ class VendorMergeService
     {
         $updates = [];
 
-        foreach (['phone', 'address', 'contact_person', 'contact_person_email', 'tax_id', 'website'] as $field) {
+        foreach (['phone', 'address', 'contact_person', 'contact_person_email', 'tax_id', 'website', 'email'] as $field) {
+            if ($field === 'email' && $this->hasRealEmail($canonical)) {
+                continue;
+            }
+
             if (trim((string) ($canonical->{$field} ?? '')) !== '') {
                 continue;
             }
 
             foreach ($group as $vendor) {
+                if ($field === 'email' && ! $this->hasRealEmail($vendor)) {
+                    continue;
+                }
+
                 $value = trim((string) ($vendor->{$field} ?? ''));
                 if ($value !== '') {
                     $updates[$field] = $value;

@@ -9,16 +9,17 @@ use Illuminate\Console\Command;
 class MergeDuplicateVendorsCommand extends Command
 {
     protected $signature = 'vendors:merge-duplicates
-                            {--list : List duplicate vendor groups without merging}
+                            {--list : List unresolved duplicate vendor groups (Active rows only)}
                             {--name= : Filter by company name (partial match)}
                             {--canonical= : Keep this vendor code (e.g. V100)}
                             {--merge= : Comma-separated vendor codes to merge into canonical}
-                            {--auto : Merge all duplicate name groups automatically}
-                            {--repair-inactive : Set Inactive on any vendor row whose notes say Merged into}
-                            {--dry-run : Preview changes without saving (default unless --force)} 
-                            {--force : Apply merges}';
+                            {--auto : Merge all unresolved duplicate groups automatically}
+                            {--repair-inactive : Set Inactive on Active rows whose notes say Merged into}
+                            {--purge-merged : Delete Inactive rows already merged (no remaining references)}
+                            {--dry-run : Preview changes without saving (default unless --force)}
+                            {--force : Apply changes}';
 
-    protected $description = 'Merge duplicate vendor directory records created before manual-PO dedupe (safe: reassigns references, deactivates duplicates)';
+    protected $description = 'Merge duplicate vendor directory records (reassigns references, deactivates duplicates, optional purge)';
 
     public function handle(VendorMergeService $mergeService): int
     {
@@ -28,32 +29,32 @@ class MergeDuplicateVendorsCommand extends Command
             return $this->repairMergedInactive($dryRun);
         }
 
+        if ($this->option('purge-merged')) {
+            return $this->purgeMerged($mergeService, $dryRun);
+        }
+
         $nameFilter = $this->option('name');
 
         if ($this->option('canonical') && $this->option('merge')) {
             return $this->mergeExplicit($mergeService, $dryRun);
         }
 
-        $groups = $mergeService->findDuplicateGroups(is_string($nameFilter) ? $nameFilter : null);
+        $groups = $mergeService->findDuplicateGroups(is_string($nameFilter) ? $nameFilter : null, true);
 
         if ($groups->isEmpty()) {
-            $this->info('No duplicate vendor groups found.');
+            $this->info('No unresolved duplicate vendor groups (Active rows with the same name).');
+            $this->line('If inactive merged rows remain in the DB, run: php artisan vendors:merge-duplicates --purge-merged --force');
 
             return self::SUCCESS;
         }
 
         if ($this->option('list') || (! $this->option('auto') && ! $this->option('force'))) {
-            $this->warn($dryRun ? 'Dry run / list mode — no changes will be saved. Pass --force to apply.' : 'Listing duplicate groups:');
+            $this->warn($dryRun
+                ? 'Preview mode — pass --force with --canonical/--merge or --auto to apply.'
+                : 'Listing unresolved duplicate groups (Active only):');
 
-            foreach ($groups as $normalizedName => $group) {
-                $canonical = $mergeService->pickCanonical($group);
-                $this->newLine();
-                $this->line('<fg=cyan>'.$group->first()->name.'</> ('.$group->count().' records)');
-                $this->line('  Keep: '.$canonical->vendor_id.' | email: '.($canonical->email ?: '—').' | status: '.$canonical->status);
-                $this->line('  Duplicates: '.$group->where('id', '!=', $canonical->id)->pluck('vendor_id')->implode(', '));
-                $this->line('  Suggested command:');
-                $dupes = $group->where('id', '!=', $canonical->id)->pluck('vendor_id')->implode(',');
-                $this->line('    php artisan vendors:merge-duplicates --canonical='.$canonical->vendor_id.' --merge='.$dupes.' --force');
+            foreach ($groups as $group) {
+                $this->printGroupSuggestion($mergeService, $group);
             }
 
             return self::SUCCESS;
@@ -65,31 +66,57 @@ class MergeDuplicateVendorsCommand extends Command
             return self::FAILURE;
         }
 
-        if ($dryRun) {
-            $this->warn('Auto mode requires --force to apply merges. Re-run with --auto --force');
-        }
-
         $totalMerged = 0;
 
         foreach ($groups as $group) {
             $canonical = $mergeService->pickCanonical($group);
             $result = $mergeService->mergeGroup($canonical, $group, $dryRun);
 
-            $this->info(($dryRun ? '[DRY RUN] Would keep ' : 'Kept ')
-                .$result['canonical']->vendor_id
-                .' and merge: '.implode(', ', $result['merged']));
-
-            if ($result['skipped'] !== []) {
-                $this->warn('Skipped: '.implode('; ', $result['skipped']));
-            }
-
+            $this->printMergeResult($result, $dryRun);
             $totalMerged += count($result['merged']);
         }
 
         $this->newLine();
         $this->info(($dryRun ? 'Would merge ' : 'Merged ').$totalMerged.' duplicate vendor record(s).');
+        $this->line('Next: php artisan vendors:merge-duplicates --purge-merged --force');
 
         return self::SUCCESS;
+    }
+
+    private function printGroupSuggestion(VendorMergeService $mergeService, $group): void
+    {
+        $canonical = $mergeService->pickCanonical($group);
+        $activeDupes = $group->where('id', '!=', $canonical->id)->values();
+
+        $this->newLine();
+        $this->line('<fg=cyan>'.$group->first()->name.'</> ('.$group->count().' active records)');
+        $this->line('  Keep: '.$canonical->vendor_id
+            .' | email: '.($canonical->email ?: '—')
+            .' | status: '.$canonical->status);
+        $this->line('  Merge: '.$activeDupes->pluck('vendor_id')->implode(', '));
+        $this->line('  Command:');
+        $dupes = $activeDupes->pluck('vendor_id')->implode(',');
+        $this->line('    php artisan vendors:merge-duplicates --canonical='.$canonical->vendor_id.' --merge='.$dupes.' --force');
+        $this->line('    php artisan vendors:merge-duplicates --purge-merged --force');
+    }
+
+    /**
+     * @param  array{canonical: Vendor, merged: list<string>, skipped: list<string>, already_merged: list<string>}  $result
+     */
+    private function printMergeResult(array $result, bool $dryRun): void
+    {
+        $prefix = $dryRun ? '[DRY RUN] Would keep ' : 'Kept ';
+        $this->info($prefix.$result['canonical']->vendor_id.' ('.$result['canonical']->name.')');
+
+        if ($result['merged'] !== []) {
+            $this->info(($dryRun ? 'Would merge: ' : 'Merged: ').implode(', ', $result['merged']));
+        }
+        if ($result['already_merged'] !== []) {
+            $this->line('Already inactive/merged: '.implode(', ', $result['already_merged']));
+        }
+        if ($result['skipped'] !== []) {
+            $this->warn('Skipped: '.implode('; ', $result['skipped']));
+        }
     }
 
     private function repairMergedInactive(bool $dryRun): int
@@ -100,7 +127,7 @@ class MergeDuplicateVendorsCommand extends Command
             ->get();
 
         if ($rows->isEmpty()) {
-            $this->info('No merged vendor rows need repair.');
+            $this->info('No merged vendor rows need Inactive repair.');
 
             return self::SUCCESS;
         }
@@ -114,6 +141,29 @@ class MergeDuplicateVendorsCommand extends Command
         }
 
         $this->info(($dryRun ? 'Would repair ' : 'Repaired ').$rows->count().' row(s).');
+
+        return self::SUCCESS;
+    }
+
+    private function purgeMerged(VendorMergeService $mergeService, bool $dryRun): int
+    {
+        if ($dryRun) {
+            $this->warn('Dry run — pass --force to delete inactive merged rows.');
+        }
+
+        $result = $mergeService->purgeInactiveMergedDuplicates($dryRun);
+
+        if ($result['deleted'] !== []) {
+            $this->info(($dryRun ? 'Would delete ' : 'Deleted ')
+                .count($result['deleted']).' inactive merged row(s): '
+                .implode(', ', $result['deleted']));
+        } else {
+            $this->info('No inactive merged rows eligible for deletion.');
+        }
+
+        if ($result['skipped'] !== []) {
+            $this->warn('Skipped: '.implode('; ', $result['skipped']));
+        }
 
         return self::SUCCESS;
     }
@@ -149,11 +199,11 @@ class MergeDuplicateVendorsCommand extends Command
         }
 
         $result = $mergeService->mergeGroup($canonical, $duplicates->push($canonical), $dryRun);
+        $this->printMergeResult($result, $dryRun);
 
-        $this->info(($dryRun ? '[DRY RUN] Would keep ' : 'Kept ')
-            .$result['canonical']->vendor_id
-            .' ('.$result['canonical']->name.')');
-        $this->info('Merged duplicates: '.implode(', ', $result['merged']));
+        if (! $dryRun && $result['merged'] !== []) {
+            $this->line('Run: php artisan vendors:merge-duplicates --purge-merged --force');
+        }
 
         return self::SUCCESS;
     }
