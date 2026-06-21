@@ -94,11 +94,14 @@ class VendorController extends Controller
      */
     public function index(Request $request)
     {
-        $query = Vendor::query();
+        $includeInactive = $request->boolean('include_inactive')
+            || $request->boolean('includeInactive');
 
-        // Filter by status
+        $query = Vendor::query()->forDirectory($includeInactive);
+
+        // Filter by status (overrides default directory filter when explicit)
         if ($request->has('status')) {
-            $query->where('status', $request->status);
+            $query = Vendor::query()->where('status', $request->status);
         }
 
         // Filter by category

@@ -622,9 +622,17 @@ Accepts: `category`, `category_other`, `website`, `tax_id`, `year_established`, 
 - `onboarding_source` (`registration` | `invite` | `manual_po`)
 - `onboarding_email_sent_at`
 
----
+`GET /api/vendors` now **excludes `Inactive` vendors by default** (merged duplicates). Pass `?include_inactive=1` to audit all rows.
 
-## Migration Required (DevOps)
+### Cleanup after merge
+
+```bash
+php artisan vendors:merge-duplicates --repair-inactive --force
+```
+
+If the directory still shows similar names (e.g. `MIJEKENDY GLOBAL SERVICES` vs `... LIMITED`), those are separate name groups — merge each with `--canonical` / `--merge` as needed.
+
+---
 
 ```bash
 php artisan migrate

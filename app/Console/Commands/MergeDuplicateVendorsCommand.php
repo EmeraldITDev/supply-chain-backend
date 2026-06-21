@@ -14,6 +14,7 @@ class MergeDuplicateVendorsCommand extends Command
                             {--canonical= : Keep this vendor code (e.g. V100)}
                             {--merge= : Comma-separated vendor codes to merge into canonical}
                             {--auto : Merge all duplicate name groups automatically}
+                            {--repair-inactive : Set Inactive on any vendor row whose notes say Merged into}
                             {--dry-run : Preview changes without saving (default unless --force)} 
                             {--force : Apply merges}';
 
@@ -22,6 +23,11 @@ class MergeDuplicateVendorsCommand extends Command
     public function handle(VendorMergeService $mergeService): int
     {
         $dryRun = ! $this->option('force');
+
+        if ($this->option('repair-inactive')) {
+            return $this->repairMergedInactive($dryRun);
+        }
+
         $nameFilter = $this->option('name');
 
         if ($this->option('canonical') && $this->option('merge')) {
@@ -82,6 +88,32 @@ class MergeDuplicateVendorsCommand extends Command
 
         $this->newLine();
         $this->info(($dryRun ? 'Would merge ' : 'Merged ').$totalMerged.' duplicate vendor record(s).');
+
+        return self::SUCCESS;
+    }
+
+    private function repairMergedInactive(bool $dryRun): int
+    {
+        $rows = Vendor::query()
+            ->where('status', '!=', 'Inactive')
+            ->where('notes', 'like', '%Merged into V%')
+            ->get();
+
+        if ($rows->isEmpty()) {
+            $this->info('No merged vendor rows need repair.');
+
+            return self::SUCCESS;
+        }
+
+        foreach ($rows as $vendor) {
+            $this->line(($dryRun ? '[DRY RUN] Would deactivate ' : 'Deactivated ')
+                .$vendor->vendor_id.' ('.$vendor->name.')');
+            if (! $dryRun) {
+                $vendor->update(['status' => 'Inactive']);
+            }
+        }
+
+        $this->info(($dryRun ? 'Would repair ' : 'Repaired ').$rows->count().' row(s).');
 
         return self::SUCCESS;
     }

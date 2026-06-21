@@ -59,10 +59,13 @@ class VendorController extends ApiController
 
     public function index(Request $request)
     {
-        $query = Vendor::query();
+        $includeInactive = $request->boolean('include_inactive')
+            || $request->boolean('includeInactive');
+
+        $query = Vendor::query()->forDirectory($includeInactive);
 
         if ($request->filled('status')) {
-            $query->where('status', $request->status);
+            $query = Vendor::query()->where('status', $request->status);
         }
 
         return $this->success([

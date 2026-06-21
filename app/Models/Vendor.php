@@ -113,6 +113,21 @@ class Vendor extends Model
     }
 
     /**
+     * Directory listings hide merged/inactive vendors unless explicitly requested.
+     *
+     * @param  \Illuminate\Database\Eloquent\Builder<self>  $query
+     * @return \Illuminate\Database\Eloquent\Builder<self>
+     */
+    public function scopeForDirectory($query, bool $includeInactive = false)
+    {
+        if (! $includeInactive) {
+            $query->where('status', '!=', 'Inactive');
+        }
+
+        return $query;
+    }
+
+    /**
      * Generate Vendor ID
      */
     public static function generateVendorId(): string
