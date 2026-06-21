@@ -589,8 +589,7 @@ All workflow mutations remain blocked: approve/reject MRF, generate/sign PO, pay
 
 ## 12. Manual PO vendor creation — dedupe & onboarding
 
-Full contract (frontend + backend, merge cleanup, acceptance criteria):
-**[`docs/manual-po-vendor-spec.md`](docs/manual-po-vendor-spec.md)**
+Full contract: **[`docs/manual-po-vendor-spec.md`](docs/manual-po-vendor-spec.md)**
 
 Quick reference:
 
@@ -600,8 +599,10 @@ Quick reference:
 | Save price sheet | `PUT /api/mrfs/{id}/price-comparisons` | Find-or-create vendor; email + phone required (422) |
 | Finalise PO | `POST /api/mrfs/{id}/generate-po` | Portal user + onboarding email; `resolvedVendors` in response |
 | Complete profile | `PUT /api/vendors/auth/profile` | Extended fields; sets `profile_completed` |
+| Bulk delete directory rows | `POST /api/vendors/bulk-delete` `{ "ids": ["V023", ...] }` | Deletes vendors; skips rows with active quotations |
 
-- `GET /api/vendors` excludes `Inactive` by default; `?include_inactive=1` for merged-row audit.
+- `GET /api/vendors` excludes `Inactive` by default.
+- Vendor Directory UI: row checkboxes + **Delete selected** (replaces inactive-merged audit toggle).
 - Legacy duplicate cleanup: `php artisan vendors:merge-duplicates --list` then `--purge-merged --force`.
 
 ---

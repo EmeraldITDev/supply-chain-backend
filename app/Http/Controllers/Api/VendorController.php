@@ -1330,83 +1330,191 @@ class VendorController extends Controller
     }
 
     /**
+     * @return list<string>
+     */
+    private function vendorDeletionRoles(): array
+    {
+        return [
+            'procurement_manager',
+            'supply_chain_director',
+            'supply_chain',
+            'executive',
+            'chairman',
+            'admin',
+        ];
+    }
+
+    private function userCanDeleteVendors(?User $user): bool
+    {
+        return $user !== null && in_array($user->scmRole(), $this->vendorDeletionRoles(), true);
+    }
+
+    /**
+     * @return array<string, mixed>|null Blocker payload when deletion is not allowed.
+     */
+    private function vendorDeletionBlocker(Vendor $vendor): ?array
+    {
+        $activeQuotations = $vendor->quotations()
+            ->whereIn('status', ['Pending', 'Approved'])
+            ->count();
+
+        if ($activeQuotations > 0) {
+            return [
+                'error' => 'Cannot delete vendor with active quotations. Please complete or reject all pending quotations first.',
+                'code' => 'VENDOR_HAS_ACTIVE_QUOTATIONS',
+                'activeQuotations' => $activeQuotations,
+            ];
+        }
+
+        return null;
+    }
+
+    /**
+     * @return array{vendorId: string, vendorName: string}
+     */
+    private function deleteVendorRecord(Vendor $vendor): array
+    {
+        $vendorUser = User::where('vendor_id', $vendor->id)->first();
+        if ($vendorUser) {
+            $vendorUser->tokens()->delete();
+            $vendorUser->delete();
+        }
+
+        $vendorName = $vendor->name;
+        $vendorId = $vendor->vendor_id;
+        $vendor->delete();
+
+        return [
+            'vendorId' => $vendorId,
+            'vendorName' => $vendorName,
+        ];
+    }
+
+    /**
      * Delete a vendor
-     * Soft deletes the vendor and deactivates their user account
      */
     public function destroy(Request $request, $id)
     {
         $user = $request->user();
 
-        // Check permission - allow procurement manager, supply chain director, and executive-level roles
-        $allowedRoles = [
-            'procurement_manager',
-            'supply_chain_director',
-            'supply_chain', // alias for supply_chain_director
-            'executive',
-            'chairman',
-            'admin'
-        ];
-
-        if (!in_array($user->scmRole(), $allowedRoles)) {
+        if (! $this->userCanDeleteVendors($user)) {
             return response()->json([
                 'success' => false,
                 'error' => 'Insufficient permissions',
-                'code' => 'FORBIDDEN'
+                'code' => 'FORBIDDEN',
             ], 403);
         }
 
-        // Find vendor by either primary key or vendor_id
         $vendor = $this->findVendor($id);
 
-        if (!$vendor) {
+        if (! $vendor) {
             return response()->json([
                 'success' => false,
                 'error' => 'Vendor not found',
                 'code' => 'NOT_FOUND',
                 'debug' => [
                     'searchedId' => $id,
-                    'searchedType' => is_numeric($id) ? 'numeric (tried both primary key and vendor_id)' : 'string (tried vendor_id only)'
-                ]
+                    'searchedType' => is_numeric($id) ? 'numeric (tried both primary key and vendor_id)' : 'string (tried vendor_id only)',
+                ],
             ], 404);
         }
 
-        // Check if vendor has active orders or quotations
-        $activeQuotations = $vendor->quotations()
-            ->whereIn('status', ['Pending', 'Approved'])
-            ->count();
-
-        if ($activeQuotations > 0) {
+        $blocker = $this->vendorDeletionBlocker($vendor);
+        if ($blocker !== null) {
             return response()->json([
                 'success' => false,
-                'error' => 'Cannot delete vendor with active quotations. Please complete or reject all pending quotations first.',
-                'code' => 'VENDOR_HAS_ACTIVE_QUOTATIONS',
-                'activeQuotations' => $activeQuotations
+                ...$blocker,
             ], 422);
         }
 
-        // Deactivate associated user account if exists
-        $vendorUser = User::where('vendor_id', $vendor->id)->first();
-        if ($vendorUser) {
-            // Revoke all tokens
-            $vendorUser->tokens()->delete();
-
-            // Delete user account
-            $vendorUser->delete();
-        }
-
-        // Delete the vendor
-        $vendorName = $vendor->name;
-        $vendorId = $vendor->vendor_id;
-        $vendor->delete();
+        $deleted = $this->deleteVendorRecord($vendor);
 
         return response()->json([
             'success' => true,
-            'message' => "Vendor '{$vendorName}' has been successfully deleted.",
-            'data' => [
-                'vendorId' => $vendorId,
-                'vendorName' => $vendorName,
-            ]
+            'message' => "Vendor '{$deleted['vendorName']}' has been successfully deleted.",
+            'data' => $deleted,
         ]);
+    }
+
+    /**
+     * Delete multiple vendors in one request.
+     */
+    public function bulkDestroy(Request $request)
+    {
+        $user = $request->user();
+
+        if (! $this->userCanDeleteVendors($user)) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Insufficient permissions',
+                'code' => 'FORBIDDEN',
+            ], 403);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'ids' => 'required|array|min:1|max:100',
+            'ids.*' => 'required|string|max:32',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Validation failed',
+                'errors' => $validator->errors(),
+                'code' => 'VALIDATION_ERROR',
+            ], 422);
+        }
+
+        $deleted = [];
+        $failed = [];
+        $seen = [];
+
+        foreach ($request->input('ids') as $id) {
+            $id = trim((string) $id);
+            if ($id === '' || isset($seen[$id])) {
+                continue;
+            }
+            $seen[$id] = true;
+
+            $vendor = $this->findVendor($id);
+            if (! $vendor) {
+                $failed[] = [
+                    'vendorId' => $id,
+                    'error' => 'Vendor not found',
+                    'code' => 'NOT_FOUND',
+                ];
+
+                continue;
+            }
+
+            $blocker = $this->vendorDeletionBlocker($vendor);
+            if ($blocker !== null) {
+                $failed[] = [
+                    'vendorId' => $vendor->vendor_id,
+                    'vendorName' => $vendor->name,
+                    ...$blocker,
+                ];
+
+                continue;
+            }
+
+            $deleted[] = $this->deleteVendorRecord($vendor);
+        }
+
+        $allSucceeded = $failed === [] && $deleted !== [];
+
+        return response()->json([
+            'success' => $allSucceeded,
+            'message' => $allSucceeded
+                ? count($deleted).' vendor(s) deleted successfully.'
+                : (count($deleted) > 0
+                    ? count($deleted).' deleted, '.count($failed).' failed.'
+                    : 'No vendors were deleted.'),
+            'data' => [
+                'deleted' => $deleted,
+                'failed' => $failed,
+            ],
+        ], $allSucceeded ? 200 : (count($deleted) > 0 ? 207 : 422));
     }
 
     /**
