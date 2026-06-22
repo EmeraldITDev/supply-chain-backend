@@ -2921,47 +2921,39 @@ class MRFWorkflowController extends Controller
     }
 
     /**
-     * Generate unique PO number automatically
-     * Format: PO-YYYY-MMDD-HHMMSS-XXXXX
-     * Ensures uniqueness by using timestamp and MRF ID suffix
+     * Generate the authoritative PO number in the canonical format
+     * PO-DDMMYY-SupplierToken-NNNN (serial resets per supplier per day).
+     * Mirrors the frontend formatter in src/utils/poNumber.ts.
      */
     private function generatePONumber(MRF $mrf): string
     {
-        $year = date('Y');
-        $month = date('m');
-        $day = date('d');
-        $hour = date('H');
-        $minute = date('i');
-        $second = date('s');
+        $supplierName = $this->resolveSupplierNameForPo($mrf);
 
-        // Extract last 5 characters of MRF ID to make it unique to the request
-        $mrfIdSuffix = substr(str_replace('-', '', $mrf->mrf_id), -5);
-        $mrfIdSuffix = strtoupper($mrfIdSuffix);
+        return app(\App\Services\PoNumberGenerator::class)->generate($supplierName);
+    }
 
-        // Format: PO-YYYY-MMDD-HHMMSS-XXXXX (e.g., PO-2026-0115-143052-A1B2C)
-        // This ensures uniqueness with timestamp + MRF ID suffix
-        $poNumber = "PO-{$year}-{$month}{$day}-{$hour}{$minute}{$second}-{$mrfIdSuffix}";
+    /**
+     * Resolve the supplier/vendor name used for the PO number token. Prefers the
+     * selected price-comparison supplier, then the MRF's selected vendor.
+     */
+    private function resolveSupplierNameForPo(MRF $mrf): string
+    {
+        $lineService = app(PriceComparisonPoLineService::class);
+        $rows = $lineService->selectedSupplierRows($mrf);
+        $vendor = $lineService->resolveVendorFromRows($rows);
 
-        // Double-check uniqueness - if somehow duplicate exists, add sequence
-        $existingMRF = MRF::where('po_number', $poNumber)
-            ->where('id', '!=', $mrf->id)
-            ->first();
-
-        if ($existingMRF) {
-            // Very rare case - add sequence number
-            $sequence = 1;
-            $lastPO = MRF::where('po_number', 'like', "{$poNumber}-%")
-                ->orderBy('po_number', 'desc')
-                ->first();
-
-            if ($lastPO && preg_match('/-(\d+)$/', $lastPO->po_number, $matches)) {
-                $sequence = (int) $matches[1] + 1;
-            }
-
-            $poNumber = "{$poNumber}-{$sequence}";
+        if ($vendor && trim((string) $vendor->name) !== '') {
+            return (string) $vendor->name;
         }
 
-        return $poNumber;
+        if ($mrf->selected_vendor_id) {
+            $selected = $mrf->selectedVendor;
+            if ($selected && trim((string) $selected->name) !== '') {
+                return (string) $selected->name;
+            }
+        }
+
+        return 'Vendor';
     }
 
     /**

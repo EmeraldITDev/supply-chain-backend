@@ -607,11 +607,34 @@ Quick reference:
 
 ---
 
+## 13. PO numbering — `PO-DDMMYY-SupplierToken-NNNN`
+
+Full contract: **[`docs/po-numbering-spec.md`](docs/po-numbering-spec.md)**
+
+The backend now generates the authoritative PO number in the canonical format,
+matching the frontend formatter `src/utils/poNumber.ts`.
+
+| Segment | Rule | Example |
+|---------|------|---------|
+| `DDMMYY` | PO creation date | `220626` |
+| `SupplierToken` | Supplier name, non-alphanumerics removed, casing preserved, ≤30 chars | `MochenzComputers` |
+| `NNNN` | 4-digit serial, resets per supplier per day | `0001` |
+
+- `POST /api/mrfs/{id}/generate-po` finalise assigns + persists `po_number`; returned on `data.mrf.po_number` and on `GET /api/mrfs` rows.
+- Drafts (`save_as_draft: true`) do **not** burn a serial.
+- Regeneration keeps the existing `po_number`.
+- A caller-supplied `po_number` is still honoured (frontend preview path).
+- `POST /api/trips/{id}/generate-trip-po`: `po_number` is now optional; backend auto-generates from the carrier/vendor name when omitted.
+- Existing PO numbers are untouched.
+
+---
+
 ```bash
 php artisan migrate
 ```
 
 Migrations:
+- `2026_06_22_120000_create_po_number_sequences_table.php` (PO serial counters)
 - `2026_05_20_160000_scm_platform_feature_enhancements.php`
 - `2026_05_21_120000_rename_line_item_tables.php` (renames `mrf_items` → `mrf_line_items`, adds `quoted_amount`)
 - `2026_05_19_000001_contract_type_free_text.php` (if not applied)

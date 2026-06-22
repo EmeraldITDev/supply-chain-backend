@@ -712,7 +712,7 @@ class TripRequestWorkflowController extends ApiController
         }
 
         $validator = Validator::make($request->all(), [
-            'po_number' => 'required|string|max:100',
+            'po_number' => 'nullable|string|max:100',
             'unsigned_po_url' => 'required|string|max:500',
         ]);
 
@@ -720,7 +720,18 @@ class TripRequestWorkflowController extends ApiController
             return $this->error('Validation failed', 'VALIDATION_ERROR', 422, $validator->errors()->toArray());
         }
 
-        $trip->fill($validator->validated());
+        $validated = $validator->validated();
+
+        // Keep an existing number on regeneration; auto-generate in the canonical
+        // PO-DDMMYY-SupplierToken-NNNN format when none is supplied.
+        $poNumber = trim((string) ($validated['po_number'] ?? '')) !== ''
+            ? $validated['po_number']
+            : (trim((string) ($trip->po_number ?? '')) !== ''
+                ? $trip->po_number
+                : app(\App\Services\PoNumberGenerator::class)->generate($this->resolveTripSupplierName($trip)));
+
+        $trip->po_number = $poNumber;
+        $trip->unsigned_po_url = $validated['unsigned_po_url'];
         $trip->workflow_stage = Trip::WORKFLOW_PO_PENDING_SIGN;
         $trip->updated_by = $user->id;
         $trip->save();
@@ -733,6 +744,19 @@ class TripRequestWorkflowController extends ApiController
         );
 
         return $this->success(['trip' => $trip]);
+    }
+
+    /**
+     * Carrier/vendor name used as the PO supplier token for a trip.
+     */
+    private function resolveTripSupplierName(Trip $trip): string
+    {
+        $vendor = $trip->selectedVendor ?? $trip->vendor;
+        if ($vendor && trim((string) $vendor->name) !== '') {
+            return (string) $vendor->name;
+        }
+
+        return 'Vendor';
     }
 
     public function uploadSignedPo(Request $request, int $id)
