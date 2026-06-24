@@ -629,6 +629,16 @@ matching the frontend formatter `src/utils/poNumber.ts`.
 
 ---
 
+## 14. Finance AP vendor sync (Pattern A)
+
+SCM is the **vendor master**. Finance AP receives a read-only vendor snapshot on every package/delta push (`header.vendor`). Finance AP must upsert locally and **must not** create SCM vendors.
+
+**Finance AP team:** implement per **[`docs/FINANCE_AP_VENDOR_SYNC_PATTERN_A.md`](docs/FINANCE_AP_VENDOR_SYNC_PATTERN_A.md)** (data model, ingest service, read APIs, UI).
+
+**SCM (done):** `FinanceApVendorSnapshotBuilder` resolves supplier from price comparison + `selected_vendor_id` and embeds extended snapshot in `FinancePackageBuilder`.
+
+---
+
 ```bash
 php artisan migrate
 ```

@@ -33,6 +33,7 @@ class FinancePackageBuilder
     public function __construct(
         private PaymentScheduleService $paymentScheduleService,
         private ProcurementDocumentService $documentService,
+        private FinanceApVendorSnapshotBuilder $vendorSnapshotBuilder,
     ) {
     }
 
@@ -49,7 +50,7 @@ class FinancePackageBuilder
         ]);
 
         $schedule = $mrf->paymentSchedule;
-        $vendor = $mrf->selectedVendor;
+        $vendor = $this->vendorSnapshotBuilder->resolveForMrf($mrf);
         $poTotal = $this->resolvePoTotal($mrf, $schedule);
 
         if ($schedule) {
@@ -92,30 +93,7 @@ class FinancePackageBuilder
                 'name' => $mrf->requester_name ?? $mrf->requester?->name,
                 'department' => $mrf->department,
             ],
-            'vendor' => $vendor ? $this->vendorSnapshot($vendor) : null,
-        ];
-    }
-
-    /**
-     * @return array<string, mixed>
-     */
-    private function vendorSnapshot(Vendor $vendor): array
-    {
-        return [
-            'scmVendorId' => $vendor->id,
-            'vendorCode' => $vendor->vendor_id,
-            'name' => $vendor->name,
-            'email' => $vendor->email,
-            'phone' => $vendor->phone,
-            'taxId' => $vendor->tax_id,
-            'address' => trim(implode(', ', array_filter([
-                $vendor->address,
-                $vendor->city,
-                $vendor->state,
-            ]))),
-            'contactPerson' => $vendor->contact_person,
-            'contactPersonEmail' => $vendor->contact_person_email,
-            'contactPersonPhone' => $vendor->contact_person_phone,
+            'vendor' => $vendor ? $this->vendorSnapshotBuilder->toArray($vendor) : null,
         ];
     }
 
