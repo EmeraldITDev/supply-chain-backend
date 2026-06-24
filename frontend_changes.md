@@ -635,7 +635,9 @@ SCM is the **vendor master**. Finance AP receives a read-only vendor snapshot on
 
 **Finance AP team:** implement per **[`docs/FINANCE_AP_VENDOR_SYNC_PATTERN_A.md`](docs/FINANCE_AP_VENDOR_SYNC_PATTERN_A.md)** (data model, ingest service, read APIs, UI).
 
-**SCM (done):** `FinanceApVendorSnapshotBuilder` resolves supplier from price comparison + `selected_vendor_id` and embeds extended snapshot in `FinancePackageBuilder`.
+**SCM (done):** `FinanceApVendorSnapshotBuilder` + automatic `POST .../integrations/scm/vendors` on vendor create/update. Backfill: `php artisan finance-ap:sync-vendors --force`.
+
+**Finance AP (required):** Implement `POST /api/v1/integrations/scm/vendors` — see [`docs/FINANCE_AP_VENDOR_SYNC_PATTERN_A.md`](docs/FINANCE_AP_VENDOR_SYNC_PATTERN_A.md) §2.1 and §5.2. Without this endpoint, `GET /api/v1/vendors` will stay empty.
 
 ---
 

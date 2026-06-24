@@ -15,12 +15,16 @@ return [
 
     'enabled' => filter_var(env('FINANCE_AP_INTEGRATION_ENABLED', true), FILTER_VALIDATE_BOOL),
 
+    // Push vendor create/update snapshots to Finance AP (in addition to package header.vendor).
+    'vendor_sync_enabled' => filter_var(env('FINANCE_AP_VENDOR_SYNC_ENABLED', true), FILTER_VALIDATE_BOOL),
+
     'http_timeout' => (int) env('FINANCE_AP_HTTP_TIMEOUT', 30),
 
     'paths' => [
         'package' => '/api/v1/integrations/scm/packages',
         'delta' => '/api/v1/integrations/scm/packages/{scm_transaction_id}/delta',
         'document_refresh' => '/api/v1/integrations/scm/documents/{scm_transaction_id}/{document_id}',
+        'vendor_sync' => '/api/v1/integrations/scm/vendors',
     ],
 
     'webhook' => [
