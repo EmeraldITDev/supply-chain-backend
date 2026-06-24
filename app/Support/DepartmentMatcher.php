@@ -10,6 +10,26 @@ use Illuminate\Support\Str;
  */
 class DepartmentMatcher
 {
+    /**
+     * Department labels that refer to the same org unit (normalized keys per group).
+     *
+     * @var list<list<string>>
+     */
+    private const SYNONYM_GROUPS = [
+        ['ict', 'it', 'information technology'],
+        ['hr', 'human resources'],
+        ['fin', 'finance'],
+        ['ops', 'operations'],
+        ['log', 'logistics'],
+        ['sc', 'supply chain'],
+        ['adm', 'administration'],
+        ['eng', 'engineering'],
+        ['leg', 'legal'],
+        ['mkt', 'marketing'],
+        ['prc', 'procurement'],
+        ['exe', 'executive'],
+    ];
+
     public static function normalizeKey(?string $value): string
     {
         $value = Str::of((string) $value)->lower()->trim();
@@ -85,6 +105,57 @@ class DepartmentMatcher
     }
 
     /**
+     * Stable key for collapsing department aliases in list UIs.
+     */
+    public static function dedupeKey(?string $label): string
+    {
+        $label = trim((string) $label);
+        if ($label === '') {
+            return '';
+        }
+
+        $synonymGroup = self::synonymGroupId($label);
+        if ($synonymGroup !== null) {
+            return 'synonym:' . $synonymGroup;
+        }
+
+        $row = self::resolveDepartmentCodeRow($label);
+        if ($row !== null) {
+            return 'dept_code:' . (int) $row->id;
+        }
+
+        return 'dept_name:' . self::normalizeKey($label);
+    }
+
+    /**
+     * @param iterable<string> $labels
+     * @return list<string>
+     */
+    public static function uniqueDepartmentLabels(iterable $labels): array
+    {
+        $grouped = [];
+
+        foreach ($labels as $label) {
+            $label = trim((string) $label);
+            if ($label === '') {
+                continue;
+            }
+
+            $key = self::dedupeKey($label);
+            if ($key === '' || isset($grouped[$key])) {
+                continue;
+            }
+
+            $grouped[$key] = self::canonicalName($label);
+        }
+
+        $values = array_values($grouped);
+        sort($values);
+
+        return $values;
+    }
+
+    /**
      * @return object{id: int, department_name: string, code: string}|null
      */
     public static function resolveDepartmentCodeRow(?string $label): ?object
@@ -98,16 +169,64 @@ class DepartmentMatcher
         $upper = strtoupper($label);
 
         $rows = DB::table('department_codes')->select(['id', 'department_name', 'code'])->get();
+        $matches = [];
 
         foreach ($rows as $row) {
             if (self::normalizeKey($row->department_name) === $key) {
-                return $row;
+                $matches[(int) $row->id] = $row;
             }
             if (strcasecmp((string) $row->code, $label) === 0 || strtoupper((string) $row->code) === $upper) {
-                return $row;
+                $matches[(int) $row->id] = $row;
             }
             if (self::normalizeKey($row->code) === $key) {
-                return $row;
+                $matches[(int) $row->id] = $row;
+            }
+        }
+
+        $synonymGroup = self::synonymGroupId($label);
+        if ($synonymGroup !== null) {
+            foreach ($rows as $row) {
+                if (self::synonymGroupId($row->department_name) === $synonymGroup
+                    || self::synonymGroupId($row->code) === $synonymGroup) {
+                    $matches[(int) $row->id] = $row;
+                }
+            }
+        }
+
+        if ($matches === []) {
+            return null;
+        }
+
+        return self::pickCanonicalDepartmentRow(array_values($matches));
+    }
+
+    /**
+     * @param list<object{id: int, department_name: string, code: string}> $rows
+     */
+    private static function pickCanonicalDepartmentRow(array $rows): object
+    {
+        usort($rows, function (object $a, object $b): int {
+            $nameCompare = strlen((string) $b->department_name) <=> strlen((string) $a->department_name);
+            if ($nameCompare !== 0) {
+                return $nameCompare;
+            }
+
+            return (int) $a->id <=> (int) $b->id;
+        });
+
+        return $rows[0];
+    }
+
+    private static function synonymGroupId(?string $label): ?string
+    {
+        $key = self::normalizeKey($label);
+        if ($key === '') {
+            return null;
+        }
+
+        foreach (self::SYNONYM_GROUPS as $group) {
+            if (in_array($key, $group, true)) {
+                return implode('|', $group);
             }
         }
 

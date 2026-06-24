@@ -400,13 +400,13 @@ class UserManagementController extends Controller
             );
         }
 
-        $departmentNames = $departmentNames
-            ->merge(User::query()->whereNotNull('department')->where('department', '!=', '')->distinct()->pluck('department'))
-            ->map(fn ($name) => trim((string) $name))
-            ->filter()
-            ->unique(fn ($name) => DepartmentMatcher::normalizeKey($name))
-            ->sort()
-            ->values();
+        $departmentNames = collect(
+            DepartmentMatcher::uniqueDepartmentLabels(
+                $departmentNames->merge(
+                    User::query()->whereNotNull('department')->where('department', '!=', '')->distinct()->pluck('department')
+                )
+            )
+        );
 
         $allUsers = User::query()
             ->whereIn('supply_chain_role', ['employee', 'staff', 'regular_staff'])
