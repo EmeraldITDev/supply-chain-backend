@@ -405,6 +405,9 @@ When staff manually link a Finance AP PO or invoice to a vendor:
 
 ## 10. FAQ
 
+**Q: `finance-ap:sync-vendors --force` fails with 404 `route api/v1/integrations/scm/vendors could not be found`?**  
+A: **SCM is working correctly.** Finance AP has not deployed `POST /api/v1/integrations/scm/vendors` yet. Implement using **`docs/financeap-backend/SCM_VENDOR_INGEST_ROUTE.md`**, deploy FA, then re-run the SCM command. Check `finance_sync_events` (`event_type = vendor_sync`) for `http_status = 200`.
+
 **Q: Can Finance AP add a vendor for a one-off payment?**  
 A: Not for SCM procurement cases. SCM is master. For non-SCM spend, use Finance AP’s own local vendor model (`source=local`) if your product allows it — keep separate from SCM-synced rows.
 
