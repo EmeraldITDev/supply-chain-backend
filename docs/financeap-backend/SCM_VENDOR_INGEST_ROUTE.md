@@ -1,15 +1,10 @@
-# Finance AP — implement `POST /api/v1/integrations/scm/vendors`
+# Finance AP — `POST /api/v1/integrations/scm/vendors`
 
-**Status:** Blocking vendor sync from SCM  
-**Error you will see until this ships:** `404 The route api/v1/integrations/scm/vendors could not be found.`
+**Status:** **Implemented** (Jun 2026)
 
-SCM (`supply-chain-backend`) is already calling this endpoint on every vendor create/update and via:
+Reference implementation notes below (for onboarding / audits). SCM calls this endpoint on vendor create/update and via `php artisan finance-ap:sync-vendors --force`.
 
-```bash
-php artisan finance-ap:sync-vendors --force
-```
-
-Finance AP must add the route below, then re-run the SCM command.
+**If sync still fails:** verify FA deploy is live, `X-Api-Key` matches SCM `FINANCE_AP_API_KEY`, and `php artisan route:list --path=integrations/scm/vendors` on FA shows the route.
 
 ---
 

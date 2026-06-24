@@ -1,6 +1,6 @@
 # Finance AP — Vendor Sync (Pattern A)
 
-Status: **SCM side implemented** · **Finance AP implementation required**
+Status: **SCM implemented** · **Finance AP vendor ingest implemented** (Jun 2026)
 
 **Audience:** `financeap-backend` and `EmeraldFinanceAP` teams  
 **SCM counterpart:** `supply-chain-backend` — vendor master; vendor data is **pushed** on each Finance AP package, not pulled via a live directory API.
@@ -22,18 +22,27 @@ Copy this file to `financeap-backend/docs/FINANCE_AP_VENDOR_SYNC_PATTERN_A.md` w
 
 ## 2. When SCM sends vendor data
 
-### 2.1 Automatic vendor sync (primary — populates vendor directory)
+Vendor snapshot is included at `package.header.vendor` (or `package.package.header.vendor` on delta — see §4), or as a standalone `{ "vendor": { ... } }` body on the vendor ingest route.
 
-Whenever a vendor is **created or updated** in SCM (registration approved, manual PO, invite, profile edit), SCM pushes to Finance AP:
+| SCM event | Endpoint SCM calls on Finance AP | Vendor in payload |
+|-----------|----------------------------------|-------------------|
+| Initial finance handoff | `POST /api/v1/integrations/scm/packages` | Yes — full snapshot at `header.vendor` |
+| Delta (e.g. vendor invoice submitted) | `POST /api/v1/integrations/scm/packages/{scm_transaction_id}/delta` | Yes — re-sent in nested `package` |
+| Vendor create/update (SCM master) | `POST /api/v1/integrations/scm/vendors` | Yes — `{ "vendor": { ... } }` snapshot |
+| Bulk vendor sync (`finance-ap:sync-vendors --force`) | `POST /api/v1/integrations/scm/vendors` | One snapshot per vendor |
+
+Finance AP upserts on **every** package, delta, and standalone vendor push.
+
+### 2.1 Automatic vendor sync (SCM → Finance AP)
+
+Whenever a vendor is **created or updated** in SCM, `VendorObserver` pushes:
 
 ```
 POST /api/v1/integrations/scm/vendors
 X-Api-Key: {FINANCE_AP_API_KEY}
 Idempotency-Key: vendor:{scm_vendor_id}:v{updated_at_unix}
 
-{
-  "vendor": { /* snapshot — same shape as §3 */ }
-}
+{ "vendor": { /* snapshot — §3 */ } }
 ```
 
 | SCM trigger | When |
@@ -42,33 +51,16 @@ Idempotency-Key: vendor:{scm_vendor_id}:v{updated_at_unix}
 | Vendor updated | Admin profile edit, portal profile save (synced fields only) |
 | Skipped | `status = Inactive` (merged duplicates) |
 
-**Backfill existing vendors** (one-time or after deploy):
+**Backfill** (after deploy or FA ingest route fix):
 
 ```bash
 php artisan finance-ap:sync-vendors --dry-run
 php artisan finance-ap:sync-vendors --force
 ```
 
-Env on SCM: `FINANCE_AP_VENDOR_SYNC_ENABLED=true` (default), plus `FINANCE_AP_BASE_URL` + `FINANCE_AP_API_KEY`.
+Env on SCM: `FINANCE_AP_VENDOR_SYNC_ENABLED=true` (default), `FINANCE_AP_BASE_URL`, `FINANCE_AP_API_KEY`.
 
-Finance AP **must implement** `POST /api/v1/integrations/scm/vendors` and call the same `upsertFromPackageSnapshot()` logic as package ingest (§5.2).
-
-### 2.2 Package / delta sync (secondary — keeps case vendor current)
-
-Vendor snapshot is also included at:
-
-```json
-package.header.vendor
-```
-
-(or `package.package.header.vendor` on delta — see §4)
-
-| SCM event | Endpoint SCM calls on Finance AP | Vendor in payload |
-|-----------|----------------------------------|-------------------|
-| Initial finance handoff | `POST /api/v1/integrations/scm/packages` | Yes — full snapshot |
-| Delta (e.g. vendor invoice submitted) | `POST /api/v1/integrations/scm/packages/{scm_transaction_id}/delta` | Yes — re-sent in nested `package` |
-
-Finance AP must **upsert on every package, delta, and automatic vendor push**.
+**Finance AP:** `POST /api/v1/integrations/scm/vendors` — **implemented.** Uses the same upsert logic as package ingest (`upsertFromSnapshot` / `upsertFromPackageSnapshot`).
 
 ---
 
@@ -201,7 +193,7 @@ Do **not** allow `POST /api/v1/vendors` to create rows with `source=scm` from hu
 
 | Method | Path | Purpose |
 |--------|------|---------|
-| `POST` | `/api/v1/integrations/scm/vendors` | **Required.** Upsert one vendor from `{ "vendor": { ... } }` |
+| `POST` | `/api/v1/integrations/scm/vendors` | **Implemented.** Upsert one vendor from `{ "vendor": { ... } }` |
 | `POST` | `/api/v1/integrations/scm/packages` | Create/update SCM case + upsert `header.vendor` |
 | `POST` | `/api/v1/integrations/scm/packages/{scm_transaction_id}/delta` | Delta + re-upsert vendor |
 
@@ -363,14 +355,11 @@ When staff manually link a Finance AP PO or invoice to a vendor:
 - [x] Resolves supplier from price comparison + `selected_vendor_id`.
 - [x] Extended snapshot fields + snake_case aliases.
 
-### Finance AP backend — todo
+### Finance AP backend
 
-- [ ] **`POST /api/v1/integrations/scm/vendors`** ingest handler (critical — without this, vendor list stays empty).
-- [ ] `vendor_scm_mappings` migration.
-- [ ] `ScmVendorSyncService::upsertFromPackageSnapshot()`.
-- [ ] Wire sync into package + delta ingest handlers.
-- [ ] Link `scm_procurement_cases` to synced vendor.
-- [ ] `GET /api/v1/vendors` read-only for SCM-sourced rows.
+- [x] **`POST /api/v1/integrations/scm/vendors`** ingest handler.
+- [x] `vendor_scm_mappings` + upsert on ingest.
+- [ ] `GET /api/v1/vendors` list query aligned with synced rows (`source=scm` / mapping join).
 - [ ] Block create/update/delete of SCM-master vendor fields via human APIs.
 
 ### Finance AP frontend — todo
@@ -405,8 +394,11 @@ When staff manually link a Finance AP PO or invoice to a vendor:
 
 ## 10. FAQ
 
-**Q: `finance-ap:sync-vendors --force` fails with 404 `route api/v1/integrations/scm/vendors could not be found`?**  
-A: **SCM is working correctly.** Finance AP has not deployed `POST /api/v1/integrations/scm/vendors` yet. Implement using **`docs/financeap-backend/SCM_VENDOR_INGEST_ROUTE.md`**, deploy FA, then re-run the SCM command. Check `finance_sync_events` (`event_type = vendor_sync`) for `http_status = 200`.
+**Q: `finance-ap:sync-vendors --force` fails with 404?**  
+A: Finance AP had not deployed `POST /api/v1/integrations/scm/vendors`. **Now implemented** — re-run `php artisan finance-ap:sync-vendors --force` on SCM and confirm `finance_sync_events` (`event_type = vendor_sync`) shows `http_status = 200`.
+
+**Q: `GET /api/v1/vendors` still empty after sync?**  
+A: Check FA list query filters (`source`, `is_scm_master`, mapping join). Confirm ingest returns 200 per vendor in SCM `finance_sync_events`.
 
 **Q: Can Finance AP add a vendor for a one-off payment?**  
 A: Not for SCM procurement cases. SCM is master. For non-SCM spend, use Finance AP’s own local vendor model (`source=local`) if your product allows it — keep separate from SCM-synced rows.

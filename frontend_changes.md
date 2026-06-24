@@ -631,13 +631,15 @@ matching the frontend formatter `src/utils/poNumber.ts`.
 
 ## 14. Finance AP vendor sync (Pattern A)
 
-SCM is the **vendor master**. Finance AP receives a read-only vendor snapshot on every package/delta push (`header.vendor`). Finance AP must upsert locally and **must not** create SCM vendors.
+SCM is the **vendor master**. Finance AP receives read-only vendor snapshots via push (automatic on create/update + package/delta).
 
-**Finance AP team:** implement per **[`docs/FINANCE_AP_VENDOR_SYNC_PATTERN_A.md`](docs/FINANCE_AP_VENDOR_SYNC_PATTERN_A.md)** (data model, ingest service, read APIs, UI).
+**Contract:** [`docs/FINANCE_AP_VENDOR_SYNC_PATTERN_A.md`](docs/FINANCE_AP_VENDOR_SYNC_PATTERN_A.md)
 
-**SCM (done):** `FinanceApVendorSnapshotBuilder` + automatic `POST .../integrations/scm/vendors` on vendor create/update. Backfill: `php artisan finance-ap:sync-vendors --force`.
-
-**Finance AP (required):** Implement `POST /api/v1/integrations/scm/vendors` — see [`docs/FINANCE_AP_VENDOR_SYNC_PATTERN_A.md`](docs/FINANCE_AP_VENDOR_SYNC_PATTERN_A.md) §2.1 and §5.2. Without this endpoint, `GET /api/v1/vendors` will stay empty.
+| Side | Status |
+|------|--------|
+| SCM push (`FinanceApVendorSyncService`, `finance-ap:sync-vendors`) | Done |
+| FA ingest (`POST /api/v1/integrations/scm/vendors`) | Done |
+| FA list UI (`GET /api/v1/vendors`) | Verify after `php artisan finance-ap:sync-vendors --force` on SCM |
 
 ---
 
