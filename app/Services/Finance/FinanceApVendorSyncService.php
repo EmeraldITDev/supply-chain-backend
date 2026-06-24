@@ -39,21 +39,30 @@ class FinanceApVendorSyncService
         return true;
     }
 
-    public function pushVendor(Vendor $vendor): bool
+    public function pushVendor(Vendor $vendor, bool $forceResync = false): bool
     {
         if (! $this->isEnabled() || ! $this->shouldSync($vendor)) {
             return false;
         }
 
         $snapshot = $this->snapshotBuilder->toArray($vendor);
-        $idempotencyKey = sprintf(
-            'vendor:%d:v%s',
-            $vendor->id,
-            $vendor->updated_at?->timestamp ?? now()->timestamp
-        );
-
         $payload = ['vendor' => $snapshot];
-        $event = $this->logOutboundEvent($vendor, $idempotencyKey, $payload);
+        $payloadHash = hash('sha256', json_encode($payload));
+        $idempotencyKey = $this->buildIdempotencyKey($vendor, $forceResync);
+
+        if (! $forceResync) {
+            $alreadySynced = FinanceSyncEvent::query()
+                ->where('idempotency_key', $idempotencyKey)
+                ->where('status', FinanceSyncEvent::STATUS_SUCCESS)
+                ->where('payload_hash', $payloadHash)
+                ->exists();
+
+            if ($alreadySynced) {
+                return true;
+            }
+        }
+
+        $event = $this->logOutboundEvent($vendor, $idempotencyKey, $payload, $payloadHash);
 
         try {
             $response = Http::baseUrl(config('finance_ap.base_url'))
@@ -111,14 +120,14 @@ class FinanceApVendorSyncService
     /**
      * @return array{synced: int, skipped: int, failed: int}
      */
-    public function pushAllActiveVendors(bool $dryRun = true): array
+    public function pushAllActiveVendors(bool $dryRun = true, bool $forceResync = false): array
     {
         $stats = ['synced' => 0, 'skipped' => 0, 'failed' => 0];
 
         Vendor::query()
             ->where('status', '!=', 'Inactive')
             ->orderBy('id')
-            ->chunkById(50, function (Collection $vendors) use ($dryRun, &$stats) {
+            ->chunkById(50, function (Collection $vendors) use ($dryRun, $forceResync, &$stats) {
                 foreach ($vendors as $vendor) {
                     if (! $this->shouldSync($vendor)) {
                         $stats['skipped']++;
@@ -132,7 +141,7 @@ class FinanceApVendorSyncService
                         continue;
                     }
 
-                    if ($this->pushVendor($vendor)) {
+                    if ($this->pushVendor($vendor, $forceResync)) {
                         $stats['synced']++;
                     } else {
                         $stats['failed']++;
@@ -143,21 +152,44 @@ class FinanceApVendorSyncService
         return $stats;
     }
 
+    private function buildIdempotencyKey(Vendor $vendor, bool $forceResync): string
+    {
+        if ($forceResync) {
+            return sprintf('vendor:%d:resync:%s', $vendor->id, uniqid('', true));
+        }
+
+        return sprintf(
+            'vendor:%d:v%s',
+            $vendor->id,
+            $vendor->updated_at?->timestamp ?? now()->timestamp
+        );
+    }
+
     /**
      * @param  array<string, mixed>  $payload
      */
-    private function logOutboundEvent(Vendor $vendor, string $idempotencyKey, array $payload): FinanceSyncEvent
-    {
-        return FinanceSyncEvent::query()->create([
-            'mrf_id' => null,
-            'scm_transaction_id' => null,
-            'direction' => FinanceSyncEvent::DIRECTION_OUTBOUND,
-            'event_type' => 'vendor_sync',
-            'idempotency_key' => $idempotencyKey,
-            'correlation_id' => 'vendor:'.$vendor->id,
-            'payload_hash' => hash('sha256', json_encode($payload)),
-            'request_payload' => $payload,
-            'status' => FinanceSyncEvent::STATUS_PENDING,
-        ]);
+    private function logOutboundEvent(
+        Vendor $vendor,
+        string $idempotencyKey,
+        array $payload,
+        string $payloadHash,
+    ): FinanceSyncEvent {
+        return FinanceSyncEvent::query()->updateOrCreate(
+            ['idempotency_key' => $idempotencyKey],
+            [
+                'mrf_id' => null,
+                'scm_transaction_id' => null,
+                'direction' => FinanceSyncEvent::DIRECTION_OUTBOUND,
+                'event_type' => 'vendor_sync',
+                'correlation_id' => 'vendor:'.$vendor->id,
+                'payload_hash' => $payloadHash,
+                'request_payload' => $payload,
+                'response_payload' => null,
+                'http_status' => null,
+                'error_message' => null,
+                'processed_at' => null,
+                'status' => FinanceSyncEvent::STATUS_PENDING,
+            ]
+        );
     }
 }

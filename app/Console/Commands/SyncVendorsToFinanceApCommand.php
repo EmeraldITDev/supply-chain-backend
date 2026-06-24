@@ -28,7 +28,7 @@ class SyncVendorsToFinanceApCommand extends Command
             $this->warn('Dry run — pass --force to push vendors to Finance AP.');
         }
 
-        $stats = $syncService->pushAllActiveVendors($dryRun);
+        $stats = $syncService->pushAllActiveVendors($dryRun, forceResync: ! $dryRun);
 
         $this->table(
             ['Synced', 'Skipped', 'Failed'],
