@@ -22,6 +22,7 @@ use App\Services\FinanceAp\MrfProgressTrackerService;
 use App\Services\PaymentScheduleService;
 use App\Services\WorkflowStateService;
 use App\Services\PermissionService;
+use App\Services\RequesterEditWindowService;
 use App\Services\PurchaseOrderPdfService;
 use App\Services\QuotationAttachmentService;
 use Illuminate\Http\Request;
@@ -250,11 +251,15 @@ class MRFController extends Controller
         $perPage = (int) $request->get('per_page', 50);
         $perPage = min($perPage, 200); // Cap at 200 to prevent abuse
         $mrfs = $query->paginate($perPage);
+        $requesterEditService = app(RequesterEditWindowService::class);
 
-        return response()->json($mrfs->map(function($mrf) {
+        return response()->json($mrfs->map(function ($mrf) use ($user, $requesterEditService) {
             $freshPOUrls = $this->generateFreshPOUrls($mrf);
 
-            return array_merge($mrf->scmTransactionApiFields(), [
+            return array_merge(
+                $mrf->scmTransactionApiFields(),
+                $requesterEditService->metaForMrf($user, $mrf),
+                [
                 'id' => $mrf->mrf_id,
                 'formattedId' => $mrf->formatted_id,
                 'formatted_id' => $mrf->formatted_id,
@@ -272,6 +277,8 @@ class MRFController extends Controller
                 'requesterId' => (string) $mrf->requester_id,
                 'department' => $mrf->department,
                 'date' => $mrf->date ? $mrf->date->format('Y-m-d') : null,
+                'createdAt' => $mrf->created_at?->toIso8601String(),
+                'created_at' => $mrf->created_at?->toIso8601String(),
                 'status' => $mrf->status,
                 'currentStage' => $mrf->current_stage,
                 'workflowState' => $mrf->workflow_state,
@@ -329,7 +336,8 @@ class MRFController extends Controller
                         'selection_reason' => $row->selection_reason,
                     ];
                 })->values(),
-            ]);
+                ]
+            );
         }));
         } catch (\Illuminate\Database\QueryException $e) {
             // Handle database errors (e.g., missing columns)
@@ -420,7 +428,7 @@ class MRFController extends Controller
     /**
      * Get single MRF by ID
      */
-    public function show($id)
+    public function show(Request $request, $id)
     {
         $mrf = MRF::where(function ($query) use ($id) {
             $query->where('formatted_id', $id)
@@ -456,8 +464,12 @@ class MRFController extends Controller
             $vendorId
         );
         $vendorInvoice = $vendorInvoiceDoc ? $documentService->transform($vendorInvoiceDoc) : null;
+        $requesterEditService = app(RequesterEditWindowService::class);
 
-        return response()->json(array_merge($mrf->scmTransactionApiFields(), [
+        return response()->json(array_merge(
+            $mrf->scmTransactionApiFields(),
+            $requesterEditService->metaForMrf($request->user(), $mrf),
+            [
             'id' => $mrf->mrf_id,
             'formattedId' => $mrf->formatted_id,
             'formatted_id' => $mrf->formatted_id,
@@ -476,6 +488,8 @@ class MRFController extends Controller
             'requesterId' => (string) $mrf->requester_id,
             'department' => $mrf->department,
             'date' => $mrf->date ? $mrf->date->format('Y-m-d') : null,
+            'createdAt' => $mrf->created_at?->toIso8601String(),
+            'created_at' => $mrf->created_at?->toIso8601String(),
             'status' => $mrf->status,
             'currentStage' => $mrf->current_stage,
             'workflowState' => $mrf->workflow_state,
@@ -588,7 +602,8 @@ class MRFController extends Controller
             'paymentMilestones' => app(PaymentScheduleService::class)->paymentMilestonesForMrf($mrf),
             'vendorInvoice' => $vendorInvoice,
             'vendor_invoice' => $vendorInvoice,
-        ]));
+            ]
+        ));
     }
 
     /**
@@ -1532,14 +1547,20 @@ class MRFController extends Controller
             ], 404);
         }
 
-        // Check if user can edit this MRF
-        if (!$this->permissionService->canEditMRF($user, $mrf)) {
+        $requesterEditService = app(RequesterEditWindowService::class);
+        $editCheck = $requesterEditService->evaluateMrfEdit($user, $mrf);
+        if (! $editCheck['allowed']) {
             return response()->json([
                 'success' => false,
-                'error' => 'You cannot edit this MRF. MRFs cannot be edited after submission.',
-                'code' => 'FORBIDDEN'
+                'error' => $editCheck['message'],
+                'code' => $editCheck['code'],
             ], 403);
         }
+
+        $before = $mrf->only([
+            'title', 'category', 'urgency', 'description', 'quantity',
+            'estimated_cost', 'justification', 'department',
+        ]);
 
         RequestLineItemParser::mergeIntoRequest($request);
         $lineItems = RequestLineItemParser::resolve($request);
@@ -1560,6 +1581,7 @@ class MRFController extends Controller
             'estimatedCost' => 'sometimes|nullable|numeric|min:0',
             'justification' => 'sometimes|required|string',
             'department' => 'sometimes|nullable|string|max:255',
+            'remarks' => 'sometimes|nullable|string|max:1000',
         ], RequestLineItemParser::validationRules(), PaymentMilestoneRequest::validationRules()));
 
         if ($validator->fails()) {
@@ -1599,13 +1621,6 @@ class MRFController extends Controller
         }
         if ($request->has('justification')) $updateData['justification'] = $request->justification;
 
-        // If updating from Rejected, reset status to Pending
-        if ($mrf->status === 'Rejected') {
-            $updateData['status'] = 'Pending';
-            $updateData['rejection_reason'] = null;
-            $updateData['is_resubmission'] = true;
-        }
-
         $mrf->update($updateData);
 
         if ($request->has('items') || $request->has('line_items')) {
@@ -1628,7 +1643,37 @@ class MRFController extends Controller
         $mrf->refresh();
         $mrf->load('items');
 
-        return response()->json([
+        $changedFields = $requesterEditService->detectChangedFieldLabels(
+            $before,
+            $mrf->only(array_keys($before)),
+            [
+                'title' => 'title',
+                'category' => 'category',
+                'urgency' => 'urgency',
+                'description' => 'description',
+                'quantity' => 'quantity',
+                'estimated cost' => 'estimated_cost',
+                'justification' => 'justification',
+                'department' => 'department',
+            ]
+        );
+
+        if ($request->has('items') || $request->has('line_items')) {
+            $changedFields[] = 'line items';
+        }
+
+        if (PaymentMilestoneRequest::provided($request)) {
+            $changedFields[] = 'payment milestones';
+        }
+
+        $remarks = $request->input('remarks');
+        $changeSummary = $requesterEditService->summarizeChangedFields($changedFields);
+        $requesterEditService->recordMrfEdit($mrf, $user, $remarks, $changedFields);
+        $this->notificationService->notifyMRFRequesterUpdated($mrf, $user, $changeSummary);
+
+        $requesterEditMeta = $requesterEditService->metaForMrf($user, $mrf);
+
+        return response()->json(array_merge([
             'id' => $mrf->mrf_id,
             'title' => $mrf->title,
             'category' => $mrf->category,
@@ -1665,7 +1710,8 @@ class MRFController extends Controller
             ])->values(),
             'payment_milestones' => app(PaymentScheduleService::class)->paymentMilestonesForMrf($mrf),
             'paymentMilestones' => app(PaymentScheduleService::class)->paymentMilestonesForMrf($mrf),
-        ]);
+            'approvalHistory' => $mrf->approval_history ?? [],
+        ], $requesterEditMeta));
     }
 
     /**

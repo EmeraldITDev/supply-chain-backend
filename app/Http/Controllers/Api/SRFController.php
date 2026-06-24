@@ -8,6 +8,8 @@ use App\Models\Logistics\VehicleMaintenance;
 use App\Support\ProcurementOverviewAccess;
 use App\Services\FormattedIdGenerator;
 use App\Services\LineItemBudgetService;
+use App\Services\NotificationService;
+use App\Services\RequesterEditWindowService;
 use App\Support\PaymentMilestoneRequest;
 use App\Support\RequestLineItemParser;
 use Illuminate\Validation\ValidationException;
@@ -19,14 +21,20 @@ class SRFController extends Controller
 {
     protected WorkflowNotificationService $workflowNotificationService;
     protected FormattedIdGenerator $formattedIdGenerator;
+    protected NotificationService $notificationService;
+    protected RequesterEditWindowService $requesterEditService;
 
     public function __construct(
         WorkflowNotificationService $workflowNotificationService,
-        FormattedIdGenerator $formattedIdGenerator
+        FormattedIdGenerator $formattedIdGenerator,
+        NotificationService $notificationService,
+        RequesterEditWindowService $requesterEditService,
     )
     {
         $this->workflowNotificationService = $workflowNotificationService;
         $this->formattedIdGenerator = $formattedIdGenerator;
+        $this->notificationService = $notificationService;
+        $this->requesterEditService = $requesterEditService;
     }
 
     private function findSrfByAnyId(string $id)
@@ -117,7 +125,9 @@ class SRFController extends Controller
         return response()->json([
             'success' => true,
             'data' => collect($srfs->items())->map(fn (SRF $srf) => $this->presentSrf($srf, $includeLineItems))->values(),
-            'srfs' => collect($srfs->items())->map(fn (SRF $srf) => $this->presentSrf($srf, $includeLineItems))->values(),
+            'srfs' => collect($srfs->items())->map(
+                fn (SRF $srf) => $this->presentSrf($srf, $includeLineItems, $request->user())
+            )->values(),
             'pagination' => [
                 'total' => $srfs->total(),
                 'per_page' => $srfs->perPage(),
@@ -132,7 +142,7 @@ class SRFController extends Controller
      * frontend. Centralised so the new logistics columns (vehicle snapshot,
      * maintenance history, RFQ prefill) are exposed everywhere.
      */
-    private function presentSrf(SRF $srf, bool $includeLineItems = false): array
+    private function presentSrf(SRF $srf, bool $includeLineItems = false, $viewer = null): array
     {
         $requesterName = $srf->requester_name
             ?: ($srf->relationLoaded('requester') && $srf->requester ? $srf->requester->name : null);
@@ -143,7 +153,9 @@ class SRFController extends Controller
             'email' => $srf->relationLoaded('requester') && $srf->requester ? $srf->requester->email : null,
         ];
 
-        $payload = [
+        $payload = array_merge(
+            $this->requesterEditService->metaForSrf($viewer, $srf),
+            [
             'id' => $srf->srf_id,
             'formattedId' => $srf->formatted_id,
             'formatted_id' => $srf->formatted_id,
@@ -187,7 +199,8 @@ class SRFController extends Controller
             'vehicleSnapshot' => $srf->vehicle_snapshot,
             'maintenanceHistory' => $srf->maintenance_history,
             'rfqPrefill' => $srf->rfq_prefill,
-        ];
+            ]
+        );
 
         $payload['ui'] = $this->srfCardUi($srf);
         $payload['lineItemCount'] = $srf->relationLoaded('items') ? $srf->items->count() : null;
@@ -516,7 +529,7 @@ class SRFController extends Controller
         $currentStep = collect($progress)->firstWhere('status', 'in_progress')
             ?? collect($progress)->last(fn (array $s) => $s['status'] === 'completed');
 
-        $payload = $this->presentSrf($srf, true);
+        $payload = $this->presentSrf($srf, true, $request->user());
         $lineItems = $srf->items->map(fn ($item) => $this->presentLineItem($srf, $item, $progress, $currentStep))->values();
         $payload['items'] = $lineItems;
         $payload['line_items'] = $lineItems;
@@ -725,6 +738,7 @@ class SRFController extends Controller
      */
     public function update(Request $request, $id)
     {
+        $user = $request->user();
         $srf = $this->findSrfByAnyId((string) $id);
 
         if (!$srf) {
@@ -735,13 +749,19 @@ class SRFController extends Controller
             ], 404);
         }
 
-        if (!in_array($srf->status, ['Pending', 'Rejected'])) {
+        $editCheck = $this->requesterEditService->evaluateSrfEdit($user, $srf);
+        if (! $editCheck['allowed']) {
             return response()->json([
                 'success' => false,
-                'error' => 'Cannot update SRF in current status',
-                'code' => 'FORBIDDEN'
+                'error' => $editCheck['message'],
+                'code' => $editCheck['code'],
             ], 403);
         }
+
+        $before = $srf->only([
+            'title', 'service_type', 'urgency', 'description', 'duration',
+            'estimated_cost', 'justification',
+        ]);
 
         RequestLineItemParser::mergeIntoRequest($request);
         $lineItems = RequestLineItemParser::resolve($request);
@@ -762,6 +782,7 @@ class SRFController extends Controller
             'estimatedCost' => 'sometimes|nullable|numeric|min:0',
             'estimated_cost' => 'sometimes|nullable|numeric|min:0',
             'justification' => 'sometimes|required|string',
+            'remarks' => 'sometimes|nullable|string|max:1000',
         ], RequestLineItemParser::validationRules(), PaymentMilestoneRequest::validationRules()));
 
         if ($validator->fails()) {
@@ -804,11 +825,6 @@ class SRFController extends Controller
             $updateData['payment_milestones'] = PaymentMilestoneRequest::resolve($request);
         }
 
-        if ($srf->status === 'Rejected') {
-            $updateData['status'] = 'Pending';
-            $updateData['rejection_reason'] = null;
-        }
-
         $srf->update($updateData);
 
         if ($request->has('items') || $request->has('line_items')) {
@@ -818,7 +834,34 @@ class SRFController extends Controller
         $srf->refresh();
         $srf->load('items');
 
-        $payload = $this->presentSrf($srf, true);
+        $changedFields = $this->requesterEditService->detectChangedFieldLabels(
+            $before,
+            $srf->only(array_keys($before)),
+            [
+                'title' => 'title',
+                'service type' => 'service_type',
+                'urgency' => 'urgency',
+                'description' => 'description',
+                'duration' => 'duration',
+                'estimated cost' => 'estimated_cost',
+                'justification' => 'justification',
+            ]
+        );
+
+        if ($request->has('items') || $request->has('line_items')) {
+            $changedFields[] = 'line items';
+        }
+
+        if (PaymentMilestoneRequest::provided($request)) {
+            $changedFields[] = 'payment milestones';
+        }
+
+        $remarks = $request->input('remarks');
+        $changeSummary = $this->requesterEditService->summarizeChangedFields($changedFields);
+        $this->requesterEditService->recordSrfEdit($srf, $user, $remarks, $changedFields);
+        $this->notificationService->notifySRFRequesterUpdated($srf, $user, $changeSummary);
+
+        $payload = $this->presentSrf($srf, true, $user);
         $payload['items'] = $srf->items->map(fn ($item) => [
             'id' => $item->id,
             'itemName' => $item->item_name,

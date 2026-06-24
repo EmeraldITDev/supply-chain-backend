@@ -3,7 +3,7 @@
 namespace App\Services\Logistics;
 
 use App\Mail\TripExternalPassengerConfirmedMail;
-use App\Mail\TripRequestSubmittedMail;
+use App\Mail\TripRequestRequesterUpdatedMail;
 use App\Models\Logistics\Trip;
 use App\Models\User;
 use App\Notifications\LogisticsEventNotification;
@@ -16,6 +16,53 @@ class TripRequestNotificationService
     public function __construct(
         private WorkflowNotificationService $workflowNotifications,
     ) {
+    }
+
+    public function notifyRequesterUpdated(Trip $trip, User $editor, ?string $changeSummary = null): void
+    {
+        $message = sprintf(
+            'Trip request %s was updated by %s%s',
+            $trip->trip_code,
+            $editor->name,
+            $changeSummary ? ': ' . $changeSummary : ''
+        );
+
+        $this->notifyUsersByRoles(
+            $trip,
+            ['logistics_manager', 'logistics_officer'],
+            'trip_request.requester_updated',
+            'Trip request updated',
+            $message,
+            '/logistics?tab=trip-requests'
+        );
+
+        $emails = User::query()
+            ->whereIn('supply_chain_role', ['logistics_manager', 'logistics_officer'])
+            ->whereNotNull('email')
+            ->pluck('email');
+
+        $emails = $emails->merge(collect(config('scm.logistics_notification_cc_emails', [])));
+
+        foreach ($emails->filter()->unique(fn ($e) => strtolower((string) $e))->values() as $email) {
+            try {
+                Mail::to((string) $email)->send(new TripRequestRequesterUpdatedMail($trip, $editor, $changeSummary));
+            } catch (\Throwable $e) {
+                Log::warning('Failed to email trip requester edit notification', [
+                    'trip_request_id' => $trip->id,
+                    'email' => $email,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+
+        $this->notifyUser(
+            $editor,
+            $trip,
+            'trip_request.requester_updated',
+            'Trip request updated',
+            $changeSummary ? "Your changes were saved. {$changeSummary}" : 'Your trip request changes were saved successfully.',
+            '/department'
+        );
     }
 
     public function notifySubmitted(Trip $trip, User $requester): void

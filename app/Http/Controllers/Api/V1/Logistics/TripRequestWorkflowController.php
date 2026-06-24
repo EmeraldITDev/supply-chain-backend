@@ -8,6 +8,7 @@ use App\Models\User;
 use App\Services\Logistics\TripCommentService;
 use App\Services\Logistics\TripRequestNotificationService;
 use App\Services\Logistics\TripRequestProgressTrackerService;
+use App\Services\RequesterEditWindowService;
 use App\Services\TripRequestWorkflowService;
 use App\Support\ExternalPassengerRequest;
 use App\Support\PassengerEligibility;
@@ -24,6 +25,7 @@ class TripRequestWorkflowController extends ApiController
         private TripRequestProgressTrackerService $progressTracker,
         private TripRequestNotificationService $tripRequestNotifications,
         private TripCommentService $commentService,
+        private RequesterEditWindowService $requesterEditService,
     ) {
     }
 
@@ -294,7 +296,7 @@ class TripRequestWorkflowController extends ApiController
     }
 
     /**
-     * Update a draft trip request (creator only).
+     * Update a trip request within the requester edit window (creator only).
      */
     public function update(Request $request, int $id)
     {
@@ -308,17 +310,15 @@ class TripRequestWorkflowController extends ApiController
             return $this->error('Trip request not found', 'NOT_FOUND', 404);
         }
 
-        if ((int) $trip->created_by !== (int) $user->id) {
-            return $this->error('Only the creator can update this trip request', 'FORBIDDEN', 403);
+        $editCheck = $this->requesterEditService->evaluateTripEdit($user, $trip);
+        if (! $editCheck['allowed']) {
+            return $this->error($editCheck['message'], $editCheck['code'], 403);
         }
 
-        if (! $this->isDeletableDraft($trip)) {
-            return $this->error(
-                'Only draft trip requests can be edited.',
-                'INVALID_STATE',
-                422
-            );
-        }
+        $before = $trip->only([
+            'destination', 'purpose', 'origin', 'scheduled_departure_at',
+            'scheduled_arrival_at', 'passenger_user_ids', 'booking_scope', 'external_passengers',
+        ]);
 
         ExternalPassengerRequest::mergeIntoRequest($request);
 
@@ -334,6 +334,7 @@ class TripRequestWorkflowController extends ApiController
             'booking_scope' => 'nullable|string',
             'tripType' => 'nullable|string',
             'trip_type' => 'nullable|string',
+            'remarks' => 'nullable|string|max:1000',
         ], ExternalPassengerRequest::validationRules()));
 
         $bookingScope = TripBookingRules::normalizeScope(
@@ -375,6 +376,27 @@ class TripRequestWorkflowController extends ApiController
 
         $trip->fill($fill);
         $trip->save();
+        $trip->refresh();
+
+        $changedFields = $this->requesterEditService->detectChangedFieldLabels(
+            $before,
+            $trip->only(array_keys($before)),
+            [
+                'destination' => 'destination',
+                'purpose' => 'purpose',
+                'origin' => 'origin',
+                'departure' => 'scheduled_departure_at',
+                'arrival' => 'scheduled_arrival_at',
+                'passengers' => 'passenger_user_ids',
+                'booking scope' => 'booking_scope',
+                'external passengers' => 'external_passengers',
+            ]
+        );
+
+        $remarks = $request->input('remarks');
+        $changeSummary = $this->requesterEditService->summarizeChangedFields($changedFields);
+        $this->requesterEditService->recordTripEdit($trip, $user, $remarks, $changedFields);
+        $this->tripRequestNotifications->notifyRequesterUpdated($trip, $user, $changeSummary);
 
         return $this->success([
             'trip' => $this->presentTripRequest($trip->load(['creator']), includeProgressSummary: true, viewer: $user),
@@ -881,7 +903,9 @@ class TripRequestWorkflowController extends ApiController
 
         $displayStatus = $this->resolveDisplayStatus($trip, $linkedTrip);
 
-        $payload = [
+        $payload = array_merge(
+            $this->requesterEditService->metaForTrip($viewer, $trip),
+            [
             'id' => $trip->id,
             'tripId' => $logisticsTripId,
             'trip_id' => $logisticsTripId,
@@ -949,7 +973,12 @@ class TripRequestWorkflowController extends ApiController
                     'confirmMessage' => 'Are you sure you want to delete this draft trip request? This cannot be undone.',
                 ] : null,
             ],
-        ];
+            ]
+        );
+
+        $metadata = is_array($trip->metadata) ? $trip->metadata : [];
+        $payload['approvalHistory'] = $metadata['requester_edit_history'] ?? [];
+        $payload['approval_history'] = $payload['approvalHistory'];
 
         if ($includeProgressSummary) {
             $progress = $this->progressTracker->build($trip);

@@ -28,19 +28,11 @@ class PermissionService
     }
 
     /**
-     * Check if user can edit MRF (only before submission)
+     * Check if user can edit MRF within the designated requester 48-hour window.
      */
     public function canEditMRF(User $user, MRF $mrf): bool
     {
-        // Staff can only edit their own MRF before submission
-        if (in_array($user->scmRole(), ['employee', 'staff', 'regular_staff'])) {
-            $currentState = $mrf->workflow_state ?? WorkflowStateService::STATE_MRF_CREATED;
-            return $mrf->requester_id === $user->id && 
-                   $currentState === WorkflowStateService::STATE_MRF_CREATED;
-        }
-        
-        // No one else can edit MRF after submission
-        return false;
+        return app(RequesterEditWindowService::class)->canRequesterEditMrf($user, $mrf);
     }
 
     /**
@@ -658,6 +650,8 @@ class PermissionService
                 'financeRoute' => $routing['financeRoute'],
                 'cutoverDate' => $routing['cutoverDate'],
                 'canEdit' => false,
+                'can_requester_edit' => false,
+                'requester_edit_expires_at' => app(RequesterEditWindowService::class)->expiresAt($mrf->created_at),
                 'canApprove' => false,
                 'canReject' => false,
                 'canSelectVendors' => false,
@@ -691,11 +685,15 @@ class PermissionService
         
         $routing = app(FinanceRoutingService::class)->routingMeta($mrf);
 
+        $requesterEdit = app(RequesterEditWindowService::class)->metaForMrf($user, $mrf);
+
         $actions = [
             'usesFinanceAp' => $routing['usesFinanceAp'],
             'financeRoute' => $routing['financeRoute'],
             'cutoverDate' => $routing['cutoverDate'],
             'canEdit' => $this->canEditMRF($user, $mrf),
+            'can_requester_edit' => $requesterEdit['can_requester_edit'],
+            'requester_edit_expires_at' => $requesterEdit['requester_edit_expires_at'],
             'canApprove' => $this->canApproveMRF($user, $mrf),
             'canReject' => $this->canApproveMRF($user, $mrf), // Same permission as approve
             'canSelectVendors' => $this->canSelectVendors($user, $mrf),

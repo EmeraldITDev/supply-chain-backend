@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\User;
 use App\Models\MRF;
+use App\Models\SRF;
 use App\Support\LogisticsMrfRouting;
 use App\Models\RFQ;
 use App\Models\Quotation;
@@ -13,6 +14,8 @@ use App\Models\ProcurementDocument;
 use App\Notifications\MRFSubmittedNotification;
 use App\Notifications\MRFApprovedNotification;
 use App\Notifications\MRFRejectedNotification;
+use App\Notifications\MRFRequesterUpdatedNotification;
+use App\Notifications\SRFRequesterUpdatedNotification;
 use App\Notifications\RFQAssignedNotification;
 use App\Notifications\QuotationSubmittedNotification;
 use App\Notifications\QuotationStatusUpdatedNotification;
@@ -114,6 +117,135 @@ class NotificationService
                 'error' => $e->getMessage()
             ]);
         }
+    }
+
+    /**
+     * Notify workflow participants when a requester edits an MRF within the edit window.
+     */
+    public function notifyMRFRequesterUpdated(MRF $mrf, User $editor, ?string $changeSummary = null): void
+    {
+        try {
+            $roles = $this->mrfWorkflowParticipantRoles($mrf);
+
+            $notifiables = User::query()
+                ->whereIn('supply_chain_role', $roles)
+                ->get();
+
+            foreach ($notifiables as $user) {
+                if ((int) $user->id === (int) $editor->id) {
+                    continue;
+                }
+
+                $user->notifyNow(new MRFRequesterUpdatedNotification($mrf, $editor, $changeSummary));
+            }
+
+            $editor->notifyNow(new MRFRequesterUpdatedNotification(
+                $mrf,
+                $editor,
+                $changeSummary ?: 'Your changes were saved successfully.'
+            ));
+
+            Log::info('MRF requester edit notification sent', [
+                'mrf_id' => $mrf->mrf_id,
+                'editor_id' => $editor->id,
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Failed to send MRF requester edit notification', [
+                'mrf_id' => $mrf->mrf_id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+    }
+
+    /**
+     * Notify workflow participants when a requester edits an SRF within the edit window.
+     */
+    public function notifySRFRequesterUpdated(SRF $srf, User $editor, ?string $changeSummary = null): void
+    {
+        try {
+            $roles = $this->srfWorkflowParticipantRoles($srf);
+
+            $notifiables = User::query()
+                ->whereIn('supply_chain_role', $roles)
+                ->get();
+
+            foreach ($notifiables as $user) {
+                if ((int) $user->id === (int) $editor->id) {
+                    continue;
+                }
+
+                $user->notifyNow(new SRFRequesterUpdatedNotification($srf, $editor, $changeSummary));
+            }
+
+            $editor->notifyNow(new SRFRequesterUpdatedNotification(
+                $srf,
+                $editor,
+                $changeSummary ?: 'Your changes were saved successfully.'
+            ));
+
+            Log::info('SRF requester edit notification sent', [
+                'srf_id' => $srf->srf_id,
+                'editor_id' => $editor->id,
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Failed to send SRF requester edit notification', [
+                'srf_id' => $srf->srf_id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function mrfWorkflowParticipantRoles(MRF $mrf): array
+    {
+        $state = strtolower(trim((string) ($mrf->workflow_state ?? WorkflowStateService::STATE_MRF_CREATED)));
+
+        if ($state === WorkflowStateService::STATE_EXECUTIVE_REVIEW) {
+            return ['executive', 'admin'];
+        }
+
+        if (in_array($state, [
+            WorkflowStateService::STATE_SUPPLY_CHAIN_DIRECTOR_REVIEW,
+            WorkflowStateService::STATE_VENDOR_SELECTED,
+            WorkflowStateService::STATE_INVOICE_APPROVED,
+        ], true)) {
+            return ['supply_chain_director', 'supply_chain', 'admin'];
+        }
+
+        if (in_array($state, [
+            WorkflowStateService::STATE_PROCUREMENT_REVIEW,
+            WorkflowStateService::STATE_PROCUREMENT_APPROVED,
+            WorkflowStateService::STATE_RFQ_ISSUED,
+            WorkflowStateService::STATE_QUOTATIONS_RECEIVED,
+            WorkflowStateService::STATE_QUOTATIONS_EVALUATED,
+            WorkflowStateService::STATE_EXECUTIVE_APPROVED,
+            WorkflowStateService::STATE_SUPPLY_CHAIN_DIRECTOR_APPROVED,
+            WorkflowStateService::STATE_MRF_CREATED,
+        ], true)) {
+            return ['procurement', 'procurement_manager', 'supply_chain_director', 'supply_chain', 'executive', 'admin'];
+        }
+
+        return ['procurement', 'procurement_manager', 'supply_chain_director', 'supply_chain', 'executive', 'admin'];
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function srfWorkflowParticipantRoles(SRF $srf): array
+    {
+        $stage = strtolower(trim((string) ($srf->current_stage ?? '')));
+
+        if ($stage === 'supply_chain_director_review') {
+            return ['supply_chain_director', 'supply_chain', 'admin'];
+        }
+
+        if (in_array($stage, ['procurement', 'procurement_review', 'vendor_selected'], true)) {
+            return ['procurement', 'procurement_manager', 'admin'];
+        }
+
+        return ['procurement', 'procurement_manager', 'supply_chain_director', 'supply_chain', 'logistics_manager', 'logistics_officer', 'admin'];
     }
 
     /**
