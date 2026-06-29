@@ -496,7 +496,8 @@ class FinanceIntegrationService
         return [
             'documentId' => (string) $document->id,
             'scmTransactionId' => $mrf->scm_transaction_id,
-            'type' => $document->type,
+            'type' => app(FinancePackageBuilder::class)->mapFinanceApDocumentType($document->type),
+            'scmDocumentType' => $document->type,
             'fileName' => $document->file_name,
             'fileUrl' => $freshUrl,
             'version' => (int) $document->version,

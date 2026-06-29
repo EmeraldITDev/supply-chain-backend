@@ -34,6 +34,7 @@ class FinancePackageBuilder
         private PaymentScheduleService $paymentScheduleService,
         private ProcurementDocumentService $documentService,
         private FinanceApVendorSnapshotBuilder $vendorSnapshotBuilder,
+        private FinanceApPaymentTypeMapper $paymentTypeMapper,
     ) {
     }
 
@@ -52,6 +53,9 @@ class FinancePackageBuilder
         $schedule = $mrf->paymentSchedule;
         $vendor = $this->vendorSnapshotBuilder->resolveForMrf($mrf);
         $poTotal = $this->resolvePoTotal($mrf, $schedule);
+        $documentManifest = $this->buildDocumentManifest($mrf);
+        $paymentTerms = $this->resolvePaymentTerms($mrf, $schedule);
+        $paymentType = $this->paymentTypeMapper->map($paymentTerms, $schedule, $documentManifest);
 
         if ($schedule) {
             $this->paymentScheduleService->recalculateAmounts($schedule, $poTotal);
@@ -61,14 +65,18 @@ class FinancePackageBuilder
         return [
             'packageVersion' => $this->nextPackageVersion($mrf),
             'deltaReason' => $deltaReason,
-            'header' => $this->buildHeader($mrf, $vendor, $poTotal),
+            'header' => $this->buildHeader($mrf, $vendor, $poTotal, $paymentTerms, $paymentType),
             'paymentSchedule' => $schedule ? $this->buildPaymentScheduleSection($schedule) : null,
             'lineItems' => $this->buildLineItems($mrf),
             'approvalsSummary' => $this->buildApprovalsSummary($mrf),
-            'documentManifest' => $this->buildDocumentManifest($mrf),
+            'documentManifest' => $documentManifest,
             'context' => [
                 'requestedMilestoneId' => $requestedMilestoneId,
                 'workflowState' => $mrf->workflow_state,
+                'paymentType' => $paymentType,
+                'payment_type' => $paymentType,
+                'paymentTerms' => $paymentTerms,
+                'payment_terms' => $paymentTerms,
             ],
         ];
     }
@@ -76,7 +84,7 @@ class FinancePackageBuilder
     /**
      * @return array<string, mixed>
      */
-    private function buildHeader(MRF $mrf, ?Vendor $vendor, float $poTotal): array
+    private function buildHeader(MRF $mrf, ?Vendor $vendor, float $poTotal, ?string $paymentTerms, string $paymentType): array
     {
         return [
             'scmTransactionId' => $mrf->scm_transaction_id,
@@ -89,12 +97,37 @@ class FinancePackageBuilder
             'currency' => $mrf->currency ?? 'NGN',
             'poTotal' => $poTotal,
             'estimatedCost' => (float) ($mrf->estimated_cost ?? 0),
+            'paymentTerms' => $paymentTerms,
+            'payment_terms' => $paymentTerms,
+            'paymentType' => $paymentType,
+            'payment_type' => $paymentType,
             'requester' => [
                 'name' => $mrf->requester_name ?? $mrf->requester?->name,
                 'department' => $mrf->department,
             ],
             'vendor' => $vendor ? $this->vendorSnapshotBuilder->toArray($vendor) : null,
         ];
+    }
+
+    private function resolvePaymentTerms(MRF $mrf, ?PaymentSchedule $schedule): ?string
+    {
+        $quotation = $mrf->selectedQuotation();
+
+        if ($quotation?->payment_terms) {
+            return (string) $quotation->payment_terms;
+        }
+
+        if ($schedule?->template_name) {
+            $template = config('payment_term_templates.'.$schedule->template_name);
+
+            if (is_array($template) && ! empty($template['name'])) {
+                return (string) $template['name'];
+            }
+
+            return (string) $schedule->template_name;
+        }
+
+        return null;
     }
 
     /**
@@ -183,7 +216,8 @@ class FinancePackageBuilder
             ->get()
             ->map(fn (ProcurementDocument $doc) => [
                 'documentId' => (string) $doc->id,
-                'type' => $doc->type,
+                'type' => $this->mapFinanceApDocumentType($doc->type),
+                'scmDocumentType' => $doc->type,
                 'fileName' => $doc->file_name,
                 'fileUrl' => $doc->file_url,
                 'version' => (int) $doc->version,
@@ -192,6 +226,20 @@ class FinancePackageBuilder
             ])
             ->values()
             ->all();
+    }
+
+    public function mapFinanceApDocumentType(string $scmType): string
+    {
+        return match ($scmType) {
+            ProcurementDocument::TYPE_SIGNED_PO,
+            ProcurementDocument::TYPE_PO_PDF => 'purchase_order',
+            ProcurementDocument::TYPE_VENDOR_INVOICE => 'invoice',
+            ProcurementDocument::TYPE_PFI => 'pfi',
+            ProcurementDocument::TYPE_GRN => 'grn',
+            ProcurementDocument::TYPE_WAYBILL => 'waybill',
+            ProcurementDocument::TYPE_DELIVERY_CONFIRMATION => 'delivery_note',
+            default => $scmType,
+        };
     }
 
     private function documentChecksum(ProcurementDocument $document): ?string

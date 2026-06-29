@@ -24,6 +24,9 @@ class FinanceApVendorSnapshotBuilderTest extends TestCase
             'state' => 'LA',
             'contact_person' => 'Jane Doe',
             'contact_person_email' => 'jane@mochenz.com',
+            'bank_name' => 'GTBank',
+            'account_name' => 'Mochenz Computers',
+            'account_number' => '0123456789',
             'profile_completed' => true,
         ]);
 
@@ -34,6 +37,9 @@ class FinanceApVendorSnapshotBuilderTest extends TestCase
         $this->assertSame('V023', $snapshot['vendorCode']);
         $this->assertSame('Mochenz Computers', $snapshot['name']);
         $this->assertSame('TIN-123', $snapshot['taxId']);
+        $this->assertSame('GTBank', $snapshot['bankName']);
+        $this->assertSame('Mochenz Computers', $snapshot['accountName']);
+        $this->assertSame('0123456789', $snapshot['accountNumber']);
         $this->assertSame(42, $snapshot['scm_vendor_id']);
         $this->assertSame('V023', $snapshot['vendor_code']);
         $this->assertArrayHasKey('snapshotAt', $snapshot);

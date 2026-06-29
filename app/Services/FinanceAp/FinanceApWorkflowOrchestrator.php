@@ -94,8 +94,14 @@ class FinanceApWorkflowOrchestrator
             return;
         }
 
+        $alreadyPushed = $this->financeIntegrationService->hasPackageBeenPushed($mrf);
+
         $this->deliveryConfirmationService->tryAdvance($mrf, $user);
         $this->syncIntermediateCompletionStates($mrf, $user);
+
+        if ($alreadyPushed) {
+            $this->financeIntegrationService->pushDelta($mrf, 'operational_documents_updated', $user);
+        }
     }
 
     public function syncIntermediateCompletionStates(MRF $mrf, User $user): void
