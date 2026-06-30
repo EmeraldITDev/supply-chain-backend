@@ -239,6 +239,9 @@ class VendorAuthController extends Controller
             'year_established' => 'sometimes|nullable|string|max:20',
             'number_of_employees' => 'sometimes|nullable|string|max:50',
             'annual_revenue' => 'sometimes|nullable|string|max:100',
+            'bank_name' => 'sometimes|nullable|string|max:255',
+            'account_name' => 'sometimes|nullable|string|max:255',
+            'account_number' => 'sometimes|nullable|string|max:64',
         ]);
 
         if ($validator->fails()) {
@@ -262,6 +265,7 @@ class VendorAuthController extends Controller
         foreach ([
             'phone', 'address', 'email', 'category', 'category_other',
             'website', 'tax_id', 'year_established', 'number_of_employees', 'annual_revenue',
+            'bank_name', 'account_name', 'account_number',
         ] as $field) {
             if ($request->has($field)) {
                 $updateData[$field] = $request->input($field);
@@ -573,6 +577,14 @@ class VendorAuthController extends Controller
             'annualRevenue' => $vendor->annual_revenue ?? $registration?->annual_revenue,
             'annual_revenue' => $vendor->annual_revenue,
 
+            // Bank details (Finance AP vendor snapshot)
+            'bank_name' => $vendor->bank_name ?? $registration?->bank_name,
+            'bankName' => $vendor->bank_name ?? $registration?->bank_name,
+            'account_name' => $vendor->account_name ?? $registration?->account_name,
+            'accountName' => $vendor->account_name ?? $registration?->account_name,
+            'account_number' => $vendor->account_number ?? $registration?->account_number,
+            'accountNumber' => $this->maskAccountNumber($vendor->account_number ?? $registration?->account_number),
+
             // Status and rating
             'status' => $vendor->status,
             'rating' => (float) ($vendor->rating ?? 0),
@@ -604,6 +616,19 @@ class VendorAuthController extends Controller
             'registration_documents' => $documents,
             'kyc_documents' => $documents,
         ];
+    }
+
+    private function maskAccountNumber(?string $accountNumber): ?string
+    {
+        if ($accountNumber === null || $accountNumber === '') {
+            return null;
+        }
+        $len = strlen($accountNumber);
+        if ($len <= 4) {
+            return str_repeat('*', $len);
+        }
+
+        return str_repeat('*', $len - 4).substr($accountNumber, -4);
     }
 
     /**

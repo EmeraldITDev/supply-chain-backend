@@ -68,6 +68,7 @@ Route::get('/', function () {
 // Finance AP integration (machine auth, no session)
 Route::prefix('v1/integrations/scm')->middleware('finance_ap.integration')->group(function () {
     Route::get('/documents/{scm_transaction_id}/{document_id}', [\App\Http\Controllers\Api\FinanceApIntegrationDocumentController::class, 'show']);
+    Route::get('/vendors/{scm_vendor_id}/open-purchase-orders', [\App\Http\Controllers\Api\FinanceApOpenPurchaseOrderController::class, 'index']);
 });
 
 Route::post('/webhooks/finance-ap', [\App\Http\Controllers\Api\FinanceApWebhookController::class, 'handle']);

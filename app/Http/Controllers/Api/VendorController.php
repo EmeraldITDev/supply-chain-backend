@@ -228,6 +228,9 @@ class VendorController extends Controller
         $yearEstablished    = $vendor->year_established    ?? $registration?->year_established;
         $website            = $vendor->website             ?? $registration?->website;
         $categoryOther      = $vendor->category_other      ?? $registration?->category_other;
+        $bankName           = $vendor->bank_name           ?? $registration?->bank_name;
+        $accountName        = $vendor->account_name        ?? $registration?->account_name;
+        $accountNumber      = $vendor->account_number      ?? $registration?->account_number;
 
         return response()->json([
             'id'            => $vendor->vendor_id,
@@ -253,6 +256,12 @@ class VendorController extends Controller
             'year_established'    => $yearEstablished,
             'yearEstablished'     => $yearEstablished,
             'website'             => $website,
+            'bank_name'           => $bankName,
+            'bankName'            => $bankName,
+            'account_name'        => $accountName,
+            'accountName'         => $accountName,
+            'account_number'      => $accountNumber,
+            'accountNumber'       => $this->maskAccountNumber($accountNumber),
             'created_at'          => $vendor->created_at,
         ]);
     }
