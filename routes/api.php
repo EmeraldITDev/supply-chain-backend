@@ -541,6 +541,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/reports/finance-ap/outstanding-milestones', [FinanceApReportController::class, 'outstandingMilestones']);
     Route::get('/reports/finance-ap/advance-delivery-risk', [FinanceApReportController::class, 'advanceDeliveryRisk']);
     Route::get('/reports/finance-ap/cycle-times', [FinanceApReportController::class, 'cycleTimes']);
+    Route::get('/reports/finance-ap/sync-events', [FinanceApReportController::class, 'syncEvents']);
     Route::get('/config/finance-routing', [AppConfigController::class, 'financeRouting']);
 
     // Eligible passengers / drivers for trip scheduling (excludes vendors & power users)

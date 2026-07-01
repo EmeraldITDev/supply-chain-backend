@@ -77,6 +77,22 @@ class FinanceApReportController extends Controller
         ]);
     }
 
+    public function syncEvents(Request $request): JsonResponse
+    {
+        if ($response = $this->authorizeReport($request)) {
+            return $response;
+        }
+
+        $limit = min(100, max(1, (int) $request->query('limit', 50)));
+        $status = $request->filled('status') ? (string) $request->query('status') : null;
+        $eventType = $request->filled('event_type') ? (string) $request->query('event_type') : null;
+
+        return response()->json([
+            'success' => true,
+            'data' => $this->reporting->syncEvents($limit, $status, $eventType),
+        ]);
+    }
+
     private function authorizeReport(Request $request): ?JsonResponse
     {
         $user = $request->user();

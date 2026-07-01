@@ -263,4 +263,57 @@ class FinanceApReportingService
             $query->where($column, '<=', $to);
         }
     }
+
+    /**
+     * Recent Finance AP sync events for the operations dashboard.
+     *
+     * @return array{summary: array<string, int>, events: list<array<string, mixed>>}
+     */
+    public function syncEvents(int $limit = 50, ?string $status = null, ?string $eventType = null): array
+    {
+        $query = FinanceSyncEvent::query()
+            ->with(['mrf:id,mrf_id,formatted_id,title'])
+            ->orderByDesc('created_at');
+
+        if ($status) {
+            $query->where('status', $status);
+        }
+        if ($eventType) {
+            $query->where('event_type', $eventType);
+        }
+
+        $events = $query->limit($limit)->get();
+
+        $failed = (int) FinanceSyncEvent::query()
+            ->where('status', FinanceSyncEvent::STATUS_FAILED)
+            ->count();
+        $pending = (int) FinanceSyncEvent::query()
+            ->where('status', FinanceSyncEvent::STATUS_PENDING)
+            ->count();
+        $vendorSyncFailed = (int) FinanceSyncEvent::query()
+            ->where('event_type', 'vendor_sync')
+            ->where('status', FinanceSyncEvent::STATUS_FAILED)
+            ->count();
+
+        return [
+            'summary' => [
+                'failed' => $failed,
+                'pending' => $pending,
+                'vendorSyncFailed' => $vendorSyncFailed,
+            ],
+            'events' => $events->map(fn (FinanceSyncEvent $event) => [
+                'id' => $event->id,
+                'mrfId' => $event->mrf?->mrf_id,
+                'mrfDisplayId' => $event->mrf?->formatted_id,
+                'mrfTitle' => $event->mrf?->title,
+                'direction' => $event->direction,
+                'eventType' => $event->event_type,
+                'status' => $event->status,
+                'httpStatus' => $event->http_status,
+                'errorMessage' => $event->error_message,
+                'processedAt' => $event->processed_at?->toIso8601String(),
+                'createdAt' => $event->created_at?->toIso8601String(),
+            ])->values()->all(),
+        ];
+    }
 }

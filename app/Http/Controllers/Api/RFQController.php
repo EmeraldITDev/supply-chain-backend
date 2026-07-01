@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Http\Controllers\Concerns\ResolvesPaginatedLists;
 use App\Http\Controllers\Controller;
 use App\Models\Activity;
 use App\Models\RFQ;
@@ -18,6 +19,8 @@ use Illuminate\Validation\ValidationException;
 
 class RFQController extends Controller
 {
+    use ResolvesPaginatedLists;
+
     protected WorkflowNotificationService $workflowNotificationService;
     protected FormattedIdGenerator $formattedIdGenerator;
 
@@ -78,11 +81,10 @@ class RFQController extends Controller
             $query->where('status', $request->status);
         }
 
-        $perPage = (int) $request->get('per_page', 50);
-        $perPage = min($perPage, 200); // Cap at 200 to prevent abuse
-        $rfqs = $query->orderBy('created_at', 'desc')->paginate($perPage);
+        $perPage = $this->resolvePerPage($request, 50, 200);
+        $paginator = $query->orderBy('created_at', 'desc')->paginate($perPage);
 
-        return response()->json($rfqs->map(function($rfq) {
+        $items = collect($paginator->items())->map(function ($rfq) {
             $mrfEstimatedCost = $rfq->mrf ? (float) $rfq->mrf->estimated_cost : null;
             $rfqEstimatedCost = $rfq->estimated_cost !== null ? (float) $rfq->estimated_cost : null;
             $estimatedBudget = ($mrfEstimatedCost !== null && $mrfEstimatedCost > 0)
@@ -117,7 +119,9 @@ class RFQController extends Controller
                 'vendorIds' => $rfq->vendors->pluck('vendor_id')->toArray(),
                 'createdAt' => $rfq->created_at->toIso8601String(),
             ];
-        }));
+        })->values()->all();
+
+        return response()->json($this->paginatedJsonResponse($paginator, $items));
     }
 
     /**

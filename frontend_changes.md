@@ -863,14 +863,31 @@ All dashboard, procurement, logistics, reports, and detail pages load via `React
 - **Backend:** `GET /api/mrfs` list no longer regenerates PO URLs per row.
 - **Frontend (`Procurement.tsx`):** Debounced search (400ms), stale-request guards on paginated fetches, filter changes reset page without duplicate in-flight requests.
 
-### Remaining Section 5 scope
+### Remaining Section 5 scope — completed (Jul 2026)
 
-- RFQ Management automatic data refresh (React Query invalidation / targeted poll)
-- Finance Handoff Pending investigation
-- Finance AP Sync dashboard
-- Global polish: skeleton loaders, empty states, notification UI consistency
-- Ensure list-query indexes migration `2026_07_01_140000_add_list_query_indexes` is applied on deployed DB
-- Migrate remaining `vendorApi.getAll()` / `mrfApi.getAll()` callers off first-page-only behavior where full lists are still assumed (`AppContext.refreshMRFs`, etc.)
+#### RFQ auto-refresh
+- `useRfqDataRefresh` hook — 30s poll while visible + `app:refresh` listener
+- `RFQManagement` uses hook; initial load shows `TableSkeleton`
+- `AppContext` `app:refresh` now refreshes RFQs + quotations
+- `Procurement` uses AppContext `rfqs` / `quotations` (removed duplicate local state)
+- `rfqApi.list()` + paginated `GET /api/rfqs` response (`success`, `data`, `pagination`)
+- `fetchAllListPages()` helper; `mrfApi.getAll`, `vendorApi.getAll`, `rfqApi.getAll` walk all pages (capped)
+
+#### Finance Handoff Pending
+- `normalizeFinanceDashboard()` maps API keys (`financeHandoffPending` → `handoff`, etc.)
+- Finance Dashboard: **Handoff pending** stat card (click to filter) + list tab `handoff_pending`
+
+#### Finance AP Sync dashboard
+- `GET /api/reports/finance-ap/sync-events` — recent `finance_sync_events` with summary counts
+- `FinanceApSyncDashboard` on Finance Dashboard (failed / pending / vendor sync failures)
+
+#### Skeleton loaders & notifications
+- `DashboardSkeleton` / `TableSkeleton` on Finance Dashboard and RFQ list
+- `NotificationCenter` skeleton on first fetch; backend `priority` respected
+- Notification poll only when tab is visible
+
+### Deploy checklist
+- Run `php artisan migrate` (includes `2026_07_01_140000_add_list_query_indexes`)
 
 ### API note — MRF list PO URLs
 
