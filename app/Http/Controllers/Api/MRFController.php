@@ -283,9 +283,9 @@ class MRFController extends Controller
         $paginator = $query->paginate($perPage);
         $requesterEditService = app(RequesterEditWindowService::class);
 
+        // List responses skip generateFreshPOUrls (S3 exists checks per row made pagination
+        // unbearably slow). Fresh PO URLs are regenerated on GET /mrfs/{id} only.
         $items = collect($paginator->items())->map(function ($mrf) use ($user, $requesterEditService) {
-            $freshPOUrls = $this->generateFreshPOUrls($mrf);
-
             return array_merge(
                 $mrf->scmTransactionApiFields(),
                 $requesterEditService->metaForMrf($user, $mrf),
@@ -338,15 +338,15 @@ class MRFController extends Controller
                 'chairman_approved' => $mrf->chairman_approved ?? false,
                 'chairman_approved_at' => $mrf->chairman_approved_at?->toIso8601String(),
                 'chairman_remarks' => $mrf->chairman_remarks,
-                // PO information with fresh regenerated URLs
+                // PO information (stored URLs; fresh signed URLs on detail endpoint only)
                 'po_number' => $mrf->po_number,
                 'poNumber' => $mrf->po_number,
-                'unsigned_po_url' => $freshPOUrls['unsigned_po_url'] ?? $mrf->unsigned_po_url,
-                'unsignedPOUrl' => $freshPOUrls['unsigned_po_url'] ?? $mrf->unsigned_po_url,
-                'unsigned_po_share_url' => $freshPOUrls['unsigned_po_share_url'] ?? $mrf->unsigned_po_share_url,
-                'unsignedPOShareUrl' => $freshPOUrls['unsigned_po_share_url'] ?? $mrf->unsigned_po_share_url,
-                'signed_po_url' => $freshPOUrls['signed_po_url'] ?? $mrf->signed_po_url,
-                'signedPOUrl' => $freshPOUrls['signed_po_url'] ?? $mrf->signed_po_url,
+                'unsigned_po_url' => $mrf->unsigned_po_url,
+                'unsignedPOUrl' => $mrf->unsigned_po_url,
+                'unsigned_po_share_url' => $mrf->unsigned_po_share_url,
+                'unsignedPOShareUrl' => $mrf->unsigned_po_share_url,
+                'signed_po_url' => $mrf->signed_po_url,
+                'signedPOUrl' => $mrf->signed_po_url,
                 'po_generated_at' => $mrf->po_generated_at?->toIso8601String(),
                 'poGeneratedAt' => $mrf->po_generated_at?->toIso8601String(),
                 'custom_terms' => $mrf->custom_terms,

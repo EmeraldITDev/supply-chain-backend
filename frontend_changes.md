@@ -818,3 +818,60 @@ Search, sort, pagination (25/page).
 Indexes on frequently filtered columns for MRFs, vendors, trips, vehicles.
 
 **Frontend components:** `ServerPaginationBar`, `AsyncVendorSearchSelect`, `paginatedListApi` helpers.
+
+---
+
+## SCM Platform — Platform Speed & Hot Reload (Section 4, Jul 2026)
+
+### Frontend route code-splitting
+All dashboard, procurement, logistics, reports, and detail pages load via `React.lazy()` (`src/routes/lazyPages.ts`). Initial bundle excludes heavy modules until navigated.
+
+### Vite build chunks
+`manualChunks` splits: `charts` (recharts), `pdf` (jspdf/html2canvas), `xlsx`, `radix-ui`, `react-query`, `router`.
+
+### React Query defaults (`src/lib/queryClient.ts`)
+- `staleTime`: 60s, `gcTime`: 5m, `refetchOnWindowFocus`: false
+- `STABLE_QUERY_OPTIONS` export for 10m stale config endpoints
+
+### Deploy update banner (`AppUpdateBanner`)
+- Build emits `dist/version.json` with `{ buildId, builtAt }`
+- App polls `/version.json` every 5 minutes (first check after 30s)
+- Non-blocking bottom banner: **"A new update is available. Click to refresh."** — user-initiated full reload only
+
+**Dev:** `public/version.json` uses `buildId: dev-local` (no false positives).
+
+### API response compression (backend)
+`CompressJsonResponse` middleware gzip-encodes JSON/text API responses ≥1KB when `Accept-Encoding: gzip`.
+
+**Frontend:** No change required — browsers send `Accept-Encoding: gzip` automatically.
+
+---
+
+## SCM Platform — Polish, Finance Handoff & Critical Fixes (Section 5, Jul 2026)
+
+### Priority 0 — Critical bugs (fixed)
+
+| Issue | Root cause | Fix |
+|-------|------------|-----|
+| Vendors page crash: `getScmRole is not defined` | Missing import after Section 3 pagination edit | Restored `import { getScmRole } from "@/utils/scmRole"` in `Vendors.tsx` |
+| RFQ Management crash: lexical declaration before init | `useEffect` referenced `createDialogOpen` / `selectionMethod` before `useState` | Reordered state declarations above effects in `RFQManagement.tsx` |
+| Logistics journey crash: `F.status is undefined` | `linkedTrip.status.replace()` when trip has no status | `formatJourneyStatus()` + safe status key helper in `JourneyManagement.tsx` |
+| Pagination / list loads take minutes | `MRFController@index` called `generateFreshPOUrls()` per row (multiple S3 `exists()` round-trips × 25 rows) | List endpoint returns stored PO URLs only; fresh signed URLs remain on `GET /mrfs/{id}` |
+
+### Priority 0 — Performance (fixed)
+
+- **Backend:** `GET /api/mrfs` list no longer regenerates PO URLs per row.
+- **Frontend (`Procurement.tsx`):** Debounced search (400ms), stale-request guards on paginated fetches, filter changes reset page without duplicate in-flight requests.
+
+### Remaining Section 5 scope
+
+- RFQ Management automatic data refresh (React Query invalidation / targeted poll)
+- Finance Handoff Pending investigation
+- Finance AP Sync dashboard
+- Global polish: skeleton loaders, empty states, notification UI consistency
+- Ensure list-query indexes migration `2026_07_01_140000_add_list_query_indexes` is applied on deployed DB
+- Migrate remaining `vendorApi.getAll()` / `mrfApi.getAll()` callers off first-page-only behavior where full lists are still assumed (`AppContext.refreshMRFs`, etc.)
+
+### API note — MRF list PO URLs
+
+`GET /api/mrfs` (paginated list) returns **stored** `unsigned_po_url` / `signed_po_url` from the database. Call `GET /api/mrfs/{id}` when the UI needs freshly signed download URLs.
