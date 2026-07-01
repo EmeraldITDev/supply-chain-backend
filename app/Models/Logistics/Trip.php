@@ -28,7 +28,12 @@ class Trip extends Model
     public const TYPE_MATERIAL = 'material';
     public const TYPE_MIXED = 'mixed';
 
+    public const BOOKING_SCOPE_OUT_OF_STATE_LOCAL = 'out_of_state_local';
+    public const BOOKING_SCOPE_INTERNATIONAL = 'international';
+
+    /** @deprecated Use BOOKING_SCOPE_OUT_OF_STATE_LOCAL */
     public const BOOKING_SCOPE_WITHIN_STATE = 'within_state';
+    /** @deprecated Use BOOKING_SCOPE_OUT_OF_STATE_LOCAL */
     public const BOOKING_SCOPE_OUTSIDE_STATE = 'outside_state';
 
     public const PRIORITY_LOW = 'low';
@@ -122,6 +127,9 @@ class Trip extends Model
     }
 
     public const WORKFLOW_TRIP_REQUEST = 'trip_request';
+    public const WORKFLOW_CHANGES_REQUESTED = 'changes_requested';
+    public const WORKFLOW_DIRECTOR_REVIEW = 'director_review';
+    public const WORKFLOW_DIRECTOR_APPROVED = 'director_approved';
     public const WORKFLOW_LOGISTICS_REVIEW = 'logistics_review';
     public const WORKFLOW_PROCUREMENT_REVIEW = 'procurement_review';
     public const WORKFLOW_SCD_APPROVAL = 'scd_approval';

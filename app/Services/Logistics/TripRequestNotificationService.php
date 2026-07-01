@@ -77,15 +77,19 @@ class TripRequestNotificationService
 
         $this->notifyUsersByRoles(
             $trip,
-            ['logistics_manager', 'logistics_officer'],
+            ['logistics_manager', 'logistics_officer', 'supply_chain_director', 'supply_chain', 'procurement_manager', 'procurement'],
             'trip_request_submitted',
             'New trip request',
             $message,
-            '/logistics?tab=trip-requests'
+            '/trip-requests/' . $trip->id
         );
 
         $emails = User::query()
-            ->whereIn('supply_chain_role', ['logistics_manager', 'logistics_officer'])
+            ->whereIn('supply_chain_role', [
+                'logistics_manager', 'logistics_officer',
+                'supply_chain_director', 'supply_chain',
+                'procurement_manager', 'procurement',
+            ])
             ->whereNotNull('email')
             ->pluck('email');
 
@@ -94,6 +98,118 @@ class TripRequestNotificationService
         foreach ($emails->filter()->unique(fn ($e) => strtolower((string) $e))->values() as $email) {
             $this->workflowNotifications->notifyTripRequestSubmittedToEmail($trip, $requester, (string) $email);
         }
+    }
+
+    public function notifyForwardedToDirector(Trip $trip, User $forwardedBy): void
+    {
+        $message = sprintf(
+            'Trip request %s was forwarded by %s for your approval.',
+            $trip->trip_code,
+            $forwardedBy->name
+        );
+
+        $this->notifyUsersByRoles(
+            $trip,
+            ['supply_chain_director', 'supply_chain'],
+            'trip_request_director_review',
+            'Trip request awaiting approval',
+            $message,
+            '/trip-requests/' . $trip->id
+        );
+    }
+
+    public function notifyChangesRequested(Trip $trip, User $reviewer, ?string $reason = null): void
+    {
+        $requester = $trip->creator ?? User::find($trip->created_by);
+        if (! $requester) {
+            return;
+        }
+
+        $message = sprintf(
+            'Changes were requested on trip request %s%s',
+            $trip->trip_code,
+            $reason ? ': ' . $reason : ''
+        );
+
+        $this->notifyUser(
+            $requester,
+            $trip,
+            'trip_request_changes_requested',
+            'Changes requested',
+            $message,
+            '/trip-requests/' . $trip->id
+        );
+    }
+
+    public function notifyDirectorApproved(Trip $trip, User $director): void
+    {
+        $message = sprintf(
+            'Trip request %s was approved by %s. Convert it to a logistics request when ready.',
+            $trip->trip_code,
+            $director->name
+        );
+
+        $this->notifyUsersByRoles(
+            $trip,
+            ['logistics_manager', 'logistics_officer'],
+            'trip_request_director_approved',
+            'Ready for logistics conversion',
+            $message,
+            '/trip-requests/' . $trip->id
+        );
+    }
+
+    public function notifyDirectorRejected(Trip $trip, User $requester, ?string $reason = null): void
+    {
+        $message = sprintf(
+            'Trip request %s was rejected by the Supervising Director%s.',
+            $trip->trip_code,
+            $reason ? ': ' . $reason : ''
+        );
+
+        $this->notifyUser(
+            $requester,
+            $trip,
+            'trip_request_director_rejected',
+            'Trip request rejected',
+            $message,
+            '/department'
+        );
+    }
+
+    public function notifyDirectorReturned(Trip $trip, User $requester, ?string $reason = null): void
+    {
+        $message = sprintf(
+            'Trip request %s was returned for revision%s.',
+            $trip->trip_code,
+            $reason ? ': ' . $reason : ''
+        );
+
+        $this->notifyUser(
+            $requester,
+            $trip,
+            'trip_request_returned',
+            'Returned for revision',
+            $message,
+            '/trip-requests/' . $trip->id
+        );
+    }
+
+    public function notifyConverted(Trip $tripRequest, Trip $logisticsTrip, User $convertedBy): void
+    {
+        $requester = $tripRequest->creator ?? User::find($tripRequest->created_by);
+        if ($requester) {
+            $this->notifyUser(
+                $requester,
+                $logisticsTrip,
+                'trip_request_converted',
+                'Trip request converted',
+                sprintf('Your trip request %s was converted to logistics trip %s.', $tripRequest->trip_code, $logisticsTrip->trip_code),
+                '/trips/' . $logisticsTrip->id
+            );
+        }
+
+        app(TripSchedulingNotificationService::class)->notifyTripCreated($logisticsTrip);
     }
 
     public function notifyConfirmed(Trip $tripRequest, Trip $logisticsTrip, User $confirmedBy): void

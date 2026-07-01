@@ -710,10 +710,80 @@ Backend `totals` keys: `packagePushed`, `financeHandoffPending`, `inReviewOrPayi
 
 ### Procurement report performance (fix)
 `ProcurementReportService::aggregateSavingsLoss` — SQL aggregation for line items with `quoted_amount`; quotation lookup only for MRFs/SRFs missing quoted data. Fixes infinite loading on large datasets.
-- [ ] Trip request create form
-- [ ] Trip workflow action buttons per stage
-- [ ] Passenger picker → `eligible-passengers`
-- [ ] Optional driver on trip forms
-- [ ] Vehicle edit button
-- [ ] Driver delete + assign notify
-- [ ] Driver form: phone required, email optional
+
+---
+
+## SCM Platform — Logistics Trip Request Workflow (Section 2, Jul 2026)
+
+### Trip booking scopes (updated)
+`GET /api/trip-requests/booking-rules` now returns:
+- `out_of_state_local` — **Out of State (Local)**, 7-day minimum lead
+- `international` — **International (Out of Nigeria)**, 14-day minimum lead
+
+Legacy values `within_state` / `outside_state` are mapped to `out_of_state_local` on read.
+
+### Workflow stages (trip requests, `TRQ-*`)
+| Stage | Meaning |
+|-------|---------|
+| `trip_request` | Submitted — awaiting LM review |
+| `changes_requested` | LM returned to employee for edits |
+| `director_review` | Forwarded — awaiting Supervising Director |
+| `director_approved` | Director approved — LM may convert |
+| `logistics_review` | Converted to logistics trip |
+
+### POST `/api/trip-requests/{id}/forward` (NEW)
+**Auth:** logistics role. **Body:** `{ notes?: string }`. Forwards to Supervising Director (`workflow_stage=director_review`). Notifies LM, SCD, procurement.
+
+### POST `/api/trip-requests/{id}/request-changes` (NEW)
+**Auth:** logistics role. **Body:** `{ reason: string }` (required). Sets `workflow_stage=changes_requested`.
+
+### POST `/api/trip-requests/{id}/director-approve` (NEW)
+**Auth:** `supply_chain_director` or `supply_chain`. Sets `workflow_stage=director_approved`.
+
+### POST `/api/trip-requests/{id}/director-reject` (NEW)
+**Auth:** supervising director. **Body:** `{ reason?: string }`. Cancels request.
+
+### POST `/api/trip-requests/{id}/director-return` (NEW)
+**Auth:** supervising director. **Body:** `{ reason: string }` (required). Returns to employee (`changes_requested`).
+
+### POST `/api/trip-requests/{id}/convert` (NEW)
+**Auth:** logistics role. **Body:**
+```json
+{
+  "fulfillment_type": "internal_vehicle" | "external_vendor",
+  "vehicle_id": "…",
+  "driver_user_id": 123,
+  "vendor_id": "…",
+  "vehicle_type": "…",
+  "driver_name": "…",
+  "estimated_vendor_cost": 0
+}
+```
+- `internal_vehicle` — requires `vehicle_id` + `driver_user_id`
+- `external_vendor` — requires `vendor_id`, `vehicle_type`, `driver_name`, `estimated_vendor_cost`
+
+Auto-migrates passengers to the linked logistics trip (`TRIP-*`). Sets `workflow_stage=logistics_review`.
+
+### POST `/api/trip-requests/{id}/confirm` (DEPRECATED)
+Returns **422** `WORKFLOW_DEPRECATED`. Use forward → director-approve → convert instead.
+
+### GET `/api/trip-requests/{id}` — `availableActions`
+Response trip payload includes `availableActions` array for the current viewer:
+- LM on `trip_request` / `changes_requested`: `forward`, `reject`, `request_changes`
+- LM on `director_approved`: `convert`
+- Supervising Director on `director_review`: `director_approve`, `director_reject`, `director_return`
+
+### LM pending inbox (`GET /api/trip-requests`)
+For logistics roles with default/`submitted` filter: returns `status=submitted` AND `workflow_stage` in (`trip_request`, `changes_requested`).
+
+### Progress tracker (`GET /api/trip-requests/{id}/progress-tracker`)
+Four steps: Submitted → Logistics Manager Review → Supervising Director Approval → Logistics Request.
+
+### Vendor search for conversion (`GET /api/vendors`)
+Supports `search` and `per_page` query params for async vendor dropdown during external-vendor conversion.
+
+**Frontend:**
+- `TripRequestWorkflowActions` — LM/SCD action buttons driven by `availableActions`
+- `TripRequestConversionDialog` — internal vehicle vs external vendor conversion
+- `TripRequestDetailPage` / `PendingTripRequestsPanel` — legacy Approve & assign removed
+- Trip type form options: `out_of_state_local`, `international`

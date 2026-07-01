@@ -226,6 +226,12 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/trip-requests', [TripRequestWorkflowController::class, 'store']);
     Route::put('/trip-requests/{id}', [TripRequestWorkflowController::class, 'update']);
     Route::post('/trip-requests/{id}/confirm', [TripRequestWorkflowController::class, 'confirm']);
+    Route::post('/trip-requests/{id}/forward', [TripRequestWorkflowController::class, 'forward']);
+    Route::post('/trip-requests/{id}/request-changes', [TripRequestWorkflowController::class, 'requestChanges']);
+    Route::post('/trip-requests/{id}/director-approve', [TripRequestWorkflowController::class, 'directorApprove']);
+    Route::post('/trip-requests/{id}/director-reject', [TripRequestWorkflowController::class, 'directorReject']);
+    Route::post('/trip-requests/{id}/director-return', [TripRequestWorkflowController::class, 'directorReturn']);
+    Route::post('/trip-requests/{id}/convert', [TripRequestWorkflowController::class, 'convert']);
     Route::post('/trip-requests/{id}/reject', [TripRequestWorkflowController::class, 'reject']);
     Route::get('/trip-requests/{id}/comments', [TripRequestWorkflowController::class, 'getComments']);
     Route::post('/trip-requests/{id}/comments', [TripRequestWorkflowController::class, 'addComment']);
@@ -675,6 +681,12 @@ Route::prefix('v1/logistics')->group(function () {
         Route::post('/trip-requests', [TripRequestWorkflowController::class, 'store']);
         Route::put('/trip-requests/{id}', [TripRequestWorkflowController::class, 'update']);
         Route::post('/trip-requests/{id}/confirm', [TripRequestWorkflowController::class, 'confirm']);
+        Route::post('/trip-requests/{id}/forward', [TripRequestWorkflowController::class, 'forward']);
+        Route::post('/trip-requests/{id}/request-changes', [TripRequestWorkflowController::class, 'requestChanges']);
+        Route::post('/trip-requests/{id}/director-approve', [TripRequestWorkflowController::class, 'directorApprove']);
+        Route::post('/trip-requests/{id}/director-reject', [TripRequestWorkflowController::class, 'directorReject']);
+        Route::post('/trip-requests/{id}/director-return', [TripRequestWorkflowController::class, 'directorReturn']);
+        Route::post('/trip-requests/{id}/convert', [TripRequestWorkflowController::class, 'convert']);
         Route::post('/trip-requests/{id}/reject', [TripRequestWorkflowController::class, 'reject']);
         Route::get('/trip-requests/{id}/comments', [TripRequestWorkflowController::class, 'getComments']);
         Route::post('/trip-requests/{id}/comments', [TripRequestWorkflowController::class, 'addComment']);
@@ -828,6 +840,12 @@ Route::prefix('logistics')->group(function () {
         Route::post('/trip-requests', [TripRequestWorkflowController::class, 'store']);
         Route::put('/trip-requests/{id}', [TripRequestWorkflowController::class, 'update']);
         Route::post('/trip-requests/{id}/confirm', [TripRequestWorkflowController::class, 'confirm']);
+        Route::post('/trip-requests/{id}/forward', [TripRequestWorkflowController::class, 'forward']);
+        Route::post('/trip-requests/{id}/request-changes', [TripRequestWorkflowController::class, 'requestChanges']);
+        Route::post('/trip-requests/{id}/director-approve', [TripRequestWorkflowController::class, 'directorApprove']);
+        Route::post('/trip-requests/{id}/director-reject', [TripRequestWorkflowController::class, 'directorReject']);
+        Route::post('/trip-requests/{id}/director-return', [TripRequestWorkflowController::class, 'directorReturn']);
+        Route::post('/trip-requests/{id}/convert', [TripRequestWorkflowController::class, 'convert']);
         Route::post('/trip-requests/{id}/reject', [TripRequestWorkflowController::class, 'reject']);
         Route::get('/trip-requests/{id}/comments', [TripRequestWorkflowController::class, 'getComments']);
         Route::post('/trip-requests/{id}/comments', [TripRequestWorkflowController::class, 'addComment']);

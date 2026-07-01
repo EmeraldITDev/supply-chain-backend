@@ -7,41 +7,46 @@ use Illuminate\Support\Str;
 
 final class TripBookingRules
 {
+    public const SCOPE_OUT_OF_STATE_LOCAL = 'out_of_state_local';
+
+    public const SCOPE_INTERNATIONAL = 'international';
+
+    /** @deprecated Legacy scope — maps to out_of_state_local */
     public const SCOPE_WITHIN_STATE = 'within_state';
 
+    /** @deprecated Legacy scope — maps to out_of_state_local */
     public const SCOPE_OUTSIDE_STATE = 'outside_state';
 
-    public const LEAD_DAYS_WITHIN_STATE = 2;
+    public const LEAD_DAYS_OUT_OF_STATE_LOCAL = 7;
 
-    public const LEAD_DAYS_OUTSIDE_STATE = 14;
+    public const LEAD_DAYS_INTERNATIONAL = 14;
 
     /**
      * @return list<string>
      */
     public static function allowedScopes(): array
     {
-        return [self::SCOPE_WITHIN_STATE, self::SCOPE_OUTSIDE_STATE];
+        return [self::SCOPE_OUT_OF_STATE_LOCAL, self::SCOPE_INTERNATIONAL];
     }
 
     public static function label(string $scope): string
     {
-        return match ($scope) {
-            self::SCOPE_WITHIN_STATE => 'Within State',
-            self::SCOPE_OUTSIDE_STATE => 'Outside State',
+        return match (self::normalizeScope($scope) ?? $scope) {
+            self::SCOPE_OUT_OF_STATE_LOCAL => 'Out of State (Local)',
+            self::SCOPE_INTERNATIONAL => 'International (Out of Nigeria)',
             default => Str::title(str_replace('_', ' ', $scope)),
         };
     }
 
     public static function minimumLeadDays(string $scope): int
     {
-        return $scope === self::SCOPE_OUTSIDE_STATE
-            ? self::LEAD_DAYS_OUTSIDE_STATE
-            : self::LEAD_DAYS_WITHIN_STATE;
+        return match (self::normalizeScope($scope)) {
+            self::SCOPE_INTERNATIONAL => self::LEAD_DAYS_INTERNATIONAL,
+            self::SCOPE_OUT_OF_STATE_LOCAL => self::LEAD_DAYS_OUT_OF_STATE_LOCAL,
+            default => self::LEAD_DAYS_OUT_OF_STATE_LOCAL,
+        };
     }
 
-    /**
-     * Earliest allowed trip date (start of day) for a scope, based on submission time.
-     */
     public static function earliestTripDate(string $scope, ?Carbon $submittedAt = null): Carbon
     {
         $base = ($submittedAt ?? now())->copy()->startOfDay();
@@ -54,13 +59,14 @@ final class TripBookingRules
      */
     public static function validateDeparture(string $scope, Carbon|string $scheduledDepartureAt, ?Carbon $submittedAt = null): array
     {
+        $normalized = self::normalizeScope($scope) ?? $scope;
         $departure = Carbon::parse($scheduledDepartureAt)->startOfDay();
-        $minimum = self::earliestTripDate($scope, $submittedAt);
+        $minimum = self::earliestTripDate($normalized, $submittedAt);
 
         if ($departure->lt($minimum)) {
             return [
                 'valid' => false,
-                'message' => self::violationMessage($scope),
+                'message' => self::violationMessage($normalized),
                 'minimum_trip_date' => $minimum->toDateString(),
             ];
         }
@@ -74,11 +80,11 @@ final class TripBookingRules
 
     public static function violationMessage(string $scope): string
     {
-        if ($scope === self::SCOPE_OUTSIDE_STATE) {
-            return 'Outside state trips must be requested at least 2 weeks (14 days) in advance. Please select a later trip date or submit sooner.';
-        }
-
-        return 'Within state trips must be requested at least 2 days in advance. Please select a later trip date or submit sooner.';
+        return match (self::normalizeScope($scope)) {
+            self::SCOPE_INTERNATIONAL => 'International trips must be requested at least 14 days before the travel date. Please select a later date.',
+            self::SCOPE_OUT_OF_STATE_LOCAL => 'Out of state (local) trips must be requested at least 7 days before the travel date. Please select a later date.',
+            default => 'The selected trip date does not meet the minimum advance booking period for this trip type.',
+        };
     }
 
     /**
@@ -93,9 +99,22 @@ final class TripBookingRules
         $normalized = strtolower(trim(str_replace([' ', '-'], '_', (string) $value)));
 
         return match ($normalized) {
-            'within_state', 'withinstate', 'within' => self::SCOPE_WITHIN_STATE,
-            'outside_state', 'outsidestate', 'outside' => self::SCOPE_OUTSIDE_STATE,
+            'out_of_state_local', 'outofstatelocal', 'out_of_state', 'outsidestate', 'outside_state', 'outside', 'within_state', 'withinstate', 'within' => self::SCOPE_OUT_OF_STATE_LOCAL,
+            'international', 'international_out_of_nigeria', 'out_of_nigeria' => self::SCOPE_INTERNATIONAL,
             default => in_array($normalized, self::allowedScopes(), true) ? $normalized : null,
         };
+    }
+
+    /**
+     * @return list<array{value: string, label: string, minimumLeadDays: int, violationMessage: string}>
+     */
+    public static function scopesPayload(): array
+    {
+        return array_map(fn (string $scope) => [
+            'value' => $scope,
+            'label' => self::label($scope),
+            'minimumLeadDays' => self::minimumLeadDays($scope),
+            'violationMessage' => self::violationMessage($scope),
+        ], self::allowedScopes());
     }
 }

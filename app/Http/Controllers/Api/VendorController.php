@@ -109,7 +109,17 @@ class VendorController extends Controller
             $query->where('category', $request->category);
         }
 
-        $vendors = $query->orderBy('name')->get();
+        if ($request->filled('search')) {
+            $term = '%' . trim((string) $request->search) . '%';
+            $query->where(function ($q) use ($term) {
+                $q->where('name', 'like', $term)
+                    ->orWhere('email', 'like', $term)
+                    ->orWhere('vendor_id', 'like', $term);
+            });
+        }
+
+        $limit = min(100, max(1, (int) $request->query('per_page', $request->query('limit', 20))));
+        $vendors = $query->orderBy('name')->limit($limit)->get();
 
         return response()->json($vendors->map(function($vendor) {
             return [
