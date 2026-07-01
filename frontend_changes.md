@@ -892,6 +892,7 @@ All dashboard, procurement, logistics, reports, and detail pages load via `React
 ### Reporting SQL fixes (post–Section 5)
 - **Reports dashboard on-time delivery:** join `r_f_q_s` (not `rfqs`) — `ReportsDashboardService`, `DashboardController`
 - **Procurement records engine:** MRF vendor column is `selected_vendor_id` / relation `selectedVendor` (not `vendor_id`) — `ReportingEngineService`
+- **Procurement report infinite load:** `ProcurementReportService` defaults to last 30 days when dates omitted; header-level savings/loss via SQL instead of per-MRF `mrfProfitAndLoss()` loops with quotation N+1
 
 ### API note — MRF list PO URLs
 

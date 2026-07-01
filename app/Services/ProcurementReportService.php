@@ -12,26 +12,15 @@ use Illuminate\Support\Facades\DB;
 
 class ProcurementReportService
 {
-    public function __construct(private LineItemBudgetService $budgetService)
-    {
-    }
-
     /**
      * @return array<string, mixed>
      */
     public function buildReport(?Carbon $from, ?Carbon $to): array
     {
-        $mrfQuery = MRF::query();
-        $srfQuery = SRF::query();
+        [$from, $to] = $this->resolveReportPeriod($from, $to);
 
-        if ($from) {
-            $mrfQuery->where('created_at', '>=', $from);
-            $srfQuery->where('created_at', '>=', $from);
-        }
-        if ($to) {
-            $mrfQuery->where('created_at', '<=', $to);
-            $srfQuery->where('created_at', '<=', $to);
-        }
+        $mrfQuery = MRF::query()->whereBetween('created_at', [$from, $to]);
+        $srfQuery = SRF::query()->whereBetween('created_at', [$from, $to]);
 
         $poGenerated = (clone $mrfQuery)->whereNotNull('po_number')->count();
         $mrfsApproved = (clone $mrfQuery)->where(function ($q): void {
@@ -56,8 +45,8 @@ class ProcurementReportService
 
         return [
             'period' => [
-                'from' => $from?->toDateString() ?? 'all',
-                'to' => $to?->toDateString() ?? 'all',
+                'from' => $from->toDateString(),
+                'to' => $to->toDateString(),
             ],
             'totals' => [
                 'totalSavings' => $savingsLoss['totalSavings'],
@@ -147,23 +136,12 @@ class ProcurementReportService
         $totalLoss = (float) ($mrfLine->loss ?? 0) + (float) ($srfLine->loss ?? 0);
         $lineCount = (int) ($mrfLine->line_count ?? 0) + (int) ($srfLine->line_count ?? 0);
 
-        MRF::with('items')->whereIn('id', $heavyMrfIds)->chunkById(50, function ($mrfs) use (&$totalSavings, &$totalLoss, &$lineCount): void {
-            foreach ($mrfs as $mrf) {
-                $pl = $this->budgetService->mrfProfitAndLoss($mrf);
-                $totalSavings += (float) $pl['summary']['totalSavings'];
-                $totalLoss += (float) $pl['summary']['totalLoss'];
-                $lineCount += (int) $pl['summary']['lineCount'];
-            }
-        });
+        $mrfHeader = $this->aggregateMrfHeaderSavingsLoss($heavyMrfIds);
+        $srfHeader = $this->aggregateSrfHeaderSavingsLoss($heavySrfIds);
 
-        SRF::with('items')->whereIn('id', $heavySrfIds)->chunkById(50, function ($srfs) use (&$totalSavings, &$totalLoss, &$lineCount): void {
-            foreach ($srfs as $srf) {
-                $pl = $this->budgetService->srfProfitAndLoss($srf);
-                $totalSavings += (float) $pl['summary']['totalSavings'];
-                $totalLoss += (float) $pl['summary']['totalLoss'];
-                $lineCount += (int) $pl['summary']['lineCount'];
-            }
-        });
+        $totalSavings += $mrfHeader['savings'] + $srfHeader['savings'];
+        $totalLoss += $mrfHeader['loss'] + $srfHeader['loss'];
+        $lineCount += $mrfHeader['lineCount'] + $srfHeader['lineCount'];
 
         return [
             'totalSavings' => round($totalSavings, 2),
@@ -213,5 +191,115 @@ class ProcurementReportService
         ];
 
         return $rows;
+    }
+
+    /**
+     * Default reporting window — avoids full-table scans when the client omits dates.
+     *
+     * @return array{0: Carbon, 1: Carbon}
+     */
+    private function resolveReportPeriod(?Carbon $from, ?Carbon $to): array
+    {
+        $periodEnd = $to ?? Carbon::now()->endOfDay();
+        $periodStart = $from ?? $periodEnd->copy()->subDays(30)->startOfDay();
+
+        return [$periodStart, $periodEnd];
+    }
+
+    /**
+     * Header-level MRF variance using SQL (no per-MRF quotation N+1).
+     *
+     * @param  \Illuminate\Support\Collection<int, int>  $heavyMrfIds
+     * @return array{savings: float, loss: float, lineCount: int}
+     */
+    private function aggregateMrfHeaderSavingsLoss($heavyMrfIds): array
+    {
+        $ids = $heavyMrfIds->values()->all();
+        if ($ids === []) {
+            return ['savings' => 0.0, 'loss' => 0.0, 'lineCount' => 0];
+        }
+
+        $placeholders = implode(',', array_fill(0, count($ids), '?'));
+
+        $row = DB::selectOne("
+            SELECT
+                COALESCE(SUM(GREATEST(budget - quoted, 0)), 0) AS savings,
+                COALESCE(SUM(GREATEST(quoted - budget, 0)), 0) AS loss,
+                COUNT(*) AS line_count
+            FROM (
+                SELECT
+                    m.id,
+                    COALESCE(m.estimated_cost, 0) AS budget,
+                    COALESCE((
+                        SELECT COALESCE(qu.total_amount, qu.price, 0)
+                        FROM r_f_q_s r
+                        INNER JOIN quotations qu ON qu.rfq_id = r.id
+                        WHERE r.mrf_id = m.id
+                        ORDER BY
+                            CASE WHEN m.selected_vendor_id IS NOT NULL AND qu.vendor_id = m.selected_vendor_id THEN 0 ELSE 1 END,
+                            CASE WHEN qu.status = 'Approved' THEN 0 ELSE 1 END,
+                            COALESCE(qu.total_amount, qu.price) ASC NULLS LAST
+                        LIMIT 1
+                    ), 0) AS quoted
+                FROM m_r_f_s m
+                WHERE m.id IN ({$placeholders})
+            ) hdr
+            WHERE budget > 0 OR quoted > 0
+        ", $ids);
+
+        return [
+            'savings' => (float) ($row->savings ?? 0),
+            'loss' => (float) ($row->loss ?? 0),
+            'lineCount' => (int) ($row->line_count ?? 0),
+        ];
+    }
+
+    /**
+     * Header-level SRF variance from SRF columns (no per-SRF PHP loop).
+     *
+     * @param  \Illuminate\Support\Collection<int, int>  $heavySrfIds
+     * @return array{savings: float, loss: float, lineCount: int}
+     */
+    private function aggregateSrfHeaderSavingsLoss($heavySrfIds): array
+    {
+        if ($heavySrfIds->isEmpty()) {
+            return ['savings' => 0.0, 'loss' => 0.0, 'lineCount' => 0];
+        }
+
+        $srfTable = (new SRFItem())->getTable();
+
+        $lineRow = DB::table($srfTable)
+            ->whereIn('srf_id', $heavySrfIds)
+            ->where(function ($w) {
+                $w->whereNull('quoted_amount')->orWhere('quoted_amount', 0);
+            })
+            ->where('budget_amount', '>', 0)
+            ->selectRaw('
+                SUM(CASE WHEN COALESCE(budget_amount, 0) > 0 THEN COALESCE(budget_amount, 0) ELSE 0 END) AS savings,
+                0 AS loss,
+                COUNT(*) AS line_count
+            ')
+            ->first();
+
+        $headerRow = DB::table('s_r_f_s as s')
+            ->whereIn('s.id', $heavySrfIds)
+            ->whereNotExists(function ($q) use ($srfTable) {
+                $q->select(DB::raw(1))
+                    ->from($srfTable)
+                    ->whereColumn("{$srfTable}.srf_id", 's.id');
+            })
+            ->where('s.estimated_cost', '>', 0)
+            ->selectRaw('
+                SUM(COALESCE(s.estimated_cost, 0)) AS savings,
+                0 AS loss,
+                COUNT(*) AS line_count
+            ')
+            ->first();
+
+        return [
+            'savings' => (float) ($lineRow->savings ?? 0) + (float) ($headerRow->savings ?? 0),
+            'loss' => (float) ($lineRow->loss ?? 0) + (float) ($headerRow->loss ?? 0),
+            'lineCount' => (int) ($lineRow->line_count ?? 0) + (int) ($headerRow->line_count ?? 0),
+        ];
     }
 }
