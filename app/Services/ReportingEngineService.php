@@ -142,7 +142,7 @@ class ReportingEngineService
 
         $response = match ($format) {
             'pdf' => $this->exportService->streamPdf($filename, 'Procurement Records', $headers, $flatRows),
-            'xlsx' => $this->exportService->streamSpreadsheet($filename, $headers, $flatRows),
+            'xlsx' => $this->exportService->streamXlsx($filename, $headers, $flatRows),
             default => $this->exportService->streamCsv($filename, $headers, $flatRows),
         };
 

@@ -624,6 +624,7 @@ Quick reference:
 | `search` | No | Same as `GET /api/vendors` |
 | `status` | No | Same as directory filter |
 | `category` | No | Same as directory filter |
+| `limit` | No | Positive integer (max 10,000) or `all` |
 | `include_inactive` | No | `1` to include inactive rows |
 
 **Selectable columns:** `vendor_id`, `company_name`, `category`, `email`, `phone`, `address`, `tax_id`, `contact_person`, `bank_name`, `account_number`, `account_name`, `currency`, `registration_status`, `registration_date`, `document_status`.
@@ -634,9 +635,24 @@ Quick reference:
 
 **PDF:** Server-generated with Emerald logo + company header (`PurchaseOrderPdfService::logoHtml()`), landscape A4 table.
 
-**CSV:** Browser assembles the file from `GET /api/vendors/export/rows` (not a streamed file). PDF and XLSX are always server-streamed.
+**CSV:** Browser assembles the file from `GET /api/vendors/export/rows` (UTF-8 with BOM). PDF and XLSX are server-streamed.
+
+**Row limit:** `limit` query param — positive integer (max 10,000) or `all` (exports up to 10,000 matching rows). UI: **Number of records** field in export modal.
+
+**File integrity:** XLSX uses PhpSpreadsheet (`application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`). CSV uses UTF-8 BOM (`text/csv; charset=UTF-8`).
 
 **UI:** Vendors page → **Export** button → modal with format radio + column checklist (Select all / Deselect all). Selection persisted in `sessionStorage` (`vendor_directory_export_columns`). No download until user confirms.
+
+### Universal table export (frontend)
+
+Reusable **`TableExportMenu`** + **`useTableExport`** (`src/components/export/TableExportMenu.tsx`, `src/hooks/useTableExport.ts`):
+
+- Formats: **CSV** (UTF-8 BOM, client-assembled) and **XLSX** (SheetJS, client-assembled).
+- **Number of records** input (number or `All`, max 10,000).
+- Inherits table **search, status, date, and sort** via each page’s `fetchPage` callback.
+- Wired on: Procurement **MRF**, **Purchase Orders**, **Service Requests**; **RFQ Management**; Logistics **All Trips**.
+
+Column presets: `src/config/tableExportPresets.ts`.
 
 ---
 

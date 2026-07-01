@@ -7,6 +7,7 @@ use App\Models\Vendor;
 use App\Models\VendorRegistration;
 use App\Models\VendorRegistrationDocument;
 use App\Support\VendorCategoryDisplay;
+use App\Support\ExportLimit;
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
@@ -115,7 +116,7 @@ class VendorDirectoryExportService
 
         return match ($format) {
             'pdf' => $this->streamBrandedPdf($filename, $headers, $rows, $request),
-            'xlsx' => $this->exportService->streamSpreadsheet($filename, $headers, $rows, 'xlsx'),
+            'xlsx' => $this->exportService->streamXlsx($filename, $headers, $rows),
             default => abort(422, 'Invalid export format. Use pdf or xlsx.'),
         };
     }
@@ -128,8 +129,11 @@ class VendorDirectoryExportService
         $query = Vendor::query();
         $this->applyDirectoryFilters($query, $request);
 
+        $limit = ExportLimit::fromRequest($request);
+
         return $query
             ->orderBy('name')
+            ->limit($limit)
             ->get([
                 'id', 'vendor_id', 'name', 'category', 'category_other', 'status',
                 'email', 'phone', 'address', 'tax_id', 'contact_person',
