@@ -787,3 +787,34 @@ Supports `search` and `per_page` query params for async vendor dropdown during e
 - `TripRequestConversionDialog` — internal vehicle vs external vendor conversion
 - `TripRequestDetailPage` / `PendingTripRequestsPanel` — legacy Approve & assign removed
 - Trip type form options: `out_of_state_local`, `international`
+
+---
+
+## SCM Platform — Database Performance & Global Pagination (Section 3, Jul 2026)
+
+### Standard paginated list response
+```json
+{
+  "success": true,
+  "data": [],
+  "pagination": { "page": 1, "per_page": 25, "total": 312, "total_pages": 13, "from": 1, "to": 25 }
+}
+```
+
+Logistics lists use `data.trips` / `data.vehicles` plus `data.pagination`.
+
+**Common query params:** `page`, `per_page` (default 25), `sort_by`, `sort_direction`, `search`.
+
+### GET `/api/vendors` (updated)
+Paginated directory; explicit column select. **Frontend:** `vendorApi.list()`, Suppliers page, async vendor search in PO/RFQ dialogs.
+
+### GET `/api/mrfs` (updated)
+`per_page` default 25; filters `po_list`, `has_po`, `date_from`, `date_to`, `workflow_state`. List omits `priceComparisons` (detail only).
+
+### GET `/api/trips` / GET `/api/fleet/vehicles` (updated)
+Search, sort, pagination (25/page).
+
+### Migration `2026_07_01_140000_add_list_query_indexes`
+Indexes on frequently filtered columns for MRFs, vendors, trips, vehicles.
+
+**Frontend components:** `ServerPaginationBar`, `AsyncVendorSearchSelect`, `paginatedListApi` helpers.
