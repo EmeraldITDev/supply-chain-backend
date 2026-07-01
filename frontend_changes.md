@@ -889,6 +889,10 @@ All dashboard, procurement, logistics, reports, and detail pages load via `React
 ### Deploy checklist
 - Run `php artisan migrate` (includes `2026_07_01_140000_add_list_query_indexes`)
 
+### Reporting SQL fixes (post–Section 5)
+- **Reports dashboard on-time delivery:** join `r_f_q_s` (not `rfqs`) — `ReportsDashboardService`, `DashboardController`
+- **Procurement records engine:** MRF vendor column is `selected_vendor_id` / relation `selectedVendor` (not `vendor_id`) — `ReportingEngineService`
+
 ### API note — MRF list PO URLs
 
 `GET /api/mrfs` (paginated list) returns **stored** `unsigned_po_url` / `signed_po_url` from the database. Call `GET /api/mrfs/{id}` when the UI needs freshly signed download URLs.

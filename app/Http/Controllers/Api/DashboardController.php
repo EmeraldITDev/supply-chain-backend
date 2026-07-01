@@ -134,7 +134,7 @@ class DashboardController extends Controller
         
         // On-Time Delivery: aggregate in SQL (avoids loading every approved quotation + RFQ)
         $onTimeRow = DB::table('quotations')
-            ->join('rfqs', 'quotations.rfq_id', '=', 'rfqs.id')
+            ->join('r_f_q_s as rfqs', 'quotations.rfq_id', '=', 'rfqs.id')
             ->where('quotations.status', 'Approved')
             ->whereNotNull('quotations.delivery_date')
             ->whereNotNull('rfqs.deadline')

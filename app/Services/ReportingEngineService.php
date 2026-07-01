@@ -39,13 +39,13 @@ class ReportingEngineService
                 'department',
                 'workflow_state',
                 'status',
-                'vendor_id',
+                'selected_vendor_id',
                 'estimated_cost',
                 'created_at',
                 'updated_at',
                 'po_signed_at',
             ])
-            ->with(['vendor:id,name']);
+            ->with(['selectedVendor:id,name']);
 
         if ($from) {
             $query->where('created_at', '>=', $from);
@@ -57,7 +57,7 @@ class ReportingEngineService
             $query->where('department', $request->query('department'));
         }
         if ($request->filled('vendor_id')) {
-            $query->where('vendor_id', (int) $request->query('vendor_id'));
+            $query->where('selected_vendor_id', (int) $request->query('vendor_id'));
         }
         if ($request->filled('status')) {
             $status = (string) $request->query('status');
@@ -96,7 +96,7 @@ class ReportingEngineService
     public function procurementRecordDetail(int $id): array
     {
         $mrf = MRF::query()
-            ->with(['vendor:id,name', 'items:id,mrf_id,item_name,budget_amount,quoted_amount'])
+            ->with(['selectedVendor:id,name', 'items:id,mrf_id,item_name,budget_amount,quoted_amount'])
             ->findOrFail($id);
 
         return [
@@ -179,8 +179,8 @@ class ReportingEngineService
             'department' => $mrf->department,
             'status' => $mrf->status,
             'workflowState' => $mrf->workflow_state,
-            'vendorId' => $mrf->vendor_id,
-            'vendorName' => $mrf->vendor?->name,
+            'vendorId' => $mrf->selected_vendor_id,
+            'vendorName' => $mrf->selectedVendor?->name,
             'estimatedCost' => (float) ($mrf->estimated_cost ?? 0),
             'createdAt' => $mrf->created_at?->toIso8601String(),
             'poSignedAt' => $mrf->po_signed_at?->toIso8601String(),
