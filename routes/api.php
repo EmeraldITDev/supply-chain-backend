@@ -492,6 +492,9 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // Vendor routes - specific routes must come before parameterized routes
     Route::get('/vendors', [VendorController::class, 'index']);
+    Route::get('/vendors/export', [VendorController::class, 'exportDirectory']);
+    Route::get('/vendors/export/rows', [VendorController::class, 'exportDirectoryRows']);
+    Route::get('/vendors/export/columns', [VendorController::class, 'exportDirectoryColumns']);
     Route::get('/vendors/lookup', [VendorController::class, 'lookup']);
     Route::post('/vendors/bulk-delete', [VendorController::class, 'bulkDestroy']);
     Route::get('/vendors/quotations', [VendorController::class, 'getVendorQuotations']);

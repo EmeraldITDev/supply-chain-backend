@@ -605,6 +605,39 @@ Quick reference:
 - Vendor Directory UI: row checkboxes + **Delete selected** (replaces inactive-merged audit toggle).
 - Legacy duplicate cleanup: `php artisan vendors:merge-duplicates --list` then `--purge-merged --force`.
 
+### Vendor directory export (role-gated)
+
+**Roles:** `procurement_manager`, `supply_chain_director`, `executive`, `logistics_manager` only. All other roles receive **403** and must not see the Export button.
+
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/api/vendors/export` | `GET` | Stream **PDF** or **Excel (XLSX)** download |
+| `/api/vendors/export/rows` | `GET` | JSON row data for **client-side CSV** assembly |
+| `/api/vendors/export/columns` | `GET` | Column catalogue (`key`, `label`) |
+
+**Query parameters (export + rows):**
+
+| Param | Required | Notes |
+|-------|----------|-------|
+| `format` | PDF/XLSX only | `pdf` or `xlsx` |
+| `columns` | Yes | Comma-separated keys (see below). At least one required. |
+| `search` | No | Same as `GET /api/vendors` |
+| `status` | No | Same as directory filter |
+| `category` | No | Same as directory filter |
+| `include_inactive` | No | `1` to include inactive rows |
+
+**Selectable columns:** `vendor_id`, `company_name`, `category`, `email`, `phone`, `address`, `tax_id`, `contact_person`, `bank_name`, `account_number`, `account_name`, `currency`, `registration_status`, `registration_date`, `document_status`.
+
+**Filename:** `Vendor_Directory_{YYYY-MM-DD}.pdf` / `.xlsx` / `.csv`
+
+**Filters:** Export applies the same directory query as `GET /api/vendors`. When any filter is active, UI shows: *"Exporting filtered results only. Clear filters to export all vendors."*
+
+**PDF:** Server-generated with Emerald logo + company header (`PurchaseOrderPdfService::logoHtml()`), landscape A4 table.
+
+**CSV:** Browser assembles the file from `GET /api/vendors/export/rows` (not a streamed file). PDF and XLSX are always server-streamed.
+
+**UI:** Vendors page → **Export** button → modal with format radio + column checklist (Select all / Deselect all). Selection persisted in `sessionStorage` (`vendor_directory_export_columns`). No download until user confirms.
+
 ---
 
 ## 13. PO numbering — `PO-DDMMYY-SupplierToken-NNNN`

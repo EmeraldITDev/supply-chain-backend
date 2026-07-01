@@ -28,8 +28,14 @@ class ReportExportService
      * @param  list<string>  $headers
      * @param  list<list<string|int|float>>  $rows
      */
-    public function streamSpreadsheet(string $filename, array $headers, array $rows): StreamedResponse
-    {
+    public function streamSpreadsheet(
+        string $filename,
+        array $headers,
+        array $rows,
+        string $extension = 'xls',
+    ): StreamedResponse {
+        $extension = ltrim($extension, '.');
+
         return response()->streamDownload(function () use ($headers, $rows): void {
             echo '<?xml version="1.0" encoding="UTF-8"?>';
             echo '<?mso-application progid="Excel.Sheet"?>';
@@ -53,7 +59,7 @@ class ReportExportService
             }
 
             echo '</Table></Worksheet></Workbook>';
-        }, $filename.'.xls', [
+        }, $filename.'.'.$extension, [
             'Content-Type' => 'application/vnd.ms-excel',
         ]);
     }

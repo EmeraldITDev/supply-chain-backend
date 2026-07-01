@@ -13,6 +13,7 @@ use App\Models\VendorRegistrationDocument;
 use App\Models\Quotation;
 use App\Services\NotificationService;
 use App\Services\VendorApprovalService;
+use App\Services\VendorDirectoryExportService;
 use App\Services\VendorDocumentService;
 use App\Services\QuotationAttachmentService;
 use App\Support\VendorCategoryDisplay;
@@ -158,6 +159,91 @@ class VendorController extends Controller
         })->values()->all();
 
         return response()->json($this->paginatedJsonResponse($paginator, $items));
+    }
+
+    /**
+     * Export vendor directory (PDF / Excel). Role-gated; mirrors directory filters.
+     */
+    public function exportDirectory(Request $request, VendorDirectoryExportService $exportService)
+    {
+        $user = $request->user();
+        if (! $exportService->userCanExport($user)) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Insufficient permissions to export vendor directory',
+                'code' => 'FORBIDDEN',
+            ], 403);
+        }
+
+        $format = strtolower((string) $request->query('format', ''));
+        if (! in_array($format, ['pdf', 'xlsx'], true)) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Invalid export format. Use pdf or xlsx.',
+                'code' => 'VALIDATION_ERROR',
+            ], 422);
+        }
+
+        $columns = $exportService->resolveRequestedColumns($request);
+        if ($columns === []) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Select at least one column to export.',
+                'code' => 'VALIDATION_ERROR',
+            ], 422);
+        }
+
+        return $exportService->export($request, $format);
+    }
+
+    /**
+     * Vendor directory row data for client-side CSV assembly (role-gated).
+     */
+    public function exportDirectoryRows(Request $request, VendorDirectoryExportService $exportService)
+    {
+        if (! $exportService->userCanExport($request->user())) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Insufficient permissions',
+                'code' => 'FORBIDDEN',
+            ], 403);
+        }
+
+        try {
+            $dataset = $exportService->buildExportDataset($request);
+        } catch (\Symfony\Component\HttpKernel\Exception\HttpException $e) {
+            return response()->json([
+                'success' => false,
+                'error' => $e->getMessage(),
+                'code' => 'VALIDATION_ERROR',
+            ], $e->getStatusCode());
+        }
+
+        return response()->json([
+            'success' => true,
+            'data' => $dataset,
+        ]);
+    }
+
+    /**
+     * Available export columns for vendor directory (role-gated).
+     */
+    public function exportDirectoryColumns(Request $request, VendorDirectoryExportService $exportService)
+    {
+        if (! $exportService->userCanExport($request->user())) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Insufficient permissions',
+                'code' => 'FORBIDDEN',
+            ], 403);
+        }
+
+        return response()->json([
+            'success' => true,
+            'columns' => collect(VendorDirectoryExportService::COLUMN_LABELS)
+                ->map(fn (string $label, string $key) => ['key' => $key, 'label' => $label])
+                ->values(),
+        ]);
     }
 
     /**
