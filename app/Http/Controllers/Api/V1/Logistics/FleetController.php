@@ -50,7 +50,13 @@ class FleetController extends ApiController
 
     public function index(Request $request)
     {
-        $query = Vehicle::with(['vendor'])
+        $query = Vehicle::query()
+            ->select([
+                'id', 'plate_number', 'name', 'type', 'make', 'model', 'year', 'color',
+                'ownership', 'vendor_id', 'status', 'approval_status', 'passenger_capacity',
+                'cargo_capacity', 'fuel_type', 'created_at', 'updated_at',
+            ])
+            ->with(['vendor:id,vendor_id,name'])
             ->withCount([
                 'documents',
                 'documents as active_documents_count' => function ($q) {
@@ -63,10 +69,33 @@ class FleetController extends ApiController
             $query->where('status', $request->status);
         }
 
-        $vehicles = $query->paginate(20);
+        if ($request->filled('ownership')) {
+            $query->where('ownership', $request->ownership);
+        }
+
+        if ($request->filled('search') || $request->filled('q')) {
+            $term = '%' . trim((string) ($request->input('search') ?: $request->input('q'))) . '%';
+            $query->where(function ($q) use ($term) {
+                $q->where('plate_number', 'like', $term)
+                    ->orWhere('name', 'like', $term)
+                    ->orWhere('make', 'like', $term)
+                    ->orWhere('model', 'like', $term);
+            });
+        }
+
+        [$sortBy, $sortDirection] = $this->resolveSort(
+            $request,
+            ['created_at', 'updated_at', 'plate_number', 'status', 'name'],
+            'created_at',
+            'desc',
+        );
+
+        $perPage = $this->resolvePerPage($request);
+        $paginator = $query->orderBy($sortBy, $sortDirection)->paginate($perPage);
 
         return $this->success([
-            'vehicles' => $vehicles,
+            'vehicles' => $paginator->items(),
+            'pagination' => $this->paginationPayload($paginator),
         ]);
     }
 

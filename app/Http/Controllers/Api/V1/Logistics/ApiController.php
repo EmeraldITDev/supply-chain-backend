@@ -2,10 +2,12 @@
 
 namespace App\Http\Controllers\Api\V1\Logistics;
 
+use App\Http\Controllers\Concerns\ResolvesPaginatedLists;
 use App\Http\Controllers\Controller;
 
 class ApiController extends Controller
 {
+    use ResolvesPaginatedLists;
     protected function success(array $data = [], int $status = 200)
     {
         return response()->json([

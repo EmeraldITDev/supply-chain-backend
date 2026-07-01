@@ -83,7 +83,7 @@ class TripController extends ApiController
 
     public function index(Request $request)
     {
-        $query = Trip::query();
+        $query = Trip::query()->with(['vendor:id,vendor_id,name', 'vehicle:id,plate_number,name']);
 
         if ($request->filled('status')) {
             $query->where('status', $request->status);
@@ -93,8 +93,46 @@ class TripController extends ApiController
             $query->where('vendor_id', $request->vendor_id);
         }
 
+        if ($request->filled('type')) {
+            $query->where('type', $request->type);
+        }
+
+        if ($request->filled('search') || $request->filled('q')) {
+            $term = '%' . trim((string) ($request->input('search') ?: $request->input('q'))) . '%';
+            $query->where(function ($q) use ($term) {
+                $q->where('destination', 'like', $term)
+                    ->orWhere('origin', 'like', $term)
+                    ->orWhere('trip_code', 'like', $term)
+                    ->orWhere('purpose', 'like', $term);
+            });
+        }
+
+        if ($request->filled('date_from')) {
+            $query->whereDate('scheduled_departure_at', '>=', $request->date_from);
+        }
+
+        if ($request->filled('date_to')) {
+            $query->whereDate('scheduled_departure_at', '<=', $request->date_to);
+        }
+
+        [$sortBy, $sortDirection] = $this->resolveSort(
+            $request,
+            ['created_at', 'updated_at', 'scheduled_departure_at', 'status', 'trip_code'],
+            'created_at',
+            'desc',
+        );
+
+        $perPage = $this->resolvePerPage($request);
+        $paginator = $query->orderBy($sortBy, $sortDirection)->paginate($perPage);
+
+        $items = collect($paginator->items())
+            ->map(fn (Trip $trip) => $this->presentTrip($trip))
+            ->values()
+            ->all();
+
         return $this->success([
-            'trips' => $query->paginate(20),
+            'trips' => $items,
+            'pagination' => $this->paginationPayload($paginator),
         ]);
     }
 

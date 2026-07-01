@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Http\Controllers\Concerns\ResolvesPaginatedLists;
 use App\Http\Controllers\Controller;
 use App\Models\MRF;
 use App\Models\Activity;
@@ -35,6 +36,7 @@ use Dompdf\Options;
 
 class MRFController extends Controller
 {
+    use ResolvesPaginatedLists;
     protected NotificationService $notificationService;
     protected WorkflowNotificationService $workflowNotificationService;
     protected WorkflowStateService $workflowService;
@@ -204,32 +206,61 @@ class MRFController extends Controller
     public function index(Request $request)
     {
         try {
-        $query = MRF::with(['requester', 'priceComparisons']);
+        $query = MRF::query()->with(['requester:id,name,email,department']);
 
         // Filter by status
         if ($request->has('status')) {
             $query->where('status', $request->status);
         }
 
-        // Search in title/description
+        if ($request->filled('workflow_state')) {
+            $query->where('workflow_state', $request->workflow_state);
+        }
+
+        if ($request->boolean('has_po') || $request->boolean('po_list')) {
+            $query->whereNotNull('po_number')->where('po_number', '!=', '');
+        }
+
+        if ($request->filled('date_from')) {
+            $query->whereDate('date', '>=', $request->date_from);
+        }
+
+        if ($request->filled('date_to')) {
+            $query->whereDate('date', '<=', $request->date_to);
+        }
+
+        // Search in title/description/po_number/mrf_id
         if ($request->has('search')) {
             $search = $request->search;
             $query->where(function($q) use ($search) {
                 $q->where('title', 'like', "%{$search}%")
-                  ->orWhere('description', 'like', "%{$search}%");
+                  ->orWhere('description', 'like', "%{$search}%")
+                  ->orWhere('po_number', 'like', "%{$search}%")
+                  ->orWhere('mrf_id', 'like', "%{$search}%")
+                  ->orWhere('formatted_id', 'like', "%{$search}%");
             });
         }
 
-        // Sort
-        $sortBy = $request->get('sortBy', 'date');
-        $sortOrder = $request->get('sortOrder', 'desc');
+        [$sortBy, $sortOrder] = $this->resolveSort(
+            $request,
+            ['date', 'estimated_cost', 'title', 'status', 'created_at', 'updated_at'],
+            'created_at',
+            'desc',
+        );
 
-        $allowedSortFields = ['date', 'estimated_cost', 'title', 'status', 'created_at'];
-        if (in_array($sortBy, $allowedSortFields)) {
-            $query->orderBy($sortBy, $sortOrder);
-        } else {
-            $query->orderBy('date', 'desc');
+        // Legacy sortBy/sortOrder from older clients
+        if ($request->filled('sortBy') && ! $request->filled('sort_by')) {
+            $legacy = (string) $request->get('sortBy');
+            if (in_array($legacy, ['date', 'estimated_cost', 'title', 'status', 'created_at'], true)) {
+                $sortBy = $legacy;
+            }
+            $legacyOrder = strtolower((string) $request->get('sortOrder', 'desc'));
+            if (in_array($legacyOrder, ['asc', 'desc'], true)) {
+                $sortOrder = $legacyOrder;
+            }
         }
+
+        $query->orderBy($sortBy, $sortOrder);
 
         // Filter by requester (for employees to see only their own)
         $user = $request->user();
@@ -248,12 +279,11 @@ class MRFController extends Controller
             $query->where('requester_id', $user->id);
         }
 
-        $perPage = (int) $request->get('per_page', 50);
-        $perPage = min($perPage, 200); // Cap at 200 to prevent abuse
-        $mrfs = $query->paginate($perPage);
+        $perPage = $this->resolvePerPage($request, 25, 100);
+        $paginator = $query->paginate($perPage);
         $requesterEditService = app(RequesterEditWindowService::class);
 
-        return response()->json($mrfs->map(function ($mrf) use ($user, $requesterEditService) {
+        $items = collect($paginator->items())->map(function ($mrf) use ($user, $requesterEditService) {
             $freshPOUrls = $this->generateFreshPOUrls($mrf);
 
             return array_merge(
@@ -323,22 +353,12 @@ class MRFController extends Controller
                 'customTerms' => $mrf->custom_terms,
                 'po_terms_mode' => $mrf->po_terms_mode,
                 'poTermsMode' => $mrf->po_terms_mode,
-                'priceComparisons' => $mrf->priceComparisons->map(function($row) {
-                    return [
-                        'id' => $row->id,
-                        'purchase_order_id' => $row->purchase_order_id,
-                        'vendor_id' => $row->vendor_id,
-                        'item_description' => $row->item_description,
-                        'unit_price' => (float) $row->unit_price,
-                        'quantity' => (float) $row->quantity,
-                        'total_price' => (float) $row->total_price,
-                        'is_selected' => (bool) $row->is_selected,
-                        'selection_reason' => $row->selection_reason,
-                    ];
-                })->values(),
+                'priceComparisons' => [],
                 ]
             );
-        }));
+        })->values()->all();
+
+        return response()->json($this->paginatedJsonResponse($paginator, $items));
         } catch (\Illuminate\Database\QueryException $e) {
             // Handle database errors (e.g., missing columns)
             $errorMessage = $e->getMessage();

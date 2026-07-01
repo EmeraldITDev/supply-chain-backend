@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Enums\VendorCategory;
+use App\Http\Controllers\Concerns\ResolvesPaginatedLists;
 use App\Http\Controllers\Controller;
 use App\Models\User;
 use App\Models\Vendor;
@@ -23,6 +24,8 @@ use Illuminate\Support\Str;
 
 class VendorController extends Controller
 {
+    use ResolvesPaginatedLists;
+
     protected NotificationService $notificationService;
 
     public function __construct(NotificationService $notificationService)
@@ -118,10 +121,24 @@ class VendorController extends Controller
             });
         }
 
-        $limit = min(100, max(1, (int) $request->query('per_page', $request->query('limit', 20))));
-        $vendors = $query->orderBy('name')->limit($limit)->get();
+        [$sortBy, $sortDirection] = $this->resolveSort(
+            $request,
+            ['name', 'created_at', 'updated_at', 'status', 'rating', 'total_orders'],
+            'name',
+            'asc',
+        );
 
-        return response()->json($vendors->map(function($vendor) {
+        $perPage = $this->resolvePerPage($request);
+        $paginator = $query
+            ->select([
+                'id', 'vendor_id', 'name', 'category', 'category_other', 'rating',
+                'total_orders', 'status', 'email', 'phone', 'address', 'tax_id',
+                'contact_person', 'created_at', 'updated_at',
+            ])
+            ->orderBy($sortBy, $sortDirection)
+            ->paginate($perPage);
+
+        $items = collect($paginator->items())->map(function ($vendor) {
             return [
                 'id' => $vendor->vendor_id,
                 'name' => $vendor->name,
@@ -138,7 +155,9 @@ class VendorController extends Controller
                 'taxId' => $vendor->tax_id,
                 'contactPerson' => $vendor->contact_person,
             ];
-        }));
+        })->values()->all();
+
+        return response()->json($this->paginatedJsonResponse($paginator, $items));
     }
 
     /**
