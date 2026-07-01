@@ -717,10 +717,11 @@ Backend `totals` keys: `packagePushed`, `financeHandoffPending`, `inReviewOrPayi
 
 ### Trip booking scopes (updated)
 `GET /api/trip-requests/booking-rules` now returns:
+- `within_state` — **Within State**, 2-day minimum lead
 - `out_of_state_local` — **Out of State (Local)**, 7-day minimum lead
 - `international` — **International (Out of Nigeria)**, 14-day minimum lead
 
-Legacy values `within_state` / `outside_state` are mapped to `out_of_state_local` on read.
+Legacy value `outside_state` maps to `out_of_state_local` on read.
 
 ### Workflow stages (trip requests, `TRQ-*`)
 | Stage | Meaning |
@@ -786,7 +787,7 @@ Supports `search` and `per_page` query params for async vendor dropdown during e
 - `TripRequestWorkflowActions` — LM/SCD action buttons driven by `availableActions`
 - `TripRequestConversionDialog` — internal vehicle vs external vendor conversion
 - `TripRequestDetailPage` / `PendingTripRequestsPanel` — legacy Approve & assign removed
-- Trip type form options: `out_of_state_local`, `international`
+- Trip type form options: `within_state`, `out_of_state_local`, `international`
 
 ---
 

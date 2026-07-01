@@ -50,7 +50,7 @@ class UpdateTripRequest extends FormRequest
             'description' => 'nullable|string',
             'purpose' => 'nullable|string|max:255',
             'trip_type' => 'nullable|in:personnel,material,mixed',
-            'booking_scope' => 'nullable|in:within_state,outside_state',
+            'booking_scope' => 'nullable|in:within_state,out_of_state_local,international,outside_state',
             'priority' => 'nullable|in:low,normal,high,urgent',
             'status' => 'sometimes|in:draft,scheduled,vendor_assigned,in_progress,completed,closed,cancelled',
             'scheduled_departure_at' => 'nullable|date',

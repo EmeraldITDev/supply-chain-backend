@@ -30,9 +30,8 @@ class Trip extends Model
 
     public const BOOKING_SCOPE_OUT_OF_STATE_LOCAL = 'out_of_state_local';
     public const BOOKING_SCOPE_INTERNATIONAL = 'international';
-
-    /** @deprecated Use BOOKING_SCOPE_OUT_OF_STATE_LOCAL */
     public const BOOKING_SCOPE_WITHIN_STATE = 'within_state';
+
     /** @deprecated Use BOOKING_SCOPE_OUT_OF_STATE_LOCAL */
     public const BOOKING_SCOPE_OUTSIDE_STATE = 'outside_state';
 
