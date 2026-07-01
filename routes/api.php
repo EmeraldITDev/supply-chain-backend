@@ -8,8 +8,11 @@ use App\Http\Controllers\Api\ContractTypeController;
 use App\Http\Controllers\Api\DashboardController;
 use App\Http\Controllers\Api\DashboardKpiController;
 use App\Http\Controllers\Api\EligiblePassengersController;
+use App\Http\Controllers\Api\AppConfigController;
 use App\Http\Controllers\Api\FinanceApReportController;
 use App\Http\Controllers\Api\ProcurementReportController;
+use App\Http\Controllers\Api\ReportingEngineController;
+use App\Http\Controllers\Api\ReportsDashboardController;
 use App\Http\Controllers\Api\MRFController;
 use App\Http\Controllers\Api\SRFController;
 use App\Http\Controllers\Api\RFQController;
@@ -522,12 +525,17 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/notifications/announcement', [NotificationController::class, 'sendAnnouncement']);
 
     // Procurement reporting
+    Route::get('/reports/dashboard', [ReportsDashboardController::class, 'index']);
     Route::get('/reports/procurement', [ProcurementReportController::class, 'index']);
     Route::get('/reports/procurement/export', [ProcurementReportController::class, 'export']);
+    Route::get('/reports/procurement/records', [ReportingEngineController::class, 'procurementRecords']);
+    Route::get('/reports/procurement/records/export', [ReportingEngineController::class, 'exportProcurementRecords']);
+    Route::get('/reports/procurement/records/{id}', [ReportingEngineController::class, 'procurementRecordDetail']);
     Route::get('/reports/finance-ap/summary', [FinanceApReportController::class, 'summary']);
     Route::get('/reports/finance-ap/outstanding-milestones', [FinanceApReportController::class, 'outstandingMilestones']);
     Route::get('/reports/finance-ap/advance-delivery-risk', [FinanceApReportController::class, 'advanceDeliveryRisk']);
     Route::get('/reports/finance-ap/cycle-times', [FinanceApReportController::class, 'cycleTimes']);
+    Route::get('/config/finance-routing', [AppConfigController::class, 'financeRouting']);
 
     // Eligible passengers / drivers for trip scheduling (excludes vendors & power users)
     Route::get('/users/eligible-passengers', [EligiblePassengersController::class, 'index']);

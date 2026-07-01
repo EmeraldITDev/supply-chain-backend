@@ -663,6 +663,53 @@ Migrations:
 - [ ] MRF/SRF detail P&L table
 - [ ] Procurement reports page + export
 - [ ] Dashboard KPI tiles (4 counters)
+
+---
+
+## Reporting Module Overhaul (Jul 2026)
+
+### GET `/api/reports/dashboard`
+**Query:** `from`, `to` (optional ISO dates; defaults to last 30 days).
+
+**Roles:** procurement_manager, procurement, supply_chain_director, supply_chain, admin, finance, finance_officer, logistics_manager, logistics_officer.
+
+**Response `data`:**
+- `period` — `{ from, to }`
+- `kpis[]` — `{ name, value, rawValue, unit, change, trend }` for Procurement Cycle Time, Inventory Turnover, On-Time Delivery, Cost Savings (all computed server-side)
+- `recentReports[]` — rows from `scm_generated_reports`
+- `scheduledReports[]` — active rows from `scm_scheduled_reports`
+
+**Frontend:** `/reports` dashboard — KPI cards, recent/scheduled lists, date filter.
+
+### GET `/api/config/finance-routing`
+**Auth:** required.
+
+**Response `data`:** `{ cutoverDate, routingConfigured, description }` — sourced from server `FINANCE_AP_CUTOVER_DATE` (source of truth).
+
+**Frontend:** Fetched on login via `financeRoutingConfig.ts`; replaces reliance on empty `VITE_FINANCE_AP_CUTOVER_DATE`. Finance AP reports section always loads API data; shows server cutover warning when `routingConfigured` is false.
+
+### GET `/api/reports/procurement/records`
+**Query:** `from`, `to`, `department`, `vendor_id`, `status`, `search`, `page`, `per_page`, `sort_by`, `sort_direction`.
+
+**Response `data`:** `{ period, items[], pagination }` — each item includes `detailPath` for drill-down.
+
+**Frontend:** Procurement Reporting Engine table — filters, pagination, row click → MRF detail.
+
+### GET `/api/reports/procurement/records/{id}`
+**Response `data.record`:** MRF summary + line items for drill-down panel.
+
+### GET `/api/reports/procurement/records/export`
+**Query:** same filters as records + `format` = `csv` | `xlsx` | `pdf`.
+
+**Response:** File stream generated server-side (CSV, SpreadsheetML `.xls`, or dompdf PDF).
+
+**Frontend:** Export buttons on Procurement Reporting Engine — no client-side jsPDF/SheetJS for this flow.
+
+### Finance AP summary field mapping (fix)
+Backend `totals` keys: `packagePushed`, `financeHandoffPending`, `inReviewOrPaying`, `closedOrComplete`. Frontend `financeApReportsApi.normalizeSummary` updated to map these correctly.
+
+### Procurement report performance (fix)
+`ProcurementReportService::aggregateSavingsLoss` — SQL aggregation for line items with `quoted_amount`; quotation lookup only for MRFs/SRFs missing quoted data. Fixes infinite loading on large datasets.
 - [ ] Trip request create form
 - [ ] Trip workflow action buttons per stage
 - [ ] Passenger picker → `eligible-passengers`
