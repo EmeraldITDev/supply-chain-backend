@@ -7,6 +7,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\URL;
 use Illuminate\Support\Str;
 
@@ -518,6 +519,40 @@ class MRF extends Model
         'po_number', 'unsigned_po_url', 'unsigned_po_share_url', 'signed_po_url', 'signed_po_share_url',
         'po_generated_at', 'po_terms_mode', 'source', 'is_po_linked', 'linked_po_id', 'po_draft_saved_at',
     ];
+
+    /**
+     * LIST_API_SELECT filtered to columns that exist in the current database schema.
+     * Prevents list endpoints from 500ing (or returning fake empty lists) when
+     * production code is ahead of pending migrations.
+     *
+     * @return list<string>
+     */
+    public static function resolveListApiSelect(): array
+    {
+        static $resolved = null;
+
+        if ($resolved !== null) {
+            return $resolved;
+        }
+
+        if (! Schema::hasTable('m_r_f_s')) {
+            $resolved = self::LIST_API_SELECT;
+
+            return $resolved;
+        }
+
+        $resolved = array_values(array_filter(
+            self::LIST_API_SELECT,
+            static fn (string $column): bool => Schema::hasColumn('m_r_f_s', $column),
+        ));
+
+        $missing = array_values(array_diff(self::LIST_API_SELECT, $resolved));
+        if ($missing !== []) {
+            Log::warning('MRF list select omits missing columns', ['columns' => $missing]);
+        }
+
+        return $resolved;
+    }
 
     /**
      * Slim API payload for GET /api/mrfs list rows (detail endpoint has full fields).

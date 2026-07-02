@@ -28,7 +28,6 @@ use App\Services\PurchaseOrderPdfService;
 use App\Services\QuotationAttachmentService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
@@ -207,16 +206,8 @@ class MRFController extends Controller
     public function index(Request $request)
     {
         try {
-        $listSelect = MRF::LIST_API_SELECT;
-        if (! Schema::hasColumn('m_r_f_s', 'first_approval_by_role')) {
-            $listSelect = array_values(array_filter(
-                $listSelect,
-                static fn (string $column): bool => $column !== 'first_approval_by_role'
-            ));
-        }
-
         $query = MRF::query()
-            ->select($listSelect)
+            ->select(MRF::resolveListApiSelect())
             ->with(['requester:id,name,email,department']);
 
         $isPoList = $request->boolean('has_po') || $request->boolean('po_list');
@@ -338,12 +329,17 @@ class MRFController extends Controller
                 }
             }
 
-            // Return empty array if it's a column error (migration not run yet)
             if ($isColumnError) {
                 Log::warning('MRF index: Missing database columns detected. Migration may need to be run.', [
                     'error' => $errorMessage,
                 ]);
-                return response()->json([]);
+
+                return response()->json([
+                    'success' => false,
+                    'error' => 'Database schema is out of date for MRF listing. Run pending migrations on the server.',
+                    'code' => 'SCHEMA_OUT_OF_DATE',
+                    'message' => config('app.debug') ? $errorMessage : 'A database migration is required. Please contact support.',
+                ], 503);
             }
 
             // For other database errors, return error response
