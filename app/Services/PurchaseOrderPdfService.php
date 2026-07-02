@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Support\PurchaseOrderCurrency;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\View;
 
@@ -159,7 +160,7 @@ class PurchaseOrderPdfService
 
         $tax = 0.0;
         $total = $subtotal + $tax;
-        $currency = $quotation['currency'] ?? 'NGN';
+        $currency = PurchaseOrderCurrency::normalize($mrf['currency'] ?? $quotation['currency'] ?? 'NGN');
 
         $shipTo = env('COMPANY_ADDRESS', $company['address'] ?? '');
         $paymentMilestones = is_array($data['payment_milestones'] ?? null) ? $data['payment_milestones'] : [];

@@ -1587,6 +1587,8 @@ class MRFWorkflowController extends Controller
             $poNumber = $request->po_number ?? $mrf->po_number ?? $this->generatePONumber($mrf);
         }
 
+        $this->applyRequestedCurrency($request, $mrf);
+
         // Check if PO number already exists (for uniqueness)
         if (MRF::where('po_number', $poNumber)->where('id', '!=', $mrf->id)->exists()) {
             return response()->json([
@@ -3757,6 +3759,22 @@ class MRFWorkflowController extends Controller
                 'path' => $storagePath,
                 'error' => $e->getMessage(),
             ]);
+        }
+    }
+
+    /**
+     * Persist request currency on the MRF before PO PDF generation or draft save.
+     */
+    private function applyRequestedCurrency(Request $request, MRF $mrf): void
+    {
+        if (! $request->filled('currency')) {
+            return;
+        }
+
+        $currency = PurchaseOrderCurrency::normalize($request->input('currency'));
+        if (PurchaseOrderCurrency::normalize($mrf->currency) !== $currency) {
+            $mrf->update(['currency' => $currency]);
+            $mrf->refresh();
         }
     }
 }
