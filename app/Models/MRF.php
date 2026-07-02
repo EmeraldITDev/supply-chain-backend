@@ -487,11 +487,29 @@ class MRF extends Model
      */
     public function selectedQuotation()
     {
-        // Find quotation through RFQ's selected_quotation_id
-        $rfq = $this->rfqs()->first();
-        if ($rfq && $rfq->selected_quotation_id) {
-            return Quotation::find($rfq->selected_quotation_id);
+        if ($this->relationLoaded('rfqs') && $this->rfqs->isNotEmpty()) {
+            $rfq = $this->rfqs->first();
+            if ($rfq->relationLoaded('selectedQuotation') && $rfq->selectedQuotation) {
+                return $rfq->selectedQuotation;
+            }
+            if ($rfq->selected_quotation_id) {
+                if ($rfq->relationLoaded('quotations')) {
+                    $fromLoaded = $rfq->quotations->firstWhere('id', $rfq->selected_quotation_id);
+                    if ($fromLoaded) {
+                        return $fromLoaded;
+                    }
+                }
+
+                return Quotation::find($rfq->selected_quotation_id);
+            }
+        } else {
+            // Find quotation through RFQ's selected_quotation_id
+            $rfq = $this->rfqs()->first();
+            if ($rfq && $rfq->selected_quotation_id) {
+                return Quotation::find($rfq->selected_quotation_id);
+            }
         }
+
         // Fallback: find approved quotation by selected vendor
         if ($this->selected_vendor_id) {
             return Quotation::where('vendor_id', $this->selected_vendor_id)

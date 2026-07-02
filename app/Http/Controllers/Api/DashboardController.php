@@ -436,6 +436,7 @@ class DashboardController extends Controller
         $routing = app(FinanceRoutingService::class);
         $eager = $this->financeDashboardEager();
         $perPage = $this->dashboardPerPage($request, default: 50, max: 100);
+        $listSelect = $this->financeDashboardSelect();
 
         $mapMrf = function (MRF $mrf) use ($routing) {
             $rfq = $mrf->rfqs->first();
@@ -500,12 +501,12 @@ class DashboardController extends Controller
         $financeApQuery = MRF::query();
         $routing->scopeFinanceApFinanceReady($financeApQuery);
 
-        $legacyPaginated = (clone $legacyQuery)->with($eager)->orderByDesc('created_at')->paginate($perPage);
-        $financeApPaginated = (clone $financeApQuery)->with($eager)->orderByDesc('created_at')->paginate($perPage);
+        $legacyPaginated = (clone $legacyQuery)->select($listSelect)->with($eager)->orderByDesc('created_at')->paginate($perPage);
+        $financeApPaginated = (clone $financeApQuery)->select($listSelect)->with($eager)->orderByDesc('created_at')->paginate($perPage);
 
         $unifiedQuery = MRF::query();
         $routing->scopeAnyFinanceReady($unifiedQuery);
-        $financePaginated = (clone $unifiedQuery)->with($eager)->orderByDesc('created_at')->paginate($perPage);
+        $financePaginated = (clone $unifiedQuery)->select($listSelect)->with($eager)->orderByDesc('created_at')->paginate($perPage);
 
         $legacyMRFs = collect($legacyPaginated->items())->map($mapMrf)->values();
         $financeApMRFs = collect($financeApPaginated->items())->map($mapMrf)->values();
@@ -687,6 +688,22 @@ class DashboardController extends Controller
         $perPage = (int) $request->query('per_page', $request->query('perPage', $default));
 
         return max(1, min($perPage, $max));
+    }
+
+    /**
+     * Columns loaded for finance dashboard list rows.
+     *
+     * @return list<string>
+     */
+    private function financeDashboardSelect(): array
+    {
+        return [
+            'id', 'mrf_id', 'formatted_id', 'title', 'category', 'contract_type', 'workflow_state',
+            'status', 'current_stage', 'estimated_cost', 'currency', 'requester_id', 'po_number',
+            'unsigned_po_url', 'signed_po_url', 'signed_po_share_url', 'po_generated_at', 'po_signed_at',
+            'selected_vendor_id', 'payment_status', 'payment_processed_at', 'finance_ap_case_id',
+            'finance_ap_status', 'executive_approved', 'executive_approved_at', 'created_at',
+        ];
     }
 
     /**

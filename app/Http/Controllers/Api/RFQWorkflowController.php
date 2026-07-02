@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Http\Controllers\Concerns\ResolvesPaginatedLists;
 use App\Http\Controllers\Controller;
 use App\Models\Activity;
 use App\Models\MRF;
@@ -21,6 +22,8 @@ use Illuminate\Support\Facades\DB;
 
 class RFQWorkflowController extends Controller
 {
+    use ResolvesPaginatedLists;
+
     protected NotificationService $notificationService;
     protected EmailService $emailService;
     protected WorkflowNotificationService $workflowNotificationService;
@@ -66,29 +69,34 @@ class RFQWorkflowController extends Controller
         }
 
         // Get RFQs assigned to this vendor via the many-to-many relationship
-        // Using whereHas ensures we only get RFQs where this vendor is in the rfq_vendors pivot table
-        $rfqs = RFQ::whereHas('vendors', function ($query) use ($vendor) {
+        $query = RFQ::whereHas('vendors', function ($query) use ($vendor) {
             $query->where('vendors.id', $vendor->id);
         })
         ->with([
             'items',
+            'mrf:id,mrf_id,title,category,estimated_cost',
             'mrf.paymentSchedule.milestones',
             'vendors' => function ($query) use ($vendor) {
-                // Only load the current vendor's pivot data for efficiency
                 $query->where('vendors.id', $vendor->id);
-            }
+            },
         ])
-        ->orderBy('created_at', 'desc')
-        ->get()
-        ->map(function ($rfq) use ($vendor) {
+        ->orderBy('created_at', 'desc');
+
+        $perPage = $this->resolvePerPage($request);
+        $paginator = $query->paginate($perPage);
+
+        $submittedRfqIds = Quotation::query()
+            ->where('vendor_id', $vendor->id)
+            ->whereIn('rfq_id', collect($paginator->items())->pluck('id'))
+            ->pluck('rfq_id')
+            ->flip();
+
+        $items = collect($paginator->items())->map(function ($rfq) use ($vendor, $submittedRfqIds) {
             // Get pivot data for this vendor (should be loaded from the relationship)
             $vendorPivot = $rfq->vendors->firstWhere('id', $vendor->id);
             $pivot = $vendorPivot ? $vendorPivot->pivot : null;
 
-            // Check if vendor has submitted quotation
-            $hasSubmitted = Quotation::where('rfq_id', $rfq->id)
-                ->where('vendor_id', $vendor->id)
-                ->exists();
+            $hasSubmitted = $submittedRfqIds->has($rfq->id);
 
             // Get estimated cost with fallback to MRF's estimated_cost
             // Cast to float to ensure proper numeric handling
@@ -135,13 +143,12 @@ class RFQWorkflowController extends Controller
                 'has_submitted_quote' => $hasSubmitted,
                 'created_at' => $rfq->created_at->toIso8601String(),
             ];
-        });
+        })->values()->all();
 
-        return response()->json([
-            'success' => true,
-            'data' => $rfqs,
-            'count' => $rfqs->count(),
-        ]);
+        return response()->json(array_merge(
+            $this->paginatedJsonResponse($paginator, $items),
+            ['count' => $paginator->total()],
+        ));
     }
 
     /**

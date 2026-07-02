@@ -20,7 +20,13 @@ return new class extends Migration
             $table->index('created_at', 'vendors_created_idx');
         });
 
-        if (Schema::hasTable('trips')) {
+        if (Schema::hasTable('logistics_trips')) {
+            Schema::table('logistics_trips', function (Blueprint $table) {
+                $table->index(['status', 'created_at'], 'logistics_trips_status_created_idx');
+                $table->index('vendor_id', 'logistics_trips_vendor_idx');
+                $table->index('scheduled_departure_at', 'logistics_trips_departure_idx');
+            });
+        } elseif (Schema::hasTable('trips')) {
             Schema::table('trips', function (Blueprint $table) {
                 $table->index(['status', 'created_at'], 'trips_status_created_idx');
                 $table->index('vendor_id', 'trips_vendor_idx');
@@ -50,7 +56,13 @@ return new class extends Migration
             $table->dropIndex('vendors_created_idx');
         });
 
-        if (Schema::hasTable('trips')) {
+        if (Schema::hasTable('logistics_trips')) {
+            Schema::table('logistics_trips', function (Blueprint $table) {
+                $table->dropIndex('logistics_trips_status_created_idx');
+                $table->dropIndex('logistics_trips_vendor_idx');
+                $table->dropIndex('logistics_trips_departure_idx');
+            });
+        } elseif (Schema::hasTable('trips')) {
             Schema::table('trips', function (Blueprint $table) {
                 $table->dropIndex('trips_status_created_idx');
                 $table->dropIndex('trips_vendor_idx');

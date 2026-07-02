@@ -41,6 +41,7 @@ return Application::configure(basePath: dirname(__DIR__))
         ]);
 
         $middleware->api(append: [
+            \App\Http\Middleware\LogSlowQueries::class,
             \App\Http\Middleware\CompressJsonResponse::class,
         ]);
 

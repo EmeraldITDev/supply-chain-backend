@@ -642,15 +642,17 @@ class MRFController extends Controller
             }
         })
             ->with([
-                'requester',
-                'executiveApprover',
-                'chairmanApprover',
-                'selectedVendor',
-                'rfqs.quotations.vendor',
-                'rfqs.quotations.items.rfqItem',
-                'rfqs.selectedQuotation.vendor',
-                'rfqs.selectedQuotation.items.rfqItem',
-                'rfqs.vendors',
+                'requester:id,name,email',
+                'executiveApprover:id,name,email',
+                'chairmanApprover:id,name,email',
+                'selectedVendor:id,vendor_id,name,email,phone,rating',
+                'rfqs' => fn ($query) => $query->with([
+                    'quotations' => fn ($q) => $q->with([
+                        'vendor:id,vendor_id,name,email,phone,rating',
+                        'items.rfqItem',
+                    ]),
+                    'vendors:id,vendor_id,name',
+                ]),
                 'items',
             ])
             ->first();
@@ -684,16 +686,24 @@ class MRFController extends Controller
         }
         $linkedFleetSrfsPayload = collect();
         if ($srfIdMatches->isNotEmpty()) {
-            $linkedFleetSrfsPayload = SRF::query()
+            $linkedSrfs = SRF::query()
                 ->whereIn('srf_id', $srfIdMatches->unique()->values()->all())
                 ->with(['vehicle', 'maintenance'])
-                ->get()
-                ->map(function (SRF $srf) {
-                    $live = collect();
-                    if ($srf->vehicle_id) {
-                        $live = VehicleMaintenance::where('vehicle_id', $srf->vehicle_id)
-                            ->orderByDesc('created_at')
-                            ->get()
+                ->get();
+
+            $vehicleIds = $linkedSrfs->pluck('vehicle_id')->filter()->unique()->values();
+            $maintenanceByVehicle = $vehicleIds->isEmpty()
+                ? collect()
+                : VehicleMaintenance::query()
+                    ->whereIn('vehicle_id', $vehicleIds)
+                    ->orderByDesc('created_at')
+                    ->get()
+                    ->groupBy('vehicle_id');
+
+            $linkedFleetSrfsPayload = $linkedSrfs
+                ->map(function (SRF $srf) use ($maintenanceByVehicle) {
+                    $live = $srf->vehicle_id
+                        ? ($maintenanceByVehicle->get($srf->vehicle_id) ?? collect())
                             ->map(function ($m) {
                                 return [
                                     'id' => $m->id,
@@ -704,8 +714,8 @@ class MRFController extends Controller
                                     'cost' => $m->cost !== null ? (float) $m->cost : null,
                                     'status' => $m->status,
                                 ];
-                            })->values();
-                    }
+                            })->values()
+                        : collect();
 
                     return [
                         'srf_id' => $srf->srf_id,

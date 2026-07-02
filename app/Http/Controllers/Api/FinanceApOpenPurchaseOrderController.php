@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Http\Controllers\Concerns\ResolvesPaginatedLists;
 use App\Http\Controllers\Controller;
 use App\Services\Finance\FinanceApOpenPurchaseOrderService;
 use Illuminate\Http\JsonResponse;
@@ -9,6 +10,8 @@ use Illuminate\Http\Request;
 
 class FinanceApOpenPurchaseOrderController extends Controller
 {
+    use ResolvesPaginatedLists;
+
     public function __construct(
         private readonly FinanceApOpenPurchaseOrderService $openPurchaseOrders,
     ) {
@@ -28,14 +31,17 @@ class FinanceApOpenPurchaseOrderController extends Controller
         }
 
         $vendorId = (int) $scmVendorId;
-        $items = $this->openPurchaseOrders->listForVendor($vendorId);
+        $perPage = $this->resolvePerPage($request, default: 25, max: 100);
+        $page = $this->resolvePage($request);
+        $paginator = $this->openPurchaseOrders->paginateForVendor($vendorId, $page, $perPage);
 
         return response()->json([
             'success' => true,
             'data' => [
                 'scm_vendor_id' => $vendorId,
-                'purchase_orders' => $items,
+                'purchase_orders' => array_values($paginator->items()),
             ],
+            'pagination' => $this->paginationPayload($paginator),
         ]);
     }
 }

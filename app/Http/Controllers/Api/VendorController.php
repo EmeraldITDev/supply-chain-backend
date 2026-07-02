@@ -853,15 +853,19 @@ class VendorController extends Controller
             ], 403);
         }
 
-        $query = VendorRegistration::with(['vendor', 'approver', 'registrationDocuments']);
+        $query = VendorRegistration::with([
+            'vendor:id,vendor_id,name',
+            'approver:id,name',
+        ]);
 
         if ($request->has('status')) {
             $query->where('status', $request->status);
         }
 
-        $registrations = $query->orderBy('created_at', 'desc')->get();
+        $perPage = $this->resolvePerPage($request);
+        $paginator = $query->orderBy('created_at', 'desc')->paginate($perPage);
 
-        $mappedRegistrations = $registrations->map(function ($registration) {
+        $mappedRegistrations = collect($paginator->items())->map(function ($registration) {
             return [
                 'id' => (string) $registration->id,
                 'companyName' => $registration->company_name,
@@ -880,12 +884,9 @@ class VendorController extends Controller
                 'reviewedBy' => $registration->approver->name ?? null,
                 'reviewNotes' => $registration->approval_remarks,
             ];
-        });
+        })->values()->all();
 
-        return response()->json([
-            'success' => true,
-            'data' => $mappedRegistrations,
-        ]);
+        return response()->json($this->paginatedJsonResponse($paginator, $mappedRegistrations));
     }
 
     /**
@@ -1936,9 +1937,20 @@ class VendorController extends Controller
             ], 404);
         }
 
-        // Build query for quotations - ensure MRF relationship is loaded for title generation
+        // Build query for quotations - list view only needs RFQ/MRF identifiers for titles
         $query = Quotation::where('vendor_id', $vendor->id)
-            ->with(['rfq.mrf', 'rfq.items', 'approver']);
+            ->select([
+                'id', 'quotation_id', 'quote_number', 'rfq_id', 'vendor_id', 'vendor_name',
+                'price', 'total_amount', 'currency', 'delivery_days', 'delivery_date',
+                'payment_terms', 'validity_days', 'warranty_period', 'notes', 'status',
+                'review_status', 'rejection_reason', 'revision_notes', 'approval_remarks',
+                'attachments', 'created_at', 'updated_at',
+            ])
+            ->with([
+                'rfq:id,rfq_id,mrf_id,title',
+                'rfq.mrf:id,mrf_id,title',
+                'approver:id,name',
+            ]);
 
         // Filter by status if provided
         if ($request->has('status')) {
@@ -1954,10 +1966,11 @@ class VendorController extends Controller
         }
 
         // Order by most recent first
-        $quotations = $query->orderBy('created_at', 'desc')->get();
+        $perPage = $this->resolvePerPage($request);
+        $paginator = $query->orderBy('created_at', 'desc')->paginate($perPage);
 
         // Format quotations for response
-        $formattedQuotations = $quotations->map(function($quotation) use ($vendor) {
+        $formattedQuotations = collect($paginator->items())->map(function($quotation) use ($vendor) {
             // Safely format dates to prevent time errors
             $formatDate = function($date) {
                 if (!$date) {
@@ -2071,17 +2084,18 @@ class VendorController extends Controller
                 'createdAt' => $formatDate($quotation->created_at) ?? ($quotation->created_at ? $quotation->created_at : null),
                 'updatedAt' => $formatDate($quotation->updated_at) ?? ($quotation->updated_at ? $quotation->updated_at : null),
             ];
-        });
+        })->values()->all();
 
-        return response()->json([
-            'success' => true,
-            'data' => $formattedQuotations,
-            'count' => $formattedQuotations->count(),
-            'vendor' => [
-                'id' => $vendor->vendor_id,
-                'name' => $vendor->name,
+        return response()->json(array_merge(
+            $this->paginatedJsonResponse($paginator, $formattedQuotations),
+            [
+                'count' => $paginator->total(),
+                'vendor' => [
+                    'id' => $vendor->vendor_id,
+                    'name' => $vendor->name,
+                ],
             ],
-        ]);
+        ));
     }
 
     /**
