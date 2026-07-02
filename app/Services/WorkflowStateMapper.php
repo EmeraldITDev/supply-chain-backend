@@ -20,6 +20,10 @@ class WorkflowStateMapper
                 'status' => 'pending',
                 'current_stage' => 'pending',
             ],
+            WorkflowStateService::STATE_PARALLEL_FIRST_APPROVAL => [
+                'status' => 'pending',
+                'current_stage' => 'parallel_first_approval',
+            ],
             WorkflowStateService::STATE_SUPPLY_CHAIN_DIRECTOR_REVIEW => [
                 'status' => 'supply_chain',
                 'current_stage' => 'supply_chain',

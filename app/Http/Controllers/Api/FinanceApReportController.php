@@ -4,17 +4,14 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Services\FinanceAp\FinanceApReportingService;
+use App\Support\ReportCache;
+use App\Support\ScmReportViewerRoles;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
 class FinanceApReportController extends Controller
 {
-    private const ALLOWED_ROLES = [
-        'finance', 'finance_officer', 'procurement_manager', 'procurement',
-        'supply_chain_director', 'supply_chain', 'admin',
-    ];
-
     public function __construct(
         private FinanceApReportingService $reporting,
     ) {
@@ -28,9 +25,14 @@ class FinanceApReportController extends Controller
 
         [$from, $to] = $this->parsePeriod($request);
 
+        $cacheKey = ReportCache::key('finance_ap_summary', [
+            $from?->toDateString() ?? 'all',
+            $to?->toDateString() ?? 'all',
+        ]);
+
         return response()->json([
             'success' => true,
-            'data' => $this->reporting->summary($from, $to),
+            'data' => ReportCache::remember($cacheKey, fn () => $this->reporting->summary($from, $to)),
         ]);
     }
 
@@ -43,9 +45,18 @@ class FinanceApReportController extends Controller
         [$from, $to] = $this->parsePeriod($request);
         $limit = min(100, max(1, (int) $request->query('limit', 50)));
 
+        $cacheKey = ReportCache::key('finance_ap_outstanding', [
+            $from?->toDateString() ?? 'all',
+            $to?->toDateString() ?? 'all',
+            $limit,
+        ]);
+
         return response()->json([
             'success' => true,
-            'data' => $this->reporting->outstandingMilestones($from, $to, $limit),
+            'data' => ReportCache::remember(
+                $cacheKey,
+                fn () => $this->reporting->outstandingMilestones($from, $to, $limit),
+            ),
         ]);
     }
 
@@ -57,9 +68,14 @@ class FinanceApReportController extends Controller
 
         $limit = min(100, max(1, (int) $request->query('limit', 50)));
 
+        $cacheKey = ReportCache::key('finance_ap_advance_risk', [$limit]);
+
         return response()->json([
             'success' => true,
-            'data' => $this->reporting->advanceDeliveryRisk($limit),
+            'data' => ReportCache::remember(
+                $cacheKey,
+                fn () => $this->reporting->advanceDeliveryRisk($limit),
+            ),
         ]);
     }
 
@@ -71,9 +87,17 @@ class FinanceApReportController extends Controller
 
         [$from, $to] = $this->parsePeriod($request);
 
+        $cacheKey = ReportCache::key('finance_ap_cycle_times', [
+            $from?->toDateString() ?? 'all',
+            $to?->toDateString() ?? 'all',
+        ]);
+
         return response()->json([
             'success' => true,
-            'data' => $this->reporting->cycleTimes($from, $to),
+            'data' => ReportCache::remember(
+                $cacheKey,
+                fn () => $this->reporting->cycleTimes($from, $to),
+            ),
         ]);
     }
 
@@ -97,7 +121,7 @@ class FinanceApReportController extends Controller
     {
         $user = $request->user();
 
-        if (! $user || ! in_array($user->scmRole(), self::ALLOWED_ROLES, true)) {
+        if (! $user || ! ScmReportViewerRoles::allows($user->scmRole())) {
             return response()->json([
                 'success' => false,
                 'error' => 'Insufficient permissions',
@@ -109,13 +133,17 @@ class FinanceApReportController extends Controller
     }
 
     /**
-     * @return array{0: ?Carbon, 1: ?Carbon}
+     * @return array{0: Carbon, 1: Carbon}
      */
     private function parsePeriod(Request $request): array
     {
-        $from = $request->filled('from') ? Carbon::parse($request->from)->startOfDay() : null;
-        $to = $request->filled('to') ? Carbon::parse($request->to)->endOfDay() : null;
+        $periodEnd = $request->filled('to')
+            ? Carbon::parse($request->to)->endOfDay()
+            : Carbon::now()->endOfDay();
+        $periodStart = $request->filled('from')
+            ? Carbon::parse($request->from)->startOfDay()
+            : $periodEnd->copy()->subDays(30)->startOfDay();
 
-        return [$from, $to];
+        return [$periodStart, $periodEnd];
     }
 }

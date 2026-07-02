@@ -206,19 +206,27 @@ class MRFController extends Controller
     public function index(Request $request)
     {
         try {
-        $query = MRF::query()->with(['requester:id,name,email,department']);
+        $query = MRF::query()
+            ->select(MRF::LIST_API_SELECT)
+            ->with(['requester:id,name,email,department']);
 
-        // Filter by status
-        if ($request->has('status')) {
-            $query->where('status', $request->status);
+        $isPoList = $request->boolean('has_po') || $request->boolean('po_list');
+
+        if ($isPoList) {
+            $query->forPoList();
+        }
+
+        // PO tab status buckets vs raw MRF status column
+        if ($request->filled('status') && strtolower((string) $request->status) !== 'all') {
+            if ($isPoList) {
+                $query->withPoLifecycleStatus((string) $request->status);
+            } else {
+                $query->where('status', $request->status);
+            }
         }
 
         if ($request->filled('workflow_state')) {
             $query->where('workflow_state', $request->workflow_state);
-        }
-
-        if ($request->boolean('has_po') || $request->boolean('po_list')) {
-            $query->whereNotNull('po_number')->where('po_number', '!=', '');
         }
 
         if ($request->filled('date_from')) {
@@ -229,22 +237,25 @@ class MRFController extends Controller
             $query->whereDate('date', '<=', $request->date_to);
         }
 
-        // Search in title/description/po_number/mrf_id
-        if ($request->has('search')) {
-            $search = $request->search;
-            $query->where(function($q) use ($search) {
-                $q->where('title', 'like', "%{$search}%")
-                  ->orWhere('description', 'like', "%{$search}%")
-                  ->orWhere('po_number', 'like', "%{$search}%")
-                  ->orWhere('mrf_id', 'like', "%{$search}%")
-                  ->orWhere('formatted_id', 'like', "%{$search}%");
-            });
+        // Search indexed identifier / requester columns (avoid unindexed title/description scans).
+        if ($request->filled('search')) {
+            $search = trim((string) $request->search);
+            if ($search !== '') {
+                $like = '%'.$search.'%';
+                $query->where(function ($q) use ($like) {
+                    $q->where('mrf_id', 'like', $like)
+                        ->orWhere('formatted_id', 'like', $like)
+                        ->orWhere('po_number', 'like', $like)
+                        ->orWhere('requester_name', 'like', $like);
+                });
+            }
         }
 
+        $defaultSort = $isPoList ? 'updated_at' : 'created_at';
         [$sortBy, $sortOrder] = $this->resolveSort(
             $request,
-            ['date', 'estimated_cost', 'title', 'status', 'created_at', 'updated_at'],
-            'created_at',
+            ['date', 'estimated_cost', 'title', 'status', 'created_at', 'updated_at', 'po_draft_saved_at', 'po_generated_at'],
+            $defaultSort,
             'desc',
         );
 
@@ -281,82 +292,11 @@ class MRFController extends Controller
 
         $perPage = $this->resolvePerPage($request, 25, 100);
         $paginator = $query->paginate($perPage);
-        $requesterEditService = app(RequesterEditWindowService::class);
 
-        // List responses skip generateFreshPOUrls (S3 exists checks per row made pagination
-        // unbearably slow). Fresh PO URLs are regenerated on GET /mrfs/{id} only.
-        $items = collect($paginator->items())->map(function ($mrf) use ($user, $requesterEditService) {
-            return array_merge(
-                $mrf->scmTransactionApiFields(),
-                $requesterEditService->metaForMrf($user, $mrf),
-                [
-                'id' => $mrf->mrf_id,
-                'formattedId' => $mrf->formatted_id,
-                'formatted_id' => $mrf->formatted_id,
-                'legacyId' => $mrf->mrf_id,
-                'legacy_id' => $mrf->mrf_id,
-                'title' => $mrf->title,
-                'category' => $mrf->category,
-                'contractType' => $mrf->contract_type,
-                'urgency' => $mrf->urgency,
-                'description' => $mrf->description,
-                'quantity' => $mrf->quantity,
-                'estimatedCost' => $mrf->estimated_cost !== null ? (float) $mrf->estimated_cost : null,
-                'justification' => $mrf->justification,
-                'requester' => $mrf->requester_name,
-                'requesterId' => (string) $mrf->requester_id,
-                'department' => $mrf->department,
-                'date' => $mrf->date ? $mrf->date->format('Y-m-d') : null,
-                'createdAt' => $mrf->created_at?->toIso8601String(),
-                'created_at' => $mrf->created_at?->toIso8601String(),
-                'status' => $mrf->status,
-                'currentStage' => $mrf->current_stage,
-                'workflowState' => $mrf->workflow_state,
-                'approvalHistory' => $mrf->approval_history ?? [],
-                'rejectionReason' => $mrf->rejection_reason,
-                'isResubmission' => $mrf->is_resubmission,
-                'pfiUrl' => $mrf->pfi_url,
-                'pfiShareUrl' => $mrf->pfi_share_url,
-                'attachmentUrl' => $mrf->attachment_url,
-                'attachmentShareUrl' => $mrf->attachment_share_url,
-                'attachment_url' => $mrf->attachment_url,
-                'attachment_share_url' => $mrf->attachment_share_url,
-                'attachmentName' => $mrf->attachment_name,
-                'attachment_name' => $mrf->attachment_name,
-                'grnRequested' => $mrf->grn_requested,
-                'grnRequestedAt' => $mrf->grn_requested_at?->toIso8601String(),
-                'grnCompleted' => $mrf->grn_completed,
-                'grnCompletedAt' => $mrf->grn_completed_at?->toIso8601String(),
-                'grnUrl' => $mrf->grn_url,
-                'grnShareUrl' => $mrf->grn_share_url,
-                'executive_approved' => $mrf->executive_approved ?? false,
-                'executive_approved_at' => $mrf->executive_approved_at?->toIso8601String(),
-                'executive_remarks' => $mrf->executive_remarks,
-                'scd_approved_by' => $mrf->director_approved_by ?? $mrf->scd_approved_by ?? $mrf->supply_chain_approved_by ?? null,
-                'scd_approved_at' => ($mrf->scd_approved_at ?? $mrf->director_approved_at ?? $mrf->supply_chain_approved_at)?->toIso8601String(),
-                'scd_remarks' => $mrf->scd_remarks ?? $mrf->director_remarks ?? $mrf->supply_chain_remarks ?? $mrf->remarks ?? null,
-                'chairman_approved' => $mrf->chairman_approved ?? false,
-                'chairman_approved_at' => $mrf->chairman_approved_at?->toIso8601String(),
-                'chairman_remarks' => $mrf->chairman_remarks,
-                // PO information (stored URLs; fresh signed URLs on detail endpoint only)
-                'po_number' => $mrf->po_number,
-                'poNumber' => $mrf->po_number,
-                'unsigned_po_url' => $mrf->unsigned_po_url,
-                'unsignedPOUrl' => $mrf->unsigned_po_url,
-                'unsigned_po_share_url' => $mrf->unsigned_po_share_url,
-                'unsignedPOShareUrl' => $mrf->unsigned_po_share_url,
-                'signed_po_url' => $mrf->signed_po_url,
-                'signedPOUrl' => $mrf->signed_po_url,
-                'po_generated_at' => $mrf->po_generated_at?->toIso8601String(),
-                'poGeneratedAt' => $mrf->po_generated_at?->toIso8601String(),
-                'custom_terms' => $mrf->custom_terms,
-                'customTerms' => $mrf->custom_terms,
-                'po_terms_mode' => $mrf->po_terms_mode,
-                'poTermsMode' => $mrf->po_terms_mode,
-                'priceComparisons' => [],
-                ]
-            );
-        })->values()->all();
+        $items = collect($paginator->items())
+            ->map(fn (MRF $mrf) => $mrf->toListApiArray())
+            ->values()
+            ->all();
 
         return response()->json($this->paginatedJsonResponse($paginator, $items));
         } catch (\Illuminate\Database\QueryException $e) {
@@ -513,6 +453,7 @@ class MRFController extends Controller
             'status' => $mrf->status,
             'currentStage' => $mrf->current_stage,
             'workflowState' => $mrf->workflow_state,
+            ...app(\App\Services\MrfParallelFirstApprovalService::class)->apiFields($mrf),
             'approvalHistory' => $mrf->approval_history ?? [],
             'rejectionReason' => $mrf->rejection_reason,
             'isResubmission' => $mrf->is_resubmission,
@@ -1301,35 +1242,13 @@ class MRFController extends Controller
             $standardContractTypes = ['emerald', 'oando', 'dangote', 'heritage'];
             $isStandardType = in_array($normalizedContractType, $standardContractTypes, true);
 
-            // Determine routing and routed reason
-            $routedReason = null;
-            if (!$isStandardType) {
-                // Non-standard contract type: route directly to Supply Chain Director
-                $initialStage = 'supply_chain_director_review';
-                $initialWorkflowState = WorkflowStateService::STATE_SUPPLY_CHAIN_DIRECTOR_REVIEW;
-                $routedReason = 'custom_contract_type';
+            // Parallel first approval: Executive and Supply Chain Director review simultaneously.
+            $initialStage = 'parallel_first_approval';
+            $initialWorkflowState = WorkflowStateService::STATE_PARALLEL_FIRST_APPROVAL;
+            if (! $isStandardType) {
+                $routedReason = 'parallel_first_approval_custom';
             } else {
-                // Standard contract type: apply existing routing logic
-                $isEmeraldContract = $normalizedContractType === 'emerald';
-                $startAtScd = ! $isEmeraldContract
-                    || LogisticsMrfRouting::shouldStartAtSupplyChainDirectorForEmerald(
-                        $user,
-                        $request->department ?? $user->department ?? null,
-                        $request->category,
-                        $request->title,
-                        $request->description
-                    );
-
-                if ($startAtScd) {
-                    $routedReason = 'logistics_exception';
-                } else {
-                    $routedReason = 'standard_contract_type';
-                }
-
-                $initialStage = $startAtScd ? 'supply_chain_director_review' : 'executive_review';
-                $initialWorkflowState = $startAtScd
-                    ? WorkflowStateService::STATE_SUPPLY_CHAIN_DIRECTOR_REVIEW
-                    : WorkflowStateService::STATE_EXECUTIVE_REVIEW;
+                $routedReason = 'parallel_first_approval';
             }
 
             $mrfSource = strtolower((string) ($request->input('source') ?? 'standard'));
@@ -1451,7 +1370,7 @@ class MRFController extends Controller
                         'performed_by' => $user->id,
                         'performer_name' => 'System',
                         'performer_role' => 'system',
-                        'remarks' => "Auto-routed to Supply Chain Director (non-standard contract type: {$normalizedContractType})"
+                        'remarks' => "Auto-routed to parallel first approval (Executive + Supply Chain Director; non-standard contract type: {$normalizedContractType})"
                     ]);
 
                     Log::info('MRF auto-routed due to custom contract type', [
@@ -2202,22 +2121,19 @@ class MRFController extends Controller
         // Admin can always delete any MRF (force delete capability)
         if ($isAdmin) {
             try {
-                // Delete related records first (cascade should handle this, but let's be explicit)
-                $mrf->rfqs()->delete();
-                $mrf->items()->delete();
-                $mrf->approvalHistory()->delete();
-
-        $mrf->delete();
+                \Illuminate\Support\Facades\DB::transaction(function () use ($mrf) {
+                    $mrf->delete();
+                });
 
                 Log::info('MRF force deleted by admin', [
                     'mrf_id' => $id,
                     'deleted_by' => $user->id,
-                    'status' => $mrf->status
+                    'status' => $mrf->status,
                 ]);
 
                 return response()->json([
                     'success' => true,
-                    'message' => 'MRF deleted successfully (admin override)'
+                    'message' => 'MRF deleted successfully (admin override)',
                 ]);
             } catch (\Exception $e) {
                 Log::error('MRF deletion failed', [
@@ -2282,7 +2198,7 @@ class MRFController extends Controller
                 'error' => 'Cannot delete MRF. Either you are not authorized, or the MRF has progressed too far in the workflow (PO generated or beyond procurement stage).',
                 'code' => 'FORBIDDEN',
                 'details' => [
-                    'has_po' => $hasPO,
+                    'has_po' => $hasUnsignedPO || $hasSignedPO,
                     'status' => $mrf->status,
                     'current_stage' => $mrf->current_stage,
                     'is_requester' => $isRequester,
@@ -2292,18 +2208,20 @@ class MRFController extends Controller
         }
 
         try {
-            $mrf->delete();
+            \Illuminate\Support\Facades\DB::transaction(function () use ($mrf) {
+                $mrf->delete();
+            });
 
             Log::info('MRF deleted', [
                 'mrf_id' => $id,
                 'deleted_by' => $user->id,
-                'status' => $mrf->status
+                'status' => $mrf->status,
             ]);
 
-        return response()->json([
-            'success' => true,
-            'message' => 'MRF deleted successfully'
-        ]);
+            return response()->json([
+                'success' => true,
+                'message' => 'MRF deleted successfully',
+            ]);
         } catch (\Exception $e) {
             Log::error('MRF deletion failed', [
                 'mrf_id' => $id,
@@ -2424,10 +2342,11 @@ class MRFController extends Controller
             ], 404);
         }
 
-        if ($mrf->workflow_state !== 'executive_review') {
+        if ($mrf->workflow_state !== 'executive_review'
+            && $mrf->workflow_state !== WorkflowStateService::STATE_PARALLEL_FIRST_APPROVAL) {
             return response()->json([
                 'success' => false,
-                'message' => 'Only MRFs in executive_review can be rejected by Executive.'
+                'message' => 'Only MRFs awaiting executive or parallel first approval can be rejected by Executive.'
             ], 422);
         }
 
@@ -2504,28 +2423,14 @@ class MRFController extends Controller
 
         $mrf->is_resubmission = true;
 
-        // Apply routing logic based on contract type
+        // Resubmit into parallel first approval (Executive + Supply Chain Director)
+        $mrf->workflow_state = WorkflowStateService::STATE_PARALLEL_FIRST_APPROVAL;
+        $mrf->current_stage = 'parallel_first_approval';
         $normalizedContractType = strtolower(trim((string) $mrf->contract_type));
         $standardContractTypes = ['emerald', 'oando', 'dangote', 'heritage'];
         $isStandardType = in_array($normalizedContractType, $standardContractTypes, true);
-
-        if (!$isStandardType) {
-            // Non-standard contract type: route directly to Supply Chain Director
-            $mrf->workflow_state = 'supply_chain_director_review';
-            $mrf->current_stage = 'supply_chain_director_review';
-            $mrf->routed_reason = 'custom_contract_type';
-        } else {
-            // Standard contract type: apply existing routing
-            if (strtolower(trim((string) $mrf->contract_type)) === 'emerald') {
-                $mrf->workflow_state = 'executive_review';
-                $mrf->current_stage = 'executive_review';
-                $mrf->routed_reason = 'standard_contract_type';
-            } else {
-                $mrf->workflow_state = 'supply_chain_director_review';
-                $mrf->current_stage = 'supply_chain_director_review';
-                $mrf->routed_reason = 'standard_contract_type';
-            }
-        }
+        $mrf->routed_reason = $isStandardType ? 'parallel_first_approval' : 'parallel_first_approval_custom';
+        $mrf->first_approval_by_role = null;
 
         $mrf->status = 'pending';
 
@@ -2581,10 +2486,11 @@ class MRFController extends Controller
             ], 404);
         }
 
-        if ($mrf->workflow_state !== 'supply_chain_director_review') {
+        if ($mrf->workflow_state !== 'supply_chain_director_review'
+            && $mrf->workflow_state !== WorkflowStateService::STATE_PARALLEL_FIRST_APPROVAL) {
             return response()->json([
                 'success' => false,
-                'message' => 'Only MRFs in supply_chain_director_review can be rejected by Supply Chain Director.'
+                'message' => 'Only MRFs awaiting Supply Chain Director or parallel first approval can be rejected.'
             ], 422);
         }
 

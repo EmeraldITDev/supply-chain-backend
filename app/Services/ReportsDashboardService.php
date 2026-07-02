@@ -6,6 +6,7 @@ use App\Models\GeneratedReport;
 use App\Models\Logistics\Material;
 use App\Models\MRF;
 use App\Models\ScheduledReport;
+use App\Support\ReportCache;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
 
@@ -22,6 +23,22 @@ class ReportsDashboardService
     {
         $periodEnd = $to ?? Carbon::now()->endOfDay();
         $periodStart = $from ?? $periodEnd->copy()->subDays(30)->startOfDay();
+
+        $cacheKey = ReportCache::key('reports_dashboard', [
+            $periodStart->toDateString(),
+            $periodEnd->toDateString(),
+        ]);
+
+        return ReportCache::remember($cacheKey, function () use ($periodStart, $periodEnd) {
+            return $this->buildDashboard($periodStart, $periodEnd);
+        });
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function buildDashboard(Carbon $periodStart, Carbon $periodEnd): array
+    {
         $spanDays = max(1, $periodStart->diffInDays($periodEnd) + 1);
         $previousEnd = $periodStart->copy()->subDay()->endOfDay();
         $previousStart = $previousEnd->copy()->subDays($spanDays - 1)->startOfDay();
@@ -50,23 +67,7 @@ class ReportsDashboardService
      */
     private function metricSnapshot(Carbon $from, Carbon $to): array
     {
-        $cycleDays = [];
-        MRF::query()
-            ->whereNotNull('po_signed_at')
-            ->whereBetween('created_at', [$from, $to])
-            ->select(['id', 'created_at', 'po_signed_at'])
-            ->orderBy('id')
-            ->chunkById(200, function ($rows) use (&$cycleDays): void {
-                foreach ($rows as $mrf) {
-                    if ($mrf->created_at && $mrf->po_signed_at) {
-                        $cycleDays[] = $mrf->created_at->diffInDays($mrf->po_signed_at);
-                    }
-                }
-            });
-
-        $procurementCycleDays = $cycleDays !== []
-            ? round(array_sum($cycleDays) / count($cycleDays), 1)
-            : null;
+        $procurementCycleDays = $this->avgProcurementCycleDays($from, $to);
 
         $delivered = Material::query()
             ->where('status', 'delivered')
@@ -97,8 +98,7 @@ class ReportsDashboardService
             ? round(($onTimeCount / $totalDeliveries) * 100, 1)
             : 0.0;
 
-        $procurement = $this->procurementReportService->buildReport($from, $to);
-        $costSavings = (float) ($procurement['totals']['totalSavings'] ?? 0);
+        $costSavings = $this->procurementReportService->totalSavingsForPeriod($from, $to);
 
         return [
             'procurementCycleDays' => $procurementCycleDays,
@@ -207,6 +207,24 @@ class ReportsDashboardService
         }
 
         return round((((float) $current - (float) $previous) / (float) $previous) * 100, 1);
+    }
+
+    private function avgProcurementCycleDays(Carbon $from, Carbon $to): ?float
+    {
+        $driver = DB::connection()->getDriverName();
+        $diffExpr = match ($driver) {
+            'sqlite' => 'CAST(julianday(po_signed_at) - julianday(created_at) AS REAL)',
+            'pgsql' => 'EXTRACT(EPOCH FROM (po_signed_at - created_at)) / 86400',
+            default => 'DATEDIFF(po_signed_at, created_at)',
+        };
+
+        $avg = MRF::query()
+            ->whereNotNull('po_signed_at')
+            ->whereBetween('created_at', [$from, $to])
+            ->selectRaw("AVG({$diffExpr}) as avg_days")
+            ->value('avg_days');
+
+        return $avg !== null ? round((float) $avg, 1) : null;
     }
 
     private function formatFileSize(?int $bytes): string

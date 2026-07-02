@@ -4,17 +4,13 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Services\ReportingEngineService;
+use App\Support\ScmReportViewerRoles;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class ReportingEngineController extends Controller
 {
-    private const ALLOWED_ROLES = [
-        'procurement_manager', 'procurement', 'supply_chain_director', 'supply_chain',
-        'admin', 'finance', 'finance_officer',
-    ];
-
     public function __construct(private ReportingEngineService $engine)
     {
     }
@@ -64,7 +60,7 @@ class ReportingEngineController extends Controller
     {
         $user = $request->user();
 
-        if (! $user || ! in_array($user->scmRole(), self::ALLOWED_ROLES, true)) {
+        if (! $user || ! ScmReportViewerRoles::allows($user->scmRole())) {
             return response()->json([
                 'success' => false,
                 'error' => 'Insufficient permissions',

@@ -27,7 +27,7 @@ class FinanceApReportingService
         $cohort = MRF::query()->tap(fn ($q) => $this->routing->scopeFinanceApCohort($q));
         $this->applyDateRange($cohort, $from, $to, 'created_at');
 
-        $mrfIds = (clone $cohort)->pluck('id');
+        $mrfCohortSub = (clone $cohort)->select('id');
 
         $totalCases = (clone $cohort)->count();
         $packagePushed = (clone $cohort)->whereNotNull('finance_ap_case_id')->count();
@@ -42,7 +42,7 @@ class FinanceApReportingService
         ])->count();
 
         $rejected = FinanceSyncEvent::query()
-            ->whereIn('mrf_id', $mrfIds)
+            ->whereIn('mrf_id', $mrfCohortSub)
             ->where('direction', FinanceSyncEvent::DIRECTION_INBOUND)
             ->where('event_type', 'rejected')
             ->where('status', FinanceSyncEvent::STATUS_SUCCESS)
@@ -51,7 +51,7 @@ class FinanceApReportingService
             ->count();
 
         $rfi = FinanceSyncEvent::query()
-            ->whereIn('mrf_id', $mrfIds)
+            ->whereIn('mrf_id', $mrfCohortSub)
             ->where('direction', FinanceSyncEvent::DIRECTION_INBOUND)
             ->where('event_type', 'rfi_raised')
             ->where('status', FinanceSyncEvent::STATUS_SUCCESS)
@@ -59,7 +59,7 @@ class FinanceApReportingService
             ->when($to, fn ($q) => $q->where('created_at', '<=', $to))
             ->count();
 
-        $outstanding = $this->outstandingMilestoneBalance($mrfIds);
+        $outstanding = $this->outstandingMilestoneBalance($mrfCohortSub);
 
         return array_merge($this->reportContext(), [
             'period' => ['from' => $from?->toDateString(), 'to' => $to?->toDateString()],
@@ -231,21 +231,24 @@ class FinanceApReportingService
     }
 
     /**
-     * @param  \Illuminate\Support\Collection<int, int>|\Illuminate\Database\Eloquent\Builder  $mrfIds
+     * @param  \Illuminate\Support\Collection<int, int>|\Illuminate\Database\Eloquent\Builder  $mrfScope
      * @return array{count: int, totalAmount: float}
      */
-    private function outstandingMilestoneBalance($mrfIds): array
+    private function outstandingMilestoneBalance($mrfScope): array
     {
-        if ($mrfIds instanceof \Illuminate\Database\Eloquent\Builder) {
-            $mrfIds = $mrfIds->pluck('id');
-        }
-
-        if ($mrfIds->isEmpty()) {
-            return ['count' => 0, 'totalAmount' => 0.0];
-        }
-
         $query = PaymentMilestone::query()
-            ->whereHas('schedule', fn ($q) => $q->whereIn('mrf_id', $mrfIds))
+            ->whereHas('schedule', function ($q) use ($mrfScope) {
+                if ($mrfScope instanceof \Illuminate\Database\Eloquent\Builder) {
+                    $q->whereIn('mrf_id', $mrfScope);
+                } else {
+                    if ($mrfScope->isEmpty()) {
+                        $q->whereRaw('0 = 1');
+
+                        return;
+                    }
+                    $q->whereIn('mrf_id', $mrfScope);
+                }
+            })
             ->whereNotIn('status', [PaymentMilestone::STATUS_PAID, PaymentMilestone::STATUS_COMPLETE]);
 
         return [

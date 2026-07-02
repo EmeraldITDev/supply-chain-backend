@@ -760,6 +760,64 @@ Backend `totals` keys: `packagePushed`, `financeHandoffPending`, `inReviewOrPayi
 ### Procurement report performance (fix)
 `ProcurementReportService::aggregateSavingsLoss` — SQL aggregation for line items with `quoted_amount`; quotation lookup only for MRFs/SRFs missing quoted data. Fixes infinite loading on large datasets.
 
+### Report performance — Section 7 (Jul 2026)
+
+**Backend (5-minute server cache via `ReportCache`, TTL 300s):**
+- `GET /api/reports/dashboard` — full dashboard payload cached per date range; cycle time uses SQL `AVG` instead of PHP `chunkById`; cost savings KPI uses lightweight `totalSavingsForPeriod()` (no full procurement report rebuild).
+- `GET /api/reports/procurement` — `buildReport()` cached per date range; savings aggregation uses period subqueries (no `pluck('id')` into PHP memory).
+- `GET /api/reports/finance-ap/*` — summary, outstanding milestones, advance delivery risk, and cycle times cached per filters.
+- `GET /api/reports/procurement/records` — defaults to last 30 days when `from`/`to` omitted; search uses indexed `mrf_id` / `formatted_id` only (no `title LIKE`).
+
+**Migration:** `2026_07_02_160000_add_report_query_indexes.php` — indexes on `po_signed_at`, `(created_at, po_signed_at)`, `quotations.updated_at`, `price_comparisons (purchase_order_id, created_at)`, line-item budget columns, `materials (status, updated_at)`.
+
+**Frontend (React Query `REPORT_QUERY_OPTIONS` — 5 min stale time):**
+- `FinanceApReportsSection` — parallel `useQueries` for summary, outstanding, risk, cycle times; `TableSkeleton` on first load; Apply button updates query keys (no mount-time refetch storm).
+- `ProcurementReportingEngine` — 300ms debounced search; `TableSkeleton` while loading.
+- `MRFProgressTracker` — `useQuery` with `WORKFLOW_QUERY_OPTIONS` (30s stale); skeleton instead of spinner.
+
+**Budget analysis:** Procurement Reports totals cards (savings / loss / net variance / line items with budget) are server-aggregated — no client-side totals over full datasets.
+
+### Procurement report — direct record navigation (Section 8, Jul 2026)
+
+**Root cause:** Row click used `navigate(detailPath)` → `/procurement?mrf=…`, remounting the full Procurement page. The deep-link handler only searched the **current paginated MRF list** (25 rows), so records outside that page never opened.
+
+**Frontend:**
+- `ProcurementReportingEngine` — row click opens `ProcurementRecordDetailSheet` (side drawer) via `GET /api/reports/procurement/records/{id}`; no full page transition.
+- Optional **Open full MRF in Procurement** button navigates to `/procurement?mrf={displayId}` only when the user explicitly wants the full module.
+- `Procurement.tsx` deep link — fetches `GET /api/mrfs/{id}` directly when the MRF is not in the cached list page; opens the existing MRF details dialog without forcing a tab switch or waiting for the full list.
+
+**Backend:** Each procurement record row includes `mrfLinkId` (same as `displayId`) for stable deep links alongside `detailPath`.
+
+### Executive role — Reports & Documents access (Section 9, Jul 2026)
+
+**Root cause:** Report API controllers omitted `executive` from allowed roles; `ProcurementReports.tsx` redirected non-listed roles to `/dashboard` (403 on load).
+
+**Backend:** Shared `App\Support\ScmReportViewerRoles` — includes `executive` on:
+- `GET /api/reports/dashboard`
+- `GET /api/reports/procurement` (+ export)
+- `GET /api/reports/procurement/records` (+ export, detail)
+- `GET /api/reports/finance-ap/*`
+
+Supply Chain Director permissions unchanged.
+
+**Frontend:**
+- `src/utils/reportAccess.ts` — `canViewScmReports()` / `SCM_REPORT_VIEW_ROLES`
+- `ProcurementReports.tsx` — uses shared helper (no redirect for executive)
+- `FinanceApReportsSection` — executive can view Finance AP cohort on procurement reports page
+- `ProcurementDocumentsPanel` — `readOnly` prop; shown in MRF details dialog for executive (view/download registry, no upload)
+
+### Logout — instant client sign-out (Section 10, Jul 2026)
+
+**Root cause:** `AuthContext.logout()` awaited `POST /api/auth/logout` before clearing `user` state and storage, so slow or hung requests blocked redirect and left `isAuthenticated` true until the API returned.
+
+**Frontend:**
+- `src/lib/authSession.ts` — synchronous `clearStaffAuthStorage()` / `clearVendorAuthStorage()`; cancels and clears React Query cache.
+- `AuthContext.logout()` — clears local session immediately, then `authApi.revokeTokenInBackground(token)` (4s abort, `keepalive`).
+- `VendorPortal` logout — same pattern via `vendorAuthApi.revokeTokenInBackground`.
+- `POST /api/auth/logout` remains available for explicit await flows; normal UI logout does not block on it.
+
+**Backend:** `POST /api/auth/logout` — null-safe token delete; clears `user_activity_{id}` cache entry.
+
 ---
 
 ## SCM Platform — Logistics Trip Request Workflow (Section 2, Jul 2026)
@@ -947,3 +1005,202 @@ All dashboard, procurement, logistics, reports, and detail pages load via `React
 ### API note — MRF list PO URLs
 
 `GET /api/mrfs` (paginated list) returns **stored** `unsigned_po_url` / `signed_po_url` from the database. Call `GET /api/mrfs/{id}` when the UI needs freshly signed download URLs.
+
+---
+
+## SCM Platform — Performance Regression Fix (Section 1, Jul 2026)
+
+### Root cause
+Server-side pagination was added to list endpoints (`GET /api/mrfs`, `/vendors`, `/rfqs`) but many frontend views still called `getAll()` via `fetchAllListPages()`, which walks up to 5 sequential API pages per resource. Combined with GlobalSearch prefetching 3× `getAll()` on every search, AppContext bootstrapping 40 quotation fetches, and 30s polling on Dashboard/RFQ views, this made the app slower than before the “optimization”.
+
+### Backend changes
+
+#### `GET /api/rfqs` (list — performance)
+- Default `per_page` is now **25** (was 50).
+- List response omits `paymentSchedule` / `supportingDocuments` (detail-only; use `GET /api/rfqs/{id}`).
+- Eager loads trimmed to `mrf` (id/title/cost only), `creator`, `vendors` — no payment-schedule milestones on list.
+
+### Frontend changes (emerald-supply-chain)
+- **GlobalSearch:** server-side `/search` only; removed local full-dataset prefetch.
+- **Dashboards:** Executive, Chairman, Supply Chain, Department use `mrfApi.list({ page: 1, per_page: 100 })` instead of `getAll()`.
+- **Procurement Dashboard:** recent activities from `GET /dashboard/recent-activities`; removed 30s MRF poll.
+- **Vendors page:** vendor counts from dashboard stats; no `getAll()` on load.
+- **AppContext:** bootstrap loads first page only (25 rows); quotations deferred to RFQ views.
+- **RFQ refresh hook:** removed 30s polling; refresh on mount + `app:refresh` only.
+- **`fetchAllListPages`:** max pages capped at **2** (was 5) for remaining `getAll()` callers (exports/dropdowns).
+
+---
+
+## SCM Platform — Smart Client-Side Caching (Section 2, Jul 2026)
+
+React Query is now the primary cache for list, report, and reference data. Stale-time presets in `src/lib/queryOptions.ts`:
+
+| Preset | `staleTime` | Use for |
+|--------|-------------|---------|
+| `STABLE_QUERY_OPTIONS` | 10 min | User directory, vendor directory |
+| `LIST_QUERY_OPTIONS` | 2 min | Paginated MRF / PO / vendor lists |
+| `REPORT_QUERY_OPTIONS` | 5 min | Reports dashboard, procurement reports, records engine |
+| `WORKFLOW_QUERY_OPTIONS` | 30 sec | Executive / Chairman / SCD approval dashboards |
+
+### Infrastructure
+- `src/lib/queryKeys.ts` — hierarchical keys for targeted invalidation
+- `src/lib/invalidateScmCache.ts` — `invalidateMrfLists`, `invalidateVendorLists`, `invalidateUserLists`, `invalidateScmListCaches` (header refresh)
+- `src/hooks/usePaginatedListQuery.ts` — cached paginated lists with `keepPreviousData` for instant page transitions
+
+### Header refresh button
+`DashboardLayout` now calls `invalidateScmListCaches()` instead of `queryClient.invalidateQueries()` (which wiped the entire cache). Active queries refetch automatically; stale cached pages reopen instantly until invalidated.
+
+### Pages migrated to React Query
+- **Procurement** — MRF + PO tabs (`queryKeys.mrfs.list`, `queryKeys.pos.list`)
+- **Vendors** — directory list (`queryKeys.vendors.list`)
+- **User Management** — user list (`queryKeys.users.list`)
+- **Reports** — analytics dashboard (`queryKeys.reports.dashboard`)
+- **Procurement Reports** — summary + records engine
+- **Executive / Chairman / Supply Chain dashboards** — workflow MRF lists (30s stale)
+
+### Mutation invalidation (targeted)
+- MRF delete → `invalidateMrfLists`
+- Vendor delete / bulk delete / rating → `invalidateVendorLists`
+- User create / update / delete → `invalidateUserLists`
+
+No backend API changes in this section.
+
+---
+
+## SCM Platform — MRF Module Performance & Delete (Section 3, Jul 2026)
+
+### `GET /api/mrfs` (list — performance)
+- Selects only `MRF::LIST_API_SELECT` columns (omits `description`, `justification`, `approval_history` JSON, `custom_terms`, etc.).
+- List rows use `MRF::toListApiArray()` — no per-row `RequesterEditWindowService` calls; `approvalHistory` and `priceComparisons` are empty on list (detail endpoint only).
+- Search (`?search=`) matches **indexed identifier columns only**: `mrf_id`, `formatted_id`, `po_number` (title/description LIKE removed).
+- Default `per_page` remains **25**; max 100.
+
+### `DELETE /api/mrfs/{id}` (performance)
+- Single `DB::transaction` + `$mrf->delete()` — relies on FK cascades instead of slow explicit `rfqs()->delete()` loops.
+- Fixed undefined `$hasPO` in 403 response (`hasUnsignedPO || hasSignedPO`).
+
+### Migration `2026_07_02_120000_add_mrf_list_search_indexes`
+- Indexes on `m_r_f_s.created_at` and `m_r_f_s.formatted_id` (in addition to existing `status+created_at`, `requester_id` from Jul 1 migration).
+
+### Frontend (emerald-supply-chain)
+- MRF Official + All MRFs share one cached React Query list (`enabled` when either tab is active).
+- **All MRFs** tab now includes `ServerPaginationBar` (was missing — only showed first page).
+- MRF delete: **optimistic removal** via `optimisticallyRemoveMrfFromCache`, then `invalidateMrfLists` on success/failure.
+- MRF search debounce reduced to **300ms**.
+
+---
+
+## SCM Platform — Refresh Button Fix (Platform Plan §4, Jul 2026)
+
+No backend API changes.
+
+### Root cause
+- Header refresh called `refreshQuotations()` **without an RFQ list**, clearing all quotation data in AppContext.
+- Many pages still used local `useState` loaders and did not listen for `app:refresh`.
+- Procurement **PullToRefresh** was a no-op (1s timeout only).
+
+### Frontend (emerald-supply-chain)
+- `src/lib/refreshScmData.ts` — `refreshScmApplicationData()`: invalidate active React Query caches, then dispatch `app:refresh`.
+- `src/hooks/useScmAppRefreshListener.ts` — pages register local-state refetch handlers.
+- `src/lib/invalidateScmCache.ts` — `refetchType: 'active'`; includes `departments` keys.
+- `DashboardLayout` — centralized refresh; in-progress + success toasts; removed broken AppContext quotation wipe.
+- Wired `app:refresh` listeners: Procurement, Dashboard, Executive, Chairman, Supply Chain Director, Vendors.
+- Procurement PullToRefresh now runs the same real refresh as the header button.
+
+---
+
+## SCM Platform — PO Draft Visibility (Platform Plan §5, Jul 2026)
+
+### `GET /api/mrfs?po_list=1` (list — PO tab)
+- **Includes PO drafts**: rows with `po_draft_saved_at` set and no `unsigned_po_url` (matches `MRF::isPoDraft()`), not only rows with `po_number`.
+- **`status` filter on PO list** uses PO lifecycle buckets (`draft`, `pending`, `signed`, `rejected`, `completed`) instead of the raw MRF `status` column.
+- Default sort for `po_list=1` is **`updated_at` desc** so recently saved drafts surface on page 1.
+- List rows now include `is_po_draft`, `po_draft_saved_at`, and PO origin fields via `toListApiArray()`.
+
+### `POST /api/mrfs/{id}/generate-po` with `save_as_draft: true`
+- Auto-assigns a canonical **PO number** on first draft save when the client omits one (same generator as finalisation).
+
+### Frontend (emerald-supply-chain)
+- After draft save: refreshes PO list cache, switches to **Purchase Orders** tab.
+- Draft badge uses `is_po_draft` from API (not “missing po_number”).
+
+---
+
+## SCM Platform — Search Performance (Platform Plan §6, Jul 2026)
+
+### Migration `2026_07_02_140000_add_module_search_indexes`
+Indexes on `m_r_f_s.po_number`, `m_r_f_s.requester_name`, `r_f_q_s.formatted_id`, `r_f_q_s.rfq_id`, `s_r_f_s.formatted_id`, `s_r_f_s.srf_id`, `s_r_f_s.requester_name`.
+
+### `GET /api/mrfs` (search)
+- `?search=` matches indexed columns: `mrf_id`, `formatted_id`, `po_number`, `requester_name` (no title/description scans).
+
+### `GET /api/rfqs` (search — new)
+- `?search=` matches `rfq_id`, `formatted_id`, linked MRF `mrf_id` / `formatted_id`.
+- Supports `date_from`, `date_to`, sort params; list includes `quotations_count` and `vendors_count`.
+
+### `GET /api/srfs` (search — aligned with MRF pattern)
+- `?search=` matches `srf_id`, `formatted_id`, `requester_name` (replaces title/description LIKE).
+- Default `per_page` **25**; `include_line_items` defaults **false** for list performance.
+- Supports `date_from`, `date_to`, sort params.
+
+### Frontend (emerald-supply-chain)
+- **MRF / PO tabs**: 300ms debounced server-side search; placeholders match indexed fields.
+- **SRF tab**: migrated to `srfApi.list` + React Query pagination (was client filter on 25 AppContext rows).
+- **RFQ Management**: paginated `rfqApi.list` with 300ms debounced search, `ListControls`, pagination; removed mount-time quotation bootstrap storm; quote counts from API `quotations_count`.
+
+---
+
+## SCM Platform — MRF Parallel First Approval (Platform Plan §11, Jul 2026)
+
+### Migration `2026_07_02_180000_add_parallel_first_approval_mrf_workflow`
+- Adds `first_approval_by_role` (`executive` | `supply_chain_director`) on `m_r_f_s`.
+- Adds workflow state `parallel_first_approval` (+ `lazarus_director_approval` in Postgres check constraint).
+
+### MRF submit / resubmit routing
+- New MRFs enter `workflow_state = parallel_first_approval` (all contract types).
+- `routed_reason`: `parallel_first_approval` or `parallel_first_approval_custom`.
+
+### Approval endpoints (race-safe)
+| Method | Path | Behavior |
+|--------|------|----------|
+| `POST` | `/api/mrfs/{id}/executive-approve` | Accepts `parallel_first_approval` or legacy `executive_review`. `DB::transaction` + `lockForUpdate`. Second approver gets **422** `This MRF has already been approved.` |
+| `POST` | `/api/mrfs/{id}/supply-chain-director-approve` | Accepts `parallel_first_approval` or legacy `supply_chain_director_review`. Same lock + duplicate message. |
+
+### API fields (list + detail)
+- `firstApprovalByRole` / `first_approval_by_role`
+- `firstApprovalStatusLabel` / `first_approval_status_label` — `"Approved by Executive"` or `"Approved by Supply Chain Director"`
+
+### Notifications
+- `notifyMRFSubmitted` notifies **both** Executive and Supply Chain Director roles (deduped by user id).
+
+### Permissions
+- `PermissionService::canApproveMRF` — Executive **or** SCD may approve when `workflow_state === parallel_first_approval`.
+
+### Frontend (emerald-supply-chain)
+- **Executive Dashboard** — pending filter includes `parallel_first_approval`; approval actions no longer Emerald-only.
+- **Supply Chain Dashboard** — `pendingFirstApprovals` includes parallel state (all contract types).
+- `workflowStageLabels.ts` — label for `parallel_first_approval`.
+
+**Note:** In-flight MRFs already in `executive_review` or `supply_chain_director_review` keep legacy sequential behavior until resubmitted.
+
+---
+
+## SCM Platform — Executive & SCD Dashboard Reorganisation (Platform Plan §12, Jul 2026)
+
+No backend API changes.
+
+### Shared utilities
+- `src/utils/mrfDashboardBuckets.ts` — classifies MRFs into `pending` | `approved` | `rejected` | `completed` for Executive and Supply Chain Director views; pending sorted oldest-first.
+- `src/components/dashboard/DashboardSummaryStats.tsx` — four summary stat cards at dashboard top.
+- `src/components/dashboard/DashboardMrfHistoryList.tsx` — compact list for approved / rejected / completed tabs (approval date, rejection reason).
+
+### Executive Dashboard
+- Summary row: Pending, Approved, Rejected, Recently Completed (+ vendor registration count in pending).
+- Tabs: **Pending** | **Approved** | **Rejected** | **Completed** (replaces undifferentiated “All Requests” list).
+- Pending tab: actionable MRF cards + vendor registrations, oldest submissions first.
+
+### Supply Chain Director Dashboard
+- Summary row at top (includes SRF + vendor registration counts in pending).
+- Tabs: **Pending** | **Approved** | **Rejected** | **Completed** (replaces Action Items / All Requests).
+- Pending tab: retained action sections (first approval, vendor selection, PO signature, SRF director review) with breakdown stat cards.
+

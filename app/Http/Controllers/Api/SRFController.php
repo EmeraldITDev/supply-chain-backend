@@ -19,6 +19,8 @@ use Illuminate\Support\Facades\Validator;
 
 class SRFController extends Controller
 {
+    use \App\Http\Controllers\Concerns\ResolvesPaginatedLists;
+
     protected WorkflowNotificationService $workflowNotificationService;
     protected FormattedIdGenerator $formattedIdGenerator;
     protected NotificationService $notificationService;
@@ -61,13 +63,25 @@ class SRFController extends Controller
             $query->where('status', $request->status);
         }
 
-        // Search
-        if ($request->has('search')) {
-            $search = $request->search;
-            $query->where(function($q) use ($search) {
-                $q->where('title', 'like', "%{$search}%")
-                  ->orWhere('description', 'like', "%{$search}%");
-            });
+        // Search indexed identifier columns (srf_id, formatted_id, requester_name).
+        if ($request->filled('search')) {
+            $search = trim((string) $request->search);
+            if ($search !== '') {
+                $like = '%'.$search.'%';
+                $query->where(function ($q) use ($like) {
+                    $q->where('srf_id', 'like', $like)
+                        ->orWhere('formatted_id', 'like', $like)
+                        ->orWhere('requester_name', 'like', $like);
+                });
+            }
+        }
+
+        if ($request->filled('date_from')) {
+            $query->whereDate('date', '>=', $request->date_from);
+        }
+
+        if ($request->filled('date_to')) {
+            $query->whereDate('date', '<=', $request->date_to);
         }
 
         // Filter by requester (for employees to see only their own)
@@ -114,27 +128,30 @@ class SRFController extends Controller
             });
         }
 
-        $perPage = (int) $request->get('per_page', 50);
-        $perPage = min($perPage, 200); // Cap at 200 to prevent abuse
-        $includeLineItems = $request->boolean('include_line_items', true);
+        $perPage = $this->resolvePerPage($request, 25, 100);
+        $includeLineItems = $request->boolean('include_line_items', false);
         if ($includeLineItems) {
             $query->with('items');
         }
-        $srfs = $query->orderBy('date', 'desc')->paginate($perPage);
 
-        return response()->json([
-            'success' => true,
-            'data' => collect($srfs->items())->map(fn (SRF $srf) => $this->presentSrf($srf, $includeLineItems))->values(),
-            'srfs' => collect($srfs->items())->map(
-                fn (SRF $srf) => $this->presentSrf($srf, $includeLineItems, $request->user())
-            )->values(),
-            'pagination' => [
-                'total' => $srfs->total(),
-                'per_page' => $srfs->perPage(),
-                'current_page' => $srfs->currentPage(),
-                'last_page' => $srfs->lastPage(),
-            ],
-        ]);
+        [$sortBy, $sortOrder] = $this->resolveSort(
+            $request,
+            ['date', 'estimated_cost', 'title', 'status', 'created_at', 'updated_at'],
+            'date',
+            'desc',
+        );
+        $query->orderBy($sortBy, $sortOrder);
+
+        $srfs = $query->paginate($perPage);
+
+        $items = collect($srfs->items())->map(
+            fn (SRF $srf) => $this->presentSrf($srf, $includeLineItems, $request->user())
+        )->values()->all();
+
+        return response()->json(array_merge(
+            $this->paginatedJsonResponse($srfs, $items),
+            ['srfs' => $items],
+        ));
     }
 
     /**

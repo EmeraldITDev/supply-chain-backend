@@ -17,6 +17,8 @@ use App\Services\NotificationService;
 use App\Services\EmailService;
 use App\Services\WorkflowNotificationService;
 use App\Services\WorkflowStateService;
+use App\Services\MrfParallelFirstApprovalService;
+use Illuminate\Support\Facades\DB;
 use App\Services\PermissionService;
 use App\Services\PurchaseOrderPdfService;
 use App\Services\PaymentScheduleService;
@@ -119,17 +121,6 @@ class MRFWorkflowController extends Controller
             ], 404);
         }
 
-        // Check if MRF is in pending supply chain director review
-        if ($mrf->workflow_state !== 'supply_chain_director_review') {
-            return response()->json([
-                'success' => false,
-                'error' => 'MRF is not awaiting Supply Chain Director review',
-                'code' => 'INVALID_WORKFLOW_STATE',
-                'currentWorkflowState' => $mrf->workflow_state,
-                'expectedState' => 'supply_chain_director_review'
-            ], 422);
-        }
-
         $validator = Validator::make($request->all(), [
             'action' => 'required|in:approve,reject',
             'remarks' => 'nullable|string|max:1000',
@@ -144,105 +135,143 @@ class MRFWorkflowController extends Controller
             ], 422);
         }
 
-        $isApproved = $request->action === 'approve';
+        $parallelService = app(MrfParallelFirstApprovalService::class);
 
-        // Determine next stage based on contract type and value
-        $nextStage = 'procurement_review';
-        $nextWorkflowState = 'supply_chain_director_approved';
-        $isHighValueCustomType = false;
+        return DB::transaction(function () use ($request, $user, $mrf, $parallelService) {
+            $locked = MRF::where('id', $mrf->id)->lockForUpdate()->first();
 
-        if ($isApproved) {
-            // Check if custom contract type with value > ₦1M
-            $isCustomType = $mrf->routed_reason === 'custom_contract_type';
-            $estimatedCost = (float) ($mrf->estimated_cost ?? 0);
-            $isHighValue = $estimatedCost > 1000000;
-
-            if ($isCustomType && $isHighValue) {
-                // Route high-value custom contract types to Lazarus.angbazo (special director approval)
-                $nextStage = 'lazarus_director_approval';
-                $nextWorkflowState = 'lazarus_director_approval';
-                $isHighValueCustomType = true;
+            if (! $locked) {
+                return response()->json([
+                    'success' => false,
+                    'error' => 'MRF not found',
+                    'code' => 'NOT_FOUND',
+                ], 404);
             }
-        } else {
-            // On rejection, status stays rejected
-            $nextStage = 'rejected';
-            $nextWorkflowState = 'supply_chain_director_rejected';
-        }
 
-        // Update MRF
-        $mrf->update([
-            'status' => $isApproved ? ($isHighValueCustomType ? 'lazarus_director_approval' : 'procurement_review') : 'rejected',
-            'current_stage' => $nextStage,
-            'workflow_state' => $nextWorkflowState,
-            'remarks' => $request->remarks,
-            'director_approved_at' => $isApproved ? now() : null,
-            'director_approved_by' => $isApproved ? $user->name : null,
-            'director_remarks' => $isApproved ? $request->remarks : null,
-            'procurement_review_started_at' => $isApproved && !$isHighValueCustomType ? now() : null,
-            'last_action_by_role' => in_array($user->scmRole(), ['admin']) ? 'admin' : 'supply_chain_director',
-        ]);
+            $validStates = ['supply_chain_director_review', MrfParallelFirstApprovalService::STATE];
+            if (! in_array($locked->workflow_state, $validStates, true)) {
+                if ($parallelService->isAlreadyApproved($locked)) {
+                    return response()->json([
+                        'success' => false,
+                        'error' => 'This MRF has already been approved.',
+                        'code' => 'ALREADY_APPROVED',
+                        'currentWorkflowState' => $locked->workflow_state,
+                    ], 422);
+                }
 
-        try {
-            $mrf->load('requester');
-
-            // For high-value custom types, notify Lazarus.angbazo directly
-            if ($isApproved && $isHighValueCustomType) {
-                $this->notificationService->notifyLazarusDirectorApprovalPending($mrf, $user, $request->remarks);
-            } else if ($isApproved) {
-                $this->notificationService->notifyMRFApproved($mrf, $user, $request->remarks);
+                return response()->json([
+                    'success' => false,
+                    'error' => 'MRF is not awaiting Supply Chain Director review',
+                    'code' => 'INVALID_WORKFLOW_STATE',
+                    'currentWorkflowState' => $locked->workflow_state,
+                    'expectedState' => 'supply_chain_director_review',
+                ], 422);
             }
-        } catch (\Exception $e) {
-            \Log::error('Failed to send MRF approved notification', [
-                'mrf_id' => $mrf->mrf_id,
-                'error' => $e->getMessage()
+
+            $isApproved = $request->action === 'approve';
+            $isParallel = $parallelService->isParallelPending($locked);
+
+            // Determine next stage based on contract type and value
+            $nextStage = 'procurement_review';
+            $nextWorkflowState = 'supply_chain_director_approved';
+            $isHighValueCustomType = false;
+
+            if ($isApproved) {
+                $isCustomType = $locked->routed_reason === 'custom_contract_type'
+                    || $locked->routed_reason === 'parallel_first_approval_custom';
+                $estimatedCost = (float) ($locked->estimated_cost ?? 0);
+                $isHighValue = $estimatedCost > 1000000;
+
+                if ($isCustomType && $isHighValue) {
+                    $nextStage = 'lazarus_director_approval';
+                    $nextWorkflowState = 'lazarus_director_approval';
+                    $isHighValueCustomType = true;
+                }
+            } else {
+                $nextStage = 'rejected';
+                $nextWorkflowState = 'supply_chain_director_rejected';
+            }
+
+            $locked->update([
+                'status' => $isApproved ? ($isHighValueCustomType ? 'lazarus_director_approval' : 'procurement_review') : 'rejected',
+                'current_stage' => $nextStage,
+                'workflow_state' => $nextWorkflowState,
+                'remarks' => $request->remarks,
+                'director_approved_at' => $isApproved ? now() : null,
+                'director_approved_by' => $isApproved ? $user->name : null,
+                'director_remarks' => $isApproved ? $request->remarks : null,
+                'procurement_review_started_at' => $isApproved && ! $isHighValueCustomType ? now() : null,
+                'last_action_by_role' => in_array($user->scmRole(), ['admin']) ? 'admin' : 'supply_chain_director',
+                'first_approval_by_role' => $isApproved && $isParallel
+                    ? MrfParallelFirstApprovalService::ROLE_SUPPLY_CHAIN_DIRECTOR
+                    : $locked->first_approval_by_role,
             ]);
-        }
 
-        // Record approval history
-        $approvalRecord = MRFApprovalHistory::create([
-            'mrf_id' => $mrf->id,
-            'stage' => 'supply_chain_director',
-            'action' => $isApproved ? 'approved' : 'rejected',
-            'approver_id' => $user->id,
-            'approver_name' => $user->name,
-            'approver_email' => $user->email,
-            'remarks' => $request->remarks,
-            'performer_name' => $user->name,
-            'performer_role' => $user->scmRole(),
-            'performed_by' => $user->id
-        ]);
+            try {
+                $locked->load('requester');
 
-        // Log activity
-        try {
-            Activity::create([
-                'type' => 'mrf_approved',
-                'title' => $isApproved ? 'MRF Approved by Supply Chain Director' : 'MRF Rejected by Supply Chain Director',
-                'description' => $isApproved ?
-                    "MRF {$mrf->mrf_id} was approved by Supply Chain Director {$user->name} and forwarded to Procurement Manager review" :
-                    "MRF {$mrf->mrf_id} was rejected by Supply Chain Director {$user->name}",
-                'user_id' => $user->id,
-                'user_name' => $user->name,
-                'reference_type' => 'mrf',
-                'reference_id' => $mrf->mrf_id,
+                if ($isApproved && $isHighValueCustomType) {
+                    $this->notificationService->notifyLazarusDirectorApprovalPending($locked, $user, $request->remarks);
+                } elseif ($isApproved) {
+                    $this->notificationService->notifyMRFApproved($locked, $user, $request->remarks);
+                }
+            } catch (\Exception $e) {
+                \Log::error('Failed to send MRF approved notification', [
+                    'mrf_id' => $locked->mrf_id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+
+            $approvalRecord = MRFApprovalHistory::create([
+                'mrf_id' => $locked->id,
+                'stage' => 'supply_chain_director',
+                'action' => $isApproved ? 'approved' : 'rejected',
+                'approver_id' => $user->id,
+                'approver_name' => $user->name,
+                'approver_email' => $user->email,
+                'remarks' => $request->remarks,
+                'performer_name' => $user->name,
+                'performer_role' => $user->scmRole(),
+                'performed_by' => $user->id,
             ]);
-        } catch (\Exception $e) {
-            Log::warning('Failed to log activity', ['error' => $e->getMessage()]);
-        }
 
-        return response()->json([
-            'success' => true,
-            'message' => $isApproved ?
-                ($isHighValueCustomType ? 'MRF approved by Supply Chain Director and forwarded to Director (Lazarus Angbazo) for high-value authorization' : 'MRF approved and forwarded to Procurement Manager') :
-                'MRF rejected',
-            'data' => [
-                'mrfId' => $mrf->mrf_id,
-                'status' => $mrf->status,
-                'workflowState' => $mrf->workflow_state,
-                'currentStage' => $mrf->current_stage,
-                'approvalRecord' => $approvalRecord,
-                'isHighValueCustomType' => $isHighValueCustomType,
-            ]
-        ]);
+            try {
+                Activity::create([
+                    'type' => 'mrf_approved',
+                    'title' => $isApproved ? 'MRF Approved by Supply Chain Director' : 'MRF Rejected by Supply Chain Director',
+                    'description' => $isApproved ?
+                        "MRF {$locked->mrf_id} was approved by Supply Chain Director {$user->name} and forwarded to Procurement Manager review" :
+                        "MRF {$locked->mrf_id} was rejected by Supply Chain Director {$user->name}",
+                    'user_id' => $user->id,
+                    'user_name' => $user->name,
+                    'reference_type' => 'mrf',
+                    'reference_id' => $locked->mrf_id,
+                ]);
+            } catch (\Exception $e) {
+                Log::warning('Failed to log activity', ['error' => $e->getMessage()]);
+            }
+
+            $approvalMessage = $isApproved
+                ? ($isHighValueCustomType
+                    ? 'MRF approved by Supply Chain Director and forwarded to Director (Lazarus Angbazo) for high-value authorization'
+                    : 'Approved by Supply Chain Director')
+                : 'MRF rejected';
+
+            return response()->json([
+                'success' => true,
+                'message' => $approvalMessage,
+                'data' => [
+                    'mrfId' => $locked->mrf_id,
+                    'status' => $locked->status,
+                    'workflowState' => $locked->workflow_state,
+                    'currentStage' => $locked->current_stage,
+                    'firstApprovalByRole' => $locked->first_approval_by_role,
+                    'firstApprovalStatusLabel' => MrfParallelFirstApprovalService::statusLabelForRole($locked->first_approval_by_role),
+                    'approvalRecord' => $approvalRecord,
+                    'isHighValueCustomType' => $isHighValueCustomType,
+                ],
+            ]);
+        });
     }
     /**
      * Procurement Manager approves MRF after Supply Chain Director approval
@@ -1106,26 +1135,6 @@ class MRFWorkflowController extends Controller
             ], 404);
         }
 
-        if (strtolower(trim((string) $mrf->contract_type)) !== 'emerald') {
-            return response()->json([
-                'success' => false,
-                'error' => 'Executive approval is only valid for Emerald contract MRFs.',
-                'code' => 'INVALID_CONTRACT_WORKFLOW',
-            ], 422);
-        }
-
-        // Check if MRF is in correct workflow state
-        $currentState = $mrf->workflow_state ?? WorkflowStateService::STATE_MRF_CREATED;
-        if ($currentState !== WorkflowStateService::STATE_EXECUTIVE_REVIEW) {
-            return response()->json([
-                'success' => false,
-                'error' => 'MRF is not pending executive approval',
-                'code' => 'INVALID_STATUS',
-                'current_state' => $currentState,
-                'current_status' => $mrf->status
-            ], 422);
-        }
-
         $validator = Validator::make($request->all(), [
             'remarks' => 'nullable|string',
         ]);
@@ -1139,109 +1148,159 @@ class MRFWorkflowController extends Controller
             ], 422);
         }
 
-        // Update MRF - mark as executive approved first
-        $mrf->update([
-            'executive_approved' => true,
-            'executive_approved_by' => $user->id,
-            'executive_approved_at' => now(),
-            'executive_remarks' => $request->remarks,
-            'last_action_by_role' => in_array($user->scmRole(), ['admin']) ? 'admin' : 'executive',
-        ]);
+        $parallelService = app(MrfParallelFirstApprovalService::class);
 
-        try {
-            $mrf->load('requester');
-            $this->notificationService->notifyMRFApproved($mrf, $user, $request->remarks);
-        } catch (\Exception $e) {
-            \Log::error('Failed to send MRF approved notification', [
-                'mrf_id' => $mrf->mrf_id,
-                'error' => $e->getMessage()
+        return DB::transaction(function () use ($request, $user, $mrf, $parallelService) {
+            $locked = MRF::where('id', $mrf->id)->lockForUpdate()->first();
+
+            if (! $locked) {
+                return response()->json([
+                    'success' => false,
+                    'error' => 'MRF not found',
+                    'code' => 'NOT_FOUND',
+                ], 404);
+            }
+
+            $currentState = $locked->workflow_state ?? WorkflowStateService::STATE_MRF_CREATED;
+            $isParallel = $parallelService->isParallelPending($locked);
+
+            if (! $isParallel) {
+                if (strtolower(trim((string) $locked->contract_type)) !== 'emerald') {
+                    return response()->json([
+                        'success' => false,
+                        'error' => 'Executive approval is only valid for Emerald contract MRFs.',
+                        'code' => 'INVALID_CONTRACT_WORKFLOW',
+                    ], 422);
+                }
+
+                if ($currentState !== WorkflowStateService::STATE_EXECUTIVE_REVIEW) {
+                    if ($parallelService->isAlreadyApproved($locked)) {
+                        return response()->json([
+                            'success' => false,
+                            'error' => 'This MRF has already been approved.',
+                            'code' => 'ALREADY_APPROVED',
+                            'current_state' => $currentState,
+                        ], 422);
+                    }
+
+                    return response()->json([
+                        'success' => false,
+                        'error' => 'MRF is not pending executive approval',
+                        'code' => 'INVALID_STATUS',
+                        'current_state' => $currentState,
+                        'current_status' => $locked->status,
+                    ], 422);
+                }
+            } elseif ($parallelService->isAlreadyApproved($locked)) {
+                return response()->json([
+                    'success' => false,
+                    'error' => 'This MRF has already been approved.',
+                    'code' => 'ALREADY_APPROVED',
+                    'current_state' => $currentState,
+                ], 422);
+            }
+
+            $locked->update([
+                'executive_approved' => true,
+                'executive_approved_by' => $user->id,
+                'executive_approved_at' => now(),
+                'executive_remarks' => $request->remarks,
+                'last_action_by_role' => in_array($user->scmRole(), ['admin']) ? 'admin' : 'executive',
+                'first_approval_by_role' => $isParallel
+                    ? MrfParallelFirstApprovalService::ROLE_EXECUTIVE
+                    : $locked->first_approval_by_role,
             ]);
-        }
 
-        // Transition to executive_approved state, then to procurement_review
-        // First transition: executive_review -> executive_approved
-        $transitionSuccess1 = $this->workflowService->transition($mrf, WorkflowStateService::STATE_EXECUTIVE_APPROVED, $user);
+            try {
+                $locked->load('requester');
+                $this->notificationService->notifyMRFApproved($locked, $user, $request->remarks);
+            } catch (\Exception $e) {
+                \Log::error('Failed to send MRF approved notification', [
+                    'mrf_id' => $locked->mrf_id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
 
-        if (!$transitionSuccess1) {
-            Log::error('Failed to transition MRF to executive_approved', [
-                'mrf_id' => $mrf->mrf_id,
-                'current_state' => $mrf->workflow_state,
-                'user_id' => $user->id
+            $transitionSuccess1 = $this->workflowService->transition($locked, WorkflowStateService::STATE_EXECUTIVE_APPROVED, $user);
+
+            if (! $transitionSuccess1) {
+                Log::error('Failed to transition MRF to executive_approved', [
+                    'mrf_id' => $locked->mrf_id,
+                    'current_state' => $locked->workflow_state,
+                    'user_id' => $user->id,
+                ]);
+
+                return response()->json([
+                    'success' => false,
+                    'error' => 'Failed to transition MRF state',
+                    'code' => 'TRANSITION_FAILED',
+                ], 500);
+            }
+
+            $locked->refresh();
+
+            $transitionSuccess2 = $this->workflowService->transition($locked, WorkflowStateService::STATE_PROCUREMENT_REVIEW, $user);
+
+            if (! $transitionSuccess2) {
+                Log::error('Failed to transition MRF to procurement_review', [
+                    'mrf_id' => $locked->mrf_id,
+                    'current_state' => $locked->workflow_state,
+                    'user_id' => $user->id,
+                ]);
+
+                return response()->json([
+                    'success' => false,
+                    'error' => 'Failed to transition MRF to procurement review',
+                    'code' => 'TRANSITION_FAILED',
+                ], 500);
+            }
+
+            $locked->refresh();
+
+            $locked->update([
+                'status' => 'procurement_review',
+                'current_stage' => 'procurement',
+                'procurement_review_started_at' => now(),
+                'last_action_by_role' => in_array($user->scmRole(), ['admin']) ? 'admin' : 'executive',
             ]);
+
+            MRFApprovalHistory::record($locked, 'approved', 'executive_review', $user, $request->remarks ?? '');
+
+            try {
+                Activity::create([
+                    'type' => 'mrf_approved',
+                    'title' => 'MRF Approved by Executive',
+                    'description' => "MRF {$locked->mrf_id} was approved by {$user->name}",
+                    'user_id' => $user->id,
+                    'user_name' => $user->name,
+                    'entity_type' => 'mrf',
+                    'entity_id' => $locked->mrf_id,
+                    'status' => 'approved',
+                ]);
+            } catch (\Exception $e) {
+                Log::warning('Failed to log MRF approval activity', ['error' => $e->getMessage()]);
+            }
+
+            try {
+                $this->notificationService->notifyMRFPendingProcurement($locked);
+            } catch (\Exception $e) {
+                Log::warning('Failed to send procurement notification', ['error' => $e->getMessage()]);
+            }
+
             return response()->json([
-                'success' => false,
-                'error' => 'Failed to transition MRF state',
-                'code' => 'TRANSITION_FAILED'
-            ], 500);
-        }
-
-        // Refresh MRF to get updated state
-        $mrf->refresh();
-
-        // Second transition: executive_approved -> procurement_review
-        $transitionSuccess2 = $this->workflowService->transition($mrf, WorkflowStateService::STATE_PROCUREMENT_REVIEW, $user);
-
-        if (!$transitionSuccess2) {
-            Log::error('Failed to transition MRF to procurement_review', [
-                'mrf_id' => $mrf->mrf_id,
-                'current_state' => $mrf->workflow_state,
-                'user_id' => $user->id
+                'success' => true,
+                'message' => 'Approved by Executive',
+                'data' => [
+                    'mrf_id' => $locked->mrf_id,
+                    'status' => $locked->status,
+                    'current_stage' => $locked->current_stage,
+                    'workflow_state' => $locked->workflow_state,
+                    'firstApprovalByRole' => $locked->first_approval_by_role,
+                    'firstApprovalStatusLabel' => MrfParallelFirstApprovalService::statusLabelForRole($locked->first_approval_by_role),
+                    'next_approver' => 'Procurement Manager',
+                ],
             ]);
-            return response()->json([
-                'success' => false,
-                'error' => 'Failed to transition MRF to procurement review',
-                'code' => 'TRANSITION_FAILED'
-            ], 500);
-        }
-
-        // Refresh MRF again to get final state
-        $mrf->refresh();
-
-        // Update status fields
-        $mrf->update([
-            'status' => 'procurement_review',
-            'current_stage' => 'procurement',
-            'procurement_review_started_at' => now(),
-            'last_action_by_role' => in_array($user->scmRole(), ['admin']) ? 'admin' : 'executive',
-        ]);
-
-        // Record in approval history
-        MRFApprovalHistory::record($mrf, 'approved', 'executive_review', $user, $request->remarks ?? '');
-
-        // Log activity
-        try {
-            Activity::create([
-                'type' => 'mrf_approved',
-                'title' => 'MRF Approved by Executive',
-                'description' => "MRF {$mrf->mrf_id} was approved by {$user->name}",
-                'user_id' => $user->id,
-                'user_name' => $user->name,
-                'entity_type' => 'mrf',
-                'entity_id' => $mrf->mrf_id,
-                'status' => 'approved',
-            ]);
-        } catch (\Exception $e) {
-            Log::warning('Failed to log MRF approval activity', ['error' => $e->getMessage()]);
-        }
-
-        // Send notifications
-        try {
-            $this->notificationService->notifyMRFPendingProcurement($mrf);
-        } catch (\Exception $e) {
-            Log::warning('Failed to send procurement notification', ['error' => $e->getMessage()]);
-        }
-
-        return response()->json([
-            'success' => true,
-            'message' => 'MRF approved by executive',
-            'data' => [
-                'mrf_id' => $mrf->mrf_id,
-                'status' => $mrf->status,
-                'current_stage' => $mrf->current_stage,
-                'workflow_state' => $mrf->workflow_state,
-                'next_approver' => 'Procurement Manager',
-            ]
-        ]);
+        });
     }
 
     /**
@@ -2805,9 +2864,15 @@ class MRFWorkflowController extends Controller
             ], 422);
         }
 
-        // Optional caller-supplied PO number must remain unique across MRFs.
-        $poNumber = $request->input('po_number');
-        if ($poNumber && MRF::where('po_number', $poNumber)->where('id', '!=', $mrf->id)->exists()) {
+        // Assign a PO number on first draft save so drafts appear in po_list queries.
+        $poNumber = trim((string) ($request->input('po_number') ?? ''));
+        if ($poNumber === '') {
+            $poNumber = trim((string) ($mrf->po_number ?? ''));
+        }
+        if ($poNumber === '') {
+            $poNumber = $this->generatePONumber($mrf);
+        }
+        if (MRF::where('po_number', $poNumber)->where('id', '!=', $mrf->id)->exists()) {
             return response()->json([
                 'success' => false,
                 'error' => 'PO number already exists. Please use a different PO number.',

@@ -66,11 +66,14 @@ class ReportingEngineService
             });
         }
         if ($request->filled('search')) {
-            $search = '%'.trim((string) $request->query('search')).'%';
-            $query->where(function ($q) use ($search) {
-                $q->where('title', 'like', $search)
-                    ->orWhere('mrf_id', 'like', $search)
-                    ->orWhere('formatted_id', 'like', $search);
+            $term = trim((string) $request->query('search'));
+            $like = '%'.$term.'%';
+            $query->where(function ($q) use ($term, $like) {
+                $q->where('mrf_id', 'like', $like)
+                    ->orWhere('formatted_id', 'like', $like);
+                if (is_numeric($term)) {
+                    $q->orWhere('id', (int) $term);
+                }
             });
         }
 
@@ -156,14 +159,18 @@ class ReportingEngineService
     }
 
     /**
-     * @return array{0: ?Carbon, 1: ?Carbon}
+     * @return array{0: Carbon, 1: Carbon}
      */
     private function parsePeriod(Request $request): array
     {
-        $from = $request->filled('from') ? Carbon::parse($request->from)->startOfDay() : null;
-        $to = $request->filled('to') ? Carbon::parse($request->to)->endOfDay() : null;
+        $periodEnd = $request->filled('to')
+            ? Carbon::parse($request->to)->endOfDay()
+            : Carbon::now()->endOfDay();
+        $periodStart = $request->filled('from')
+            ? Carbon::parse($request->from)->startOfDay()
+            : $periodEnd->copy()->subDays(30)->startOfDay();
 
-        return [$from, $to];
+        return [$periodStart, $periodEnd];
     }
 
     /**
@@ -185,6 +192,7 @@ class ReportingEngineService
             'createdAt' => $mrf->created_at?->toIso8601String(),
             'poSignedAt' => $mrf->po_signed_at?->toIso8601String(),
             'detailPath' => '/procurement?mrf='.urlencode((string) ($mrf->formatted_id ?? $mrf->mrf_id)),
+            'mrfLinkId' => (string) ($mrf->formatted_id ?? $mrf->mrf_id),
         ];
     }
 }

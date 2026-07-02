@@ -37,23 +37,29 @@ class PermissionService
 
     /**
      * Check if user can approve/reject MRF at initial stage.
-     * Emerald contracts: Executive first approval.
-     * Non-Emerald contracts: Supply Chain Director first approval.
+     * Parallel first approval: Executive and Supply Chain Director may both approve;
+     * whichever acts first wins (enforced in MRFWorkflowController with row lock).
      */
     public function canApproveMRF(User $user, MRF $mrf): bool
     {
         $currentState = $mrf->workflow_state ?? WorkflowStateService::STATE_MRF_CREATED;
+        $role = $user->scmRole();
+
+        if ($currentState === WorkflowStateService::STATE_PARALLEL_FIRST_APPROVAL) {
+            return in_array($role, ['executive', 'supply_chain_director', 'supply_chain', 'admin'], true);
+        }
+
         $isEmeraldContract = strtolower(trim((string) $mrf->contract_type)) === 'emerald';
 
         if ($isEmeraldContract) {
-            if (!in_array($user->scmRole(), ['executive', 'admin'])) {
+            if (! in_array($role, ['executive', 'admin'], true)) {
                 return false;
             }
 
             return $currentState === WorkflowStateService::STATE_EXECUTIVE_REVIEW;
         }
 
-        if (!in_array($user->scmRole(), ['supply_chain_director', 'supply_chain', 'admin'])) {
+        if (! in_array($role, ['supply_chain_director', 'supply_chain', 'admin'], true)) {
             return false;
         }
 

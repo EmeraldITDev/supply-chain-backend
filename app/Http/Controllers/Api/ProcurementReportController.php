@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Services\ProcurementReportService;
+use App\Support\ScmReportViewerRoles;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -18,8 +19,7 @@ class ProcurementReportController extends Controller
     public function index(Request $request)
     {
         $user = $request->user();
-        $allowed = ['procurement_manager', 'procurement', 'supply_chain_director', 'supply_chain', 'admin', 'finance', 'finance_officer'];
-        if (!$user || !in_array($user->scmRole(), $allowed, true)) {
+        if (! $user || ! ScmReportViewerRoles::allows($user->scmRole())) {
             return response()->json(['success' => false, 'error' => 'Insufficient permissions', 'code' => 'FORBIDDEN'], 403);
         }
 
@@ -35,8 +35,7 @@ class ProcurementReportController extends Controller
     public function export(Request $request): StreamedResponse|JsonResponse
     {
         $user = $request->user();
-        $allowed = ['procurement_manager', 'procurement', 'supply_chain_director', 'supply_chain', 'admin', 'finance', 'finance_officer'];
-        if (!$user || !in_array($user->scmRole(), $allowed, true)) {
+        if (! $user || ! ScmReportViewerRoles::allows($user->scmRole())) {
             return response()->json(['success' => false, 'error' => 'Insufficient permissions', 'code' => 'FORBIDDEN'], 403);
         }
 

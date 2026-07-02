@@ -51,7 +51,11 @@ class RFQController extends Controller
     public function index(Request $request)
     {
         $user = $request->user();
-        $query = RFQ::with(['mrf.paymentSchedule.milestones', 'creator', 'vendors']);
+        $query = RFQ::with([
+            'mrf:id,mrf_id,formatted_id,title,estimated_cost',
+            'creator:id,name,email',
+            'vendors:id,vendor_id,name',
+        ])->withCount(['quotations', 'vendors']);
 
         // If user is a vendor, only show RFQs assigned to them
         $isVendor = false;
@@ -77,12 +81,43 @@ class RFQController extends Controller
         }
 
         // Filter by status
-        if ($request->has('status')) {
+        if ($request->filled('status') && strtolower((string) $request->status) !== 'all') {
             $query->where('status', $request->status);
         }
 
-        $perPage = $this->resolvePerPage($request, 50, 200);
-        $paginator = $query->orderBy('created_at', 'desc')->paginate($perPage);
+        if ($request->filled('date_from')) {
+            $query->whereDate('deadline', '>=', $request->date_from);
+        }
+
+        if ($request->filled('date_to')) {
+            $query->whereDate('deadline', '<=', $request->date_to);
+        }
+
+        // Search indexed identifier columns (rfq_id, formatted_id, linked MRF ids).
+        if ($request->filled('search')) {
+            $search = trim((string) $request->search);
+            if ($search !== '') {
+                $like = '%'.$search.'%';
+                $query->where(function ($q) use ($like) {
+                    $q->where('rfq_id', 'like', $like)
+                        ->orWhere('formatted_id', 'like', $like)
+                        ->orWhereHas('mrf', function ($mrf) use ($like) {
+                            $mrf->where('mrf_id', 'like', $like)
+                                ->orWhere('formatted_id', 'like', $like);
+                        });
+                });
+            }
+        }
+
+        [$sortBy, $sortOrder] = $this->resolveSort(
+            $request,
+            ['created_at', 'updated_at', 'deadline', 'estimated_cost', 'status', 'title'],
+            'created_at',
+            'desc',
+        );
+
+        $perPage = $this->resolvePerPage($request, 25, 100);
+        $paginator = $query->orderBy($sortBy, $sortOrder)->paginate($perPage);
 
         $items = collect($paginator->items())->map(function ($rfq) {
             $mrfEstimatedCost = $rfq->mrf ? (float) $rfq->mrf->estimated_cost : null;
@@ -109,14 +144,18 @@ class RFQController extends Controller
                 'estimated_budget' => $estimatedBudget,
                 'estimatedBudget' => $estimatedBudget,
                 ...$rfq->extendedDetailApiFields(),
-                'paymentSchedule' => $this->paymentSchedulePayload($rfq->mrf),
-                'payment_schedule' => $this->paymentSchedulePayload($rfq->mrf),
-                'supportingDocuments' => $this->supportingDocumentsPayload($rfq),
-                'supporting_documents' => $this->supportingDocumentsPayload($rfq),
+                'paymentSchedule' => null,
+                'payment_schedule' => null,
+                'supportingDocuments' => [],
+                'supporting_documents' => [],
                 'deadline' => $rfq->deadline->format('Y-m-d'),
                 'status' => $rfq->status,
                 'workflowState' => $rfq->workflow_state,
                 'vendorIds' => $rfq->vendors->pluck('vendor_id')->toArray(),
+                'vendorsCount' => (int) ($rfq->vendors_count ?? $rfq->vendors->count()),
+                'vendors_count' => (int) ($rfq->vendors_count ?? $rfq->vendors->count()),
+                'quotationsCount' => (int) ($rfq->quotations_count ?? 0),
+                'quotations_count' => (int) ($rfq->quotations_count ?? 0),
                 'createdAt' => $rfq->created_at->toIso8601String(),
             ];
         })->values()->all();

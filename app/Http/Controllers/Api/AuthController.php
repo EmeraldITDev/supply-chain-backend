@@ -9,6 +9,7 @@ use App\Support\DepartmentMatcher;
 use App\Support\SignatureUrls;
 use App\Support\UserRoleNormalizer;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Validator;
@@ -95,7 +96,11 @@ class AuthController extends Controller
      */
     public function logout(Request $request)
     {
-        $request->user()->currentAccessToken()->delete();
+        $user = $request->user();
+        if ($user) {
+            $user->currentAccessToken()?->delete();
+            Cache::forget("user_activity_{$user->id}");
+        }
 
         return response()->json([
             'success' => true,

@@ -30,64 +30,41 @@ class NotificationService
     /**
      * Notify first approver(s) about new MRF submission.
      *
-     * Routing:
-     * - Non-standard contract types → Supply Chain Director only
-     * - Emerald contracts with logistics exception → Supply Chain Director
-     * - Emerald contracts without exception → Executive (bunmi.babajide@emeraldcfze.com)
-     * - Other standard types (oando, dangote, heritage) → Supply Chain Director
+     * Parallel first approval: Executive and Supply Chain Director are notified
+     * simultaneously; whichever approves first wins.
      */
     public function notifyMRFSubmitted(MRF $mrf): void
     {
         try {
             $mrf->loadMissing('requester');
 
-            // Normalize and check contract type
-            $normalizedType = strtolower(trim((string) $mrf->contract_type));
-            $standardTypes = ['emerald', 'oando', 'dangote', 'heritage'];
-            $isStandardType = in_array($normalizedType, $standardTypes, true);
-
             $notifiables = collect();
 
-            // Non-standard contract types go directly to Supply Chain Director
-            if (!$isStandardType) {
-                $notifiables = User::whereIn('supply_chain_role', [
-                    'supply_chain_director',
-                    'supply_chain',
-                    'admin',
-                ])->get();
-            } elseif ($normalizedType === 'emerald' && LogisticsMrfRouting::mrfShouldStartAtSupplyChainDirector($mrf)) {
-                // Emerald with logistics exception
-                $notifiables = User::whereIn('supply_chain_role', [
-                    'supply_chain_director',
-                    'supply_chain',
-                    'admin',
-                ])->get();
-            } elseif ($normalizedType === 'emerald') {
-                // Standard Emerald: use named executive approver
-                $namedExecutive = User::where('email', 'bunmi.babajide@emeraldcfze.com')->first();
+            $executives = User::query()
+                ->whereIn('supply_chain_role', ['executive', 'admin'])
+                ->get();
+            $notifiables = $notifiables->merge($executives);
 
-                if ($namedExecutive) {
-                    $notifiables->push($namedExecutive);
-                } else {
-                    Log::warning('Configured Emerald executive approver not found by email; falling back to executive role.', [
-                        'mrf_id' => $mrf->mrf_id,
-                    ]);
-                    $notifiables = User::whereIn('supply_chain_role', ['executive', 'admin'])->get();
-                }
-            } else {
-                // Other standard types (oando, dangote, heritage) go to Supply Chain Director
-                $notifiables = User::whereIn('supply_chain_role', [
-                    'supply_chain_director',
-                    'supply_chain',
-                    'admin',
-                ])->get();
+            $namedExecutive = User::where('email', 'bunmi.babajide@emeraldcfze.com')->first();
+            if ($namedExecutive) {
+                $notifiables->push($namedExecutive);
             }
+
+            $directors = User::query()
+                ->whereIn('supply_chain_role', ['supply_chain_director', 'supply_chain', 'admin'])
+                ->get();
+            $notifiables = $notifiables->merge($directors);
+
+            $notifiables = $notifiables->unique('id')->values();
 
             foreach ($notifiables as $user) {
                 $user->notifyNow(new MRFSubmittedNotification($mrf));
             }
 
-            Log::info('MRF submitted notification sent', ['mrf_id' => $mrf->mrf_id]);
+            Log::info('MRF submitted notification sent (parallel first approval)', [
+                'mrf_id' => $mrf->mrf_id,
+                'recipient_count' => $notifiables->count(),
+            ]);
         } catch (\Exception $e) {
             Log::error('Failed to send MRF submitted notification', [
                 'mrf_id' => $mrf->mrf_id,

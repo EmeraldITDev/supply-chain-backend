@@ -15,6 +15,7 @@ class WorkflowStateService
      * Quotations → PO Creation (ends here)
      */
     const STATE_MRF_CREATED = 'mrf_created';
+    const STATE_PARALLEL_FIRST_APPROVAL = 'parallel_first_approval';
     const STATE_SUPPLY_CHAIN_DIRECTOR_REVIEW = 'supply_chain_director_review';
     const STATE_SUPPLY_CHAIN_DIRECTOR_APPROVED = 'supply_chain_director_approved';
     const STATE_SUPPLY_CHAIN_DIRECTOR_REJECTED = 'supply_chain_director_rejected';
@@ -58,7 +59,17 @@ class WorkflowStateService
      */
     private array $validTransitions = [
         // New simplified workflow
-        self::STATE_MRF_CREATED => [self::STATE_SUPPLY_CHAIN_DIRECTOR_REVIEW, self::STATE_EXECUTIVE_REVIEW],
+        self::STATE_MRF_CREATED => [
+            self::STATE_PARALLEL_FIRST_APPROVAL,
+            self::STATE_SUPPLY_CHAIN_DIRECTOR_REVIEW,
+            self::STATE_EXECUTIVE_REVIEW,
+        ],
+        self::STATE_PARALLEL_FIRST_APPROVAL => [
+            self::STATE_EXECUTIVE_APPROVED,
+            self::STATE_EXECUTIVE_REJECTED,
+            self::STATE_SUPPLY_CHAIN_DIRECTOR_APPROVED,
+            self::STATE_SUPPLY_CHAIN_DIRECTOR_REJECTED,
+        ],
         self::STATE_SUPPLY_CHAIN_DIRECTOR_REVIEW => [self::STATE_SUPPLY_CHAIN_DIRECTOR_APPROVED, self::STATE_SUPPLY_CHAIN_DIRECTOR_REJECTED],
         self::STATE_SUPPLY_CHAIN_DIRECTOR_APPROVED => [self::STATE_PROCUREMENT_REVIEW],
         self::STATE_SUPPLY_CHAIN_DIRECTOR_REJECTED => [], // Terminal state (can resubmit by creating new MRF)
@@ -119,6 +130,11 @@ class WorkflowStateService
             self::STATE_MRF_CREATED => ['create'],
         ],
         'supply_chain_director' => [
+            self::STATE_PARALLEL_FIRST_APPROVAL => ['approve', 'reject'],
+            self::STATE_SUPPLY_CHAIN_DIRECTOR_REVIEW => ['approve', 'reject'],
+        ],
+        'supply_chain' => [
+            self::STATE_PARALLEL_FIRST_APPROVAL => ['approve', 'reject'],
             self::STATE_SUPPLY_CHAIN_DIRECTOR_REVIEW => ['approve', 'reject'],
         ],
         'procurement_manager' => [
@@ -137,6 +153,7 @@ class WorkflowStateService
         'admin' => [
             // Admin can perform any action
             self::STATE_MRF_CREATED => ['create', 'approve', 'reject'],
+            self::STATE_PARALLEL_FIRST_APPROVAL => ['approve', 'reject'],
             self::STATE_SUPPLY_CHAIN_DIRECTOR_REVIEW => ['approve', 'reject'],
             self::STATE_PROCUREMENT_REVIEW => ['approve', 'reject'],
             self::STATE_RFQ_ISSUED => ['submit_quotation'],
@@ -145,6 +162,7 @@ class WorkflowStateService
         ],
         // Legacy roles (for backward compatibility)
         'executive' => [
+            self::STATE_PARALLEL_FIRST_APPROVAL => ['approve', 'reject'],
             self::STATE_EXECUTIVE_REVIEW => ['approve', 'reject'],
         ],
     ];

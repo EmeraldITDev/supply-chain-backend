@@ -10,6 +10,7 @@ use App\Models\ProcurementDocument;
 use App\Services\Finance\FinanceRoutingService;
 use App\Services\PaymentScheduleService;
 use App\Services\ProcurementDocumentService;
+use App\Services\MrfParallelFirstApprovalService;
 use App\Services\WorkflowStateService;
 use Illuminate\Support\Collection;
 
@@ -402,24 +403,22 @@ class MrfProgressTrackerService
 
     private function initialApprovalStatus(MRF $mrf, bool $isEmerald): string
     {
-        if ($isEmerald) {
-            if (in_array($mrf->workflow_state, ['executive_rejected'], true) || strtolower($mrf->status ?? '') === 'rejected') {
-                return 'rejected';
-            }
-
-            return in_array($mrf->workflow_state, [
-                'executive_approved', 'procurement_review', 'procurement_approved', 'rfq_issued',
-                'quotations_received', 'quotations_evaluated', 'vendor_selected', 'invoice_approved',
-                'po_generated', 'po_signed', 'closed',
-            ], true) ? 'completed' : ($mrf->workflow_state === 'executive_review' ? 'pending' : 'not_started');
+        if (in_array($mrf->workflow_state, ['executive_rejected', 'supply_chain_director_rejected'], true)
+            || strtolower($mrf->status ?? '') === 'rejected') {
+            return 'rejected';
         }
 
-        return $mrf->workflow_state === 'supply_chain_director_review' ? 'pending' :
-            (in_array($mrf->workflow_state, [
-                'supply_chain_director_approved', 'procurement_review', 'procurement_approved',
-                'rfq_issued', 'quotations_received', 'quotations_evaluated', 'vendor_selected',
-                'invoice_approved', 'po_generated', 'po_signed', 'closed',
-            ], true) ? 'completed' : 'not_started');
+        if ($mrf->workflow_state === MrfParallelFirstApprovalService::STATE
+            || $mrf->workflow_state === 'executive_review'
+            || $mrf->workflow_state === 'supply_chain_director_review') {
+            return 'pending';
+        }
+
+        return in_array($mrf->workflow_state, [
+            'executive_approved', 'supply_chain_director_approved', 'procurement_review', 'procurement_approved', 'rfq_issued',
+            'quotations_received', 'quotations_evaluated', 'vendor_selected', 'invoice_approved',
+            'po_generated', 'po_signed', 'closed', 'lazarus_director_approval',
+        ], true) ? 'completed' : 'not_started';
     }
 
     private function procurementReviewStatus(MRF $mrf, bool $hasRfqs): string

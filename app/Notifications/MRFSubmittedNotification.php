@@ -3,7 +3,6 @@
 namespace App\Notifications;
 
 use App\Models\MRF;
-use App\Support\LogisticsMrfRouting;
 use Illuminate\Bus\Queueable;
 use Illuminate\Notifications\Notification;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -50,11 +49,7 @@ class MRFSubmittedNotification extends Notification implements ShouldQueue
         }
 
         $this->mrf->loadMissing('requester');
-        $isEmeraldContract = strtolower(trim((string) $this->mrf->contract_type)) === 'emerald';
-        $scdFirst = ! $isEmeraldContract || LogisticsMrfRouting::mrfShouldStartAtSupplyChainDirector($this->mrf);
-        $firstApprovalLabel = $scdFirst
-            ? 'Supply Chain Director Initial Approval'
-            : 'Executive Approval';
+        $firstApprovalLabel = 'Executive or Supply Chain Director (parallel — first approval wins)';
 
         return (new MailMessage)
             ->subject("New MRF Submitted - {$this->mrf->mrf_id}")
@@ -76,11 +71,7 @@ class MRFSubmittedNotification extends Notification implements ShouldQueue
     public function toArray($notifiable): array
     {
         $this->mrf->loadMissing('requester');
-        $isEmeraldContract = strtolower(trim((string) $this->mrf->contract_type)) === 'emerald';
-        $scdFirst = ! $isEmeraldContract || LogisticsMrfRouting::mrfShouldStartAtSupplyChainDirector($this->mrf);
-        $firstApprovalLabel = $scdFirst
-            ? 'Supply Chain Director Initial Approval'
-            : 'Executive Approval (bunmi.babajide@emeraldcfze.com)';
+        $firstApprovalLabel = 'Executive or Supply Chain Director (parallel — first approval wins)';
 
         return [
             'type' => 'mrf_submitted',

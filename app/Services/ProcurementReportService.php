@@ -7,7 +7,9 @@ use App\Models\MRFItem;
 use App\Models\PriceComparison;
 use App\Models\SRF;
 use App\Models\SRFItem;
+use App\Support\ReportCache;
 use Carbon\Carbon;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
 
 class ProcurementReportService
@@ -19,6 +21,27 @@ class ProcurementReportService
     {
         [$from, $to] = $this->resolveReportPeriod($from, $to);
 
+        $cacheKey = ReportCache::key('procurement_report', [$from->toDateString(), $to->toDateString()]);
+
+        return ReportCache::remember($cacheKey, fn () => $this->buildReportUncached($from, $to));
+    }
+
+    public function totalSavingsForPeriod(Carbon $from, Carbon $to): float
+    {
+        [$from, $to] = $this->resolveReportPeriod($from, $to);
+
+        $cacheKey = ReportCache::key('procurement_savings', [$from->toDateString(), $to->toDateString()]);
+
+        return ReportCache::remember($cacheKey, function () use ($from, $to) {
+            return $this->aggregateSavingsLoss($from, $to)['totalSavings'];
+        });
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function buildReportUncached(Carbon $from, Carbon $to): array
+    {
         $mrfQuery = MRF::query()->whereBetween('created_at', [$from, $to]);
         $srfQuery = SRF::query()->whereBetween('created_at', [$from, $to]);
 
@@ -37,11 +60,8 @@ class ProcurementReportService
             ->distinct('purchase_order_id')
             ->count('purchase_order_id');
 
-        $mrfIds = (clone $mrfQuery)->pluck('id');
-        $srfIds = (clone $srfQuery)->pluck('id');
-
-        $savingsLoss = $this->aggregateSavingsLoss($mrfIds, $srfIds);
-        $priceComparisons = $this->priceComparisonSummaries($mrfIds, $from, $to);
+        $savingsLoss = $this->aggregateSavingsLoss($from, $to);
+        $priceComparisons = $this->priceComparisonSummaries($from, $to);
 
         return [
             'period' => [
@@ -63,17 +83,18 @@ class ProcurementReportService
     }
 
     /**
-     * @param  \Illuminate\Support\Collection<int, int>  $mrfIds
-     * @param  \Illuminate\Support\Collection<int, int>  $srfIds
      * @return array{totalSavings: float, totalLoss: float, netVariance: float, lineCount: int}
      */
-    private function aggregateSavingsLoss($mrfIds, $srfIds): array
+    private function aggregateSavingsLoss(Carbon $from, Carbon $to): array
     {
+        $mrfPeriodSub = $this->mrfPeriodSubquery($from, $to);
+        $srfPeriodSub = $this->srfPeriodSubquery($from, $to);
+
         $mrfTable = (new MRFItem())->getTable();
         $srfTable = (new SRFItem())->getTable();
 
         $heavyMrfIds = MRF::query()
-            ->whereIn('id', $mrfIds)
+            ->whereIn('id', $mrfPeriodSub)
             ->where(function ($q) use ($mrfTable) {
                 $q->whereDoesntHave('items')
                     ->orWhereExists(function ($sub) use ($mrfTable) {
@@ -90,7 +111,7 @@ class ProcurementReportService
             ->pluck('id');
 
         $heavySrfIds = SRF::query()
-            ->whereIn('id', $srfIds)
+            ->whereIn('id', $srfPeriodSub)
             ->where(function ($q) use ($srfTable) {
                 $q->whereDoesntHave('items')
                     ->orWhereExists(function ($sub) use ($srfTable) {
@@ -107,8 +128,8 @@ class ProcurementReportService
             ->pluck('id');
 
         $mrfLine = DB::table($mrfTable)
-            ->whereIn('mrf_id', $mrfIds)
-            ->whereNotIn('mrf_id', $heavyMrfIds)
+            ->whereIn('mrf_id', $mrfPeriodSub)
+            ->when($heavyMrfIds->isNotEmpty(), fn ($q) => $q->whereNotIn('mrf_id', $heavyMrfIds))
             ->whereNotNull('quoted_amount')
             ->selectRaw('
                 SUM(CASE WHEN COALESCE(budget_amount, 0) > COALESCE(quoted_amount, 0)
@@ -120,8 +141,8 @@ class ProcurementReportService
             ->first();
 
         $srfLine = DB::table($srfTable)
-            ->whereIn('srf_id', $srfIds)
-            ->whereNotIn('srf_id', $heavySrfIds)
+            ->whereIn('srf_id', $srfPeriodSub)
+            ->when($heavySrfIds->isNotEmpty(), fn ($q) => $q->whereNotIn('srf_id', $heavySrfIds))
             ->whereNotNull('quoted_amount')
             ->selectRaw('
                 SUM(CASE WHEN COALESCE(budget_amount, 0) > COALESCE(quoted_amount, 0)
@@ -152,15 +173,13 @@ class ProcurementReportService
     }
 
     /**
-     * @param  \Illuminate\Support\Collection<int, int>  $mrfIds
      * @return array<int, array<string, mixed>>
      */
-    private function priceComparisonSummaries($mrfIds, ?Carbon $from, ?Carbon $to): array
+    private function priceComparisonSummaries(Carbon $from, Carbon $to): array
     {
         return PriceComparison::query()
-            ->whereIn('purchase_order_id', $mrfIds)
-            ->when($from, fn ($q) => $q->where('created_at', '>=', $from))
-            ->when($to, fn ($q) => $q->where('created_at', '<=', $to))
+            ->whereIn('purchase_order_id', $this->mrfPeriodSubquery($from, $to))
+            ->whereBetween('created_at', [$from, $to])
             ->select('purchase_order_id', DB::raw('COUNT(*) as comparison_count'), DB::raw('MIN(unit_price) as lowest_unit_price'), DB::raw('MAX(unit_price) as highest_unit_price'))
             ->groupBy('purchase_order_id')
             ->limit(100)
@@ -204,6 +223,22 @@ class ProcurementReportService
         $periodStart = $from ?? $periodEnd->copy()->subDays(30)->startOfDay();
 
         return [$periodStart, $periodEnd];
+    }
+
+    /**
+     * @return Builder<MRF>
+     */
+    private function mrfPeriodSubquery(Carbon $from, Carbon $to): Builder
+    {
+        return MRF::query()->whereBetween('created_at', [$from, $to])->select('id');
+    }
+
+    /**
+     * @return Builder<SRF>
+     */
+    private function srfPeriodSubquery(Carbon $from, Carbon $to): Builder
+    {
+        return SRF::query()->whereBetween('created_at', [$from, $to])->select('id');
     }
 
     /**

@@ -4,17 +4,13 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Services\ReportsDashboardService;
+use App\Support\ScmReportViewerRoles;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
 class ReportsDashboardController extends Controller
 {
-    private const ALLOWED_ROLES = [
-        'procurement_manager', 'procurement', 'supply_chain_director', 'supply_chain',
-        'admin', 'finance', 'finance_officer', 'logistics_manager', 'logistics_officer',
-    ];
-
     public function __construct(private ReportsDashboardService $dashboardService)
     {
     }
@@ -38,7 +34,7 @@ class ReportsDashboardController extends Controller
     {
         $user = $request->user();
 
-        if (! $user || ! in_array($user->scmRole(), self::ALLOWED_ROLES, true)) {
+        if (! $user || ! ScmReportViewerRoles::allows($user->scmRole())) {
             return response()->json([
                 'success' => false,
                 'error' => 'Insufficient permissions',

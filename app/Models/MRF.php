@@ -49,6 +49,61 @@ class MRF extends Model
     }
 
     /**
+     * PO list rows: finalised POs (po_number) and in-progress drafts (po_draft_saved_at, no PDF yet).
+     */
+    public function scopeForPoList($query)
+    {
+        return $query->where(function ($q) {
+            $q->where(function ($inner) {
+                $inner->whereNotNull('po_number')->where('po_number', '!=', '');
+            })->orWhere(function ($inner) {
+                $inner->whereNotNull('po_draft_saved_at')
+                    ->where(function ($unsigned) {
+                        $unsigned->whereNull('unsigned_po_url')
+                            ->orWhere('unsigned_po_url', '=', '');
+                    });
+            });
+        });
+    }
+
+    /**
+     * PO tab status buckets (draft / pending / signed / rejected / completed).
+     */
+    public function scopeWithPoLifecycleStatus($query, string $status)
+    {
+        $bucket = strtolower(trim($status));
+        if ($bucket === '' || $bucket === 'all') {
+            return $query;
+        }
+
+        return match ($bucket) {
+            'draft' => $query->whereNotNull('po_draft_saved_at')
+                ->where(function ($unsigned) {
+                    $unsigned->whereNull('unsigned_po_url')
+                        ->orWhere('unsigned_po_url', '=', '');
+                }),
+            'signed' => $query->whereNotNull('signed_po_url')->where('signed_po_url', '!=', ''),
+            'rejected' => $query->where(function ($q) {
+                $q->whereRaw('LOWER(COALESCE(status, "")) LIKE ?', ['%reject%'])
+                    ->orWhereRaw('LOWER(COALESCE(workflow_state, "")) LIKE ?', ['%reject%'])
+                    ->orWhereRaw('LOWER(COALESCE(current_stage, "")) LIKE ?', ['%reject%'])
+                    ->orWhereRaw('LOWER(COALESCE(rejection_reason, "")) != ?', ['']);
+            }),
+            'completed' => $query->where(function ($q) {
+                $q->where('grn_completed', true)
+                    ->orWhereRaw('LOWER(COALESCE(status, "")) LIKE ?', ['%complete%'])
+                    ->orWhereRaw('LOWER(COALESCE(workflow_state, "")) LIKE ?', ['%complete%']);
+            }),
+            'pending' => $query->whereNotNull('unsigned_po_url')
+                ->where('unsigned_po_url', '!=', '')
+                ->where(function ($signed) {
+                    $signed->whereNull('signed_po_url')->orWhere('signed_po_url', '=', '');
+                }),
+            default => $query,
+        };
+    }
+
+    /**
      * Draft PO badge fields for list/detail responses.
      *
      * @return array{is_po_draft: bool, isPoDraft: bool, po_draft_saved_at: ?string, poDraftSavedAt: ?string}
@@ -124,6 +179,7 @@ class MRF extends Model
         'status',
         'current_stage',
         'workflow_state',
+        'first_approval_by_role',
         'approval_history',
         'rejection_reason',
         'rejection_comments',
@@ -441,6 +497,104 @@ class MRF extends Model
     public function invoiceApprover(): BelongsTo
     {
         return $this->belongsTo(User::class, 'invoice_approved_by');
+    }
+
+    /**
+     * Columns loaded for paginated list endpoints (avoids large text / JSON blobs).
+     *
+     * @var list<string>
+     */
+    public const LIST_API_SELECT = [
+        'id', 'mrf_id', 'formatted_id', 'scm_transaction_id', 'title', 'category', 'contract_type',
+        'urgency', 'quantity', 'estimated_cost', 'requester_id', 'requester_name', 'department',
+        'date', 'created_at', 'updated_at', 'status', 'current_stage', 'workflow_state', 'first_approval_by_role', 'rejection_reason',
+        'is_resubmission', 'pfi_url', 'pfi_share_url', 'attachment_url', 'attachment_share_url',
+        'attachment_name', 'grn_requested', 'grn_requested_at', 'grn_completed', 'grn_completed_at',
+        'grn_url', 'grn_share_url', 'executive_approved', 'executive_approved_at', 'executive_remarks',
+        'director_approved_by', 'scd_approved_by', 'supply_chain_approved_by',
+        'scd_approved_at', 'director_approved_at', 'supply_chain_approved_at',
+        'scd_remarks', 'director_remarks', 'supply_chain_remarks', 'remarks',
+        'chairman_approved', 'chairman_approved_at', 'chairman_remarks',
+        'po_number', 'unsigned_po_url', 'unsigned_po_share_url', 'signed_po_url', 'signed_po_share_url',
+        'po_generated_at', 'po_terms_mode', 'source', 'is_po_linked', 'linked_po_id', 'po_draft_saved_at',
+    ];
+
+    /**
+     * Slim API payload for GET /api/mrfs list rows (detail endpoint has full fields).
+     *
+     * @return array<string, mixed>
+     */
+    public function toListApiArray(): array
+    {
+        return array_merge(
+            $this->scmTransactionApiFields(),
+            [
+                'id' => $this->mrf_id,
+                'formattedId' => $this->formatted_id,
+                'formatted_id' => $this->formatted_id,
+                'legacyId' => $this->mrf_id,
+                'legacy_id' => $this->mrf_id,
+                'title' => $this->title,
+                'category' => $this->category,
+                'contractType' => $this->contract_type,
+                'urgency' => $this->urgency,
+                'quantity' => $this->quantity,
+                'estimatedCost' => $this->estimated_cost !== null ? (float) $this->estimated_cost : null,
+                'requester' => $this->requester_name,
+                'requesterId' => (string) $this->requester_id,
+                'department' => $this->department,
+                'date' => $this->date ? $this->date->format('Y-m-d') : null,
+                'createdAt' => $this->created_at?->toIso8601String(),
+                'created_at' => $this->created_at?->toIso8601String(),
+                'updatedAt' => $this->updated_at?->toIso8601String(),
+                'updated_at' => $this->updated_at?->toIso8601String(),
+                'status' => $this->status,
+                'currentStage' => $this->current_stage,
+                'workflowState' => $this->workflow_state,
+                ...app(\App\Services\MrfParallelFirstApprovalService::class)->apiFields($this),
+                'approvalHistory' => [],
+                'rejectionReason' => $this->rejection_reason,
+                'isResubmission' => $this->is_resubmission,
+                'pfiUrl' => $this->pfi_url,
+                'pfiShareUrl' => $this->pfi_share_url,
+                'attachmentUrl' => $this->attachment_url,
+                'attachmentShareUrl' => $this->attachment_share_url,
+                'attachment_url' => $this->attachment_url,
+                'attachment_share_url' => $this->attachment_share_url,
+                'attachmentName' => $this->attachment_name,
+                'attachment_name' => $this->attachment_name,
+                'grnRequested' => $this->grn_requested,
+                'grnRequestedAt' => $this->grn_requested_at?->toIso8601String(),
+                'grnCompleted' => $this->grn_completed,
+                'grnCompletedAt' => $this->grn_completed_at?->toIso8601String(),
+                'grnUrl' => $this->grn_url,
+                'grnShareUrl' => $this->grn_share_url,
+                'executive_approved' => $this->executive_approved ?? false,
+                'executive_approved_at' => $this->executive_approved_at?->toIso8601String(),
+                'executive_remarks' => $this->executive_remarks,
+                'scd_approved_by' => $this->director_approved_by ?? $this->scd_approved_by ?? $this->supply_chain_approved_by ?? null,
+                'scd_approved_at' => ($this->scd_approved_at ?? $this->director_approved_at ?? $this->supply_chain_approved_at)?->toIso8601String(),
+                'scd_remarks' => $this->scd_remarks ?? $this->director_remarks ?? $this->supply_chain_remarks ?? $this->remarks ?? null,
+                'chairman_approved' => $this->chairman_approved ?? false,
+                'chairman_approved_at' => $this->chairman_approved_at?->toIso8601String(),
+                'chairman_remarks' => $this->chairman_remarks,
+                'po_number' => $this->po_number,
+                'poNumber' => $this->po_number,
+                'unsigned_po_url' => $this->unsigned_po_url,
+                'unsignedPOUrl' => $this->unsigned_po_url,
+                'unsigned_po_share_url' => $this->unsigned_po_share_url,
+                'unsignedPOShareUrl' => $this->unsigned_po_share_url,
+                'signed_po_url' => $this->signed_po_url,
+                'signedPOUrl' => $this->signed_po_url,
+                'po_generated_at' => $this->po_generated_at?->toIso8601String(),
+                'poGeneratedAt' => $this->po_generated_at?->toIso8601String(),
+                'po_terms_mode' => $this->po_terms_mode,
+                'poTermsMode' => $this->po_terms_mode,
+                'priceComparisons' => [],
+            ],
+            $this->poOriginApiFields(),
+            $this->poDraftApiFields(),
+        );
     }
 
     /**
