@@ -2109,13 +2109,31 @@ class VendorController extends Controller
             ], 403);
         }
 
-        // Validate input
-        $validator = Validator::make($request->all(), [
+        // Normalize input — frontend sends camelCase; API docs use snake_case
+        $companyName = trim($request->input('companyName') ?? $request->input('company_name') ?? '');
+        $email = strtolower(trim(
+            $request->input('email')
+            ?? $request->input('contactEmail')
+            ?? $request->input('contact_email')
+            ?? ''
+        ));
+        $category = trim($request->input('category') ?? '');
+        $categoryOtherRaw = $request->input('categoryOther', $request->input('category_other'));
+        $categoryOther = is_string($categoryOtherRaw) ? trim($categoryOtherRaw) : '';
+        if ($categoryOther === '') {
+            $categoryOther = null;
+        }
+
+        $validator = Validator::make([
+            'email' => $email,
+            'company_name' => $companyName,
+            'category' => $category,
+            'category_other' => $categoryOther,
+        ], [
             'email' => 'required|email|max:255',
             'company_name' => 'required|string|max:255',
             'category' => 'required|string|max:255',
             'category_other' => 'nullable|string|max:500',
-            'categoryOther' => 'nullable|string|max:500',
         ]);
 
         if ($validator->fails()) {
@@ -2128,7 +2146,7 @@ class VendorController extends Controller
         }
 
         // Validate category is in allowed list
-        if (!VendorCategory::isValid($request->category)) {
+        if (!VendorCategory::isValid($category)) {
             return response()->json([
                 'success' => false,
                 'error' => 'Invalid vendor category',
@@ -2138,7 +2156,7 @@ class VendorController extends Controller
         }
 
         // Check if vendor already exists with this email
-        $existingVendor = Vendor::where('email', $request->email)->first();
+        $existingVendor = Vendor::whereRaw('LOWER(email) = ?', [$email])->first();
         if ($existingVendor) {
             return response()->json([
                 'success' => false,
@@ -2148,7 +2166,7 @@ class VendorController extends Controller
         }
 
         // Check if there's already a pending registration with this email
-        $pendingRegistration = VendorRegistration::where('email', $request->email)
+        $pendingRegistration = VendorRegistration::whereRaw('LOWER(email) = ?', [$email])
             ->whereIn('status', ['pending', 'Pending'])
             ->first();
 
@@ -2163,8 +2181,8 @@ class VendorController extends Controller
         // Send invitation email
         $emailService = app(\App\Services\EmailService::class);
         $emailSent = $emailService->sendVendorInvitation(
-            $request->email,
-            $request->company_name
+            $email,
+            $companyName
         );
 
         if (!$emailSent) {
@@ -2179,9 +2197,9 @@ class VendorController extends Controller
             'success' => true,
             'message' => 'Vendor invitation sent successfully',
             'data' => [
-                'email' => $request->email,
-                'companyName' => $request->company_name,
-                'category' => $request->category,
+                'email' => $email,
+                'companyName' => $companyName,
+                'category' => $category,
                 'sentAt' => now()->toIso8601String(),
                 'sentBy' => [
                     'id' => $user->id,
