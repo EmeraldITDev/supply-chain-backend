@@ -22,6 +22,7 @@ enum VendorCategory: string
     case MAINTENANCE = 'Maintenance';
     case IT_SOLUTIONS = 'IT Solutions';
     case CONSULTING = 'Consulting';
+    case CATERING = 'Catering';
     case ACCOMMODATION_HOTEL = 'Accommodation/Hotel';
     case OTHERS = 'Others';
 

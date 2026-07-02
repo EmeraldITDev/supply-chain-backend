@@ -2145,14 +2145,10 @@ class VendorController extends Controller
             ], 422);
         }
 
-        // Validate category is in allowed list
-        if (!VendorCategory::isValid($category)) {
-            return response()->json([
-                'success' => false,
-                'error' => 'Invalid vendor category',
-                'code' => 'INVALID_CATEGORY',
-                'valid_categories' => VendorCategory::values()
-            ], 422);
+        // Normalize known categories to canonical casing; allow any non-empty string (matches registration).
+        $resolvedCategory = VendorCategory::fromString($category);
+        if ($resolvedCategory !== null) {
+            $category = $resolvedCategory->value;
         }
 
         // Check if vendor already exists with this email
