@@ -10,18 +10,15 @@ class DepartmentCodesSeeder extends Seeder
     public function run(): void
     {
         $rows = [
-            ['department_name' => 'Information Technology', 'code' => 'IT'],
-            ['department_name' => 'Human Resources', 'code' => 'HR'],
-            ['department_name' => 'Finance', 'code' => 'FIN'],
+            ['department_name' => 'Business Development', 'code' => 'BD'],
             ['department_name' => 'Operations', 'code' => 'OPS'],
-            ['department_name' => 'Logistics', 'code' => 'LOG'],
-            ['department_name' => 'Supply Chain', 'code' => 'SC'],
-            ['department_name' => 'Administration', 'code' => 'ADM'],
-            ['department_name' => 'Engineering', 'code' => 'ENG'],
-            ['department_name' => 'Legal', 'code' => 'LEG'],
-            ['department_name' => 'Marketing', 'code' => 'MKT'],
+            ['department_name' => 'Finance', 'code' => 'FIN'],
+            ['department_name' => 'IT', 'code' => 'IT'],
+            ['department_name' => 'Human Resources', 'code' => 'HR'],
             ['department_name' => 'Procurement', 'code' => 'PRC'],
             ['department_name' => 'Executive', 'code' => 'EXE'],
+            ['department_name' => 'Supply Chain', 'code' => 'SC'],
+            ['department_name' => 'Technical Operations', 'code' => 'TEO'],
         ];
 
         foreach ($rows as $row) {
@@ -32,4 +29,3 @@ class DepartmentCodesSeeder extends Seeder
         }
     }
 }
-

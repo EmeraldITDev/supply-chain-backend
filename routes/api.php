@@ -425,6 +425,7 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // User management (admin only)
     Route::get('/users', [\App\Http\Controllers\Api\UserManagementController::class, 'index']);
+    Route::get('/users/department-options', [\App\Http\Controllers\Api\UserManagementController::class, 'departmentOptions']);
     Route::post('/users', [\App\Http\Controllers\Api\UserManagementController::class, 'store']);
     Route::put('/users/{id}', [\App\Http\Controllers\Api\UserManagementController::class, 'update']);
     Route::delete('/users/{id}', [\App\Http\Controllers\Api\UserManagementController::class, 'destroy']);

@@ -11,6 +11,113 @@ use Illuminate\Support\Str;
 class DepartmentMatcher
 {
     /**
+     * Canonical departments for user management (create / edit forms).
+     *
+     * @var list<string>
+     */
+    public const STANDARD_USER_DEPARTMENTS = [
+        'Business Development',
+        'Operations',
+        'Finance',
+        'IT',
+        'Human Resources',
+        'Procurement',
+        'Executive',
+        'Supply Chain',
+        'Technical Operations',
+    ];
+
+    /**
+     * Legacy / alias labels mapped to a standard department (normalized keys).
+     *
+     * @var array<string, string>
+     */
+    private const LEGACY_DEPARTMENT_ALIASES = [
+        'business development' => 'Business Development',
+        'bd' => 'Business Development',
+        'operations' => 'Operations',
+        'ops' => 'Operations',
+        'finance' => 'Finance',
+        'fin' => 'Finance',
+        'it' => 'IT',
+        'ict' => 'IT',
+        'information technology' => 'IT',
+        'human resources' => 'Human Resources',
+        'hr' => 'Human Resources',
+        'procurement' => 'Procurement',
+        'prc' => 'Procurement',
+        'executive' => 'Executive',
+        'exe' => 'Executive',
+        'supply chain' => 'Supply Chain',
+        'sc' => 'Supply Chain',
+        'logistics' => 'Supply Chain',
+        'log' => 'Supply Chain',
+        'technical operations' => 'Technical Operations',
+        'technical' => 'Technical Operations',
+        'teo' => 'Technical Operations',
+        'engineering' => 'Technical Operations',
+        'eng' => 'Technical Operations',
+        'administration' => 'Operations',
+        'adm' => 'Operations',
+        'marketing' => 'Business Development',
+        'mkt' => 'Business Development',
+        'legal' => 'Business Development',
+        'leg' => 'Business Development',
+    ];
+
+    /**
+     * @return list<string>
+     */
+    public static function standardUserDepartments(): array
+    {
+        return self::STANDARD_USER_DEPARTMENTS;
+    }
+
+    /**
+     * Map a legacy or alias label to a standard user-management department, if possible.
+     */
+    public static function normalizeToStandardDepartment(?string $label): ?string
+    {
+        $label = trim((string) $label);
+        if ($label === '') {
+            return null;
+        }
+
+        foreach (self::STANDARD_USER_DEPARTMENTS as $standard) {
+            if (strcasecmp($standard, $label) === 0) {
+                return $standard;
+            }
+        }
+
+        $key = self::normalizeKey($label);
+        if (isset(self::LEGACY_DEPARTMENT_ALIASES[$key])) {
+            return self::LEGACY_DEPARTMENT_ALIASES[$key];
+        }
+
+        $row = self::resolveDepartmentCodeRow($label);
+        if ($row !== null) {
+            $fromCode = self::normalizeToStandardDepartment((string) $row->department_name);
+            if ($fromCode !== null) {
+                return $fromCode;
+            }
+            $fromCodeKey = self::normalizeToStandardDepartment((string) $row->code);
+            if ($fromCodeKey !== null) {
+                return $fromCodeKey;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * @return list<string>
+     */
+    public static function standardDepartmentsForValidation(): array
+    {
+        return self::STANDARD_USER_DEPARTMENTS;
+    }
+
+    /**
      * Department labels that refer to the same org unit (normalized keys per group).
      *
      * @var list<list<string>>
@@ -19,15 +126,12 @@ class DepartmentMatcher
         ['ict', 'it', 'information technology'],
         ['hr', 'human resources'],
         ['fin', 'finance'],
-        ['ops', 'operations'],
-        ['log', 'logistics'],
-        ['sc', 'supply chain'],
-        ['adm', 'administration'],
-        ['eng', 'engineering'],
-        ['leg', 'legal'],
-        ['mkt', 'marketing'],
+        ['ops', 'operations', 'administration', 'adm'],
+        ['log', 'logistics', 'sc', 'supply chain'],
         ['prc', 'procurement'],
         ['exe', 'executive'],
+        ['bd', 'business development', 'marketing', 'mkt', 'legal', 'leg'],
+        ['teo', 'technical operations', 'engineering', 'eng', 'technical'],
     ];
 
     public static function normalizeKey(?string $value): string
@@ -55,8 +159,18 @@ class DepartmentMatcher
             return null;
         }
 
+        $standard = self::normalizeToStandardDepartment($label);
+        if ($standard !== null) {
+            return $standard;
+        }
+
         $row = self::resolveDepartmentCodeRow($label);
         if ($row !== null) {
+            $fromRow = self::normalizeToStandardDepartment((string) $row->department_name);
+            if ($fromRow !== null) {
+                return $fromRow;
+            }
+
             return (string) $row->department_name;
         }
 
@@ -99,6 +213,11 @@ class DepartmentMatcher
      */
     public static function canonicalName(string $label): string
     {
+        $standard = self::normalizeToStandardDepartment($label);
+        if ($standard !== null) {
+            return $standard;
+        }
+
         $row = self::resolveDepartmentCodeRow($label);
 
         return $row ? (string) $row->department_name : trim($label);

@@ -1204,3 +1204,43 @@ No backend API changes.
 - Tabs: **Pending** | **Approved** | **Rejected** | **Completed** (replaces Action Items / All Requests).
 - Pending tab: retained action sections (first approval, vendor selection, PO signature, SRF director review) with breakdown stat cards.
 
+---
+
+## SCM Platform — User Management Department Dropdown (Platform Plan §13, Jul 2026)
+
+### Migration `2026_07_02_190000_normalize_user_departments_to_standard_list`
+One-time normalization of `users.department` and `employees.department` to the fixed list below. Legacy mapping (documented in migration):
+
+| Legacy | Standard |
+|--------|----------|
+| Information Technology, ICT | IT |
+| Human Resources, HR | Human Resources |
+| Finance, FIN | Finance |
+| Operations, OPS, Administration | Operations |
+| Logistics, LOG, Supply Chain, SC | Supply Chain |
+| Engineering, Technical Operations | Technical Operations |
+| Marketing, Legal | Business Development |
+| Procurement, PRC | Procurement |
+| Executive, EXE | Executive |
+| Unmapped values | Operations (default) |
+
+Also replaces `department_codes` rows with the nine canonical departments + codes (`BD`, `OPS`, `FIN`, `IT`, `HR`, `PRC`, `EXE`, `SC`, `TEO`).
+
+### `GET /api/users/department-options`
+Returns the allowed department labels (admin / user-management permission required).
+
+### `POST /api/users` / `PUT /api/users/{id}`
+- `department` validated with `Rule::in(...)` against the fixed list (nullable).
+
+### `App\Support\DepartmentMatcher`
+- `STANDARD_USER_DEPARTMENTS` — canonical nine labels.
+- `normalizeToStandardDepartment()` — legacy alias resolution.
+- `storageLabel()` prefers standard names when aliases match.
+
+### `GET /api/departments/requisition-creators`
+Department list is now the fixed nine options (not a union of ad-hoc user spellings).
+
+### Frontend (emerald-supply-chain)
+- `src/constants/scmDepartments.ts` — same nine options + `normalizeScmUserDepartment()` for edit form prefill.
+- `UserManagement.tsx` — department **Select** dropdown on create and edit (replaces free-text `Input`).
+

@@ -17,6 +17,7 @@ class DepartmentMatcherTest extends TestCase
 
         $this->seed(\Database\Seeders\DepartmentCodesSeeder::class);
     }
+
     public function test_matches_case_insensitive_department_names(): void
     {
         $this->assertTrue(DepartmentMatcher::matches('Human Resources', 'HUMAN RESOURCES'));
@@ -24,7 +25,7 @@ class DepartmentMatcherTest extends TestCase
 
     public function test_matches_department_code_to_full_name(): void
     {
-        $this->assertTrue(DepartmentMatcher::matches('Information Technology', 'IT'));
+        $this->assertTrue(DepartmentMatcher::matches('IT', 'IT'));
         $this->assertTrue(DepartmentMatcher::matches('Human Resources', 'HR'));
     }
 
@@ -45,28 +46,33 @@ class DepartmentMatcherTest extends TestCase
         $this->assertFalse(DepartmentMatcher::matches('Finance', 'Human Resources'));
     }
 
-    public function test_matches_ict_to_information_technology(): void
+    public function test_matches_ict_to_it(): void
     {
-        $this->assertTrue(DepartmentMatcher::matches('ICT', 'Information Technology'));
         $this->assertTrue(DepartmentMatcher::matches('ICT', 'IT'));
+        $this->assertSame('IT', DepartmentMatcher::normalizeToStandardDepartment('ICT'));
     }
 
-    public function test_unique_department_labels_collapses_ict_aliases(): void
+    public function test_unique_department_labels_collapses_it_aliases(): void
     {
-        DB::table('department_codes')->insert([
-            'department_name' => 'ICT',
-            'code' => 'ICT',
-            'created_at' => now(),
-            'updated_at' => now(),
-        ]);
-
         $labels = DepartmentMatcher::uniqueDepartmentLabels([
-            'Information Technology',
-            'ICT',
             'IT',
+            'ICT',
+            'it',
         ]);
 
         $this->assertCount(1, $labels);
-        $this->assertSame('Information Technology', $labels[0]);
+        $this->assertSame('IT', $labels[0]);
+    }
+
+    public function test_normalize_legacy_logistics_to_supply_chain(): void
+    {
+        $this->assertSame('Supply Chain', DepartmentMatcher::normalizeToStandardDepartment('Logistics'));
+    }
+
+    public function test_standard_user_departments_list(): void
+    {
+        $this->assertContains('IT', DepartmentMatcher::standardUserDepartments());
+        $this->assertContains('Technical Operations', DepartmentMatcher::standardUserDepartments());
+        $this->assertCount(9, DepartmentMatcher::standardUserDepartments());
     }
 }

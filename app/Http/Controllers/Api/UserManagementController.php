@@ -13,6 +13,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Validation\Rule;
 
 class UserManagementController extends Controller
 {
@@ -188,7 +189,7 @@ class UserManagementController extends Controller
             'email' => 'required|email',
             'supply_chain_role' => 'required_without:role|in:' . implode(',', self::ALLOWED_ROLES),
             'role' => 'required_without:supply_chain_role|in:' . implode(',', self::ALLOWED_ROLES),
-            'department' => 'nullable|string|max:255',
+            'department' => ['nullable', Rule::in(DepartmentMatcher::standardUserDepartments())],
             'password' => 'required|string|min:8',
             'is_admin' => 'nullable|boolean',
             'can_manage_users' => 'nullable|boolean',
@@ -294,7 +295,7 @@ class UserManagementController extends Controller
             'email' => 'sometimes|email',
             'supply_chain_role' => 'required_without:role|in:' . implode(',', self::ALLOWED_ROLES),
             'role' => 'required_without:supply_chain_role|in:' . implode(',', self::ALLOWED_ROLES),
-            'department' => 'nullable|string|max:255',
+            'department' => ['nullable', Rule::in(DepartmentMatcher::standardUserDepartments())],
             'password' => 'sometimes|string|min:8',
             'is_admin' => 'nullable|boolean',
             'can_manage_users' => 'nullable|boolean',
@@ -379,6 +380,26 @@ class UserManagementController extends Controller
     }
 
     /**
+     * Standard department options for user create / edit forms.
+     */
+    public function departmentOptions(Request $request)
+    {
+        $user = $request->user();
+        if (! $this->permissionService->canManageUsers($user)) {
+            return response()->json([
+                'success' => false,
+                'error' => 'You do not have permission to view department options',
+                'code' => 'FORBIDDEN',
+            ], 403);
+        }
+
+        return response()->json([
+            'success' => true,
+            'data' => DepartmentMatcher::standardUserDepartments(),
+        ]);
+    }
+
+    /**
      * List departments and each designated requisition creator (for Settings UI).
      */
     public function listRequisitionCreators(Request $request)
@@ -392,21 +413,7 @@ class UserManagementController extends Controller
             ], 403);
         }
 
-        $departmentNames = collect();
-
-        if (\Illuminate\Support\Facades\Schema::hasTable('department_codes')) {
-            $departmentNames = $departmentNames->merge(
-                DB::table('department_codes')->orderBy('department_name')->pluck('department_name')
-            );
-        }
-
-        $departmentNames = collect(
-            DepartmentMatcher::uniqueDepartmentLabels(
-                $departmentNames->merge(
-                    User::query()->whereNotNull('department')->where('department', '!=', '')->distinct()->pluck('department')
-                )
-            )
-        );
+        $departmentNames = collect(DepartmentMatcher::standardUserDepartments());
 
         $allUsers = User::query()
             ->whereIn('supply_chain_role', ['employee', 'staff', 'regular_staff'])
