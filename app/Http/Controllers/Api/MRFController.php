@@ -28,6 +28,7 @@ use App\Services\PurchaseOrderPdfService;
 use App\Services\QuotationAttachmentService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
@@ -206,8 +207,16 @@ class MRFController extends Controller
     public function index(Request $request)
     {
         try {
+        $listSelect = MRF::LIST_API_SELECT;
+        if (! Schema::hasColumn('m_r_f_s', 'first_approval_by_role')) {
+            $listSelect = array_values(array_filter(
+                $listSelect,
+                static fn (string $column): bool => $column !== 'first_approval_by_role'
+            ));
+        }
+
         $query = MRF::query()
-            ->select(MRF::LIST_API_SELECT)
+            ->select($listSelect)
             ->with(['requester:id,name,email,department']);
 
         $isPoList = $request->boolean('has_po') || $request->boolean('po_list');
