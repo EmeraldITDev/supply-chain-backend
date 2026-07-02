@@ -25,6 +25,7 @@ use App\Services\PaymentScheduleService;
 use App\Services\PriceComparisonPoLineService;
 use App\Services\ProcurementDocumentService;
 use App\Services\QuotationAttachmentService;
+use App\Support\PurchaseOrderCurrency;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\Storage;
@@ -1542,6 +1543,7 @@ class MRFWorkflowController extends Controller
             'bypass_executive_review' => 'nullable|boolean',
             'bypassExecutiveReview' => 'nullable|boolean',
             'allow_missing_rfq' => 'nullable|boolean',
+            'currency' => PurchaseOrderCurrency::VALIDATION_RULE,
         ]);
 
         if ($validator->fails()) {
@@ -1569,6 +1571,7 @@ class MRFWorkflowController extends Controller
             'bypass_executive_review' => 'nullable|boolean',
             'bypassExecutiveReview' => 'nullable|boolean',
             'allow_missing_rfq' => 'nullable|boolean',
+            'currency' => PurchaseOrderCurrency::VALIDATION_RULE,
             ]);
 
         if ($validator->fails()) {
@@ -1814,6 +1817,7 @@ class MRFWorkflowController extends Controller
             'po_terms_mode' => $termsMode,
             'invoice_submission_email' => $request->invoice_submission_email ?? null,
             'invoice_submission_cc' => $request->invoice_submission_cc ?? null,
+            'currency' => PurchaseOrderCurrency::normalize($mrf->currency),
         ];
 
         if ($mrf->is_po_linked || ($mrf->source ?? 'standard') === 'po_generated') {
@@ -1973,8 +1977,9 @@ class MRFWorkflowController extends Controller
                 'synthetic_po' => ! $rfq && ($fastTrack || $allowMissingRfq),
                 'syntheticPo' => ! $rfq && ($fastTrack || $allowMissingRfq),
                 'priceComparisons' => $mrf->priceComparisons()->get(),
-                'payment_milestones' => $paymentMilestones,
-                'paymentMilestones' => $paymentMilestones,
+                    'payment_milestones' => $paymentMilestones,
+                    'paymentMilestones' => $paymentMilestones,
+                    ...$mrf->currencyApiFields(),
                 ],
                 'po_url' => $poStreamUrl,
                 'fast_tracked' => $fastTrack,
@@ -2853,6 +2858,7 @@ class MRFWorkflowController extends Controller
             'invoice_submission_email' => 'nullable|string|max:255',
             'invoice_submission_cc' => 'nullable|string|max:500',
             'remarks' => 'nullable|string',
+            'currency' => PurchaseOrderCurrency::VALIDATION_RULE,
         ]);
 
         if ($validator->fails()) {
@@ -2911,6 +2917,8 @@ class MRFWorkflowController extends Controller
 
         $isDraftUpdate = $mrf->isPoDraft();
 
+        $this->applyRequestedCurrency($request, $mrf);
+
         $draftUpdate = [
             'po_number' => $poNumber ?: $mrf->po_number, // preserve any existing number
             'ship_to_address' => $request->input('ship_to_address', $mrf->ship_to_address),
@@ -2923,6 +2931,7 @@ class MRFWorkflowController extends Controller
             'invoice_submission_cc' => $request->input('invoice_submission_cc', $mrf->invoice_submission_cc),
             'procurement_manager_id' => $user->id,
             'po_draft_saved_at' => now(),
+            'currency' => PurchaseOrderCurrency::normalize($mrf->currency),
         ];
 
         $resolvedPoNumber = $draftUpdate['po_number'];
@@ -2979,6 +2988,7 @@ class MRFWorkflowController extends Controller
                     'invoice_submission_cc' => $mrf->invoice_submission_cc,
                     'fast_tracked' => $fastTrack,
                     'fastTracked' => $fastTrack,
+                    ...$mrf->currencyApiFields(),
                 ],
                 'fast_tracked' => $fastTrack,
             ],
@@ -3497,7 +3507,7 @@ class MRFWorkflowController extends Controller
                     'total_amount' => $selectedComparisonRows->isNotEmpty()
                         ? $poLineService->subtotalForRows($selectedComparisonRows)
                         : $quotation->total_amount,
-                    'currency' => $quotation->currency ?? 'NGN',
+                    'currency' => PurchaseOrderCurrency::normalize($mrf->currency ?? $quotation->currency ?? 'NGN'),
                     'delivery_days' => $quotation->delivery_days,
                     'delivery_date' => $quotation->delivery_date ? ($quotation->delivery_date instanceof \DateTime || $quotation->delivery_date instanceof \Carbon\Carbon ? $quotation->delivery_date : \Carbon\Carbon::parse($quotation->delivery_date)) : null,
                     'payment_terms' => $quotation->payment_terms,
@@ -3680,7 +3690,7 @@ class MRFWorkflowController extends Controller
 
         $quotation = $data['quotation'] ?? [];
         $items = $data['items'] ?? [];
-        $currency = (string) ($quotation['currency'] ?? $mrf->currency ?? 'NGN');
+        $currency = PurchaseOrderCurrency::normalize($mrf->currency ?? $quotation['currency'] ?? 'NGN');
 
         $poTotal = (float) ($quotation['total_amount'] ?? 0);
         if ($poTotal <= 0) {

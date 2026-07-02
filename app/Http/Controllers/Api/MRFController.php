@@ -14,6 +14,7 @@ use App\Models\Logistics\VehicleMaintenance;
 use App\Support\LogisticsMrfRouting;
 use App\Services\LineItemBudgetService;
 use App\Support\PaymentMilestoneRequest;
+use App\Support\PurchaseOrderCurrency;
 use App\Support\RequestLineItemParser;
 use Illuminate\Validation\ValidationException;
 use App\Services\NotificationService;
@@ -448,6 +449,7 @@ class MRFController extends Controller
             'description' => $mrf->description,
             'quantity' => $mrf->quantity,
             'estimatedCost' => $mrf->estimated_cost !== null ? (float) $mrf->estimated_cost : null,
+            ...$mrf->currencyApiFields(),
             'justification' => $mrf->justification,
             'requester' => $mrf->requester_name,
             'requesterId' => (string) $mrf->requester_id,
@@ -852,6 +854,7 @@ class MRFController extends Controller
                     'description' => $mrf->description,
                     'quantity' => $mrf->quantity,
                     'estimatedCost' => $mrf->estimated_cost !== null ? (float) $mrf->estimated_cost : null,
+                    ...$mrf->currencyApiFields(),
                     'justification' => $mrf->justification,
                     'requester' => [
                         'id' => $mrf->requester_id,
@@ -1138,6 +1141,7 @@ class MRFController extends Controller
                 'description' => 'required|string',
                 'quantity' => 'required|string',
                 'estimatedCost' => 'nullable|numeric|min:0',
+                'currency' => PurchaseOrderCurrency::VALIDATION_RULE,
                 'justification' => 'required|string',
                 'department' => 'nullable|string|max:255',
                 'pfi' => 'nullable|file|mimes:pdf,doc,docx|max:10240', // Optional PFI upload (10MB max)
@@ -1285,6 +1289,7 @@ class MRFController extends Controller
                 'estimated_cost' => $request->input('estimatedCost') !== null && $request->input('estimatedCost') !== ''
                     ? (float) $request->input('estimatedCost')
                     : null,
+                'currency' => PurchaseOrderCurrency::fromRequest($request) ?? PurchaseOrderCurrency::DEFAULT,
                 'justification' => $request->justification,
                 'requester_id' => $user->id,
                 'requester_name' => $user->name,
@@ -1437,6 +1442,7 @@ class MRFController extends Controller
                 'description' => $mrf->description,
                 'quantity' => $mrf->quantity,
                 'estimatedCost' => $mrf->estimated_cost !== null ? (float) $mrf->estimated_cost : null,
+                ...$mrf->currencyApiFields(),
                 'justification' => $mrf->justification,
                 'requester' => $mrf->requester_name,
                 'requesterId' => (string) $mrf->requester_id,
@@ -1523,6 +1529,7 @@ class MRFController extends Controller
             'description' => 'sometimes|required|string',
             'quantity' => 'sometimes|required|string',
             'estimatedCost' => 'sometimes|nullable|numeric|min:0',
+            'currency' => PurchaseOrderCurrency::VALIDATION_RULE,
             'justification' => 'sometimes|required|string',
             'department' => 'sometimes|nullable|string|max:255',
             'remarks' => 'sometimes|nullable|string|max:1000',
@@ -1562,6 +1569,9 @@ class MRFController extends Controller
             $updateData['estimated_cost'] = $request->input('estimatedCost') === null || $request->input('estimatedCost') === ''
                 ? null
                 : (float) $request->input('estimatedCost');
+        }
+        if ($request->has('currency')) {
+            $updateData['currency'] = PurchaseOrderCurrency::normalize($request->input('currency'));
         }
         if ($request->has('justification')) $updateData['justification'] = $request->justification;
 
@@ -1625,6 +1635,7 @@ class MRFController extends Controller
             'description' => $mrf->description,
             'quantity' => $mrf->quantity,
             'estimatedCost' => $mrf->estimated_cost !== null ? (float) $mrf->estimated_cost : null,
+            ...$mrf->currencyApiFields(),
             'justification' => $mrf->justification,
             'requester' => $mrf->requester_name,
             'requesterId' => (string) $mrf->requester_id,

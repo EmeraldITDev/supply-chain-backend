@@ -10,6 +10,7 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\URL;
 use Illuminate\Support\Str;
+use App\Support\PurchaseOrderCurrency;
 
 class MRF extends Model
 {
@@ -143,6 +144,18 @@ class MRF extends Model
             'isPoLinked' => $isPoLinked,
             'linked_po_id' => $linkedPoId,
             'linkedPoId' => $linkedPoId,
+        ];
+    }
+
+    /**
+     * ISO 4217 currency for PO line amounts (NGN default).
+     *
+     * @return array{currency: string}
+     */
+    public function currencyApiFields(): array
+    {
+        return [
+            'currency' => PurchaseOrderCurrency::normalize($this->currency),
         ];
     }
 
@@ -507,7 +520,7 @@ class MRF extends Model
      */
     public const LIST_API_SELECT = [
         'id', 'mrf_id', 'formatted_id', 'scm_transaction_id', 'title', 'category', 'contract_type',
-        'urgency', 'quantity', 'estimated_cost', 'requester_id', 'requester_name', 'department',
+        'urgency', 'quantity', 'estimated_cost', 'currency', 'requester_id', 'requester_name', 'department',
         'date', 'created_at', 'updated_at', 'status', 'current_stage', 'workflow_state', 'first_approval_by_role', 'rejection_reason',
         'is_resubmission', 'pfi_url', 'pfi_share_url', 'attachment_url', 'attachment_share_url',
         'attachment_name', 'grn_requested', 'grn_requested_at', 'grn_completed', 'grn_completed_at',
@@ -575,6 +588,7 @@ class MRF extends Model
                 'urgency' => $this->urgency,
                 'quantity' => $this->quantity,
                 'estimatedCost' => $this->estimated_cost !== null ? (float) $this->estimated_cost : null,
+                ...$this->currencyApiFields(),
                 'requester' => $this->requester_name,
                 'requesterId' => (string) $this->requester_id,
                 'department' => $this->department,
