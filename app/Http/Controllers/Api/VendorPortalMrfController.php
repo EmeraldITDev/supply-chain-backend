@@ -2,8 +2,10 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Http\Controllers\Concerns\ResolvesPaginatedLists;
 use App\Http\Controllers\Controller;
 use App\Models\MRF;
+use App\Models\ProcurementDocument;
 use App\Models\User;
 use App\Models\Vendor;
 use App\Services\FinanceAp\VendorInvoiceGateService;
@@ -16,6 +18,8 @@ use Illuminate\Support\Facades\Validator;
 
 class VendorPortalMrfController extends Controller
 {
+    use ResolvesPaginatedLists;
+
     public function __construct(
         private VendorInvoiceSubmissionService $submissionService,
         private VendorInvoiceGateService $gateService,
@@ -32,18 +36,42 @@ class VendorPortalMrfController extends Controller
             return $vendor;
         }
 
-        $mrfs = MRF::query()
+        $perPage = $this->resolvePerPage($request, 25, 50);
+
+        $paginator = MRF::query()
+            ->select([
+                'id',
+                'mrf_id',
+                'formatted_id',
+                'title',
+                'workflow_state',
+                'po_number',
+                'contract_type',
+                'finance_ap_case_id',
+                'updated_at',
+            ])
             ->where('selected_vendor_id', $vendor->id)
             ->whereNotNull('workflow_state')
             ->orderByDesc('updated_at')
-            ->get()
-            ->map(function (MRF $mrf) use ($vendor) {
+            ->paginate($perPage);
+
+        $mrfIds = collect($paginator->items())->pluck('id')->all();
+        $submittedMrfIds = $mrfIds === []
+            ? []
+            : ProcurementDocument::query()
+                ->whereIn('mrf_id', $mrfIds)
+                ->where('type', ProcurementDocument::TYPE_VENDOR_INVOICE)
+                ->where('is_active', true)
+                ->where('vendor_id', $vendor->id)
+                ->pluck('mrf_id')
+                ->map(fn ($id) => (int) $id)
+                ->flip()
+                ->all();
+
+        $items = collect($paginator->items())
+            ->map(function (MRF $mrf) use ($vendor, $submittedMrfIds) {
                 $gate = $this->gateService->status($mrf);
-                $submitted = $this->documentService->hasActiveDocument(
-                    $mrf,
-                    \App\Models\ProcurementDocument::TYPE_VENDOR_INVOICE,
-                    $vendor->id
-                );
+                $submitted = isset($submittedMrfIds[(int) $mrf->id]);
 
                 return [
                     'mrfId' => $mrf->mrf_id,
@@ -62,12 +90,14 @@ class VendorPortalMrfController extends Controller
                     'invoiceSubmitted' => $submitted,
                 ];
             })
-            ->values();
+            ->values()
+            ->all();
 
         return response()->json([
             'success' => true,
             'data' => [
-                'mrfs' => $mrfs,
+                'mrfs' => $items,
+                'pagination' => $this->paginationPayload($paginator),
             ],
         ]);
     }

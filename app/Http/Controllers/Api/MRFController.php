@@ -230,6 +230,17 @@ class MRFController extends Controller
             $query->where('workflow_state', $request->workflow_state);
         }
 
+        if ($request->filled('workflow_states')) {
+            $states = array_filter(array_map('trim', explode(',', (string) $request->workflow_states)));
+            if ($states !== []) {
+                $query->workflowStates($states);
+            }
+        }
+
+        if ($request->filled('pending_for_role')) {
+            $query->pendingForRole((string) $request->pending_for_role);
+        }
+
         if ($request->filled('date_from')) {
             $query->whereDate('date', '>=', $request->date_from);
         }

@@ -106,6 +106,65 @@ class MRF extends Model
     }
 
     /**
+     * Filter by one or more workflow_state values.
+     *
+     * @param  list<string>  $states
+     */
+    public function scopeWorkflowStates($query, array $states)
+    {
+        $states = array_values(array_filter(array_map('trim', $states)));
+
+        if ($states === []) {
+            return $query;
+        }
+
+        return $query->whereIn('workflow_state', $states);
+    }
+
+    /**
+     * MRFs awaiting action on role-specific approval dashboards.
+     */
+    public function scopePendingForRole($query, string $role)
+    {
+        $role = strtolower(trim($role));
+
+        return match ($role) {
+            'executive' => $query->where(function ($q) {
+                $q->whereIn('workflow_state', ['parallel_first_approval', 'executive_review'])
+                    ->orWhereIn('current_stage', ['parallel_first_approval', 'executive_review', 'executive']);
+            }),
+            'scd', 'supply_chain_director', 'supply_chain' => $query->where(function ($q) {
+                $q->whereIn('workflow_state', [
+                    'parallel_first_approval',
+                    'supply_chain_director_review',
+                    'vendor_selected',
+                    'invoice_received',
+                    'po_generated',
+                ])->orWhereIn('current_stage', [
+                    'parallel_first_approval',
+                    'supply_chain_director_review',
+                    'director_review',
+                    'supply_chain',
+                    'final_approval',
+                ])->orWhere(function ($inner) {
+                    $inner->whereIn('current_stage', ['supply_chain'])
+                        ->whereNotNull('unsigned_po_url')
+                        ->where('unsigned_po_url', '!=', '')
+                        ->where(function ($signed) {
+                            $signed->whereNull('signed_po_url')->orWhere('signed_po_url', '=', '');
+                        });
+                });
+            }),
+            'chairman' => $query->where(function ($q) {
+                $q->whereIn('current_stage', ['chairman_review', 'chairman', 'chairman_payment'])
+                    ->orWhere('status', 'chairman_payment')
+                    ->orWhere('status', 'like', '%chairman%');
+            }),
+            default => $query,
+        };
+    }
+
+    /**
      * Draft PO badge fields for list/detail responses.
      *
      * @return array{is_po_draft: bool, isPoDraft: bool, po_draft_saved_at: ?string, poDraftSavedAt: ?string}
