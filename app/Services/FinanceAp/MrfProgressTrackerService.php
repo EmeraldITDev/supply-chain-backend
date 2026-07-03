@@ -29,16 +29,22 @@ class MrfProgressTrackerService
      */
     public function build(MRF $mrf): array
     {
-        $mrf->loadMissing(['requester', 'selectedVendor', 'rfqs', 'approvalHistory']);
+        $mrf->loadMissing([
+            'requester',
+            'selectedVendor',
+            'rfqs' => fn ($query) => $query->withCount('quotations'),
+            'approvalHistory',
+        ]);
 
         $documents = $this->documentService->listGroupedForMrf($mrf);
         $activeByType = $documents['activeByType'];
         $schedule = $this->paymentScheduleService->findForMrf($mrf);
         $schedulePayload = $schedule ? $this->paymentScheduleService->toApiArray($schedule) : null;
+        $financeSyncTimestamps = $this->preloadFinanceSyncTimestamps($mrf);
 
         $hideDeliveryPhase = $this->shouldHideDeliveryPhase($schedule);
         $usesFinanceAp = mrfUsesFinanceAp($mrf);
-        $stageTimestamps = $this->buildStageTimestamps($mrf, $activeByType);
+        $stageTimestamps = $this->buildStageTimestamps($mrf, $activeByType, $financeSyncTimestamps);
 
         $phases = $this->buildPhases($mrf, $activeByType, $schedule, $hideDeliveryPhase, $usesFinanceAp, $stageTimestamps);
         $steps = collect($phases)->flatMap(fn (array $phase) => $phase['steps'])->values()->all();
@@ -78,7 +84,7 @@ class MrfProgressTrackerService
      * @param  array<string, array<string, mixed>|null>  $activeByType
      * @return array<string, ?string>
      */
-    private function buildStageTimestamps(MRF $mrf, array $activeByType): array
+    private function buildStageTimestamps(MRF $mrf, array $activeByType, array $financeSyncTimestamps = []): array
     {
         $vendorInvoice = $activeByType[ProcurementDocument::TYPE_VENDOR_INVOICE] ?? null;
         $grn = $activeByType[ProcurementDocument::TYPE_GRN] ?? null;
@@ -106,8 +112,8 @@ class MrfProgressTrackerService
                 ?? $this->historyTimestamp($mrf, ['signed_po'], ['supply_chain']),
             'grn_generated_at' => $grn['uploadedAt'] ?? $grn['uploaded_at'] ?? $mrf->grn_completed_at?->toIso8601String(),
             'delivery_docs_uploaded_at' => $deliveryUploadedAt,
-            'finance_reviewed_at' => $this->resolveFinanceReviewedAt($mrf),
-            'payment_completed_at' => $this->resolvePaymentCompletedAt($mrf),
+            'finance_reviewed_at' => $financeSyncTimestamps['reviewed_at'] ?? $this->resolveFinanceReviewedAt($mrf),
+            'payment_completed_at' => $financeSyncTimestamps['payment_completed_at'] ?? $this->resolvePaymentCompletedAt($mrf),
             'closed_at' => $mrf->workflow_state === WorkflowStateService::STATE_CLOSED
                 ? ($mrf->updated_at?->toIso8601String()) : null,
         ];
@@ -213,7 +219,7 @@ class MrfProgressTrackerService
     ): array {
         $isEmerald = strtolower(trim((string) $mrf->contract_type)) === 'emerald';
         $hasRfqs = $mrf->rfqs->isNotEmpty();
-        $quotationCount = $mrf->quotations()->count();
+        $quotationCount = (int) $mrf->rfqs->sum(fn ($rfq) => (int) ($rfq->quotations_count ?? 0));
 
         $phases = [
             $this->phase('approval', 'Approval', [
@@ -535,17 +541,67 @@ class MrfProgressTrackerService
             return 'completed';
         }
 
-        $evaluation = $this->deliveryConfirmationService->evaluate($mrf);
-
-        if ($evaluation['satisfied']) {
-            return 'completed';
-        }
-
         if ($mrf->workflow_state === WorkflowStateService::STATE_DELIVERY_CONFIRMATION_PENDING) {
             return 'pending';
         }
 
-        return 'not_started';
+        return in_array($mrf->workflow_state, [
+            WorkflowStateService::STATE_DELIVERY_CONFIRMATION_COMPLETE,
+            WorkflowStateService::STATE_FINANCE_HANDOFF_PENDING,
+            WorkflowStateService::STATE_FINANCE_IN_REVIEW,
+            WorkflowStateService::STATE_MILESTONE_PAYMENT_IN_PROGRESS,
+            WorkflowStateService::STATE_FINANCIALLY_COMPLETE,
+            WorkflowStateService::STATE_OPERATIONALLY_COMPLETE,
+            WorkflowStateService::STATE_CLOSED,
+        ], true) ? 'completed' : 'not_started';
+    }
+
+    /**
+     * @return array{reviewed_at: ?string, payment_completed_at: ?string}
+     */
+    private function preloadFinanceSyncTimestamps(MRF $mrf): array
+    {
+        if (! mrfUsesFinanceAp($mrf)) {
+            return ['reviewed_at' => null, 'payment_completed_at' => null];
+        }
+
+        $events = FinanceSyncEvent::query()
+            ->where('mrf_id', $mrf->id)
+            ->where('direction', FinanceSyncEvent::DIRECTION_INBOUND)
+            ->where('status', FinanceSyncEvent::STATUS_SUCCESS)
+            ->whereIn('event_type', ['approved', 'milestone_payment_approved', 'payment_posted'])
+            ->orderBy('processed_at')
+            ->get(['event_type', 'processed_at']);
+
+        $approved = $events->firstWhere('event_type', 'approved');
+        $reviewedAt = $approved?->processed_at;
+
+        if (! $reviewedAt && $mrf->finance_ap_status && ! in_array($mrf->finance_ap_status, ['pending_review', 'pending'], true)) {
+            $reviewedAt = $events
+                ->whereIn('event_type', ['milestone_payment_approved', 'payment_posted'])
+                ->sortBy('processed_at')
+                ->first()
+                ?->processed_at;
+        }
+
+        $paymentCompletedAt = null;
+        if (in_array($mrf->workflow_state, [
+            WorkflowStateService::STATE_FINANCIALLY_COMPLETE,
+            WorkflowStateService::STATE_OPERATIONALLY_COMPLETE,
+            WorkflowStateService::STATE_CLOSED,
+        ], true)) {
+            $paymentCompletedAt = $events
+                ->where('event_type', 'payment_posted')
+                ->sortByDesc('processed_at')
+                ->first()
+                ?->processed_at
+                ?? $mrf->updated_at;
+        }
+
+        return [
+            'reviewed_at' => $this->normalizeTimestamp($reviewedAt),
+            'payment_completed_at' => $this->normalizeTimestamp($paymentCompletedAt),
+        ];
     }
 
     /**

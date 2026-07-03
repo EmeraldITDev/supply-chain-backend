@@ -79,10 +79,8 @@ class TripRequestWorkflowController extends ApiController
         }
 
         $paginator = $query->paginate($perPage);
-        $trips = collect($paginator->items())
-            ->map(fn (Trip $trip) => $this->presentTripRequest($trip, includeProgressSummary: true, viewer: $user))
-            ->values()
-            ->all();
+        $includeProgress = $request->boolean('include_progress');
+        $trips = $this->presentTripRequestPage(collect($paginator->items()), $user, $includeProgress);
 
         return $this->success([
             'trips' => $trips,
@@ -131,10 +129,8 @@ class TripRequestWorkflowController extends ApiController
         }
 
         $paginator = $query->paginate($perPage);
-        $trips = collect($paginator->items())
-            ->map(fn (Trip $trip) => $this->presentTripRequest($trip, includeProgressSummary: true, viewer: $user))
-            ->values()
-            ->all();
+        $includeProgress = $request->boolean('include_progress');
+        $trips = $this->presentTripRequestPage(collect($paginator->items()), $user, $includeProgress);
 
         return $this->success([
             'trips' => $trips,
@@ -1203,14 +1199,19 @@ class TripRequestWorkflowController extends ApiController
             && $trip->workflow_stage === Trip::WORKFLOW_TRIP_REQUEST;
     }
 
-    private function presentTripRequest(Trip $trip, bool $includeProgressSummary = false, ?User $viewer = null): array
-    {
+    private function presentTripRequest(
+        Trip $trip,
+        bool $includeProgressSummary = false,
+        ?User $viewer = null,
+        ?\Illuminate\Support\Collection $linkedTrips = null,
+        ?\Illuminate\Support\Collection $passengersById = null,
+    ): array {
         $scope = $trip->booking_scope;
         $canDelete = $viewer && $this->isDeletableDraft($trip) && (int) $trip->created_by === (int) $viewer->id;
         $logisticsTripId = $trip->logisticsTripIdFromMetadata();
 
         $linkedTrip = $logisticsTripId
-            ? Trip::with(['vehicle', 'driver'])->find($logisticsTripId)
+            ? ($linkedTrips?->get((int) $logisticsTripId) ?? Trip::with(['vehicle', 'driver'])->find($logisticsTripId))
             : null;
 
         $requester = $trip->relationLoaded('creator') ? $trip->creator : null;
@@ -1259,7 +1260,7 @@ class TripRequestWorkflowController extends ApiController
             'scheduled_arrival_at' => $trip->scheduled_arrival_at?->toIso8601String(),
             'passengerUserIds' => $trip->passenger_user_ids ?? [],
             'passenger_user_ids' => $trip->passenger_user_ids ?? [],
-            'passengers' => $this->internalPassengersPayload($trip),
+            'passengers' => $this->internalPassengersPayload($trip, $passengersById),
             'externalPassengers' => $trip->external_passengers ?? [],
             'external_passengers' => $trip->external_passengers ?? [],
             'workflowStage' => $trip->workflow_stage,
@@ -1321,6 +1322,50 @@ class TripRequestWorkflowController extends ApiController
     }
 
     /**
+     * @param  \Illuminate\Support\Collection<int, Trip>  $trips
+     * @return list<array<string, mixed>>
+     */
+    private function presentTripRequestPage(\Illuminate\Support\Collection $trips, ?User $viewer, bool $includeProgressSummary = false): array
+    {
+        $linkedTripIds = $trips
+            ->map(fn (Trip $trip) => $trip->logisticsTripIdFromMetadata())
+            ->filter()
+            ->map(fn ($id) => (int) $id)
+            ->unique()
+            ->values()
+            ->all();
+
+        $linkedTrips = $linkedTripIds === []
+            ? collect()
+            : Trip::with(['vehicle', 'driver'])->whereIn('id', $linkedTripIds)->get()->keyBy('id');
+
+        $passengerIds = $trips
+            ->flatMap(fn (Trip $trip) => $trip->passenger_user_ids ?? [])
+            ->map(fn ($id) => (int) $id)
+            ->unique()
+            ->values()
+            ->all();
+
+        $passengersById = $passengerIds === []
+            ? collect()
+            : User::query()
+                ->whereIn('id', $passengerIds)
+                ->get(['id', 'name', 'email', 'phone', 'department', 'role'])
+                ->keyBy('id');
+
+        return $trips
+            ->map(fn (Trip $trip) => $this->presentTripRequest(
+                $trip,
+                includeProgressSummary: $includeProgressSummary,
+                viewer: $viewer,
+                linkedTrips: $linkedTrips,
+                passengersById: $passengersById,
+            ))
+            ->values()
+            ->all();
+    }
+
+    /**
      * Resolve a single user-facing status for the org-wide trips list, combining the request's
      * own state with the linked logistics trip's operational progress once confirmed.
      */
@@ -1358,11 +1403,27 @@ class TripRequestWorkflowController extends ApiController
     /**
      * @return list<array<string, mixed>>
      */
-    private function internalPassengersPayload(Trip $trip): array
+    private function internalPassengersPayload(Trip $trip, ?\Illuminate\Support\Collection $passengersById = null): array
     {
         $ids = $trip->passenger_user_ids ?? [];
         if ($ids === []) {
             return [];
+        }
+
+        if ($passengersById !== null) {
+            return collect($ids)
+                ->map(fn ($id) => $passengersById->get((int) $id))
+                ->filter()
+                ->map(fn (User $u) => [
+                    'id' => $u->id,
+                    'name' => $u->name,
+                    'email' => $u->email,
+                    'phone' => $u->phone,
+                    'department' => $u->department,
+                    'role' => $u->scmRole(),
+                ])
+                ->values()
+                ->all();
         }
 
         return User::query()

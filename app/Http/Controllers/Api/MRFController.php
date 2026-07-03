@@ -415,7 +415,7 @@ class MRFController extends Controller
                 $query->orWhere('id', (int) $id);
             }
         })
-            ->with(['requester', 'directorApprover', 'priceComparisons', 'items'])
+            ->with(['requester', 'directorApprover', 'executiveApprover', 'priceComparisons', 'items'])
             ->first();
 
         if (!$mrf) {
@@ -426,13 +426,18 @@ class MRFController extends Controller
             ], 404);
         }
 
-        if ($mrf->priceComparisons->isEmpty()) {
-            $mrf->syncPriceComparisonsFromQuotations();
-            $mrf->load('priceComparisons');
-        }
-
-        $freshPOUrls = $this->generateFreshPOUrls($mrf);
-        $profitAndLoss = app(LineItemBudgetService::class)->mrfProfitAndLoss($mrf);
+        $freshPOUrls = $request->boolean('fresh_po_urls')
+            ? $this->generateFreshPOUrls($mrf)
+            : [
+                'unsigned_po_url' => $mrf->unsigned_po_url,
+                'unsigned_po_share_url' => $mrf->unsigned_po_share_url ?? $mrf->unsigned_po_url,
+                'signed_po_url' => $mrf->signed_po_url,
+                'signed_po_share_url' => $mrf->signed_po_share_url ?? $mrf->signed_po_url,
+            ];
+        $profitAndLoss = $request->boolean('include_pnl')
+            ? app(LineItemBudgetService::class)->mrfProfitAndLoss($mrf)
+            : null;
+        $paymentMilestones = app(PaymentScheduleService::class)->paymentMilestonesForMrf($mrf);
         $documentService = app(\App\Services\ProcurementDocumentService::class);
         $vendorId = $documentService->resolveVendorId($mrf);
         $vendorInvoiceDoc = $documentService->findActiveDocument(
@@ -577,8 +582,8 @@ class MRFController extends Controller
                 'quoted_amount' => $item->quoted_amount !== null ? (float) $item->quoted_amount : null,
             ])->values(),
             'profitAndLoss' => $profitAndLoss,
-            'payment_milestones' => app(PaymentScheduleService::class)->paymentMilestonesForMrf($mrf),
-            'paymentMilestones' => app(PaymentScheduleService::class)->paymentMilestonesForMrf($mrf),
+            'payment_milestones' => $paymentMilestones,
+            'paymentMilestones' => $paymentMilestones,
             'vendorInvoice' => $vendorInvoice,
             'vendor_invoice' => $vendorInvoice,
             ]
@@ -676,10 +681,7 @@ class MRFController extends Controller
             ], 404);
         }
 
-        if ($mrf->priceComparisons()->count() === 0) {
-            $mrf->syncPriceComparisonsFromQuotations();
-        }
-        $mrf->load(['priceComparisons.vendor']);
+        $mrf->loadMissing(['priceComparisons.vendor']);
 
         // Get all RFQs for this MRF
         $rfqs = $mrf->rfqs;
@@ -851,7 +853,7 @@ class MRFController extends Controller
                         }
 
                         return array_values($out);
-                    })($quotation->attachments)),
+                    })($quotation->attachments), false),
                     'status' => $quotation->status,
                     'reviewStatus' => $quotation->review_status ?? 'pending',
                     'submittedAt' => $quotation->submitted_at ? $quotation->submitted_at->toIso8601String() : null,
@@ -1014,7 +1016,7 @@ class MRFController extends Controller
                             }
 
                             return array_values($out);
-                        })($selectedQuotation->attachments)), // All uploaded documents
+                        })($selectedQuotation->attachments), false), // All uploaded documents
                         'items' => $selectedQuotation->items->map(function ($item) {
                             return [
                                 'id' => $item->id,
@@ -1079,7 +1081,14 @@ class MRFController extends Controller
             if (is_numeric((string) $id)) {
                 $query->orWhere('id', (int) $id);
             }
-        })->first();
+        })
+            ->with([
+                'requester',
+                'selectedVendor',
+                'rfqs' => fn ($query) => $query->withCount('quotations'),
+                'approvalHistory',
+            ])
+            ->first();
 
         if (! $mrf) {
             return response()->json([

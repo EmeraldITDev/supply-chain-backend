@@ -101,7 +101,7 @@ class QuotationAttachmentService
      * @param mixed $attachments
      * @return array<int, mixed>
      */
-    public function hydrateAttachments($attachments): array
+    public function hydrateAttachments($attachments, bool $signUrls = true): array
     {
         if ($attachments === null || $attachments === '' || $attachments === []) {
             return [];
@@ -140,7 +140,7 @@ class QuotationAttachmentService
             $filePath = $a['file_path'] ?? $a['path'] ?? null;
             $disk = $a['disk'] ?? null;
 
-            if ($filePath) {
+            if ($filePath && $signUrls) {
                 try {
                     $freshUrl = $this->getSignedUrl($filePath, $disk, self::DEFAULT_SIGNED_URL_DAYS);
                     $a['url'] = $freshUrl;
