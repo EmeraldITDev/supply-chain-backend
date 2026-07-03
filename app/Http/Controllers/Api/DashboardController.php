@@ -10,6 +10,7 @@ use App\Models\RFQ;
 use App\Models\SRF;
 use App\Models\Vendor;
 use App\Models\VendorRegistration;
+use App\Services\DashboardStatsCache;
 use App\Services\Finance\FinanceRoutingService;
 use App\Services\WorkflowStateService;
 use App\Support\ProcurementOverviewAccess;
@@ -17,6 +18,7 @@ use App\Support\UserRoleNormalizer;
 use App\Support\VendorCategoryDisplay;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 class DashboardController extends Controller
 {
@@ -65,8 +67,12 @@ class DashboardController extends Controller
             });
 
         // Get pending MRFs
-        $pendingMRFs = MRF::where('status', 'Pending')
-            ->with(['requester'])
+        $pendingMRFs = MRF::query()
+            ->select(array_values(array_intersect(
+                ['id', 'mrf_id', 'formatted_id', 'title', 'category', 'urgency', 'requester_name', 'estimated_cost', 'created_at', 'source', 'is_po_linked', 'linked_po_id', 'po_draft_saved_at', 'unsigned_po_url'],
+                MRF::resolveListApiSelect(),
+            )))
+            ->where('status', 'Pending')
             ->orderBy('created_at', 'desc')
             ->limit($listLimit)
             ->get()
@@ -84,8 +90,12 @@ class DashboardController extends Controller
             });
 
         // Get pending SRFs
-        $pendingSRFs = SRF::where('status', 'Pending')
-            ->with(['requester'])
+        $pendingSRFs = SRF::query()
+            ->select(array_values(array_intersect(
+                ['id', 'srf_id', 'formatted_id', 'title', 'requester_name', 'created_at'],
+                SRF::resolveListApiSelect(),
+            )))
+            ->where('status', 'Pending')
             ->orderBy('created_at', 'desc')
             ->limit($listLimit)
             ->get()
@@ -117,48 +127,40 @@ class DashboardController extends Controller
                 ];
             });
 
-        // Statistics - All pulled live from database
-        
-        // Pending KYC / Awaiting Review: Count pending vendor registrations
-        $pendingRegistrationsCount = VendorRegistration::where('status', 'Pending')->count();
-        
-        // Total Vendors: Count active vendors directly from database
-        $totalVendorsCount = Vendor::where('status', 'Active')->count();
-        
-        // Average Rating: Calculate from active vendors with ratings (database query)
-        $avgRating = Vendor::where('status', 'Active')
-            ->whereNotNull('rating')
-            ->where('rating', '>', 0)
-            ->avg('rating') ?? 0;
-        $avgRating = round((float) $avgRating, 2);
-        
-        // On-Time Delivery: aggregate in SQL (avoids loading every approved quotation + RFQ)
-        $onTimeRow = DB::table('quotations')
-            ->join('r_f_q_s as rfqs', 'quotations.rfq_id', '=', 'rfqs.id')
-            ->where('quotations.status', 'Approved')
-            ->whereNotNull('quotations.delivery_date')
-            ->whereNotNull('rfqs.deadline')
-            ->selectRaw('COUNT(*) as total')
-            ->selectRaw('SUM(CASE WHEN quotations.delivery_date <= rfqs.deadline THEN 1 ELSE 0 END) as on_time')
-            ->first();
+        $stats = DashboardStatsCache::remember('dashboard.procurement_manager.stats', function () {
+            $pendingRegistrationsCount = VendorRegistration::where('status', 'Pending')->count();
+            $totalVendorsCount = Vendor::where('status', 'Active')->count();
+            $avgRating = Vendor::where('status', 'Active')
+                ->whereNotNull('rating')
+                ->where('rating', '>', 0)
+                ->avg('rating') ?? 0;
 
-        $totalDeliveries = (int) ($onTimeRow->total ?? 0);
-        $onTimeCount = (int) ($onTimeRow->on_time ?? 0);
-        $onTimeDeliveryPercentage = $totalDeliveries > 0
-            ? round(($onTimeCount / $totalDeliveries) * 100, 1)
-            : 0;
+            $onTimeRow = DB::table('quotations')
+                ->join('r_f_q_s as rfqs', 'quotations.rfq_id', '=', 'rfqs.id')
+                ->where('quotations.status', 'Approved')
+                ->whereNotNull('quotations.delivery_date')
+                ->whereNotNull('rfqs.deadline')
+                ->selectRaw('COUNT(*) as total')
+                ->selectRaw('SUM(CASE WHEN quotations.delivery_date <= rfqs.deadline THEN 1 ELSE 0 END) as on_time')
+                ->first();
 
-        $stats = [
-            'pendingRegistrations' => $pendingRegistrationsCount,
-            'pendingMRFs' => MRF::where('status', 'Pending')->count(),
-            'pendingSRFs' => SRF::where('status', 'Pending')->count(),
-            'pendingQuotations' => Quotation::where('status', 'Pending')->count(),
-            'totalVendors' => $totalVendorsCount, // Live count from database
-            'pendingKYC' => $pendingRegistrationsCount, // Live count from database
-            'awaitingReview' => $pendingRegistrationsCount, // Live count from database
-            'avgRating' => $avgRating, // Live calculation from database
-            'onTimeDelivery' => $onTimeDeliveryPercentage, // Live calculation from database
-        ];
+            $totalDeliveries = (int) ($onTimeRow->total ?? 0);
+            $onTimeCount = (int) ($onTimeRow->on_time ?? 0);
+
+            return [
+                'pendingRegistrations' => $pendingRegistrationsCount,
+                'pendingMRFs' => MRF::where('status', 'Pending')->count(),
+                'pendingSRFs' => SRF::where('status', 'Pending')->count(),
+                'pendingQuotations' => Quotation::where('status', 'Pending')->count(),
+                'totalVendors' => $totalVendorsCount,
+                'pendingKYC' => $pendingRegistrationsCount,
+                'awaitingReview' => $pendingRegistrationsCount,
+                'avgRating' => round((float) $avgRating, 2),
+                'onTimeDelivery' => $totalDeliveries > 0
+                    ? round(($onTimeCount / $totalDeliveries) * 100, 1)
+                    : 0,
+            ];
+        });
 
         return response()->json([
             'success' => true,
@@ -199,9 +201,14 @@ class DashboardController extends Controller
 
         // SRFs waiting on Supply Chain Director (not returned here before — frontends that only read this dashboard never saw them)
         $srfsAwaitingSupplyChainDirectorApproval = SRF::query()
+            ->select(array_values(array_filter([
+                'id', 'srf_id', 'formatted_id', 'title', 'service_type', 'description', 'justification',
+                'duration', 'department', 'requester_id', 'requester_name', 'current_stage',
+                'urgency', 'estimated_cost', 'created_at', 'date',
+            ], fn (string $column): bool => Schema::hasColumn('s_r_f_s', $column))))
             ->where('status', 'Pending')
             ->where('current_stage', 'supply_chain_director_review')
-            ->with(['requester'])
+            ->with(['requester:id,name,email'])
             ->orderByDesc('created_at')
             ->limit($listLimit)
             ->get()
@@ -254,8 +261,7 @@ class DashboardController extends Controller
                 ];
             });
 
-        // Get high-level statistics
-        $stats = [
+        $stats = DashboardStatsCache::remember('dashboard.supply_chain_director.stats', fn () => [
             'totalVendors' => Vendor::count(),
             'activeVendors' => Vendor::where('status', 'Active')->count(),
             'pendingRegistrations' => VendorRegistration::where('status', 'Pending')->count(),
@@ -270,14 +276,13 @@ class DashboardController extends Controller
             'pendingSrfDirectorApprovals' => SRF::where('status', 'Pending')
                 ->where('current_stage', 'supply_chain_director_review')
                 ->count(),
-        ];
+        ]);
 
-        // Get procurement metrics
-        $metrics = [
+        $metrics = DashboardStatsCache::remember('dashboard.supply_chain_director.metrics', fn () => [
             'averageQuotationAmount' => Quotation::where('status', 'Approved')->avg('price') ?? 0,
             'totalApprovedQuotations' => Quotation::where('status', 'Approved')->count(),
             'totalApprovedMRFs' => MRF::where('status', 'Approved')->count(),
-        ];
+        ]);
 
         return response()->json([
             'success' => true,

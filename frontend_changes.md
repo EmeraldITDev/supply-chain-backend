@@ -1244,3 +1244,42 @@ Department list is now the fixed nine options (not a union of ad-hoc user spelli
 - `src/constants/scmDepartments.ts` — same nine options + `normalizeScmUserDepartment()` for edit form prefill.
 - `UserManagement.tsx` — department **Select** dropdown on create and edit (replaces free-text `Input`).
 
+---
+
+## SCM Platform — MRF/SRF Multi-Document Attachments & Backend Performance (Jul 2026)
+
+### Backend attachment API
+- New polymorphic `attachments` table stores MRF/SRF supporting documents (`attachable_type`, `attachable_id`, `collection`, `disk`, `file_path`, `original_name`, `mime_type`, `size`, `uploaded_by`).
+- `POST /api/mrfs`, `PUT /api/mrfs/{id}`, `POST /api/srfs`, and `PUT /api/srfs/{id}` accept multiple files using `attachments[]` or `documents[]`. Legacy single-file names `attachment` and `invoice` are also accepted.
+- Allowed file types: `pdf`, `xls`, `xlsx`, `csv`, `png`, `jpg`, `jpeg`, `webp`. Max size: 10 MB per file.
+- Detail/create/update responses include both `attachments` and `documents` arrays. MRF legacy fields (`attachmentUrl`, `attachmentShareUrl`, `attachmentName`) still point to the first uploaded document for old clients.
+
+### Attachment response item
+```json
+{
+  "id": 12,
+  "collection": "supporting_documents",
+  "fileName": "vendor-quote.pdf",
+  "mimeType": "application/pdf",
+  "sizeBytes": 384221,
+  "downloadUrl": "https://...",
+  "uploadedBy": { "id": 4, "name": "Amina Bello", "email": "amina@example.com" },
+  "createdAt": "2026-07-03T17:48:00+01:00"
+}
+```
+
+### Frontend (emerald-supply-chain)
+- Replace MRF/SRF single-file inputs with a reusable multi-file dropzone. Keep selected `File[]` in form state and show removable chips/cards before submit.
+- For multipart submit, append each file separately:
+```ts
+files.forEach((file) => formData.append("attachments[]", file));
+```
+- Continue JSON-stringifying `items` / `line_items` arrays when sending multipart form data.
+- Detail pages should render `response.attachments ?? response.documents ?? []` as a document list/grid with file icon, name, size, uploaded timestamp, and `downloadUrl` link.
+- After successful create/update, render the returned attachment array immediately and invalidate the relevant MRF/SRF detail + list query keys.
+
+### Backend performance
+- `GET /api/srfs` now uses strict server-side pagination, narrow requester eager-loads, and explicit list columns by default. Rich line-item rows remain opt-in via `include_line_items=1`.
+- Dashboard aggregate stats are cached for short intervals and invalidated when MRF/SRF models change.
+- Added guarded indexes for MRF/SRF status/stage/requester/date sorts plus attachment and line-item lookup paths.
+

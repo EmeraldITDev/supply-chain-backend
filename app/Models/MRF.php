@@ -6,10 +6,12 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
+use Illuminate\Database\Eloquent\Relations\MorphMany;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\URL;
 use Illuminate\Support\Str;
+use App\Services\DashboardStatsCache;
 use App\Support\PurchaseOrderCurrency;
 
 class MRF extends Model
@@ -29,6 +31,9 @@ class MRF extends Model
                 $mrf->scm_transaction_id = $mrf->getOriginal('scm_transaction_id');
             }
         });
+
+        static::saved(fn () => DashboardStatsCache::forgetAll());
+        static::deleted(fn () => DashboardStatsCache::forgetAll());
     }
 
     /**
@@ -399,6 +404,11 @@ class MRF extends Model
     public function items(): HasMany
     {
         return $this->hasMany(MRFItem::class, 'mrf_id');
+    }
+
+    public function attachments(): MorphMany
+    {
+        return $this->morphMany(Attachment::class, 'attachable');
     }
 
     /**

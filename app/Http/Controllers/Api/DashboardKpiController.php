@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\MRF;
 use App\Models\PriceComparison;
 use App\Models\SRF;
+use App\Services\DashboardStatsCache;
 use Illuminate\Http\Request;
 
 class DashboardKpiController extends Controller
@@ -17,25 +18,29 @@ class DashboardKpiController extends Controller
             return response()->json(['success' => false, 'error' => 'Unauthenticated'], 401);
         }
 
-        $posGenerated = MRF::whereNotNull('po_number')->count();
-        $mrfsApproved = MRF::where(function ($q): void {
-            $q->where('executive_approved', true)
-                ->orWhereNotNull('director_approved_at')
-                ->orWhereIn('workflow_state', ['procurement_review', 'vendor_selection', 'po_generation', 'po_signed', 'closed']);
-        })->count();
-        $srfsApproved = SRF::where('status', 'Approved')->count();
-        $priceComparisonCount = PriceComparison::query()
-            ->distinct('purchase_order_id')
-            ->count('purchase_order_id');
+        $kpis = DashboardStatsCache::remember('dashboard.kpis', function () {
+            $posGenerated = MRF::whereNotNull('po_number')->count();
+            $mrfsApproved = MRF::where(function ($q): void {
+                $q->where('executive_approved', true)
+                    ->orWhereNotNull('director_approved_at')
+                    ->orWhereIn('workflow_state', ['procurement_review', 'vendor_selection', 'po_generation', 'po_signed', 'closed']);
+            })->count();
+            $srfsApproved = SRF::where('status', 'Approved')->count();
+            $priceComparisonCount = PriceComparison::query()
+                ->distinct('purchase_order_id')
+                ->count('purchase_order_id');
 
-        return response()->json([
-            'success' => true,
-            'kpis' => [
+            return [
                 'totalPosGenerated' => $posGenerated,
                 'totalMrfsApproved' => $mrfsApproved,
                 'totalSrfsApproved' => $srfsApproved,
                 'priceComparisonCount' => $priceComparisonCount,
-            ],
+            ];
+        });
+
+        return response()->json([
+            'success' => true,
+            'kpis' => $kpis,
         ]);
     }
 }

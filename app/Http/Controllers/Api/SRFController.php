@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\SRF;
 use App\Models\Logistics\VehicleMaintenance;
 use App\Support\ProcurementOverviewAccess;
+use App\Services\AttachmentService;
 use App\Services\FormattedIdGenerator;
 use App\Services\LineItemBudgetService;
 use App\Services\NotificationService;
@@ -56,7 +57,10 @@ class SRFController extends Controller
      */
     public function index(Request $request)
     {
-        $query = SRF::with('requester');
+        $includeLineItems = $request->boolean('include_line_items', false);
+        $query = SRF::query()
+            ->when(! $includeLineItems, fn ($q) => $q->select(SRF::resolveListApiSelect()))
+            ->with(['requester:id,name,email,department']);
 
         // Filter by status
         if ($request->has('status')) {
@@ -93,7 +97,20 @@ class SRFController extends Controller
         if ($user && ($user->scmRole() === 'vendor' || (method_exists($user, 'hasRole') && $user->hasRole('vendor')))) {
             $isVendor = true;
             // Vendors don't typically need SRFs - return empty array
-            return response()->json([]);
+            $perPage = $this->resolvePerPage($request, 25, 100);
+            return response()->json([
+                'success' => true,
+                'data' => [],
+                'srfs' => [],
+                'pagination' => [
+                    'page' => $this->resolvePage($request),
+                    'per_page' => $perPage,
+                    'total' => 0,
+                    'total_pages' => 0,
+                    'from' => null,
+                    'to' => null,
+                ],
+            ]);
         }
 
         if ($user && in_array($user->scmRole(), ['employee', 'general_employee', 'staff', 'regular_staff'], true)) {
@@ -129,7 +146,6 @@ class SRFController extends Controller
         }
 
         $perPage = $this->resolvePerPage($request, 25, 100);
-        $includeLineItems = $request->boolean('include_line_items', false);
         if ($includeLineItems) {
             $query->with('items');
         }
@@ -145,7 +161,9 @@ class SRFController extends Controller
         $srfs = $query->paginate($perPage);
 
         $items = collect($srfs->items())->map(
-            fn (SRF $srf) => $this->presentSrf($srf, $includeLineItems, $request->user())
+            fn (SRF $srf) => $includeLineItems
+                ? $this->presentSrf($srf, true, $request->user())
+                : $srf->toListApiArray()
         )->values()->all();
 
         return response()->json(array_merge(
@@ -163,6 +181,9 @@ class SRFController extends Controller
     {
         $requesterName = $srf->requester_name
             ?: ($srf->relationLoaded('requester') && $srf->requester ? $srf->requester->name : null);
+        $attachments = $srf->relationLoaded('attachments')
+            ? app(AttachmentService::class)->payloadFor($srf, false)
+            : [];
 
         $requesterObject = [
             'id' => (int) $srf->requester_id,
@@ -216,6 +237,8 @@ class SRFController extends Controller
             'vehicleSnapshot' => $srf->vehicle_snapshot,
             'maintenanceHistory' => $srf->maintenance_history,
             'rfqPrefill' => $srf->rfq_prefill,
+            'attachments' => $attachments,
+            'documents' => $attachments,
             ]
         );
 
@@ -385,7 +408,7 @@ class SRFController extends Controller
             'estimatedCost' => 'nullable|numeric|min:0',
             'estimated_cost' => 'nullable|numeric|min:0',
             'justification' => 'required|string',
-            'invoice' => 'nullable|file|mimes:pdf,doc,docx,xls,xlsx,png,jpg,jpeg|max:10240', // Optional invoice upload (10MB max)
+            ...AttachmentService::validationRules(),
         ], RequestLineItemParser::validationRules(), PaymentMilestoneRequest::validationRules()));
 
         if ($validator->fails()) {
@@ -415,9 +438,6 @@ class SRFController extends Controller
 
         $user = $request->user();
 
-        // Handle invoice upload if provided
-        $invoiceUrl = null;
-        $invoiceShareUrl = null;
         $srfId = SRF::generateSRFId();
         $createdAt = now();
 
@@ -431,42 +451,8 @@ class SRFController extends Controller
             'created_at' => $createdAt,
         ]);
 
-        if ($request->hasFile('invoice')) {
-            $invoiceFile = $request->file('invoice');
-            $disk = config('filesystems.documents_disk', env('DOCUMENTS_DISK', 's3'));
-            $invoiceFileName = "invoice_{$srfId}_" . time() . "." . $invoiceFile->getClientOriginalExtension();
-            $invoicePath = "srfs/" . date('Y/m') . "/{$srfId}/{$invoiceFileName}";
-
-            // Ensure directory structure exists (for S3, this is just the path)
-            $directory = dirname($invoicePath);
-            if ($disk !== 's3' && !\Storage::disk($disk)->exists($directory)) {
-                \Storage::disk($disk)->makeDirectory($directory, 0755, true);
-            }
-
-            $invoiceFile->storeAs($directory, basename($invoicePath), $disk);
-
-            // Get URL (temporary signed URL for S3, public URL for local)
-            if ($disk === 's3') {
-                try {
-                    $invoiceUrl = \Storage::disk($disk)->temporaryUrl($invoicePath, now()->addDays(7));
-                    $invoiceShareUrl = $invoiceUrl;
-                } catch (\Exception $e) {
-                    \Log::warning('S3 temporary URL generation failed, using regular URL', [
-                        'error' => $e->getMessage(),
-                        'path' => $invoicePath
-                    ]);
-                    $invoiceUrl = \Storage::disk($disk)->url($invoicePath);
-                    $invoiceShareUrl = $invoiceUrl;
-                }
-            } else {
-                $invoiceUrl = \Storage::disk($disk)->url($invoicePath);
-                if (!filter_var($invoiceUrl, FILTER_VALIDATE_URL)) {
-                    $baseUrl = config('app.url');
-                    $invoiceUrl = rtrim($baseUrl, '/') . '/' . ltrim($invoiceUrl, '/');
-                }
-                $invoiceShareUrl = $invoiceUrl;
-            }
-        }
+        $attachmentService = app(AttachmentService::class);
+        $attachmentFiles = $attachmentService->filesFromRequest($request, ['invoice', 'attachment', 'attachments', 'documents']);
 
         $srf = SRF::create([
             'srf_id' => $srfId,
@@ -493,10 +479,12 @@ class SRFController extends Controller
                 'note' => 'SRF submitted; awaiting Supply Chain Director review.',
             ]],
             'remarks' => 'pending_supply_chain_director_review',
-            'invoice_url' => $invoiceUrl,
-            'invoice_share_url' => $invoiceShareUrl,
             'payment_milestones' => $paymentMilestones,
         ]);
+
+        if ($attachmentFiles !== []) {
+            $attachmentService->storeMany($srf, $attachmentFiles, $user);
+        }
 
         if ($lineItems !== []) {
             app(LineItemBudgetService::class)->syncSrfItems($srf, $lineItems);
@@ -512,7 +500,7 @@ class SRFController extends Controller
             ]);
         }
 
-        $srf->load('items');
+        $srf->load('items', 'attachments.uploader:id,name,email');
 
         return response()->json($this->presentSrf($srf, true), 201);
     }
@@ -541,7 +529,7 @@ class SRFController extends Controller
             ], 403);
         }
 
-        $srf->load(['vehicle', 'maintenance', 'requester', 'items']);
+        $srf->load(['vehicle', 'maintenance', 'requester', 'items', 'attachments.uploader:id,name,email']);
         $progress = $this->buildProgressTimeline($srf);
         $currentStep = collect($progress)->firstWhere('status', 'in_progress')
             ?? collect($progress)->last(fn (array $s) => $s['status'] === 'completed');
@@ -800,6 +788,7 @@ class SRFController extends Controller
             'estimated_cost' => 'sometimes|nullable|numeric|min:0',
             'justification' => 'sometimes|required|string',
             'remarks' => 'sometimes|nullable|string|max:1000',
+            ...AttachmentService::validationRules(),
         ], RequestLineItemParser::validationRules(), PaymentMilestoneRequest::validationRules()));
 
         if ($validator->fails()) {
@@ -826,6 +815,9 @@ class SRFController extends Controller
             }
         }
 
+        $attachmentService = app(AttachmentService::class);
+        $attachmentFiles = $attachmentService->filesFromRequest($request, ['invoice', 'attachment', 'attachments', 'documents']);
+
         $updateData = [];
         if ($request->has('title')) $updateData['title'] = $request->title;
         if ($request->has('serviceType')) $updateData['service_type'] = $request->serviceType;
@@ -848,8 +840,12 @@ class SRFController extends Controller
             app(LineItemBudgetService::class)->syncSrfItems($srf, $lineItems);
         }
 
+        if ($attachmentFiles !== []) {
+            $attachmentService->storeMany($srf, $attachmentFiles, $user);
+        }
+
         $srf->refresh();
-        $srf->load('items');
+        $srf->load('items', 'attachments.uploader:id,name,email');
 
         $changedFields = $this->requesterEditService->detectChangedFieldLabels(
             $before,
@@ -871,6 +867,10 @@ class SRFController extends Controller
 
         if (PaymentMilestoneRequest::provided($request)) {
             $changedFields[] = 'payment milestones';
+        }
+
+        if ($attachmentFiles !== []) {
+            $changedFields[] = 'attachments';
         }
 
         $remarks = $request->input('remarks');

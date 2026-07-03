@@ -13,6 +13,7 @@ use App\Models\Vendor;
 use App\Models\Logistics\VehicleMaintenance;
 use App\Support\LogisticsMrfRouting;
 use App\Services\LineItemBudgetService;
+use App\Services\AttachmentService;
 use App\Support\PaymentMilestoneRequest;
 use App\Support\PurchaseOrderCurrency;
 use App\Support\RequestLineItemParser;
@@ -295,7 +296,20 @@ class MRFController extends Controller
             $isVendor = true;
             // Vendors can see MRFs that are linked to RFQs assigned to them
             // For now, return empty array - vendors should access MRFs through RFQs
-            return response()->json([]);
+            $perPage = $this->resolvePerPage($request, 25, 100);
+            return response()->json([
+                'success' => true,
+                'data' => [],
+                'mrfs' => [],
+                'pagination' => [
+                    'page' => $this->resolvePage($request),
+                    'per_page' => $perPage,
+                    'total' => 0,
+                    'total_pages' => 0,
+                    'from' => null,
+                    'to' => null,
+                ],
+            ]);
         }
 
         if ($user && in_array($user->scmRole(), ['employee', 'general_employee'])) {
@@ -415,7 +429,7 @@ class MRFController extends Controller
                 $query->orWhere('id', (int) $id);
             }
         })
-            ->with(['requester', 'directorApprover', 'executiveApprover', 'priceComparisons', 'items'])
+            ->with(['requester', 'directorApprover', 'executiveApprover', 'priceComparisons', 'items', 'attachments.uploader:id,name,email'])
             ->first();
 
         if (!$mrf) {
@@ -447,6 +461,7 @@ class MRFController extends Controller
         );
         $vendorInvoice = $vendorInvoiceDoc ? $documentService->transform($vendorInvoiceDoc) : null;
         $requesterEditService = app(RequesterEditWindowService::class);
+        $attachments = app(AttachmentService::class)->payloadFor($mrf);
 
         return response()->json(array_merge(
             $mrf->scmTransactionApiFields(),
@@ -543,6 +558,8 @@ class MRFController extends Controller
             'attachment_share_url' => $mrf->attachment_share_url,
             'attachmentName' => $mrf->attachment_name,
             'attachment_name' => $mrf->attachment_name,
+            'attachments' => $attachments,
+            'documents' => $attachments,
             'items' => $mrf->items->map(fn ($item) => [
                 'id' => $item->id,
                 'itemName' => $item->item_name,
@@ -670,6 +687,7 @@ class MRFController extends Controller
                     'vendors:id,vendor_id,name',
                 ]),
                 'items',
+                'attachments.uploader:id,name,email',
             ])
             ->first();
 
@@ -685,6 +703,7 @@ class MRFController extends Controller
 
         // Get all RFQs for this MRF
         $rfqs = $mrf->rfqs;
+        $attachments = app(AttachmentService::class)->payloadFor($mrf);
 
         // Fleet / maintenance SRFs referenced from RFQ copy (e.g. "SRF-2026-001")
         $srfIdMatches = collect();
@@ -899,6 +918,8 @@ class MRFController extends Controller
                     'executiveRemarks' => $mrf->executive_remarks,
                     'chairmanApproved' => (bool) $mrf->chairman_approved,
                     'chairmanApprovedAt' => $mrf->chairman_approved_at ? $mrf->chairman_approved_at->toIso8601String() : null,
+                    'attachments' => $attachments,
+                    'documents' => $attachments,
                 'rfqs' => $rfqs->map(function ($rfq) {
                     return [
                         'id' => $rfq->rfq_id,
@@ -1175,7 +1196,7 @@ class MRFController extends Controller
                 'justification' => 'required|string',
                 'department' => 'nullable|string|max:255',
                 'pfi' => 'nullable|file|mimes:pdf,doc,docx|max:10240', // Optional PFI upload (10MB max)
-                'attachment' => 'nullable|file|max:10240', // Max 10MB, any file type
+                ...AttachmentService::validationRules(),
                 'source' => 'nullable|string|in:standard,po_generated',
                 'is_po_linked' => 'nullable|boolean',
                 'isPoLinked' => 'nullable|boolean',
@@ -1255,25 +1276,8 @@ class MRFController extends Controller
             $attachmentUrl = null;
             $attachmentShareUrl = null;
             $attachmentName = null;
-
-            if ($request->hasFile('attachment')) {
-                $attachmentFile = $request->file('attachment');
-
-                $disk = $this->getStorageDisk();
-                $attachmentFileName = "attachment_{$mrfId}_" . time() . "." . $attachmentFile->getClientOriginalExtension();
-                $attachmentPath = "mrfs/" . date('Y/m') . "/{$mrfId}/{$attachmentFileName}";
-
-                $directory = dirname($attachmentPath);
-                if ($disk !== 's3' && !Storage::disk($disk)->exists($directory)) {
-                    Storage::disk($disk)->makeDirectory($directory, 0755, true);
-                }
-
-                $attachmentFile->storeAs($directory, basename($attachmentPath), $disk);
-
-                $attachmentUrl = $this->getFileUrl($attachmentPath, $disk);
-                $attachmentShareUrl = $attachmentUrl;
-                $attachmentName = $attachmentFile->getClientOriginalName();
-            }
+            $attachmentService = app(AttachmentService::class);
+            $attachmentFiles = $attachmentService->filesFromRequest($request, ['invoice', 'attachment', 'attachments', 'documents']);
 
             $normalizedContractType = strtolower(trim((string) $request->contractType));
 
@@ -1364,6 +1368,20 @@ class MRFController extends Controller
             if ($isPoLinked && ! filled($mrf->linked_po_id)) {
                 $mrf->update(['linked_po_id' => $mrf->mrf_id]);
                 $mrf->refresh();
+            }
+
+            if ($attachmentFiles !== []) {
+                $uploadedAttachments = $attachmentService->storeMany($mrf, $attachmentFiles, $user);
+                $firstAttachment = $uploadedAttachments->first();
+
+                if ($firstAttachment) {
+                    $firstAttachmentPayload = $attachmentService->transform($firstAttachment);
+                    $mrf->update([
+                        'attachment_url' => $firstAttachmentPayload['downloadUrl'],
+                        'attachment_share_url' => $firstAttachmentPayload['downloadUrl'],
+                        'attachment_name' => $firstAttachmentPayload['fileName'],
+                    ]);
+                }
             }
 
             // Log activity
@@ -1457,6 +1475,9 @@ class MRFController extends Controller
                 ]);
             }
 
+            $mrf->load('attachments.uploader:id,name,email');
+            $attachments = $attachmentService->payloadFor($mrf);
+
             return response()->json([
                 'success' => true,
                 'data' => array_merge($mrf->scmTransactionApiFields(), [
@@ -1489,6 +1510,8 @@ class MRFController extends Controller
                     'attachmentUrl' => $mrf->attachment_url,
                     'attachmentShareUrl' => $mrf->attachment_share_url,
                     'attachmentName' => $mrf->attachment_name,
+                    'attachments' => $attachments,
+                    'documents' => $attachments,
                     'payment_milestones' => app(PaymentScheduleService::class)->paymentMilestonesForMrf($mrf),
                     'paymentMilestones' => app(PaymentScheduleService::class)->paymentMilestonesForMrf($mrf),
                 ]),
@@ -1563,6 +1586,7 @@ class MRFController extends Controller
             'justification' => 'sometimes|required|string',
             'department' => 'sometimes|nullable|string|max:255',
             'remarks' => 'sometimes|nullable|string|max:1000',
+            ...AttachmentService::validationRules(),
         ], RequestLineItemParser::validationRules(), PaymentMilestoneRequest::validationRules()));
 
         if ($validator->fails()) {
@@ -1587,6 +1611,9 @@ class MRFController extends Controller
                 ], 422);
             }
         }
+
+        $attachmentService = app(AttachmentService::class);
+        $attachmentFiles = $attachmentService->filesFromRequest($request, ['invoice', 'attachment', 'attachments', 'documents']);
 
         $updateData = [];
         if ($request->has('title')) $updateData['title'] = $request->title;
@@ -1624,8 +1651,22 @@ class MRFController extends Controller
             }
         }
 
+        if ($attachmentFiles !== []) {
+            $uploadedAttachments = $attachmentService->storeMany($mrf, $attachmentFiles, $user);
+            $firstAttachment = $uploadedAttachments->first();
+
+            if ($firstAttachment) {
+                $firstAttachmentPayload = $attachmentService->transform($firstAttachment);
+                $mrf->update([
+                    'attachment_url' => $firstAttachmentPayload['downloadUrl'],
+                    'attachment_share_url' => $firstAttachmentPayload['downloadUrl'],
+                    'attachment_name' => $firstAttachmentPayload['fileName'],
+                ]);
+            }
+        }
+
         $mrf->refresh();
-        $mrf->load('items');
+        $mrf->load('items', 'attachments.uploader:id,name,email');
 
         $changedFields = $requesterEditService->detectChangedFieldLabels(
             $before,
@@ -1650,12 +1691,17 @@ class MRFController extends Controller
             $changedFields[] = 'payment milestones';
         }
 
+        if ($attachmentFiles !== []) {
+            $changedFields[] = 'attachments';
+        }
+
         $remarks = $request->input('remarks');
         $changeSummary = $requesterEditService->summarizeChangedFields($changedFields);
         $requesterEditService->recordMrfEdit($mrf, $user, $remarks, $changedFields);
         $this->notificationService->notifyMRFRequesterUpdated($mrf, $user, $changeSummary);
 
         $requesterEditMeta = $requesterEditService->metaForMrf($user, $mrf);
+        $attachments = $attachmentService->payloadFor($mrf);
 
         return response()->json(array_merge([
             'id' => $mrf->mrf_id,
@@ -1695,6 +1741,11 @@ class MRFController extends Controller
             ])->values(),
             'payment_milestones' => app(PaymentScheduleService::class)->paymentMilestonesForMrf($mrf),
             'paymentMilestones' => app(PaymentScheduleService::class)->paymentMilestonesForMrf($mrf),
+            'attachmentUrl' => $mrf->attachment_url,
+            'attachmentShareUrl' => $mrf->attachment_share_url,
+            'attachmentName' => $mrf->attachment_name,
+            'attachments' => $attachments,
+            'documents' => $attachments,
             'approvalHistory' => $mrf->approval_history ?? [],
         ], $requesterEditMeta));
     }
