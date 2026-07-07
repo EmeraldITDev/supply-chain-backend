@@ -3,12 +3,12 @@
 namespace App\Models;
 
 use App\Services\DashboardStatsCache;
+use App\Support\TableColumnCache;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\MorphMany;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Schema;
 
 class SRF extends Model
 {
@@ -116,16 +116,13 @@ class SRF extends Model
             return $resolved;
         }
 
-        if (! Schema::hasTable('s_r_f_s')) {
+        if (! TableColumnCache::hasTable('s_r_f_s')) {
             $resolved = self::LIST_API_SELECT;
 
             return $resolved;
         }
 
-        $resolved = array_values(array_filter(
-            self::LIST_API_SELECT,
-            static fn (string $column): bool => Schema::hasColumn('s_r_f_s', $column),
-        ));
+        $resolved = TableColumnCache::filterExisting('s_r_f_s', self::LIST_API_SELECT);
 
         $missing = array_values(array_diff(self::LIST_API_SELECT, $resolved));
         if ($missing !== []) {

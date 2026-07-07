@@ -14,11 +14,11 @@ use App\Services\DashboardStatsCache;
 use App\Services\Finance\FinanceRoutingService;
 use App\Services\WorkflowStateService;
 use App\Support\ProcurementOverviewAccess;
+use App\Support\TableColumnCache;
 use App\Support\UserRoleNormalizer;
 use App\Support\VendorCategoryDisplay;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Schema;
 
 class DashboardController extends Controller
 {
@@ -201,11 +201,11 @@ class DashboardController extends Controller
 
         // SRFs waiting on Supply Chain Director (not returned here before — frontends that only read this dashboard never saw them)
         $srfsAwaitingSupplyChainDirectorApproval = SRF::query()
-            ->select(array_values(array_filter([
+            ->select(TableColumnCache::filterExisting('s_r_f_s', [
                 'id', 'srf_id', 'formatted_id', 'title', 'service_type', 'description', 'justification',
                 'duration', 'department', 'requester_id', 'requester_name', 'current_stage',
                 'urgency', 'estimated_cost', 'created_at', 'date',
-            ], fn (string $column): bool => Schema::hasColumn('s_r_f_s', $column))))
+            ]))
             ->where('status', 'Pending')
             ->where('current_stage', 'supply_chain_director_review')
             ->with(['requester:id,name,email'])

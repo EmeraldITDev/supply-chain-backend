@@ -8,12 +8,12 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\Relations\MorphMany;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\URL;
 use Illuminate\Support\Str;
 use App\Services\DashboardStatsCache;
 use App\Services\WorkflowStateService;
 use App\Support\PurchaseOrderCurrency;
+use App\Support\TableColumnCache;
 
 class MRF extends Model
 {
@@ -664,16 +664,13 @@ class MRF extends Model
             return $resolved;
         }
 
-        if (! Schema::hasTable('m_r_f_s')) {
+        if (! TableColumnCache::hasTable('m_r_f_s')) {
             $resolved = self::LIST_API_SELECT;
 
             return $resolved;
         }
 
-        $resolved = array_values(array_filter(
-            self::LIST_API_SELECT,
-            static fn (string $column): bool => Schema::hasColumn('m_r_f_s', $column),
-        ));
+        $resolved = TableColumnCache::filterExisting('m_r_f_s', self::LIST_API_SELECT);
 
         $missing = array_values(array_diff(self::LIST_API_SELECT, $resolved));
         if ($missing !== []) {
