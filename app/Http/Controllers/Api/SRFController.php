@@ -58,9 +58,11 @@ class SRFController extends Controller
     public function index(Request $request)
     {
         $includeLineItems = $request->boolean('include_line_items', false);
-        $query = SRF::query()
-            ->when(! $includeLineItems, fn ($q) => $q->select(SRF::resolveListApiSelect()))
-            ->with(['requester:id,name,email,department']);
+        $query = SRF::query();
+
+        if (! $includeLineItems) {
+            $query->select(SRF::resolveTableListSelect());
+        }
 
         // Filter by status
         if ($request->has('status')) {
@@ -94,7 +96,7 @@ class SRFController extends Controller
         // If user is a vendor, they typically don't need direct access to SRFs
         // Allow access but return empty array
         $isVendor = false;
-        if ($user && ($user->scmRole() === 'vendor' || (method_exists($user, 'hasRole') && $user->hasRole('vendor')))) {
+        if ($user && ($user->scmRole() === 'vendor' || $user->hasScmRole('vendor'))) {
             $isVendor = true;
             // Vendors don't typically need SRFs - return empty array
             $perPage = $this->resolvePerPage($request, 25, 100);
@@ -145,7 +147,6 @@ class SRFController extends Controller
             });
         }
 
-        $perPage = $this->resolvePerPage($request, 25, 100);
         if ($includeLineItems) {
             $query->with('items');
         }
@@ -158,7 +159,7 @@ class SRFController extends Controller
         );
         $query->orderBy($sortBy, $sortOrder);
 
-        $srfs = $query->paginate($perPage);
+        $srfs = $this->paginateWithCachedCount($query, $request, 'srf');
 
         $items = collect($srfs->items())->map(
             fn (SRF $srf) => $includeLineItems

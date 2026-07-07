@@ -12,6 +12,7 @@ use Illuminate\Support\Facades\URL;
 use Illuminate\Support\Str;
 use App\Services\DashboardStatsCache;
 use App\Services\WorkflowStateService;
+use App\Support\ListCountCache;
 use App\Support\PurchaseOrderCurrency;
 use App\Support\TableColumnCache;
 
@@ -33,8 +34,14 @@ class MRF extends Model
             }
         });
 
-        static::saved(fn () => DashboardStatsCache::forgetAll());
-        static::deleted(fn () => DashboardStatsCache::forgetAll());
+        static::saved(function () {
+            DashboardStatsCache::forgetAll();
+            ListCountCache::bump('mrf');
+        });
+        static::deleted(function () {
+            DashboardStatsCache::forgetAll();
+            ListCountCache::bump('mrf');
+        });
     }
 
     /**
@@ -630,6 +637,20 @@ class MRF extends Model
     }
 
     /**
+     * Slimmer column set for default GET /api/mrfs table rows (avoids wide text/url columns).
+     *
+     * @var list<string>
+     */
+    public const LIST_TABLE_SELECT = [
+        'id', 'mrf_id', 'formatted_id', 'scm_transaction_id', 'title', 'category', 'contract_type',
+        'urgency', 'quantity', 'estimated_cost', 'currency', 'requester_id', 'requester_name', 'department',
+        'date', 'created_at', 'updated_at', 'status', 'current_stage', 'workflow_state', 'first_approval_by_role',
+        'rejection_reason', 'is_resubmission', 'executive_approved', 'executive_approved_at',
+        'po_number', 'po_draft_saved_at', 'unsigned_po_url', 'signed_po_url', 'po_generated_at', 'po_terms_mode',
+        'source', 'is_po_linked', 'linked_po_id', 'grn_completed',
+    ];
+
+    /**
      * Columns loaded for paginated list endpoints (avoids large text / JSON blobs).
      *
      * @var list<string>
@@ -676,6 +697,30 @@ class MRF extends Model
         if ($missing !== []) {
             Log::warning('MRF list select omits missing columns', ['columns' => $missing]);
         }
+
+        return $resolved;
+    }
+
+    /**
+     * Table-view column list (narrower than resolveListApiSelect for PO mode).
+     *
+     * @return list<string>
+     */
+    public static function resolveTableListSelect(): array
+    {
+        static $resolved = null;
+
+        if ($resolved !== null) {
+            return $resolved;
+        }
+
+        if (! TableColumnCache::hasTable('m_r_f_s')) {
+            $resolved = self::LIST_TABLE_SELECT;
+
+            return $resolved;
+        }
+
+        $resolved = TableColumnCache::filterExisting('m_r_f_s', self::LIST_TABLE_SELECT);
 
         return $resolved;
     }

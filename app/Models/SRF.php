@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Services\DashboardStatsCache;
+use App\Support\ListCountCache;
 use App\Support\TableColumnCache;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -16,8 +17,14 @@ class SRF extends Model
 
     protected static function booted(): void
     {
-        static::saved(fn () => DashboardStatsCache::forgetAll());
-        static::deleted(fn () => DashboardStatsCache::forgetAll());
+        static::saved(function () {
+            DashboardStatsCache::forgetAll();
+            ListCountCache::bump('srf');
+        });
+        static::deleted(function () {
+            DashboardStatsCache::forgetAll();
+            ListCountCache::bump('srf');
+        });
     }
 
     protected $fillable = [
@@ -94,6 +101,18 @@ class SRF extends Model
     }
 
     /**
+     * Slimmer columns for default SRF list tables (omits logistics FK ids).
+     *
+     * @var list<string>
+     */
+    public const LIST_TABLE_SELECT = [
+        'id', 'srf_id', 'formatted_id', 'title', 'service_type', 'contract_type',
+        'urgency', 'duration', 'estimated_cost', 'requester_id', 'requester_name',
+        'department', 'date', 'created_at', 'updated_at', 'status', 'current_stage',
+        'rejection_reason', 'remarks', 'origin',
+    ];
+
+    /**
      * Columns loaded for SRF list endpoints.
      *
      * @var list<string>
@@ -128,6 +147,28 @@ class SRF extends Model
         if ($missing !== []) {
             Log::warning('SRF list select omits missing columns', ['columns' => $missing]);
         }
+
+        return $resolved;
+    }
+
+    /**
+     * @return list<string>
+     */
+    public static function resolveTableListSelect(): array
+    {
+        static $resolved = null;
+
+        if ($resolved !== null) {
+            return $resolved;
+        }
+
+        if (! TableColumnCache::hasTable('s_r_f_s')) {
+            $resolved = self::LIST_TABLE_SELECT;
+
+            return $resolved;
+        }
+
+        $resolved = TableColumnCache::filterExisting('s_r_f_s', self::LIST_TABLE_SELECT);
 
         return $resolved;
     }

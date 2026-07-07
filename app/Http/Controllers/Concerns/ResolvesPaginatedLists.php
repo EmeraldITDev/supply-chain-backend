@@ -2,6 +2,8 @@
 
 namespace App\Http\Controllers\Concerns;
 
+use App\Support\ListCountCache;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
 use Illuminate\Pagination\LengthAwarePaginator;
 
@@ -69,5 +71,41 @@ trait ResolvesPaginatedLists
             'data' => array_values($items),
             'pagination' => $this->paginationPayload($paginator),
         ];
+    }
+
+    /**
+     * Paginate with a cached total count (one fewer count(*) per request on warm cache).
+     *
+     * @param  Builder<\Illuminate\Database\Eloquent\Model>  $query
+     */
+    protected function paginateWithCachedCount(
+        Builder $query,
+        Request $request,
+        string $countScope,
+        int $defaultPerPage = 25,
+        int $maxPerPage = 100,
+    ): LengthAwarePaginator {
+        $perPage = $this->resolvePerPage($request, $defaultPerPage, $maxPerPage);
+        $page = $this->resolvePage($request);
+        $queryHash = md5($query->toSql().serialize($query->getBindings()));
+
+        $total = ListCountCache::remember(
+            $countScope,
+            $queryHash,
+            static fn (): int => (clone $query)->toBase()->getCountForPagination(),
+        );
+
+        $items = $query->forPage($page, $perPage)->get();
+
+        return new LengthAwarePaginator(
+            $items,
+            $total,
+            $perPage,
+            $page,
+            [
+                'path' => $request->url(),
+                'query' => $request->query(),
+            ],
+        );
     }
 }

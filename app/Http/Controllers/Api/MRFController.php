@@ -208,10 +208,10 @@ class MRFController extends Controller
     public function index(Request $request)
     {
         try {
-        $query = MRF::query()
-            ->select(MRF::resolveListApiSelect());
-
         $isPoList = $request->boolean('has_po') || $request->boolean('po_list');
+
+        $query = MRF::query()
+            ->select($isPoList ? MRF::resolveListApiSelect() : MRF::resolveTableListSelect());
 
         if ($isPoList) {
             $query->forPoList();
@@ -291,7 +291,7 @@ class MRFController extends Controller
         // If user is a vendor, they typically don't need direct access to MRFs
         // But allow access and return empty array or MRFs related to their RFQs
         $isVendor = false;
-        if ($user && ($user->scmRole() === 'vendor' || (method_exists($user, 'hasRole') && $user->hasRole('vendor')))) {
+        if ($user && ($user->scmRole() === 'vendor' || $user->hasScmRole('vendor'))) {
             $isVendor = true;
             // Vendors can see MRFs that are linked to RFQs assigned to them
             // For now, return empty array - vendors should access MRFs through RFQs
@@ -315,8 +315,7 @@ class MRFController extends Controller
             $query->where('requester_id', $user->id);
         }
 
-        $perPage = $this->resolvePerPage($request, 25, 100);
-        $paginator = $query->paginate($perPage);
+        $paginator = $this->paginateWithCachedCount($query, $request, 'mrf');
 
         $items = collect($paginator->items())
             ->map(fn (MRF $mrf) => $mrf->toListApiArray())
