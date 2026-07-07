@@ -10,6 +10,7 @@ use App\Models\RFQ;
 use App\Models\User;
 use App\Support\PaymentMilestoneRequest;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
@@ -35,6 +36,30 @@ class PaymentScheduleService
             ->where('mrf_id', $mrf->id)
             ->with(['milestones', 'creator:id,name,email'])
             ->first();
+    }
+
+    /**
+     * Batch-load payment schedules (with milestones) for many MRFs in one query.
+     *
+     * @param  list<int>  $mrfIds
+     * @return Collection<int, PaymentSchedule> keyed by mrf_id
+     */
+    public function findForMrfs(array $mrfIds): Collection
+    {
+        $mrfIds = array_values(array_unique(array_filter(
+            array_map(static fn ($id) => (int) $id, $mrfIds),
+            static fn (int $id): bool => $id > 0,
+        )));
+
+        if ($mrfIds === []) {
+            return collect();
+        }
+
+        return PaymentSchedule::query()
+            ->whereIn('mrf_id', $mrfIds)
+            ->with(['milestones', 'creator:id,name,email'])
+            ->get()
+            ->keyBy('mrf_id');
     }
 
     /**

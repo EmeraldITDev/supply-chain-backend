@@ -143,6 +143,53 @@ class FinanceRoutingService
     }
 
     /**
+     * @return array{
+     *     totalFinanceMRFs: int,
+     *     legacy: array{count: int, pendingInternalPayment: int, awaitingChairmanApproval: int},
+     *     financeAp: array{count: int, financeHandoffPending: int, inReviewOrMilestonePayment: int, packagePushedCount: int}
+     * }
+     */
+    public function computeDashboardStats(): array
+    {
+        $legacyQuery = MRF::query();
+        $this->scopeLegacyFinanceReady($legacyQuery);
+
+        $financeApQuery = MRF::query();
+        $this->scopeFinanceApFinanceReady($financeApQuery);
+
+        $unifiedQuery = MRF::query();
+        $this->scopeAnyFinanceReady($unifiedQuery);
+
+        return [
+            'totalFinanceMRFs' => (clone $unifiedQuery)->count(),
+            'legacy' => [
+                'count' => (clone $legacyQuery)->count(),
+                'pendingInternalPayment' => (clone $legacyQuery)
+                    ->where('status', 'finance')
+                    ->whereNull('payment_processed_at')
+                    ->count(),
+                'awaitingChairmanApproval' => (clone $legacyQuery)
+                    ->where('status', 'chairman_payment')
+                    ->where('payment_status', 'processing')
+                    ->count(),
+            ],
+            'financeAp' => [
+                'count' => (clone $financeApQuery)->count(),
+                'financeHandoffPending' => (clone $financeApQuery)
+                    ->where('workflow_state', WorkflowStateService::STATE_FINANCE_HANDOFF_PENDING)
+                    ->count(),
+                'inReviewOrMilestonePayment' => (clone $financeApQuery)
+                    ->whereIn('workflow_state', [
+                        WorkflowStateService::STATE_FINANCE_IN_REVIEW,
+                        WorkflowStateService::STATE_MILESTONE_PAYMENT_IN_PROGRESS,
+                    ])
+                    ->count(),
+                'packagePushedCount' => (clone $financeApQuery)->whereNotNull('finance_ap_case_id')->count(),
+            ],
+        ];
+    }
+
+    /**
      * @return array{usesFinanceAp: bool, financeRoute: string, cutoverDate: ?string}
      */
     public function routingMeta(MRF $mrf): array

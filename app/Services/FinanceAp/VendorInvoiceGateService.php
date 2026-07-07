@@ -3,6 +3,7 @@
 namespace App\Services\FinanceAp;
 
 use App\Models\MRF;
+use App\Models\PaymentSchedule;
 use App\Models\ProcurementDocument;
 use App\Services\PaymentScheduleService;
 use App\Services\WorkflowStateService;
@@ -27,7 +28,7 @@ class VendorInvoiceGateService
      *     usesFinanceAp: bool
      * }
      */
-    public function status(MRF $mrf): array
+    public function status(MRF $mrf, ?PaymentSchedule $schedule = null, ?bool $hasConfirmedGrn = null): array
     {
         if (! mrfUsesFinanceAp($mrf)) {
             return [
@@ -47,7 +48,7 @@ class VendorInvoiceGateService
             ];
         }
 
-        $schedule = $this->paymentScheduleService->findForMrf($mrf);
+        $schedule ??= $this->paymentScheduleService->findForMrf($mrf);
 
         if ($this->paymentScheduleService->hasAdvanceMilestone($schedule)) {
             if ($this->isScdVendorQuoteApproved($mrf)) {
@@ -67,7 +68,7 @@ class VendorInvoiceGateService
             ];
         }
 
-        if ($this->isDeliveryConfirmed($mrf)) {
+        if ($this->isDeliveryConfirmed($mrf, $hasConfirmedGrn)) {
             return [
                 'canSubmit' => true,
                 'reason' => 'Vendor invoice submission is open after delivery confirmation (GRN received and confirmed).',
@@ -103,7 +104,7 @@ class VendorInvoiceGateService
         ], true);
     }
 
-    private function isDeliveryConfirmed(MRF $mrf): bool
+    private function isDeliveryConfirmed(MRF $mrf, ?bool $hasConfirmedGrn = null): bool
     {
         $state = $mrf->workflow_state ?? WorkflowStateService::STATE_MRF_CREATED;
 
@@ -122,7 +123,7 @@ class VendorInvoiceGateService
             return false;
         }
 
-        return $this->hasConfirmedGrn($mrf);
+        return $hasConfirmedGrn ?? $this->hasConfirmedGrn($mrf);
     }
 
     private function hasConfirmedGrn(MRF $mrf): bool

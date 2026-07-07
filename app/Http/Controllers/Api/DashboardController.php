@@ -72,7 +72,7 @@ class DashboardController extends Controller
                 ['id', 'mrf_id', 'formatted_id', 'title', 'category', 'urgency', 'requester_name', 'estimated_cost', 'created_at', 'source', 'is_po_linked', 'linked_po_id', 'po_draft_saved_at', 'unsigned_po_url'],
                 MRF::resolveListApiSelect(),
             )))
-            ->where('status', 'Pending')
+            ->where('status', 'pending')
             ->orderBy('created_at', 'desc')
             ->limit($listLimit)
             ->get()
@@ -149,7 +149,7 @@ class DashboardController extends Controller
 
             return [
                 'pendingRegistrations' => $pendingRegistrationsCount,
-                'pendingMRFs' => MRF::where('status', 'Pending')->count(),
+                'pendingMRFs' => MRF::where('status', 'pending')->count(),
                 'pendingSRFs' => SRF::where('status', 'Pending')->count(),
                 'pendingQuotations' => Quotation::where('status', 'Pending')->count(),
                 'totalVendors' => $totalVendorsCount,
@@ -268,7 +268,7 @@ class DashboardController extends Controller
             'approvedRegistrations' => VendorRegistration::where('status', 'Approved')->count(),
             'rejectedRegistrations' => VendorRegistration::where('status', 'Rejected')->count(),
             'totalMRFs' => MRF::count(),
-            'pendingMRFs' => MRF::where('status', 'Pending')->count(),
+            'pendingMRFs' => MRF::where('status', 'pending')->count(),
             'totalRFQs' => RFQ::count(),
             'activeRFQs' => RFQ::where('status', 'Active')->count(),
             'totalQuotations' => Quotation::count(),
@@ -281,7 +281,21 @@ class DashboardController extends Controller
         $metrics = DashboardStatsCache::remember('dashboard.supply_chain_director.metrics', fn () => [
             'averageQuotationAmount' => Quotation::where('status', 'Approved')->avg('price') ?? 0,
             'totalApprovedQuotations' => Quotation::where('status', 'Approved')->count(),
-            'totalApprovedMRFs' => MRF::where('status', 'Approved')->count(),
+            'totalApprovedMRFs' => MRF::where(function ($q): void {
+                $q->where('executive_approved', true)
+                    ->orWhereNotNull('director_approved_at')
+                    ->orWhereIn('workflow_state', [
+                        WorkflowStateService::STATE_SUPPLY_CHAIN_DIRECTOR_APPROVED,
+                        WorkflowStateService::STATE_PROCUREMENT_REVIEW,
+                        WorkflowStateService::STATE_PROCUREMENT_APPROVED,
+                        WorkflowStateService::STATE_RFQ_ISSUED,
+                        WorkflowStateService::STATE_QUOTATIONS_RECEIVED,
+                        WorkflowStateService::STATE_QUOTATIONS_EVALUATED,
+                        WorkflowStateService::STATE_PO_GENERATED,
+                        WorkflowStateService::STATE_PO_SIGNED,
+                        WorkflowStateService::STATE_CLOSED,
+                    ]);
+            })->count(),
         ]);
 
         return response()->json([
@@ -442,6 +456,7 @@ class DashboardController extends Controller
         $eager = $this->financeDashboardEager();
         $perPage = $this->dashboardPerPage($request, default: 50, max: 100);
         $listSelect = $this->financeDashboardSelect();
+        $page = max(1, (int) $request->query('page', 1));
 
         $mapMrf = function (MRF $mrf) use ($routing) {
             $rfq = $mrf->rfqs->first();
@@ -500,45 +515,17 @@ class DashboardController extends Controller
             ]);
         };
 
-        $legacyQuery = MRF::query();
-        $routing->scopeLegacyFinanceReady($legacyQuery);
-
-        $financeApQuery = MRF::query();
-        $routing->scopeFinanceApFinanceReady($financeApQuery);
-
-        $legacyPaginated = (clone $legacyQuery)->select($listSelect)->with($eager)->orderByDesc('created_at')->paginate($perPage);
-        $financeApPaginated = (clone $financeApQuery)->select($listSelect)->with($eager)->orderByDesc('created_at')->paginate($perPage);
-
         $unifiedQuery = MRF::query();
         $routing->scopeAnyFinanceReady($unifiedQuery);
-        $financePaginated = (clone $unifiedQuery)->select($listSelect)->with($eager)->orderByDesc('created_at')->paginate($perPage);
+        $financePaginated = (clone $unifiedQuery)
+            ->select($listSelect)
+            ->with($eager)
+            ->orderByDesc('created_at')
+            ->paginate($perPage, ['*'], 'page', $page);
 
-        $legacyMRFs = collect($legacyPaginated->items())->map($mapMrf)->values();
-        $financeApMRFs = collect($financeApPaginated->items())->map($mapMrf)->values();
         $financeMRFs = collect($financePaginated->items())->map($mapMrf)->values();
 
-        $legacyPending = (clone $legacyQuery)
-            ->where('status', 'finance')
-            ->whereNull('payment_processed_at')
-            ->count();
-
-        $legacyChairman = (clone $legacyQuery)
-            ->where('status', 'chairman_payment')
-            ->where('payment_status', 'processing')
-            ->count();
-
-        $financeApHandoff = (clone $financeApQuery)
-            ->where('workflow_state', WorkflowStateService::STATE_FINANCE_HANDOFF_PENDING)
-            ->count();
-
-        $financeApInReview = (clone $financeApQuery)
-            ->whereIn('workflow_state', [
-                WorkflowStateService::STATE_FINANCE_IN_REVIEW,
-                WorkflowStateService::STATE_MILESTONE_PAYMENT_IN_PROGRESS,
-            ])
-            ->count();
-
-        $financeApSynced = (clone $financeApQuery)->whereNotNull('finance_ap_case_id')->count();
+        $stats = DashboardStatsCache::remember('dashboard.finance.stats', fn () => $routing->computeDashboardStats());
 
         return response()->json([
             'success' => true,
@@ -547,29 +534,12 @@ class DashboardController extends Controller
                 'routingConfigured' => $routing->isRoutingConfigured(),
                 'description' => 'MRFs created on or after cutoverDate use Finance AP; earlier MRFs use internal chairman payment flow in SCM.',
             ],
-            'stats' => [
-                'totalFinanceMRFs' => $financePaginated->total(),
-                'legacy' => [
-                    'count' => $legacyPaginated->total(),
-                    'pendingInternalPayment' => $legacyPending,
-                    'awaitingChairmanApproval' => $legacyChairman,
-                ],
-                'financeAp' => [
-                    'count' => $financeApPaginated->total(),
-                    'financeHandoffPending' => $financeApHandoff,
-                    'inReviewOrMilestonePayment' => $financeApInReview,
-                    'packagePushedCount' => $financeApSynced,
-                ],
-            ],
+            'stats' => $stats,
             'pagination' => [
                 'perPage' => $perPage,
                 'financeMRFs' => $this->paginationMeta($financePaginated),
-                'legacyFinanceMRFs' => $this->paginationMeta($legacyPaginated),
-                'financeApMRFs' => $this->paginationMeta($financeApPaginated),
             ],
             'financeMRFs' => $financeMRFs,
-            'legacyFinanceMRFs' => $legacyMRFs,
-            'financeApMRFs' => $financeApMRFs,
         ]);
     }
 
@@ -584,12 +554,8 @@ class DashboardController extends Controller
     public function getRecentActivities(Request $request)
     {
         $user = $request->user();
-        $limit = (int) $request->query('limit', 20);
+        $limit = max(1, min((int) $request->query('limit', 20), 100));
 
-        // Get MRF IDs where user is the requester
-        $userMRFIds = MRF::where('requester_id', $user->id)->pluck('mrf_id')->toArray();
-        
-        // Get vendor ID if user is a vendor
         $vendorId = null;
         if ($user->scmRole() === 'vendor') {
             $vendor = Vendor::where('email', $user->email)->first();
@@ -598,82 +564,91 @@ class DashboardController extends Controller
             }
         }
 
-        // Role-based MRF filtering
-        $relevantMRFIds = $userMRFIds;
-        
-        // Procurement managers see all MRFs in procurement stage
-        if (in_array($user->scmRole(), ['procurement_manager', 'procurement', 'admin'])) {
-            $procurementMRFIds = MRF::whereIn('status', ['procurement', 'pending_po_upload', 'procurement_review', 'revision_required'])
-                ->orWhere('current_stage', 'procurement')
-                ->pluck('mrf_id')->toArray();
-            $relevantMRFIds = array_merge($relevantMRFIds, $procurementMRFIds);
-        }
-        
-        // Finance team sees MRFs in finance stage
-        if (in_array($user->scmRole(), ['finance', 'admin'])) {
-            $financeMRFIds = MRF::whereIn('status', ['finance', 'chairman_payment'])
-                ->orWhere('current_stage', 'finance')
-                ->orWhere('workflow_state', 'like', '%finance%')
-                ->pluck('mrf_id')->toArray();
-            $relevantMRFIds = array_merge($relevantMRFIds, $financeMRFIds);
-        }
-        
-        // Supply Chain Directors see MRFs they need to approve
-        if (in_array($user->scmRole(), ['supply_chain_director', 'supply_chain', 'admin'])) {
-            $scdMRFIds = MRF::whereIn('status', ['supply_chain', 'vendor_selected', 'vendor_approved', 'awaiting_scd_signature'])
-                ->orWhere('current_stage', 'supply_chain')
-                ->pluck('mrf_id')->toArray();
-            $relevantMRFIds = array_merge($relevantMRFIds, $scdMRFIds);
-        }
-        
-        // Remove duplicates
-        $relevantMRFIds = array_unique($relevantMRFIds);
+        $role = $user->scmRole();
 
-        // Build query: Show activities where:
-        // 1. User performed the action (user_id matches)
-        // 2. OR activity relates to user's MRFs (based on role)
-        // 3. OR activity relates to user's quotations (if vendor)
-        $query = Activity::query()
-            ->where(function($q) use ($user, $relevantMRFIds, $vendorId) {
-                // Activities performed by this user
+        $activities = Activity::query()
+            ->where(function ($q) use ($user, $vendorId, $role) {
                 $q->where('user_id', $user->id);
-                
-                // OR activities related to relevant MRFs (based on role)
-                if (!empty($relevantMRFIds)) {
-                    $q->orWhere(function($mrfQ) use ($relevantMRFIds) {
-                        $mrfQ->where('entity_type', 'mrf')
-                             ->whereIn('entity_id', $relevantMRFIds);
-                    });
-                }
-                
-                // For vendors, also include activities related to their quotations
-                if ($vendorId) {
-                    $q->orWhere(function($vendorQ) use ($vendorId) {
-                        $vendorQ->where('entity_type', 'quotation')
-                                ->whereIn('entity_id', function($quoteQuery) use ($vendorId) {
-                                    $quoteQuery->select('quotation_id')
-                                              ->from('quotations')
-                                              ->where('vendor_id', $vendorId);
+
+                $q->orWhere(function ($mrfActivity) use ($user, $role) {
+                    $mrfActivity->where('entity_type', 'mrf')
+                        ->whereExists(function ($sub) use ($user, $role) {
+                            $sub->selectRaw('1')
+                                ->from('m_r_f_s')
+                                ->whereColumn('m_r_f_s.mrf_id', 'activities.entity_id')
+                                ->where(function ($mrfScope) use ($user, $role) {
+                                    $mrfScope->where('m_r_f_s.requester_id', $user->id);
+
+                                    if (in_array($role, ['procurement_manager', 'procurement', 'admin'], true)) {
+                                        $mrfScope->orWhere(function ($procurement) {
+                                            $procurement->whereIn('m_r_f_s.status', [
+                                                'procurement',
+                                                'pending_po_upload',
+                                                'procurement_review',
+                                                'revision_required',
+                                            ])->orWhere('m_r_f_s.current_stage', 'procurement');
+                                        });
+                                    }
+
+                                    if (in_array($role, ['finance', 'finance_officer', 'admin'], true)) {
+                                        $mrfScope->orWhere(function ($finance) {
+                                            $finance->whereIn('m_r_f_s.status', ['finance', 'chairman_payment'])
+                                                ->orWhere('m_r_f_s.current_stage', 'finance')
+                                                ->orWhereIn('m_r_f_s.workflow_state', [
+                                                    WorkflowStateService::STATE_FINANCE_HANDOFF_PENDING,
+                                                    WorkflowStateService::STATE_FINANCE_IN_REVIEW,
+                                                    WorkflowStateService::STATE_MILESTONE_PAYMENT_IN_PROGRESS,
+                                                    WorkflowStateService::STATE_FINANCIALLY_COMPLETE,
+                                                ]);
+                                        });
+                                    }
+
+                                    if (in_array($role, ['supply_chain_director', 'supply_chain', 'admin'], true)) {
+                                        $mrfScope->orWhere(function ($scd) {
+                                            $scd->whereIn('m_r_f_s.status', [
+                                                'supply_chain',
+                                                'vendor_selected',
+                                                'vendor_approved',
+                                                'awaiting_scd_signature',
+                                            ])->orWhere('m_r_f_s.current_stage', 'supply_chain')
+                                                ->orWhereIn('m_r_f_s.workflow_state', [
+                                                    WorkflowStateService::STATE_SUPPLY_CHAIN_DIRECTOR_REVIEW,
+                                                    WorkflowStateService::STATE_SUPPLY_CHAIN_DIRECTOR_APPROVED,
+                                                ]);
+                                        });
+                                    }
                                 });
+                        });
+                });
+
+                if ($vendorId) {
+                    $q->orWhere(function ($vendorQ) use ($vendorId) {
+                        $vendorQ->where('entity_type', 'quotation')
+                            ->whereExists(function ($sub) use ($vendorId) {
+                                $sub->selectRaw('1')
+                                    ->from('quotations')
+                                    ->whereColumn('quotations.quotation_id', 'activities.entity_id')
+                                    ->where('quotations.vendor_id', $vendorId);
+                            });
                     });
                 }
             })
-            ->orderBy('created_at', 'desc')
-            ->limit($limit);
-
-        $activities = $query->get()->map(function($activity) {
-            return [
-                'id' => (string) $activity->id,
-                'type' => $activity->type,
-                'title' => $activity->title,
-                'description' => $activity->description,
-                'timestamp' => $activity->created_at->toIso8601String(),
-                'user' => $activity->user_name,
-                'entityId' => $activity->entity_id,
-                'entityType' => $activity->entity_type,
-                'status' => $activity->status,
-            ];
-        });
+            ->orderByDesc('created_at')
+            ->limit($limit)
+            ->get()
+            ->map(function ($activity) {
+                return [
+                    'id' => (string) $activity->id,
+                    'type' => $activity->type,
+                    'title' => $activity->title,
+                    'description' => $activity->description,
+                    'timestamp' => $activity->created_at->toIso8601String(),
+                    'user' => $activity->user_name,
+                    'entityId' => $activity->entity_id,
+                    'entityType' => $activity->entity_type,
+                    'status' => $activity->status,
+                ];
+            });
 
         return response()->json([
             'success' => true,

@@ -12,6 +12,7 @@ use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\URL;
 use Illuminate\Support\Str;
 use App\Services\DashboardStatsCache;
+use App\Services\WorkflowStateService;
 use App\Support\PurchaseOrderCurrency;
 
 class MRF extends Model
@@ -65,12 +66,41 @@ class MRF extends Model
                 $inner->whereNotNull('po_number')->where('po_number', '!=', '');
             })->orWhere(function ($inner) {
                 $inner->whereNotNull('po_draft_saved_at')
-                    ->where(function ($unsigned) {
-                        $unsigned->whereNull('unsigned_po_url')
-                            ->orWhere('unsigned_po_url', '=', '');
-                    });
+                    ->whereNull('unsigned_po_url');
+            })->orWhere(function ($inner) {
+                $inner->whereNotNull('po_draft_saved_at')
+                    ->where('unsigned_po_url', '=', '');
             });
         });
+    }
+
+    /**
+     * Workflow states indicating a PO lifecycle rejection.
+     *
+     * @return list<string>
+     */
+    public static function poRejectedWorkflowStates(): array
+    {
+        return [
+            WorkflowStateService::STATE_SUPPLY_CHAIN_DIRECTOR_REJECTED,
+            WorkflowStateService::STATE_EXECUTIVE_REJECTED,
+        ];
+    }
+
+    /**
+     * Workflow states indicating a PO lifecycle completion.
+     *
+     * @return list<string>
+     */
+    public static function poCompletedWorkflowStates(): array
+    {
+        return [
+            WorkflowStateService::STATE_CLOSED,
+            WorkflowStateService::STATE_OPERATIONALLY_COMPLETE,
+            WorkflowStateService::STATE_FINANCIALLY_COMPLETE,
+            WorkflowStateService::STATE_GRN_COMPLETED,
+            WorkflowStateService::STATE_PAYMENT_PROCESSED,
+        ];
     }
 
     /**
@@ -91,15 +121,14 @@ class MRF extends Model
                 }),
             'signed' => $query->whereNotNull('signed_po_url')->where('signed_po_url', '!=', ''),
             'rejected' => $query->where(function ($q) {
-                $q->whereRaw('LOWER(COALESCE(status, "")) LIKE ?', ['%reject%'])
-                    ->orWhereRaw('LOWER(COALESCE(workflow_state, "")) LIKE ?', ['%reject%'])
-                    ->orWhereRaw('LOWER(COALESCE(current_stage, "")) LIKE ?', ['%reject%'])
-                    ->orWhereRaw('LOWER(COALESCE(rejection_reason, "")) != ?', ['']);
+                $q->where('status', 'rejected')
+                    ->orWhereIn('workflow_state', self::poRejectedWorkflowStates())
+                    ->orWhereNotNull('rejected_at');
             }),
             'completed' => $query->where(function ($q) {
                 $q->where('grn_completed', true)
-                    ->orWhereRaw('LOWER(COALESCE(status, "")) LIKE ?', ['%complete%'])
-                    ->orWhereRaw('LOWER(COALESCE(workflow_state, "")) LIKE ?', ['%complete%']);
+                    ->orWhere('status', 'completed')
+                    ->orWhereIn('workflow_state', self::poCompletedWorkflowStates());
             }),
             'pending' => $query->whereNotNull('unsigned_po_url')
                 ->where('unsigned_po_url', '!=', '')

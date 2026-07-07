@@ -11,6 +11,7 @@ use App\Models\Vendor;
 use App\Services\FinanceAp\VendorInvoiceGateService;
 use App\Services\FinanceAp\VendorInvoiceSubmissionService;
 use App\Services\NotificationService;
+use App\Services\PaymentScheduleService;
 use App\Services\ProcurementDocumentService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -25,6 +26,7 @@ class VendorPortalMrfController extends Controller
         private VendorInvoiceGateService $gateService,
         private ProcurementDocumentService $documentService,
         private NotificationService $notificationService,
+        private PaymentScheduleService $paymentScheduleService,
     ) {
     }
 
@@ -48,6 +50,10 @@ class VendorPortalMrfController extends Controller
                 'po_number',
                 'contract_type',
                 'finance_ap_case_id',
+                'selected_vendor_id',
+                'created_at',
+                'grn_completed',
+                'grn_url',
                 'updated_at',
             ])
             ->where('selected_vendor_id', $vendor->id)
@@ -56,6 +62,7 @@ class VendorPortalMrfController extends Controller
             ->paginate($perPage);
 
         $mrfIds = collect($paginator->items())->pluck('id')->all();
+        $schedulesByMrfId = $this->paymentScheduleService->findForMrfs($mrfIds);
         $submittedMrfIds = $mrfIds === []
             ? []
             : ProcurementDocument::query()
@@ -67,10 +74,23 @@ class VendorPortalMrfController extends Controller
                 ->map(fn ($id) => (int) $id)
                 ->flip()
                 ->all();
+        $confirmedGrnMrfIds = $mrfIds === []
+            ? []
+            : ProcurementDocument::query()
+                ->whereIn('mrf_id', $mrfIds)
+                ->where('type', ProcurementDocument::TYPE_GRN)
+                ->where('is_active', true)
+                ->pluck('mrf_id')
+                ->map(fn ($id) => (int) $id)
+                ->flip()
+                ->all();
 
         $items = collect($paginator->items())
-            ->map(function (MRF $mrf) use ($vendor, $submittedMrfIds) {
-                $gate = $this->gateService->status($mrf);
+            ->map(function (MRF $mrf) use ($vendor, $submittedMrfIds, $schedulesByMrfId, $confirmedGrnMrfIds) {
+                $schedule = $schedulesByMrfId->get((int) $mrf->id);
+                $hasConfirmedGrn = isset($confirmedGrnMrfIds[(int) $mrf->id])
+                    || (bool) ($mrf->grn_completed && ! empty($mrf->grn_url));
+                $gate = $this->gateService->status($mrf, $schedule, $hasConfirmedGrn);
                 $submitted = isset($submittedMrfIds[(int) $mrf->id]);
 
                 return [

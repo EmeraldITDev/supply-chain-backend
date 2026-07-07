@@ -13,6 +13,7 @@ class DashboardStatsCache
         'dashboard.supply_chain_director.stats',
         'dashboard.supply_chain_director.metrics',
         'dashboard.kpis',
+        'dashboard.finance.stats',
     ];
 
     public static function remember(string $key, callable $callback, ?int $ttlSeconds = null): mixed

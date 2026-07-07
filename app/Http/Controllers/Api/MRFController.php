@@ -209,8 +209,7 @@ class MRFController extends Controller
     {
         try {
         $query = MRF::query()
-            ->select(MRF::resolveListApiSelect())
-            ->with(['requester:id,name,email,department']);
+            ->select(MRF::resolveListApiSelect());
 
         $isPoList = $request->boolean('has_po') || $request->boolean('po_list');
 
