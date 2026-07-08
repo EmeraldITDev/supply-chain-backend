@@ -6,12 +6,15 @@ use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration
 {
-    /**
-     * Run the migrations.
-     */
     public function up(): void
     {
         if (Schema::hasTable('notifications')) {
+            Schema::table('notifications', function (Blueprint $table) {
+                if (! Schema::hasColumn('notifications', 'read_at')) {
+                    $table->timestamp('read_at')->nullable()->after('data');
+                }
+            });
+
             return;
         }
 
@@ -27,11 +30,8 @@ return new class extends Migration
         });
     }
 
-    /**
-     * Reverse the migrations.
-     */
     public function down(): void
     {
-        Schema::dropIfExists('notifications');
+        // Intentionally no-op: table is shared framework infrastructure.
     }
 };

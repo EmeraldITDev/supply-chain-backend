@@ -5,6 +5,7 @@ namespace App\Services\Logistics;
 use App\Models\Logistics\Trip;
 use App\Models\User;
 use App\Notifications\LogisticsEventNotification;
+use App\Support\DatabaseNotifications;
 use Illuminate\Support\Facades\Log;
 
 class TripSchedulingNotificationService
@@ -136,7 +137,7 @@ class TripSchedulingNotificationService
     private function notifyUser(User $user, Trip $trip, string $type, string $title, string $message): void
     {
         try {
-            $user->notifyNow(new LogisticsEventNotification($type, [
+            DatabaseNotifications::send($user, new LogisticsEventNotification($type, [
                 'title' => $title,
                 'message' => $message,
                 'action_url' => '/logistics/trips/'.$trip->id,

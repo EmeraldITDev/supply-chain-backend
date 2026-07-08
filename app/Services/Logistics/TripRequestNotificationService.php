@@ -8,6 +8,7 @@ use App\Models\Logistics\Trip;
 use App\Models\User;
 use App\Notifications\LogisticsEventNotification;
 use App\Services\WorkflowNotificationService;
+use App\Support\DatabaseNotifications;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
 
@@ -314,7 +315,7 @@ class TripRequestNotificationService
     private function notifyUser(User $user, Trip $trip, string $type, string $title, string $message, string $actionUrl): void
     {
         try {
-            $user->notifyNow(new LogisticsEventNotification($type, [
+            DatabaseNotifications::send($user, new LogisticsEventNotification($type, [
                 'title' => $title,
                 'message' => $message,
                 'action_url' => $actionUrl,

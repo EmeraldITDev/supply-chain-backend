@@ -141,7 +141,8 @@ class NotificationController extends Controller
 
             $notification->markAsRead();
 
-            $formattedNotification = $this->formatNotification($notification);
+            $formattedNotification = $this->formatNotification($notification->fresh());
+            $formattedNotification['read'] = true;
             $formattedNotification['is_read'] = true;
 
             return response()->json([
@@ -353,12 +354,13 @@ class NotificationController extends Controller
             'type' => $type,
             'title' => $title,
             'message' => $message,
+            'read' => $notification->read_at !== null,
+            'read_at' => $notification->read_at ? $notification->read_at->toIso8601String() : null,
+            'created_at' => $notification->created_at->toIso8601String(),
             'action_url' => $data['action_url'] ?? ($data['payload']['action_url'] ?? null),
             'icon' => $data['icon'] ?? 'bell',
             'color' => $data['color'] ?? 'blue',
             'priority' => $data['priority'] ?? 'normal',
-            'read_at' => $notification->read_at ? $notification->read_at->toIso8601String() : null,
-            'created_at' => $notification->created_at->toIso8601String(),
             'is_read' => $notification->read_at !== null,
             'data' => $data,
         ];
@@ -370,6 +372,8 @@ class NotificationController extends Controller
             'mrf_submitted' => 'New MRF Submitted',
             'mrf_approved' => 'MRF Approved',
             'mrf_rejected' => 'MRF Rejected',
+            'srf_submitted' => 'New SRF Submitted',
+            'trip_request_submitted' => 'New Trip Request',
             'system_announcement' => 'System Announcement',
             'rfq_assigned' => 'New RFQ Assignment',
             'quotation_submitted' => 'New Quotation Received',

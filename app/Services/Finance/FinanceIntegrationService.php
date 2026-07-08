@@ -8,6 +8,7 @@ use App\Models\PaymentMilestone;
 use App\Models\ProcurementDocument;
 use App\Models\User;
 use App\Notifications\SystemAnnouncementNotification;
+use App\Support\DatabaseNotifications;
 use App\Services\FinanceAp\ClosureReadinessService;
 use App\Services\FinanceAp\FinanceApWorkflowOrchestrator;
 use App\Services\ProcurementDocumentService;
@@ -522,7 +523,7 @@ class FinanceIntegrationService
                 ->get();
 
             foreach ($users as $user) {
-                $user->notifyNow(new SystemAnnouncementNotification($title, $message, $url, $priority));
+                DatabaseNotifications::send($user, new SystemAnnouncementNotification($title, $message, $url, $priority));
             }
         } catch (\Throwable $e) {
             Log::warning('Failed to notify procurement of Finance AP event', ['error' => $e->getMessage()]);

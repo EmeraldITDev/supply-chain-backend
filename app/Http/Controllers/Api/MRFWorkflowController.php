@@ -17,6 +17,7 @@ use App\Services\NotificationService;
 use App\Services\EmailService;
 use App\Services\WorkflowNotificationService;
 use App\Services\WorkflowStateService;
+use App\Support\DatabaseNotifications;
 use App\Services\MrfParallelFirstApprovalService;
 use Illuminate\Support\Facades\DB;
 use App\Services\PermissionService;
@@ -853,7 +854,7 @@ class MRFWorkflowController extends Controller
         try {
             $scdUsers = \App\Models\User::whereIn('supply_chain_role', ['supply_chain_director', 'supply_chain', 'admin'])->get();
             foreach ($scdUsers as $scdUser) {
-                $scdUser->notifyNow(new \App\Notifications\SystemAnnouncementNotification(
+                DatabaseNotifications::send($scdUser, new \App\Notifications\SystemAnnouncementNotification(
                     'Vendor Selection Pending Approval',
                     "MRF {$mrf->mrf_id} - Vendor {$vendor->name} selected and pending your approval",
                     [
@@ -981,7 +982,7 @@ class MRFWorkflowController extends Controller
         try {
             $procurementUsers = \App\Models\User::whereIn('supply_chain_role', ['procurement', 'procurement_manager', 'admin'])->get();
             foreach ($procurementUsers as $procUser) {
-                $procUser->notifyNow(new \App\Notifications\SystemAnnouncementNotification(
+                DatabaseNotifications::send($procUser, new \App\Notifications\SystemAnnouncementNotification(
                     'Vendor Selection Approved - PO Upload Required',
                     "MRF {$mrf->mrf_id} - Vendor selection has been approved by Supply Chain Director. Please upload the Purchase Order.",
                     [
@@ -1089,7 +1090,7 @@ class MRFWorkflowController extends Controller
         try {
             $procurementUsers = \App\Models\User::whereIn('supply_chain_role', ['procurement', 'procurement_manager', 'admin'])->get();
             foreach ($procurementUsers as $procUser) {
-                $procUser->notifyNow(new \App\Notifications\SystemAnnouncementNotification(
+                DatabaseNotifications::send($procUser, new \App\Notifications\SystemAnnouncementNotification(
                     'Vendor Selection Rejected',
                     "MRF {$mrf->mrf_id} - Vendor selection rejected. Reason: {$request->reason}. Please select another vendor."
                 ));
@@ -1903,7 +1904,7 @@ class MRFWorkflowController extends Controller
             $financeTeam = \App\Models\User::whereIn('supply_chain_role', ['finance', 'admin'])->get();
 
             foreach ($financeTeam as $finance) {
-                $finance->notifyNow(new \App\Notifications\SystemAnnouncementNotification(
+                DatabaseNotifications::send($finance, new \App\Notifications\SystemAnnouncementNotification(
                     'PO Generated',
                     "Purchase Order {$poNumber} for MRF {$mrf->mrf_id} has been generated and is ready for review.",
                     "/mrfs/{$mrf->mrf_id}",
@@ -2303,7 +2304,7 @@ class MRFWorkflowController extends Controller
         if ($mrf->procurement_manager_id) {
             $manager = \App\Models\User::find($mrf->procurement_manager_id);
             if ($manager) {
-                $manager->notifyNow(new \App\Notifications\SystemAnnouncementNotification(
+                DatabaseNotifications::send($manager, new \App\Notifications\SystemAnnouncementNotification(
                     'PO Returned for Revision',
                     "PO {$mrf->po_number} was returned for revision. Reason: {$request->reason}",
                     [

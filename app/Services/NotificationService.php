@@ -23,6 +23,7 @@ use App\Notifications\VendorRegistrationNotification;
 use App\Notifications\VendorApprovedNotification;
 use App\Notifications\DocumentExpiryNotification;
 use App\Notifications\SystemAnnouncementNotification;
+use App\Support\DatabaseNotifications;
 use Illuminate\Support\Facades\Log;
 
 class NotificationService
@@ -58,7 +59,7 @@ class NotificationService
             $notifiables = $notifiables->unique('id')->values();
 
             foreach ($notifiables as $user) {
-                $user->notifyNow(new MRFSubmittedNotification($mrf));
+                DatabaseNotifications::send($user, new MRFSubmittedNotification($mrf));
             }
 
             Log::info('MRF submitted notification sent (parallel first approval)', [
@@ -81,7 +82,7 @@ class NotificationService
         try {
             $requester = $mrf->requester;
             if ($requester) {
-                $requester->notifyNow(new MRFApprovedNotification($mrf, $approver->name, $remarks));
+                DatabaseNotifications::send($requester, new MRFApprovedNotification($mrf, $approver->name, $remarks));
             }
 
             Log::info('MRF approved notification sent', [
@@ -113,10 +114,10 @@ class NotificationService
                     continue;
                 }
 
-                $user->notifyNow(new MRFRequesterUpdatedNotification($mrf, $editor, $changeSummary));
+                DatabaseNotifications::send($user, new MRFRequesterUpdatedNotification($mrf, $editor, $changeSummary));
             }
 
-            $editor->notifyNow(new MRFRequesterUpdatedNotification(
+            DatabaseNotifications::send($editor, new MRFRequesterUpdatedNotification(
                 $mrf,
                 $editor,
                 $changeSummary ?: 'Your changes were saved successfully.'
@@ -151,10 +152,10 @@ class NotificationService
                     continue;
                 }
 
-                $user->notifyNow(new SRFRequesterUpdatedNotification($srf, $editor, $changeSummary));
+                DatabaseNotifications::send($user, new SRFRequesterUpdatedNotification($srf, $editor, $changeSummary));
             }
 
-            $editor->notifyNow(new SRFRequesterUpdatedNotification(
+            DatabaseNotifications::send($editor, new SRFRequesterUpdatedNotification(
                 $srf,
                 $editor,
                 $changeSummary ?: 'Your changes were saved successfully.'
@@ -233,7 +234,7 @@ class NotificationService
         try {
             $requester = $mrf->requester;
             if ($requester) {
-                $requester->notifyNow(new MRFRejectedNotification($mrf, $rejector->name, $reason));
+                DatabaseNotifications::send($requester, new MRFRejectedNotification($mrf, $rejector->name, $reason));
             }
 
             Log::info('MRF rejected notification sent', [
@@ -258,7 +259,7 @@ class NotificationService
             $vendorUser = User::where('vendor_id', $vendor->id)->first();
 
             if ($vendorUser) {
-                $vendorUser->notifyNow(new RFQAssignedNotification($rfq));
+                DatabaseNotifications::send($vendorUser, new RFQAssignedNotification($rfq));
             }
 
             Log::info('RFQ assigned notification sent', [
@@ -287,7 +288,7 @@ class NotificationService
             ])->get();
 
             foreach ($notifiables as $user) {
-                $user->notifyNow(new QuotationSubmittedNotification($quotation, $vendorName));
+                DatabaseNotifications::send($user, new QuotationSubmittedNotification($quotation, $vendorName));
             }
 
             Log::info('Quotation submitted notification sent', [
@@ -318,7 +319,7 @@ class NotificationService
                 $vendorUser = User::where('vendor_id', $vendor->id)->first();
 
                 if ($vendorUser) {
-                    $vendorUser->notifyNow(new QuotationStatusUpdatedNotification(
+                    DatabaseNotifications::send($vendorUser, new QuotationStatusUpdatedNotification(
                         $quotation,
                         $oldStatus,
                         $newStatus,
@@ -374,7 +375,7 @@ class NotificationService
                 ->values();
 
             foreach ($notifiables as $user) {
-                $user->notifyNow(new VendorRegistrationNotification($registration));
+                DatabaseNotifications::send($user, new VendorRegistrationNotification($registration));
             }
 
             Log::info('Vendor registration notification sent', [
@@ -405,7 +406,7 @@ class NotificationService
             ])->get();
 
             foreach ($notifiables as $user) {
-                $user->notifyNow(new VendorApprovedNotification($vendor, $temporaryPassword));
+                DatabaseNotifications::send($user, new VendorApprovedNotification($vendor, $temporaryPassword));
             }
 
             Log::info('Vendor approved notification sent', [
@@ -445,7 +446,7 @@ class NotificationService
             }
 
             foreach ($notifiables as $user) {
-                $user->notifyNow(new DocumentExpiryNotification(
+                DatabaseNotifications::send($user, new DocumentExpiryNotification(
                     $documentType,
                     $expiryDate,
                     $vendor->name,
@@ -487,7 +488,7 @@ class NotificationService
             $users = $query->get();
 
             foreach ($users as $user) {
-                $user->notifyNow(new SystemAnnouncementNotification(
+                DatabaseNotifications::send($user, new SystemAnnouncementNotification(
                     $title,
                     $message,
                     $actionUrl,
@@ -517,7 +518,7 @@ class NotificationService
             $users = User::whereIn('id', $userIds)->get();
 
             foreach ($users as $user) {
-                $user->notifyNow($notification);
+                DatabaseNotifications::send($user, $notification);
             }
 
             Log::info('Custom notification sent', [
@@ -541,7 +542,7 @@ class NotificationService
             $chairmen = User::whereIn('supply_chain_role', ['chairman', 'admin'])->get();
 
             foreach ($chairmen as $chairman) {
-                $chairman->notifyNow(new SystemAnnouncementNotification(
+                DatabaseNotifications::send($chairman, new SystemAnnouncementNotification(
                     'High-Value MRF Pending Approval',
                     "MRF {$mrf->mrf_id} requires your approval. " . ($mrf->estimated_cost !== null
                         ? "Amount: {$mrf->currency} " . number_format((float) $mrf->estimated_cost, 2)
@@ -569,7 +570,7 @@ class NotificationService
             $procurementManagers = User::whereIn('supply_chain_role', ['procurement_manager', 'procurement', 'admin'])->get();
 
             foreach ($procurementManagers as $manager) {
-                $manager->notifyNow(new SystemAnnouncementNotification(
+                DatabaseNotifications::send($manager, new SystemAnnouncementNotification(
                     'MRF Ready for PO Generation',
                     "MRF {$mrf->mrf_id} has been approved and is ready for PO generation.",
                     "/mrfs/{$mrf->mrf_id}",
@@ -597,7 +598,7 @@ class NotificationService
             $lazarus = User::where('email', 'lazarus.angbazo@emeraldcfze.com')->first();
 
             if ($lazarus) {
-                $lazarus->notifyNow(new SystemAnnouncementNotification(
+                DatabaseNotifications::send($lazarus, new SystemAnnouncementNotification(
                     'High-Value Custom Contract MRF - Director Approval Required',
                     "MRF {$mrf->mrf_id} (Contract Type: {$mrf->contract_type}) has been approved by Supply Chain Director {$approver->name} and requires your authorization before proceeding. " .
                     ($mrf->estimated_cost !== null ? "Amount: ₦" . number_format((float) $mrf->estimated_cost, 2) : "Amount not specified."),
@@ -619,7 +620,7 @@ class NotificationService
                 // Fallback: notify supply chain directors if Lazarus not found
                 $supplyChainDirectors = User::whereIn('supply_chain_role', ['supply_chain_director', 'supply_chain', 'admin'])->get();
                 foreach ($supplyChainDirectors as $director) {
-                    $director->notifyNow(new SystemAnnouncementNotification(
+                    DatabaseNotifications::send($director, new SystemAnnouncementNotification(
                         'High-Value Custom Contract MRF - Director Approval Required',
                         "MRF {$mrf->mrf_id} (Custom Contract: {$mrf->contract_type}) requires director-level approval. Amount: ₦" .
                         number_format((float) ($mrf->estimated_cost ?? 0), 2),
@@ -645,7 +646,7 @@ class NotificationService
             $supplyChainDirectors = User::whereIn('supply_chain_role', ['supply_chain_director', 'supply_chain', 'admin'])->get();
 
             foreach ($supplyChainDirectors as $director) {
-                $director->notifyNow(new SystemAnnouncementNotification(
+                DatabaseNotifications::send($director, new SystemAnnouncementNotification(
                     'PO Ready for Signature',
                     "PO {$mrf->po_number} for MRF {$mrf->mrf_id} is ready for your signature.",
                     "/mrfs/{$mrf->mrf_id}",
@@ -671,7 +672,7 @@ class NotificationService
             $financeTeam = User::whereIn('supply_chain_role', ['finance', 'admin'])->get();
 
             foreach ($financeTeam as $finance) {
-                $finance->notifyNow(new SystemAnnouncementNotification(
+                DatabaseNotifications::send($finance, new SystemAnnouncementNotification(
                     'Signed PO Received',
                     "PO {$mrf->po_number} for MRF {$mrf->mrf_id} has been signed and is ready for payment processing.",
                     "/mrfs/{$mrf->mrf_id}",
@@ -697,7 +698,7 @@ class NotificationService
             $procurementManagers = User::whereIn('supply_chain_role', ['procurement_manager', 'procurement', 'admin'])->get();
 
             foreach ($procurementManagers as $manager) {
-                $manager->notifyNow(new SystemAnnouncementNotification(
+                DatabaseNotifications::send($manager, new SystemAnnouncementNotification(
                     'PO Rejected - Revision Required',
                     "PO {$mrf->po_number} for MRF {$mrf->mrf_id} has been rejected. Reason: {$reason}",
                     "/mrfs/{$mrf->mrf_id}",
@@ -723,7 +724,7 @@ class NotificationService
             $chairmen = User::whereIn('supply_chain_role', ['chairman', 'admin'])->get();
 
             foreach ($chairmen as $chairman) {
-                $chairman->notifyNow(new SystemAnnouncementNotification(
+                DatabaseNotifications::send($chairman, new SystemAnnouncementNotification(
                     'Payment Pending Approval',
                     "Payment for PO {$mrf->po_number} (MRF {$mrf->mrf_id}) requires your approval. " . ($mrf->estimated_cost !== null
                         ? "Amount: {$mrf->currency} " . number_format((float) $mrf->estimated_cost, 2)
@@ -752,7 +753,7 @@ class NotificationService
             $executives = User::whereIn('supply_chain_role', ['executive', 'admin'])->get();
 
             foreach ($executives as $executive) {
-                $executive->notifyNow(new SystemAnnouncementNotification(
+                DatabaseNotifications::send($executive, new SystemAnnouncementNotification(
                     'MRF Pending Your Approval',
                     "MRF {$mrf->mrf_id} - {$mrf->title} has been approved by {$approver->name} and requires your approval. " . ($mrf->estimated_cost !== null
                         ? 'Estimated cost: ₦' . number_format((float) $mrf->estimated_cost, 2)
@@ -783,7 +784,7 @@ class NotificationService
             // Notify requester
             $requester = $mrf->requester;
             if ($requester) {
-                $requester->notifyNow(new SystemAnnouncementNotification(
+                DatabaseNotifications::send($requester, new SystemAnnouncementNotification(
                     'MRF Completed',
                     "Your MRF {$mrf->mrf_id} has been completed. Payment has been approved.",
                     "/mrfs/{$mrf->mrf_id}",
@@ -802,7 +803,7 @@ class NotificationService
             ])->get();
 
             foreach ($stakeholders as $stakeholder) {
-                $stakeholder->notifyNow(new SystemAnnouncementNotification(
+                DatabaseNotifications::send($stakeholder, new SystemAnnouncementNotification(
                     'MRF Workflow Completed',
                     "MRF {$mrf->mrf_id} workflow has been completed. PO {$mrf->po_number}.",
                     "/mrfs/{$mrf->mrf_id}",
@@ -829,7 +830,7 @@ class NotificationService
             $vendorUser = User::where('vendor_id', $vendor->id)->first();
 
             if ($vendorUser) {
-                $vendorUser->notifyNow(new SystemAnnouncementNotification(
+                DatabaseNotifications::send($vendorUser, new SystemAnnouncementNotification(
                     'Quotation Awarded! 🎉',
                     "Congratulations! Your quotation {$quotation->quotation_id} has been selected for RFQ {$quotation->rfq->rfq_id}. Total amount: {$quotation->currency} " . number_format($quotation->total_amount, 2),
                     "/quotations/{$quotation->quotation_id}",
@@ -840,7 +841,7 @@ class NotificationService
             // Notify procurement team
             $procurementTeam = User::whereIn('supply_chain_role', ['procurement_manager', 'procurement', 'admin'])->get();
             foreach ($procurementTeam as $manager) {
-                $manager->notifyNow(new SystemAnnouncementNotification(
+                DatabaseNotifications::send($manager, new SystemAnnouncementNotification(
                     'Vendor Selected',
                     "Vendor {$vendor->name} has been selected for RFQ {$quotation->rfq->rfq_id}. Quotation: {$quotation->quotation_id}.",
                     "/rfqs/{$quotation->rfq->rfq_id}",
@@ -870,7 +871,7 @@ class NotificationService
             $vendorUser = User::where('vendor_id', $vendor->id)->first();
 
             if ($vendorUser) {
-                $vendorUser->notifyNow(new SystemAnnouncementNotification(
+                DatabaseNotifications::send($vendorUser, new SystemAnnouncementNotification(
                     'Quotation Not Selected',
                     "Thank you for your submission for RFQ {$quotation->rfq->rfq_id}. Another vendor was selected for this opportunity.",
                     "/quotations/{$quotation->quotation_id}",
@@ -899,7 +900,7 @@ class NotificationService
             $vendorUser = User::where('vendor_id', $vendor->id)->first();
 
             if ($vendorUser) {
-                $vendorUser->notifyNow(new SystemAnnouncementNotification(
+                DatabaseNotifications::send($vendorUser, new SystemAnnouncementNotification(
                     'RFQ Closed',
                     "RFQ {$rfq->rfq_id} has been closed without vendor selection.",
                     "/rfqs/{$rfq->rfq_id}",
@@ -929,7 +930,7 @@ class NotificationService
             $procurementManagers = User::whereIn('supply_chain_role', ['procurement_manager', 'procurement', 'admin'])->get();
 
             foreach ($procurementManagers as $manager) {
-                $manager->notifyNow(new SystemAnnouncementNotification(
+                DatabaseNotifications::send($manager, new SystemAnnouncementNotification(
                     'GRN Requested',
                     "GRN has been requested for PO {$mrf->po_number} (MRF {$mrf->mrf_id}) by {$requestedBy->name}. Please complete the GRN.",
                     "/mrfs/{$mrf->mrf_id}",
@@ -959,7 +960,7 @@ class NotificationService
             $financeTeam = User::whereIn('supply_chain_role', ['finance', 'finance_officer', 'admin'])->get();
 
             foreach ($financeTeam as $finance) {
-                $finance->notifyNow(new SystemAnnouncementNotification(
+                DatabaseNotifications::send($finance, new SystemAnnouncementNotification(
                     'GRN Completed',
                     "GRN for PO {$mrf->po_number} (MRF {$mrf->mrf_id}) has been completed by {$completedBy->name}.",
                     "/mrfs/{$mrf->mrf_id}",
@@ -970,7 +971,7 @@ class NotificationService
             // Also notify the requester
             $requester = $mrf->requester;
             if ($requester) {
-                $requester->notifyNow(new SystemAnnouncementNotification(
+                DatabaseNotifications::send($requester, new SystemAnnouncementNotification(
                     'GRN Completed',
                     "GRN for your MRF {$mrf->mrf_id} (PO {$mrf->po_number}) has been completed.",
                     "/mrfs/{$mrf->mrf_id}",
@@ -1010,7 +1011,7 @@ class NotificationService
                 ->get();
 
             foreach ($recipients as $recipient) {
-                $recipient->notifyNow(new SystemAnnouncementNotification(
+                DatabaseNotifications::send($recipient, new SystemAnnouncementNotification(
                     'Vendor Invoice Submitted',
                     $message,
                     "/mrfs/{$mrf->mrf_id}",

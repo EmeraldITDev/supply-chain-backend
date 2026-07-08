@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\Logistics\Trip;
 use App\Models\User;
 use App\Notifications\LogisticsEventNotification;
+use App\Support\DatabaseNotifications;
 use Illuminate\Support\Facades\Notification;
 
 class TripRequestWorkflowService
@@ -19,7 +20,7 @@ class TripRequestWorkflowService
         $users = $query->whereNotNull('email')->get();
         foreach ($users as $user) {
             try {
-                $user->notifyNow(new LogisticsEventNotification($eventType, [
+                DatabaseNotifications::send($user, new LogisticsEventNotification($eventType, [
                     'trip_id' => $trip->id,
                     'trip_code' => $trip->trip_code,
                     'workflow_stage' => $trip->workflow_stage,

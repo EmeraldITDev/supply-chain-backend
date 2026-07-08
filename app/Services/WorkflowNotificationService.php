@@ -18,6 +18,8 @@ use App\Models\Quotation;
 use App\Models\RFQ;
 use App\Models\SRF;
 use App\Models\User;
+use App\Notifications\SRFSubmittedNotification;
+use App\Support\DatabaseNotifications;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Log;
 
@@ -88,6 +90,33 @@ class WorkflowNotificationService
                 modelId: $srf->formatted_id ?: $srf->srf_id,
                 mailableFactory: static fn () => new SRFCreatedMail($srf)
             );
+        }
+
+        $this->notifySRFSubmittedInApp($srf);
+    }
+
+    private function notifySRFSubmittedInApp(SRF $srf): void
+    {
+        try {
+            $srf->loadMissing('requester');
+
+            $roles = ['logistics_manager', 'logistics_officer', 'procurement_manager', 'procurement'];
+            $stage = strtolower((string) ($srf->current_stage ?? ''));
+            if ($stage === 'supply_chain_director_review' || ($srf->origin ?? null) === 'fleet_dashboard') {
+                $roles[] = 'supply_chain_director';
+                $roles[] = 'supply_chain';
+            }
+
+            $notifiables = User::query()
+                ->whereIn('supply_chain_role', array_unique($roles))
+                ->get();
+
+            DatabaseNotifications::sendMany($notifiables, new SRFSubmittedNotification($srf));
+        } catch (\Throwable $e) {
+            Log::error('SRF submitted in-app notification failed', [
+                'srf_id' => $srf->srf_id,
+                'error' => $e->getMessage(),
+            ]);
         }
     }
 
@@ -260,7 +289,7 @@ class WorkflowNotificationService
         $vendorUser = User::query()->where('vendor_id', $quotation->vendor_id)->first();
         if ($vendorUser) {
             try {
-                $vendorUser->notifyNow(new \App\Notifications\VendorQuoteApprovedNotification(
+                DatabaseNotifications::send($vendorUser, new \App\Notifications\VendorQuoteApprovedNotification(
                     $mrf,
                     $quotation,
                     (bool) $gate['canSubmit'],
