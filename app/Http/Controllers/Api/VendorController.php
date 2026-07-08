@@ -98,6 +98,10 @@ class VendorController extends Controller
      */
     public function index(Request $request)
     {
+        if ($request->boolean('dropdown') || $request->boolean('for_dropdown')) {
+            return $this->dropdownIndex($request);
+        }
+
         $includeInactive = $request->boolean('include_inactive')
             || $request->boolean('includeInactive');
 
@@ -159,6 +163,43 @@ class VendorController extends Controller
         })->values()->all();
 
         return response()->json($this->paginatedJsonResponse($paginator, $items));
+    }
+
+    /**
+     * Lightweight vendor search for PO/RFQ comboboxes (search required, max 20 rows).
+     */
+    private function dropdownIndex(Request $request): \Illuminate\Http\JsonResponse
+    {
+        $search = trim((string) $request->input('search', $request->input('q', '')));
+        if ($search === '') {
+            return response()->json([
+                'success' => true,
+                'data' => [],
+            ]);
+        }
+
+        $term = '%'.$search.'%';
+        $items = Vendor::query()
+            ->forDirectory(false)
+            ->where(function ($q) use ($term) {
+                $q->where('name', 'like', $term)
+                    ->orWhere('vendor_id', 'like', $term);
+            })
+            ->select(['vendor_id', 'name'])
+            ->orderBy('name')
+            ->limit(20)
+            ->get()
+            ->map(fn ($vendor) => [
+                'id' => $vendor->vendor_id,
+                'name' => $vendor->name,
+            ])
+            ->values()
+            ->all();
+
+        return response()->json([
+            'success' => true,
+            'data' => $items,
+        ]);
     }
 
     /**

@@ -38,7 +38,7 @@ class PurchaseOrderPdfService
     {
         $options = new \Dompdf\Options();
         $options->set('isHtml5ParserEnabled', true);
-        $options->set('isRemoteEnabled', true);
+        $options->set('isRemoteEnabled', false);
         $options->set('defaultFont', 'DejaVu Sans');
         $options->set('chroot', public_path());
         $options->set('pdfBackend', 'CPDF');
@@ -90,6 +90,56 @@ class PurchaseOrderPdfService
         }
 
         return '<div class="logo-placeholder">LOGO</div>';
+    }
+
+    /**
+     * Inline signature image for Dompdf (no remote HTTP). Accepts data URI or local storage path.
+     */
+    public function signatureHtml(?string $signatureImageUrl): string
+    {
+        if ($signatureImageUrl === null || trim($signatureImageUrl) === '') {
+            return '';
+        }
+
+        $value = trim($signatureImageUrl);
+
+        if (str_starts_with($value, 'data:image/')) {
+            return '<img src="'.$value.'" alt="Signature" class="signature-img" />';
+        }
+
+        $localPath = $this->resolveLocalImagePath($value);
+        if ($localPath !== null && is_readable($localPath)) {
+            $imageData = file_get_contents($localPath);
+            $imageInfo = @getimagesize($localPath);
+            $mimeType = is_array($imageInfo) && isset($imageInfo['mime']) ? $imageInfo['mime'] : 'image/png';
+
+            return '<img src="data:'.$mimeType.';base64,'.base64_encode($imageData).'" alt="Signature" class="signature-img" />';
+        }
+
+        return '';
+    }
+
+    private function resolveLocalImagePath(string $value): ?string
+    {
+        if (is_file($value)) {
+            return $value;
+        }
+
+        $publicPath = public_path(ltrim($value, '/'));
+        if (is_file($publicPath)) {
+            return $publicPath;
+        }
+
+        $signaturesDisk = config('filesystems.signatures_disk', env('SIGNATURES_DISK', 'public'));
+        try {
+            if (\Illuminate\Support\Facades\Storage::disk($signaturesDisk)->exists($value)) {
+                return \Illuminate\Support\Facades\Storage::disk($signaturesDisk)->path($value);
+            }
+        } catch (\Throwable) {
+            // Fall through
+        }
+
+        return null;
     }
 
     /**
@@ -308,7 +358,7 @@ class PurchaseOrderPdfService
             'show_tax_breakdown' => $showTaxBreakdown,
             'approved_by_name' => $approvedByName,
             'approved_by_date' => $approvedByDate,
-            'signature_image_url' => $signatureImageUrl,
+            'signature_html' => $this->signatureHtml($signatureImageUrl),
         ];
     }
 

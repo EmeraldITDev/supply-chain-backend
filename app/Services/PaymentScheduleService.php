@@ -116,13 +116,56 @@ class PaymentScheduleService
         return $this->paymentMilestonesForApi($this->findForMrf($mrf));
     }
 
-    public function assertEditable(PaymentSchedule $schedule): void
+    public function assertEditable(PaymentSchedule $schedule, ?MRF $mrf = null): void
     {
-        if ($schedule->isLocked()) {
+        if ($this->scheduleIsLockedForEditing($schedule, $mrf)) {
             throw ValidationException::withMessages([
                 'paymentSchedule' => 'Payment schedule is locked after PO generation and cannot be edited.',
             ]);
         }
+    }
+
+    /**
+     * Payment schedules stay editable until the PO is signed by SCD.
+     * locked_at may be set early for amount calculation; workflow state is authoritative.
+     */
+    public function scheduleIsLockedForEditing(PaymentSchedule $schedule, ?MRF $mrf = null): bool
+    {
+        if ($mrf === null) {
+            $mrf = $schedule->relationLoaded('mrf')
+                ? $schedule->mrf
+                : $schedule->mrf()->first(['id', 'mrf_id', 'workflow_state', 'status', 'signed_po_url']);
+        }
+
+        if ($mrf && $this->mrfAllowsPaymentScheduleEdits($mrf)) {
+            return false;
+        }
+
+        return $schedule->isLocked();
+    }
+
+    public function mrfAllowsPaymentScheduleEdits(MRF $mrf): bool
+    {
+        $state = strtolower((string) ($mrf->workflow_state ?? ''));
+        $status = strtolower((string) ($mrf->status ?? ''));
+
+        if ($state === WorkflowStateService::STATE_PO_GENERATED) {
+            return true;
+        }
+
+        if ($status === 'awaiting_scd_signature') {
+            return true;
+        }
+
+        if (in_array($status, ['po rejected', 'po_rejected', 'supply_chain'], true)) {
+            return empty(trim((string) ($mrf->signed_po_url ?? '')));
+        }
+
+        if ($mrf->isPoDraft()) {
+            return true;
+        }
+
+        return false;
     }
 
     /**
@@ -199,7 +242,7 @@ class PaymentScheduleService
             ]);
         }
 
-        $this->assertEditable($schedule);
+        $this->assertEditable($schedule, $mrf);
 
         $milestones = $this->resolveMilestonesFromInput($input);
         $this->validateMilestonePercentages($milestones);
@@ -233,6 +276,59 @@ class PaymentScheduleService
         });
     }
 
+    /**
+     * Fast milestone sync during PO draft saves (no version audit row).
+     *
+     * @param  array<string, mixed>  $input
+     */
+    public function updateForPoDraft(MRF $mrf, User $user, array $input): PaymentSchedule
+    {
+        $schedule = $this->findForMrf($mrf);
+
+        if (! $schedule) {
+            throw ValidationException::withMessages([
+                'paymentSchedule' => 'No payment schedule exists for this MRF. Use POST to create.',
+            ]);
+        }
+
+        $this->assertEditable($schedule, $mrf);
+
+        $milestones = $this->resolveMilestonesFromInput($input);
+        $this->validateMilestonePercentages($milestones);
+
+        $schedule->milestones()->delete();
+        $this->persistMilestones($schedule, $milestones);
+
+        return $schedule->fresh(['milestones', 'creator:id,name,email']);
+    }
+
+    /**
+     * Apply payment milestones from a PO draft payload (skips version audit for speed).
+     */
+    public function applyFromRequestForPoDraft(MRF $mrf, User $user, Request $request): ?PaymentSchedule
+    {
+        if (! PaymentMilestoneRequest::provided($request)) {
+            return null;
+        }
+
+        $rows = PaymentMilestoneRequest::resolve($request);
+        PaymentMilestoneRequest::validatePercentages($rows);
+
+        if ($rows === []) {
+            throw ValidationException::withMessages([
+                'payment_milestones' => 'At least one payment milestone is required when payment_milestones is provided.',
+            ]);
+        }
+
+        $input = ['milestones' => PaymentMilestoneRequest::toScheduleMilestones($rows)];
+
+        if ($this->findForMrf($mrf)) {
+            return $this->updateForPoDraft($mrf, $user, $input);
+        }
+
+        return $this->create($mrf, $user, $input);
+    }
+
     public function lockOnPoGeneration(MRF $mrf, float $poTotal): ?PaymentSchedule
     {
         $schedule = $this->findForMrf($mrf);
@@ -241,11 +337,21 @@ class PaymentScheduleService
             return null;
         }
 
-        if ($schedule->isLocked()) {
+        $this->recalculateAmounts($schedule, $poTotal);
+
+        return $schedule->fresh(['milestones']);
+    }
+
+    /**
+     * Lock payment schedule after SCD signs the PO.
+     */
+    public function lockOnPoSigned(MRF $mrf): ?PaymentSchedule
+    {
+        $schedule = $this->findForMrf($mrf);
+
+        if (! $schedule || $schedule->isLocked()) {
             return $schedule;
         }
-
-        $this->recalculateAmounts($schedule, $poTotal);
 
         $schedule->update(['locked_at' => now()]);
 
@@ -275,7 +381,7 @@ class PaymentScheduleService
      */
     public function toApiArray(PaymentSchedule $schedule): array
     {
-        $schedule->loadMissing(['milestones', 'creator:id,name,email']);
+        $schedule->loadMissing(['milestones', 'creator:id,name,email', 'mrf:id,mrf_id,workflow_state,status,signed_po_url,po_draft_saved_at']);
 
         return [
             'id' => $schedule->id,
@@ -285,7 +391,7 @@ class PaymentScheduleService
             'templateName' => $this->templateDisplayName($schedule->template_name),
             'totalPercentageCheck' => (float) $schedule->total_percentage_check,
             'version' => $schedule->version,
-            'isLocked' => $schedule->isLocked(),
+            'isLocked' => $this->scheduleIsLockedForEditing($schedule, $schedule->mrf),
             'lockedAt' => $schedule->locked_at?->toIso8601String(),
             'approvedAt' => $schedule->approved_at?->toIso8601String(),
             'summary' => $this->summaryText($schedule),

@@ -1426,26 +1426,8 @@ class MRFWorkflowController extends Controller
             ], 404);
         }
 
-        if (\App\Support\PaymentMilestoneRequest::provided($request)) {
-            \App\Support\PaymentMilestoneRequest::mergeIntoRequest($request);
-            try {
-                \App\Support\PaymentMilestoneRequest::validatePercentages(
-                    \App\Support\PaymentMilestoneRequest::resolve($request)
-                );
-                app(PaymentScheduleService::class)->applyFromRequest($mrf, $user, $request);
-            } catch (\Illuminate\Validation\ValidationException $e) {
-                return response()->json([
-                    'success' => false,
-                    'error' => 'Validation failed',
-                    'errors' => $e->errors(),
-                    'code' => 'VALIDATION_ERROR',
-                ], 422);
-            }
-        }
-
         $fastTrack = $this->resolveFastTrackFlag($request);
         $allowMissingRfq = $request->boolean('allow_missing_rfq');
-        $rfq = RFQ::where('mrf_id', $mrf->id)->with('items')->first();
 
         $saveAsDraft = $request->boolean('save_as_draft', false)
             || $request->boolean('saveAsDraft', false);
@@ -1479,6 +1461,25 @@ class MRFWorkflowController extends Controller
 
             return $this->savePOAsDraft($request, $mrf, $user, $fastTrack);
         }
+
+        if (\App\Support\PaymentMilestoneRequest::provided($request)) {
+            \App\Support\PaymentMilestoneRequest::mergeIntoRequest($request);
+            try {
+                \App\Support\PaymentMilestoneRequest::validatePercentages(
+                    \App\Support\PaymentMilestoneRequest::resolve($request)
+                );
+                app(PaymentScheduleService::class)->applyFromRequest($mrf, $user, $request);
+            } catch (\Illuminate\Validation\ValidationException $e) {
+                return response()->json([
+                    'success' => false,
+                    'error' => 'Validation failed',
+                    'errors' => $e->errors(),
+                    'code' => 'VALIDATION_ERROR',
+                ], 422);
+            }
+        }
+
+        $rfq = RFQ::where('mrf_id', $mrf->id)->with('items')->first();
 
         // Final PO generation: normal path uses canGeneratePO (RFQ + workflow).
         // Fast-track or explicit allow_missing_rfq with no RFQ uses the loose gate and
@@ -2787,6 +2788,23 @@ class MRFWorkflowController extends Controller
             ], 422);
         }
 
+        if (\App\Support\PaymentMilestoneRequest::provided($request)) {
+            \App\Support\PaymentMilestoneRequest::mergeIntoRequest($request);
+            try {
+                \App\Support\PaymentMilestoneRequest::validatePercentages(
+                    \App\Support\PaymentMilestoneRequest::resolve($request)
+                );
+                app(PaymentScheduleService::class)->applyFromRequestForPoDraft($mrf, $user, $request);
+            } catch (\Illuminate\Validation\ValidationException $e) {
+                return response()->json([
+                    'success' => false,
+                    'error' => 'Validation failed',
+                    'errors' => $e->errors(),
+                    'code' => 'VALIDATION_ERROR',
+                ], 422);
+            }
+        }
+
         // Assign a PO number on first draft save so drafts appear in po_list queries.
         $poNumber = trim((string) ($request->input('po_number') ?? ''));
         if ($poNumber === '') {
@@ -2817,11 +2835,14 @@ class MRFWorkflowController extends Controller
 
         // Merge standard + custom terms for preview parity with finalisation.
         $poType = strtolower((string) ($request->input('po_type') ?: 'goods'));
-        $standardTerms = POTermsTemplate::query()
-            ->where('po_type', $poType)
-            ->where('is_active', true)
-            ->latest('id')
-            ->value('content');
+        $standardTerms = null;
+        if (in_array($termsMode, ['standard', 'both'], true)) {
+            $standardTerms = POTermsTemplate::query()
+                ->where('po_type', $poType)
+                ->where('is_active', true)
+                ->latest('id')
+                ->value('content');
+        }
         $customTerms = $request->has('custom_terms')
             ? $request->input('custom_terms')
             : $mrf->custom_terms;
@@ -2861,26 +2882,26 @@ class MRFWorkflowController extends Controller
 
         $mrf->update($draftUpdate);
 
-        try {
-            $draftRemark = $isDraftUpdate ? 'PO draft updated' : 'PO draft saved';
-            if ($fastTrack) {
-                $draftRemark .= ' (fast-tracked from Procurement Overview, executive review bypassed)';
+        if (! $isDraftUpdate) {
+            try {
+                $draftRemark = 'PO draft saved';
+                if ($fastTrack) {
+                    $draftRemark .= ' (fast-tracked from Procurement Overview, executive review bypassed)';
+                }
+                MRFApprovalHistory::record(
+                    $mrf,
+                    'saved_po_draft',
+                    'procurement',
+                    $user,
+                    $draftRemark
+                );
+            } catch (\Throwable $e) {
+                Log::warning('Failed to record PO draft approval history', [
+                    'mrf_id' => $mrf->mrf_id,
+                    'error' => $e->getMessage(),
+                ]);
             }
-            MRFApprovalHistory::record(
-                $mrf,
-                $isDraftUpdate ? 'updated_po_draft' : 'saved_po_draft',
-                'procurement',
-                $user,
-                $draftRemark
-            );
-        } catch (\Throwable $e) {
-            Log::warning('Failed to record PO draft approval history', [
-                'mrf_id' => $mrf->mrf_id,
-                'error' => $e->getMessage(),
-            ]);
         }
-
-        $mrf->refresh();
 
         return response()->json([
             'success' => true,
@@ -2888,24 +2909,15 @@ class MRFWorkflowController extends Controller
             'data' => [
                 'mrf' => [
                     'id' => $mrf->mrf_id,
-                    'po_number' => $mrf->po_number,
-                    'poNumber' => $mrf->po_number,
-                    ...$mrf->poDraftApiFields(),
+                    'po_number' => $draftUpdate['po_number'],
+                    'poNumber' => $draftUpdate['po_number'],
+                    'po_draft_saved_at' => $draftUpdate['po_draft_saved_at']->toIso8601String(),
+                    'poDraftSavedAt' => $draftUpdate['po_draft_saved_at']->toIso8601String(),
                     'workflow_state' => $mrf->workflow_state,
+                    'workflowState' => $mrf->workflow_state,
                     'status' => $mrf->status,
-                    'current_stage' => $mrf->current_stage,
-                    'ship_to_address' => $mrf->ship_to_address,
-                    'tax_rate' => $mrf->tax_rate,
-                    'tax_amount' => $mrf->tax_amount,
-                    'po_special_terms' => $mrf->po_special_terms,
-                    'custom_terms' => $mrf->custom_terms,
-                    'po_terms_mode' => $mrf->po_terms_mode,
-                    'poTermsMode' => $mrf->po_terms_mode,
-                    'invoice_submission_email' => $mrf->invoice_submission_email,
-                    'invoice_submission_cc' => $mrf->invoice_submission_cc,
                     'fast_tracked' => $fastTrack,
                     'fastTracked' => $fastTrack,
-                    ...$mrf->currencyApiFields(),
                 ],
                 'fast_tracked' => $fastTrack,
             ],

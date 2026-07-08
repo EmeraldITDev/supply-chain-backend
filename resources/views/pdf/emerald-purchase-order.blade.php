@@ -281,8 +281,8 @@
 
     <div class="approval">
         <div class="lbl">Approved By</div>
-        @if (!empty($signature_image_url))
-            <img src="{{ $signature_image_url }}" alt="Signature" class="signature-img" />
+        @if (!empty($signature_html))
+            {!! $signature_html !!}
         @endif
         <div class="val">{{ $approved_by_name }}</div>
         <div class="lbl">Date</div>

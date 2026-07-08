@@ -170,44 +170,119 @@ class MRFController extends Controller
      * Also ensures the path has the proper directory prefix
      */
     private function extractFilePathFromUrl(string $urlOrPath): ?string
-{
-    // If it's already a plain file path (no protocol), return as-is
-    if (!str_contains($urlOrPath, '://')) {
-        return $urlOrPath ?: null;
-    }
-
-    // For S3 URLs, extract just the path portion
-    if (str_contains($urlOrPath, 's3')) {
-        $parsed = parse_url($urlOrPath);
-
-        if (!isset($parsed['path'])) {
-            return null;
+    {
+        // If it's already a plain file path (no protocol), return as-is
+        if (! str_contains($urlOrPath, '://')) {
+            return $urlOrPath ?: null;
         }
 
-        // Remove leading slash to get the raw S3 key
-        $path = ltrim($parsed['path'], '/');
+        // For S3 URLs, extract just the path portion
+        if (str_contains($urlOrPath, 's3')) {
+            $parsed = parse_url($urlOrPath);
 
-        // The S3 bucket name is the first segment of the path
-        // e.g. "supply-chain-vendor-documents/purchase-orders/2026/04/file.pdf"
-        // We need to remove the bucket name if present
-        $bucketName = config('filesystems.disks.s3.bucket', '');
+            if (! isset($parsed['path'])) {
+                return null;
+            }
 
-        if ($bucketName && str_starts_with($path, $bucketName . '/')) {
-            $path = substr($path, strlen($bucketName) + 1);
+            // Remove leading slash to get the raw S3 key
+            $path = ltrim($parsed['path'], '/');
+
+            // The S3 bucket name is the first segment of the path
+            $bucketName = config('filesystems.disks.s3.bucket', '');
+
+            if ($bucketName && str_starts_with($path, $bucketName.'/')) {
+                $path = substr($path, strlen($bucketName) + 1);
+            }
+
+            return $path ?: null;
         }
 
-        // Return the full path including purchase-orders prefix
-        return $path ?: null;
+        return null;
     }
 
-    return null;
-}
+    /**
+     * Stream bytes from storage when an unsigned PO PDF already exists (avoids Dompdf render).
+     */
+    private function resolveStoredUnsignedPoBinary(MRF $mrf): ?string
+    {
+        $disk = $this->getStorageDisk();
+        $candidates = [];
+
+        if (! empty($mrf->unsigned_po_url)) {
+            $candidates[] = $mrf->unsigned_po_url;
+            $extracted = $this->extractFilePathFromUrl($mrf->unsigned_po_url);
+            if ($extracted) {
+                $candidates[] = $extracted;
+            }
+        }
+
+        foreach (array_unique(array_filter($candidates)) as $candidate) {
+            try {
+                if (Storage::disk($disk)->exists($candidate)) {
+                    $binary = Storage::disk($disk)->get($candidate);
+                    if (is_string($binary) && $binary !== '') {
+                        return $binary;
+                    }
+                }
+            } catch (\Throwable) {
+                continue;
+            }
+        }
+
+        return null;
+    }
+    /**
+     * Lightweight MRF search for PO fast-track comboboxes (search required, max 20 rows).
+     */
+    private function dropdownMrfIndex(Request $request): \Illuminate\Http\JsonResponse
+    {
+        $search = trim((string) $request->input('search', $request->input('q', '')));
+        if ($search === '') {
+            return response()->json([
+                'success' => true,
+                'data' => [],
+            ]);
+        }
+
+        $like = '%'.$search.'%';
+        $items = MRF::query()
+            ->select(['id', 'mrf_id', 'formatted_id', 'title', 'po_number'])
+            ->where(function ($q) use ($like) {
+                $q->where('mrf_id', 'like', $like)
+                    ->orWhere('formatted_id', 'like', $like)
+                    ->orWhere('po_number', 'like', $like)
+                    ->orWhere('title', 'like', $like);
+            })
+            ->orderByDesc('updated_at')
+            ->limit(20)
+            ->get()
+            ->map(fn (MRF $mrf) => [
+                'id' => $mrf->mrf_id,
+                'mrfId' => $mrf->mrf_id,
+                'formattedId' => $mrf->formatted_id,
+                'title' => $mrf->title,
+                'poNumber' => $mrf->po_number,
+                'label' => trim(($mrf->formatted_id ?: $mrf->mrf_id).' — '.($mrf->title ?? '')),
+            ])
+            ->values()
+            ->all();
+
+        return response()->json([
+            'success' => true,
+            'data' => $items,
+        ]);
+    }
+
     /**
      * Get all MRFs with optional filters
      */
     public function index(Request $request)
     {
         try {
+        if ($request->boolean('dropdown') || $request->boolean('for_dropdown')) {
+            return $this->dropdownMrfIndex($request);
+        }
+
         $isPoList = $request->boolean('has_po') || $request->boolean('po_list');
 
         $query = MRF::query()
@@ -2371,7 +2446,10 @@ class MRFController extends Controller
         }
 
         try {
-            $pdfContent = $this->generatePOPDFFromMRF($mrf);
+            $pdfContent = $this->resolveStoredUnsignedPoBinary($mrf);
+            if ($pdfContent === null) {
+                $pdfContent = $this->generatePOPDFFromMRF($mrf);
+            }
             $filenameBase = $mrf->formatted_id ?: $mrf->po_number;
             $filename = "PO-{$filenameBase}.pdf";
             $disposition = $asAttachment ? 'attachment' : 'inline';

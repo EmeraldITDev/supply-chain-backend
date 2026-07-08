@@ -312,6 +312,8 @@ class WorkflowStateService
         ], $legacy, $extraAttributes));
         $mrf->save();
 
+        app(PaymentScheduleService::class)->lockOnPoSigned($mrf);
+
         Log::info('MRF PO signed state applied', [
             'mrf_id' => $mrf->mrf_id,
             'from_state' => $currentState,
