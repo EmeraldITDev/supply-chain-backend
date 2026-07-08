@@ -2,6 +2,8 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Jobs\ProcessPurchaseOrderGenerationJob;
+use App\Jobs\ProcessPurchaseOrderNotificationsJob;
 use App\Http\Controllers\Controller;
 use App\Models\Activity;
 use App\Models\MRF;
@@ -32,8 +34,6 @@ use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Log;
 use Carbon\Carbon;
-use Dompdf\Dompdf;
-use Dompdf\Options;
 
 class MRFWorkflowController extends Controller
 {
@@ -1545,6 +1545,10 @@ class MRFWorkflowController extends Controller
             'bypassExecutiveReview' => 'nullable|boolean',
             'allow_missing_rfq' => 'nullable|boolean',
             'currency' => PurchaseOrderCurrency::VALIDATION_RULE,
+            'tax_rate' => 'nullable|numeric|min:0|max:100',
+            'taxRate' => 'nullable|numeric|min:0|max:100',
+            'tax_amount' => 'nullable|numeric|min:0',
+            'taxAmount' => 'nullable|numeric|min:0',
         ]);
 
         if ($validator->fails()) {
@@ -1573,6 +1577,10 @@ class MRFWorkflowController extends Controller
             'bypassExecutiveReview' => 'nullable|boolean',
             'allow_missing_rfq' => 'nullable|boolean',
             'currency' => PurchaseOrderCurrency::VALIDATION_RULE,
+            'tax_rate' => 'nullable|numeric|min:0|max:100',
+            'taxRate' => 'nullable|numeric|min:0|max:100',
+            'tax_amount' => 'nullable|numeric|min:0',
+            'taxAmount' => 'nullable|numeric|min:0',
             ]);
 
         if ($validator->fails()) {
@@ -1664,131 +1672,112 @@ class MRFWorkflowController extends Controller
                 ], 500);
             }
         } else {
-            // Mode 2: Auto-Generation
-            // Fetch all required data for PO generation (RFQ-backed or synthetic)
+            // Mode 2: Auto-Generation — persist draft fields, queue PDF + notifications.
             $poData = $this->resolvePoGenerationPayload($mrf, $rfq, $request, $fastTrack, $allowMissingRfq);
 
-            if (!$poData['success']) {
-            return response()->json([
-                'success' => false,
+            if (! $poData['success']) {
+                return response()->json([
+                    'success' => false,
                     'error' => $poData['error'],
-                    'code' => $poData['code']
+                    'code' => $poData['code'],
                 ], $poData['status'] ?? 400);
             }
 
-            // Generate PO PDF document
-            try {
-                $pdfContent = $this->generatePOPDF($poData['data'], $poNumber, $user);
-
-                // Save PDF to storage (S3)
-                $poUrl = null;
-                $poShareUrl = null;
-
-                // Delete old PO file if regenerating
-                if ($isRegeneration && $mrf->unsigned_po_url) {
-                    try {
-                    $disk = $this->getStorageDisk();
-                    // Try to extract file path from URL
-                    $urlPath = parse_url($mrf->unsigned_po_url, PHP_URL_PATH);
-                    if ($urlPath) {
-                        // Extract path from S3 URL or local URL
-                        $baseUrl = Storage::disk($disk)->url('');
-                        $oldPath = str_replace($baseUrl, '', $mrf->unsigned_po_url);
-                        $oldPath = ltrim(str_replace('/storage/', '', $oldPath), '/');
-
-                        // Try multiple path formats
-                        $possiblePaths = [
-                            $oldPath,
-                            ltrim($urlPath, '/'),
-                            str_replace('/storage/', '', $urlPath),
-                        ];
-
-                        foreach ($possiblePaths as $path) {
-                            if (!empty($path) && Storage::disk($disk)->exists($path)) {
-                                Storage::disk($disk)->delete($path);
-                                Log::info('Deleted old PO file for regeneration', ['old_path' => $path]);
-                                break;
-                            }
-                        }
-                        }
-                    } catch (\Exception $e) {
-                        Log::warning('Failed to delete old PO file', ['error' => $e->getMessage()]);
-                    }
+            $taxRate = (float) ($request->input('tax_rate', $request->input('taxRate', 0)));
+            $subtotal = 0;
+            if (isset($poData['data']['items']) && is_array($poData['data']['items'])) {
+                foreach ($poData['data']['items'] as $item) {
+                    $unitPrice = $item['unit_price'] ?? (($item['total_price'] ?? 0) / max(1, $item['quantity'] ?? 1));
+                    $subtotal += ($unitPrice * ($item['quantity'] ?? 1));
                 }
-
-            // Upload to S3 storage
-            $disk = $this->getStorageDisk();
-
-                if (!config("filesystems.disks.{$disk}")) {
-                throw new \Exception("Storage disk '{$disk}' is not configured.");
-                }
-
-            $poFileName = "po_{$poNumber}_" . time() . ".pdf";
-            $poPath = "purchase-orders/" . date('Y/m') . "/{$poFileName}";
-
-            // Ensure directory structure exists (for S3, this is just the path)
-                    $directory = dirname($poPath);
-            if ($disk !== 's3' && !Storage::disk($disk)->exists($directory)) {
-                Storage::disk($disk)->makeDirectory($directory, 0755, true);
             }
 
-            // Store PDF
-            Storage::disk($disk)->put($poPath, $pdfContent);
-
-            $storedPoPath = $poPath;
-            $storedPoFileName = $poFileName;
-
-            // Get URL (temporary signed URL for S3, public URL for local)
-            $poUrl = $this->getFileUrl($poPath, $disk);
-            $poShareUrl = $poUrl;
-
-            Log::info('PO PDF generated and stored', [
-                    'mrf_id' => $id,
-                    'po_number' => $poNumber,
-                    'file_name' => $poFileName,
-                'stored_path' => $poPath,
-                    'url' => $poUrl,
-                'disk' => $disk
-                ]);
-
-            if (empty($poUrl)) {
-                    throw new \Exception('PO PDF generation failed - no URL was generated');
+            $taxAmount = 0;
+            if ($taxRate > 0) {
+                $taxAmount = ($subtotal * $taxRate) / 100;
+            } elseif ($request->has('tax_amount') || $request->has('taxAmount')) {
+                $taxAmount = (float) ($request->input('tax_amount', $request->input('taxAmount', 0)));
             }
 
-        } catch (\Exception $e) {
-                Log::error('PO PDF generation failed', [
-                'mrf_id' => $id,
+            $poType = strtolower((string) ($request->input('po_type') ?: 'goods'));
+            $standardTerms = POTermsTemplate::query()
+                ->where('po_type', $poType)
+                ->where('is_active', true)
+                ->latest('id')
+                ->value('content');
+            $customTerms = $request->input('custom_terms');
+            $mergedTerms = $this->mergePoSpecialTerms($termsMode, $standardTerms, $customTerms);
+
+            $draftUpdate = [
                 'po_number' => $poNumber,
-                'error' => $e->getMessage(),
-                    'trace' => $e->getTraceAsString()
-            ]);
+                'ship_to_address' => $request->input('ship_to_address', $request->input('shipToAddress')),
+                'tax_rate' => $taxRate,
+                'tax_amount' => $taxAmount,
+                'po_special_terms' => $mergedTerms !== '' ? $mergedTerms : ($request->po_special_terms ?? null),
+                'custom_terms' => $customTerms,
+                'po_terms_mode' => $termsMode,
+                'invoice_submission_email' => $request->invoice_submission_email ?? null,
+                'invoice_submission_cc' => $request->invoice_submission_cc ?? null,
+                'procurement_manager_id' => $user->id,
+                'currency' => PurchaseOrderCurrency::normalize($mrf->currency),
+            ];
+
+            if ($mrf->is_po_linked || ($mrf->source ?? 'standard') === 'po_generated') {
+                $draftUpdate['linked_po_id'] = $poNumber;
+            }
+
+            $mrf->update($draftUpdate);
+
+            ProcessPurchaseOrderGenerationJob::dispatch(
+                $mrf->id,
+                $user->id,
+                [
+                    'po_number' => $poNumber,
+                    'po_data' => $poData['data'],
+                    'tax_rate' => $taxRate,
+                    'tax_amount' => $taxAmount,
+                    'subtotal' => $subtotal,
+                    'fast_track' => $fastTrack,
+                    'is_regeneration' => $isRegeneration,
+                    'has_rfq' => (bool) $rfq,
+                ],
+            )->afterResponse();
 
             return response()->json([
-                'success' => false,
-                    'error' => 'Failed to generate PO document: ' . $e->getMessage(),
-                    'code' => 'PDF_GENERATION_FAILED'
-            ], 500);
-            }
+                'success' => true,
+                'message' => 'PO generation queued',
+                'processing' => true,
+                'data' => [
+                    'mrf' => [
+                        'id' => $mrf->mrf_id,
+                        'po_number' => $poNumber,
+                        'poNumber' => $poNumber,
+                        'fast_tracked' => $fastTrack,
+                        'fastTracked' => $fastTrack,
+                        'synthetic_po' => ! $rfq && ($fastTrack || $allowMissingRfq),
+                        'syntheticPo' => ! $rfq && ($fastTrack || $allowMissingRfq),
+                    ],
+                ],
+            ], 202);
         }
 
-        // Calculate tax if tax_rate is provided
-        $taxRate = $request->tax_rate ?? 0;
+        // Calculate tax if tax_rate is provided (file upload path only)
+        $taxRate = (float) ($request->input('tax_rate', $request->input('taxRate', 0)));
         $taxAmount = 0;
 
-        // Calculate subtotal from items
+        // Calculate subtotal from MRF line items (file upload path).
         $subtotal = 0;
-        if (isset($poData['data']['items'])) {
-            foreach ($poData['data']['items'] as $item) {
-                $unitPrice = $item['unit_price'] ?? ($item['total_price'] ?? 0) / ($item['quantity'] ?? 1);
-                $subtotal += ($unitPrice * ($item['quantity'] ?? 1));
-            }
+        $mrf->loadMissing('items');
+        foreach ($mrf->items as $item) {
+            $unitPrice = $item->unit_price ?? (($item->total_price ?? 0) / max(1, $item->quantity ?? 1));
+            $subtotal += ($unitPrice * ($item->quantity ?? 1));
         }
 
         // Calculate tax amount if tax_rate is provided
         if ($taxRate > 0) {
             $taxAmount = ($subtotal * $taxRate) / 100;
-        } elseif ($request->has('tax_amount')) {
-            $taxAmount = $request->tax_amount;
+        } elseif ($request->has('tax_amount') || $request->has('taxAmount')) {
+            $taxAmount = (float) ($request->input('tax_amount', $request->input('taxAmount', 0)));
         }
 
         $poType = strtolower((string) ($request->input('po_type') ?: 'goods'));
@@ -1838,9 +1827,6 @@ class MRFWorkflowController extends Controller
         $mrf->update($updateData);
 
         $poTotalForSchedule = $subtotal + $taxAmount;
-        if ($poTotalForSchedule <= 0 && isset($poData['data'])) {
-            $poTotalForSchedule = (float) ($poData['data']['quotation']['total_amount'] ?? 0);
-        }
         if ($poTotalForSchedule <= 0) {
             $poTotalForSchedule = (float) ($mrf->estimated_cost ?? 0);
         }
@@ -1856,18 +1842,14 @@ class MRFWorkflowController extends Controller
             );
         }
 
-        // Record in approval history
-        $action = $isRegeneration ? 'regenerated_po' : 'generated_po';
-        $remarks = $isRegeneration
-            ? "PO regenerated after rejection: {$poNumber}"
-            : "PO generated: {$poNumber}";
-        if ($fastTrack) {
-            $remarks .= ' (fast-tracked from Procurement Overview, executive review bypassed)';
-        }
-        if (! $rfq) {
-            $remarks .= ' (synthetic PO dataset — no RFQ on record; built from price comparison / MRF lines / request defaults)';
-        }
-        MRFApprovalHistory::record($mrf, $action, 'procurement', $user, $remarks);
+        ProcessPurchaseOrderNotificationsJob::dispatch(
+            $mrf->id,
+            $user->id,
+            $poNumber,
+            $fastTrack,
+            $isRegeneration,
+            (bool) $rfq,
+        )->afterResponse();
 
         if ($fastTrack) {
             Log::info('PO fast-tracked from Procurement Overview', [
@@ -1879,76 +1861,7 @@ class MRFWorkflowController extends Controller
             ]);
         }
 
-        // Log activity
-        try {
-            Activity::create([
-                'type' => 'po_generated',
-                'title' => 'PO Generated',
-                'description' => "Purchase Order {$poNumber} was generated for MRF {$mrf->mrf_id}",
-                'user_id' => $user->id,
-                'user_name' => $user->name,
-                'entity_type' => 'mrf',
-                'entity_id' => $mrf->mrf_id,
-                'status' => 'finance',
-            ]);
-        } catch (\Exception $e) {
-            Log::warning('Failed to log PO generation activity', [
-                'mrf_id' => $mrf->mrf_id,
-                'po_number' => $poNumber,
-                'error' => $e->getMessage()
-            ]);
-        }
-
-        // Notify Finance team about PO generation
-        try {
-            $financeTeam = \App\Models\User::whereIn('supply_chain_role', ['finance', 'admin'])->get();
-
-            foreach ($financeTeam as $finance) {
-                DatabaseNotifications::send($finance, new \App\Notifications\SystemAnnouncementNotification(
-                    'PO Generated',
-                    "Purchase Order {$poNumber} for MRF {$mrf->mrf_id} has been generated and is ready for review.",
-                    "/mrfs/{$mrf->mrf_id}",
-                    'high'
-                ));
-            }
-
-            Log::info('PO generation notification sent to Finance team', [
-                'mrf_id' => $mrf->mrf_id,
-                'po_number' => $poNumber
-            ]);
-        } catch (\Exception $e) {
-            Log::warning('Failed to send PO generation notification to Finance team', [
-                'mrf_id' => $mrf->mrf_id,
-                'po_number' => $poNumber,
-                'error' => $e->getMessage()
-            ]);
-        }
-
-        // Always notify the Supply Chain Director (signature workflow).
-        $this->notificationService->notifyPOReadyForSignature($mrf);
-
-        // Skip the broader PO-generated email blast for fast-tracked POs to avoid
-        // pinging the executive distribution list on a flow that intentionally
-        // bypasses executive review.
-        if (! $fastTrack) {
-            try {
-                $mrf->loadMissing(['requester', 'selectedVendor']);
-                $this->workflowNotificationService->notifyPOGenerated($mrf);
-            } catch (\Exception $e) {
-                Log::error('Failed to send PO generated email notifications', [
-                    'event' => 'po_generated',
-                    'recipient' => null,
-                    'model_id' => $mrf->mrf_id,
-                    'error' => $e->getMessage(),
-                ]);
-            }
-        }
-
-        // Refresh MRF to get updated values
         $mrf->refresh();
-
-        $resolvedVendors = app(\App\Services\ManualVendorOnboardingService::class)
-            ->finalizeVendorsForPoGeneration($mrf, $isRegeneration);
 
         $poStreamUrl = $mrf->freshUnsignedPoStreamUrl() ?? $mrf->unsigned_po_url;
 
@@ -1987,8 +1900,9 @@ class MRFWorkflowController extends Controller
                 'po_url' => $poStreamUrl,
                 'fast_tracked' => $fastTrack,
                 'synthetic_po' => ! $rfq && ($fastTrack || $allowMissingRfq),
-                'resolvedVendors' => $resolvedVendors,
-                'resolved_vendors' => $resolvedVendors,
+                'resolvedVendors' => [],
+                'resolved_vendors' => [],
+                'notifications_queued' => true,
             ]
         ]);
     }
@@ -3547,21 +3461,7 @@ class MRFWorkflowController extends Controller
      */
     private function generatePOPDF(array $data, string $poNumber, $user): string
     {
-        $html = app(PurchaseOrderPdfService::class)->htmlFromWorkflow($data, $poNumber, $user);
-
-        $options = new Options();
-        $options->set('isHtml5ParserEnabled', true);
-        $options->set('isRemoteEnabled', true);
-        $options->set('defaultFont', 'DejaVu Sans');
-        $options->set('chroot', public_path());
-        $options->set('pdfBackend', 'CPDF');
-
-        $dompdf = new Dompdf($options);
-        $dompdf->loadHtml($html);
-        $dompdf->setPaper('A4', 'portrait');
-        $dompdf->render();
-
-        return $dompdf->output();
+        return app(PurchaseOrderPdfService::class)->renderWorkflowPdf($data, $poNumber, $user);
     }
 
     /**

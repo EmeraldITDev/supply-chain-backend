@@ -8,6 +8,57 @@ use Illuminate\Support\Facades\View;
 
 class PurchaseOrderPdfService
 {
+    public const EMERALD_LAYOUT_VIEW = 'pdf.emerald-purchase-order';
+
+    /**
+     * Render workflow PO payload to PDF bytes (Emerald layout).
+     *
+     * @param  array<string, mixed>  $data
+     */
+    public function renderWorkflowPdf(array $data, string $poNumber, object $user): string
+    {
+        $html = $this->htmlFromWorkflow($data, $poNumber, $user);
+
+        return $this->renderHtmlToPdf($html);
+    }
+
+    /**
+     * Render MRF-backed PO dataset to PDF bytes (Emerald layout).
+     *
+     * @param  array<string, mixed>  $data
+     */
+    public function renderMrfPdf(array $data): string
+    {
+        $html = $this->htmlFromMrf($data);
+
+        return $this->renderHtmlToPdf($html);
+    }
+
+    public function renderHtmlToPdf(string $html): string
+    {
+        $options = new \Dompdf\Options();
+        $options->set('isHtml5ParserEnabled', true);
+        $options->set('isRemoteEnabled', true);
+        $options->set('defaultFont', 'DejaVu Sans');
+        $options->set('chroot', public_path());
+        $options->set('pdfBackend', 'CPDF');
+
+        $dompdf = new \Dompdf\Dompdf($options);
+        $dompdf->loadHtml($html);
+        $dompdf->setPaper('A4', 'portrait');
+        $dompdf->render();
+
+        return $dompdf->output();
+    }
+
+    private function renderEmeraldLayout(array $viewData): string
+    {
+        if (! View::exists(self::EMERALD_LAYOUT_VIEW)) {
+            throw new \RuntimeException('Emerald PO layout unavailable: view '.self::EMERALD_LAYOUT_VIEW.' is missing.');
+        }
+
+        return View::make(self::EMERALD_LAYOUT_VIEW, $viewData)->render();
+    }
     /**
      * Embed company logo as HTML for Dompdf (data URI). Prefer Emerald assets in public/images.
      * Dompdf needs PHP GD (or compatible stack) to rasterize PNG/JPEG in PDFs; without GD, use text-only branding.
@@ -98,7 +149,7 @@ class PurchaseOrderPdfService
             $approverDate = $poDate->format('F j, Y');
         }
 
-        return View::make('pdf.purchase-order', $this->baseViewVars(
+        return $this->renderEmeraldLayout($this->baseViewVars(
             $company,
             $vendor,
             $data['ship_to'],
@@ -116,7 +167,7 @@ class PurchaseOrderPdfService
             $approverDate,
             $data['signature_image_url'] ?? null,
             is_array($paymentMilestones) ? $paymentMilestones : [],
-        ))->render();
+        ));
     }
 
     /**
@@ -188,7 +239,7 @@ class PurchaseOrderPdfService
         $additionalParts[] = 'MRF: ' . $mrfDisplayId . ' — ' . ($mrf['title'] ?? '');
         $additionalParts[] = 'Payment shall be made according to the payment terms above. Goods must be delivered as per specifications with proper documentation.';
 
-        return View::make('pdf.purchase-order', $this->baseViewVars(
+        return $this->renderEmeraldLayout($this->baseViewVars(
             $company,
             $vendor,
             $shipTo,
@@ -206,7 +257,7 @@ class PurchaseOrderPdfService
             $date->format('F j, Y'),
             $data['signature_image_url'] ?? null,
             $paymentMilestones,
-        ))->render();
+        ));
     }
 
     /**

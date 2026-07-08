@@ -2698,7 +2698,14 @@ class MRFController extends Controller
      */
     private function generatePOPDFFromMRF(MRF $mrf): string
     {
-        $mrf->load(['requester', 'items']);
+        $mrf->load([
+            'requester:id,name,email',
+            'items:id,mrf_id,item_name,description,quantity,unit,unit_price,total_price',
+            'selectedVendor:id,vendor_id,name,email,phone,address,contact_person,contact_person_email',
+            'priceComparisons:id,purchase_order_id,vendor_id,item_description,unit_price,quantity,total_price,is_selected',
+            'priceComparisons.vendor:id,vendor_id,name,email,phone,address,contact_person',
+            'paymentSchedule.milestones',
+        ]);
 
         $rfq = RFQ::where('mrf_id', $mrf->id)->first();
         if ($rfq) {
@@ -2740,7 +2747,7 @@ class MRFController extends Controller
 
         $total = $subtotal + $tax;
 
-        $html = app(PurchaseOrderPdfService::class)->htmlFromMrf([
+        return app(PurchaseOrderPdfService::class)->renderMrfPdf([
             'po_number' => $mrf->po_number,
             'po_date' => $poDate,
             'company' => $company,
@@ -2759,8 +2766,6 @@ class MRFController extends Controller
             'mrf_department' => $mrf->department,
             'mrf_display_id' => $mrf->formatted_id ?: $mrf->mrf_id,
         ]);
-
-        return $this->renderPurchaseOrderDompdf($html);
     }
 
     /**

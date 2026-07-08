@@ -405,6 +405,11 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::delete('/mrfs/{id}/po', [\App\Http\Controllers\Api\MRFWorkflowController::class, 'deletePO']); // Delete/clear PO
     Route::post('/mrfs/{id}/upload-signed-po', [\App\Http\Controllers\Api\MRFWorkflowController::class, 'uploadSignedPO']);
     Route::post('/purchase-orders/{po}/sign', [\App\Http\Controllers\Api\MRFWorkflowController::class, 'signPurchaseOrder']);
+    Route::get('/pos', [\App\Http\Controllers\Api\PurchaseOrderController::class, 'index']);
+    Route::post('/pos', [\App\Http\Controllers\Api\PurchaseOrderController::class, 'store']);
+    Route::get('/pos/{id}', [\App\Http\Controllers\Api\PurchaseOrderController::class, 'show']);
+    Route::put('/pos/{id}', [\App\Http\Controllers\Api\PurchaseOrderController::class, 'update']);
+    Route::patch('/pos/{id}', [\App\Http\Controllers\Api\PurchaseOrderController::class, 'update']);
     Route::post('/pos/{id}/close', [\App\Http\Controllers\Api\PurchaseOrderController::class, 'close']);
     Route::post('/mrfs/{id}/reject-po', [\App\Http\Controllers\Api\MRFWorkflowController::class, 'rejectPO']);
     Route::post('/mrfs/{id}/process-payment', [\App\Http\Controllers\Api\MRFWorkflowController::class, 'processPayment']);

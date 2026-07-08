@@ -50,7 +50,7 @@ class StorePriceComparisonsRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'rows' => 'required|array|min:2',
+            'rows' => 'required|array|min:1',
             'rows.*.vendor_id' => 'nullable|string|max:50',
             'rows.*.manual_vendor' => 'nullable|array',
             'rows.*.manual_vendor.name' => 'nullable|string|max:255',
@@ -70,8 +70,8 @@ class StorePriceComparisonsRequest extends FormRequest
     public function messages(): array
     {
         return [
-            'rows.required' => 'At least two supplier rows are required.',
-            'rows.min' => 'At least two supplier rows are required.',
+            'rows.required' => 'At least one supplier row is required.',
+            'rows.min' => 'At least one supplier row is required.',
         ];
     }
 
