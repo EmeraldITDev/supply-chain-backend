@@ -3,7 +3,10 @@
 namespace App\Http\Requests\Logistics;
 
 use App\Support\ExternalDriverRequest;
+use App\Support\InternationalTransportModeRequest;
+use App\Support\TripBookingRules;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Validator;
 
 class StoreTripRequest extends FormRequest
 {
@@ -15,6 +18,17 @@ class StoreTripRequest extends FormRequest
     protected function prepareForValidation(): void
     {
         ExternalDriverRequest::mergeIntoRequest($this);
+        InternationalTransportModeRequest::mergeIntoRequest($this);
+
+        if ($this->has('booking_scope') || $this->has('bookingScope')) {
+            $bookingScope = TripBookingRules::normalizeScope(
+                $this->input('booking_scope', $this->input('bookingScope'))
+            );
+
+            if ($bookingScope !== TripBookingRules::SCOPE_INTERNATIONAL) {
+                $this->merge(['international_transport_mode' => null, 'internationalTransportMode' => null]);
+            }
+        }
 
         if ($this->has('passengerUserIds') && ! $this->has('passenger_user_ids')) {
             $this->merge(['passenger_user_ids' => $this->input('passengerUserIds')]);
@@ -79,6 +93,20 @@ class StoreTripRequest extends FormRequest
             'driver_user_id' => 'nullable|integer|exists:users,id',
             'driverUserId' => 'nullable|integer|exists:users,id',
             ...ExternalDriverRequest::validationRules(),
+            ...InternationalTransportModeRequest::validationRules(),
         ];
+    }
+
+    public function withValidator(Validator $validator): void
+    {
+        if (! $this->has('booking_scope') && ! $this->has('bookingScope')) {
+            return;
+        }
+
+        $bookingScope = TripBookingRules::normalizeScope(
+            $this->input('booking_scope', $this->input('bookingScope'))
+        );
+
+        InternationalTransportModeRequest::assertIntegrity($validator, $this, $bookingScope);
     }
 }

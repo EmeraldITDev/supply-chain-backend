@@ -35,6 +35,10 @@ class Trip extends Model
     /** @deprecated Use BOOKING_SCOPE_OUT_OF_STATE_LOCAL */
     public const BOOKING_SCOPE_OUTSIDE_STATE = 'outside_state';
 
+    public const INTERNATIONAL_TRANSPORT_FLIGHT = 'flight';
+
+    public const INTERNATIONAL_TRANSPORT_ROAD = 'road';
+
     public const PRIORITY_LOW = 'low';
     public const PRIORITY_NORMAL = 'normal';
     public const PRIORITY_HIGH = 'high';
@@ -47,6 +51,7 @@ class Trip extends Model
         'purpose',
         'trip_type',
         'booking_scope',
+        'international_transport_mode',
         'priority',
         'status',
         'scheduled_departure_at',

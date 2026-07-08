@@ -11,6 +11,7 @@ use App\Services\Logistics\TripRequestProgressTrackerService;
 use App\Services\RequesterEditWindowService;
 use App\Services\TripRequestWorkflowService;
 use App\Support\ExternalPassengerRequest;
+use App\Support\InternationalTransportModeRequest;
 use App\Support\PassengerEligibility;
 use App\Support\TripBookingRules;
 use Illuminate\Http\Request;
@@ -225,6 +226,7 @@ class TripRequestWorkflowController extends ApiController
         );
 
         ExternalPassengerRequest::mergeIntoRequest($request);
+        InternationalTransportModeRequest::mergeIntoRequest($request);
 
         $validator = Validator::make($request->all(), array_merge([
             'destination' => 'required|string|max:255',
@@ -238,7 +240,7 @@ class TripRequestWorkflowController extends ApiController
             'booking_scope' => 'nullable|string',
             'tripType' => 'nullable|string',
             'trip_type' => 'nullable|string',
-        ], ExternalPassengerRequest::validationRules()));
+        ], ExternalPassengerRequest::validationRules(), InternationalTransportModeRequest::validationRules()));
 
         if ($bookingScope === null) {
             $validator->after(function ($v) {
@@ -248,6 +250,8 @@ class TripRequestWorkflowController extends ApiController
                 );
             });
         }
+
+        InternationalTransportModeRequest::assertIntegrity($validator, $request, $bookingScope);
 
         if ($validator->fails()) {
             return $this->error('Validation failed', 'VALIDATION_ERROR', 422, $validator->errors()->toArray());
@@ -281,6 +285,7 @@ class TripRequestWorkflowController extends ApiController
             'approval_status' => $isDraft ? 'draft' : 'submitted',
             'trip_type' => Trip::TYPE_PERSONNEL,
             'booking_scope' => $bookingScope,
+            'international_transport_mode' => InternationalTransportModeRequest::resolve($request, $bookingScope),
             'created_by' => $user->id,
         ]);
 
@@ -317,9 +322,11 @@ class TripRequestWorkflowController extends ApiController
         $before = $trip->only([
             'destination', 'purpose', 'origin', 'scheduled_departure_at',
             'scheduled_arrival_at', 'passenger_user_ids', 'booking_scope', 'external_passengers',
+            'international_transport_mode',
         ]);
 
         ExternalPassengerRequest::mergeIntoRequest($request);
+        InternationalTransportModeRequest::mergeIntoRequest($request);
 
         $validator = Validator::make($request->all(), array_merge([
             'destination' => 'sometimes|required|string|max:255',
@@ -334,11 +341,13 @@ class TripRequestWorkflowController extends ApiController
             'tripType' => 'nullable|string',
             'trip_type' => 'nullable|string',
             'remarks' => 'nullable|string|max:1000',
-        ], ExternalPassengerRequest::validationRules()));
+        ], ExternalPassengerRequest::validationRules(), InternationalTransportModeRequest::validationRules()));
 
         $bookingScope = TripBookingRules::normalizeScope(
             $request->input('bookingScope', $request->input('booking_scope', $request->input('tripType', $trip->booking_scope)))
         );
+
+        InternationalTransportModeRequest::assertIntegrity($validator, $request, $bookingScope);
 
         if ($validator->fails()) {
             return $this->error('Validation failed', 'VALIDATION_ERROR', 422, $validator->errors()->toArray());
@@ -367,6 +376,21 @@ class TripRequestWorkflowController extends ApiController
 
         if ($request->has('external_passengers') || $request->has('externalPassengers')) {
             $fill['external_passengers'] = ExternalPassengerRequest::resolve($request);
+        }
+
+        $shouldUpdateTransportMode = $request->has('international_transport_mode')
+            || $request->has('internationalTransportMode')
+            || $request->has('bookingScope')
+            || $request->has('booking_scope')
+            || $request->has('tripType')
+            || $request->has('trip_type');
+
+        if ($shouldUpdateTransportMode) {
+            $fill['international_transport_mode'] = InternationalTransportModeRequest::resolveForUpdate(
+                $request,
+                $bookingScope,
+                $trip->international_transport_mode
+            );
         }
 
         if (isset($fill['destination'])) {
@@ -1251,6 +1275,8 @@ class TripRequestWorkflowController extends ApiController
             'bookingScope' => $scope,
             'booking_scope' => $scope,
             'bookingScopeLabel' => $scope ? TripBookingRules::label($scope) : null,
+            'internationalTransportMode' => $trip->international_transport_mode,
+            'international_transport_mode' => $trip->international_transport_mode,
             'tripType' => $scope,
             'trip_type' => $scope,
             'tripTypeLabel' => $scope ? TripBookingRules::label($scope) : null,
