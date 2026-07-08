@@ -374,6 +374,7 @@ class NotificationController extends Controller
             'mrf_rejected' => 'MRF Rejected',
             'srf_submitted' => 'New SRF Submitted',
             'trip_request_submitted' => 'New Trip Request',
+            'trip_request_changes_requested' => 'Changes Requested',
             'system_announcement' => 'System Announcement',
             'rfq_assigned' => 'New RFQ Assignment',
             'quotation_submitted' => 'New Quotation Received',

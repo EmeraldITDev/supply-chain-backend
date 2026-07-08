@@ -13,6 +13,7 @@ use App\Models\Vendor;
 use App\Services\Logistics\AuditLogger;
 use App\Services\Logistics\IdempotencyService;
 use App\Services\Logistics\TripCommentService;
+use App\Services\Logistics\TripDirectoryService;
 use App\Services\Logistics\TripRequestNotificationService;
 use App\Services\Logistics\TripSchedulingNotificationService;
 use App\Services\Logistics\TripService;
@@ -35,6 +36,7 @@ class TripController extends ApiController
         private TripSchedulingNotificationService $schedulingNotifications,
         private TripCommentService $commentService,
         private TripRequestNotificationService $tripRequestNotifications,
+        private TripDirectoryService $tripDirectory,
     ) {
     }
 
@@ -83,37 +85,12 @@ class TripController extends ApiController
 
     public function index(Request $request)
     {
-        $query = Trip::query()->with(['vendor:id,vendor_id,name', 'vehicle:id,plate_number,name']);
-
-        if ($request->filled('status')) {
-            $query->where('status', $request->status);
+        $user = $request->user();
+        if (! $user) {
+            return $this->error('Unauthenticated', 'UNAUTHENTICATED', 401);
         }
 
-        if ($request->filled('vendor_id')) {
-            $query->where('vendor_id', $request->vendor_id);
-        }
-
-        if ($request->filled('type')) {
-            $query->where('type', $request->type);
-        }
-
-        if ($request->filled('search') || $request->filled('q')) {
-            $term = '%' . trim((string) ($request->input('search') ?: $request->input('q'))) . '%';
-            $query->where(function ($q) use ($term) {
-                $q->where('destination', 'like', $term)
-                    ->orWhere('origin', 'like', $term)
-                    ->orWhere('trip_code', 'like', $term)
-                    ->orWhere('purpose', 'like', $term);
-            });
-        }
-
-        if ($request->filled('date_from')) {
-            $query->whereDate('scheduled_departure_at', '>=', $request->date_from);
-        }
-
-        if ($request->filled('date_to')) {
-            $query->whereDate('scheduled_departure_at', '<=', $request->date_to);
-        }
+        [$query, $canManage] = $this->tripDirectory->buildIndexQuery($request, $user);
 
         [$sortBy, $sortDirection] = $this->resolveSort(
             $request,
@@ -126,7 +103,7 @@ class TripController extends ApiController
         $paginator = $query->orderBy($sortBy, $sortDirection)->paginate($perPage);
 
         $items = collect($paginator->items())
-            ->map(fn (Trip $trip) => $this->presentTrip($trip))
+            ->map(fn (Trip $trip) => $this->tripDirectory->presentListItem($trip, $canManage, $user))
             ->values()
             ->all();
 

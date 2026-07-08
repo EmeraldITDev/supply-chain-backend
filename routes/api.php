@@ -144,8 +144,9 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // Trip routes - forward to logistics controllers
     Route::post('/trips', [LogisticsTripController::class, 'store'])->middleware($logisticsInternalRoles);
-    Route::get('/trips', [LogisticsTripController::class, 'index'])->middleware($logisticsInternalRoles);
+    Route::get('/trips', [LogisticsTripController::class, 'index']);
     Route::get('/trips/{id}', [LogisticsTripController::class, 'show']);
+    Route::post('/trips/{id}/request-changes', [TripRequestWorkflowController::class, 'requestChanges'])->middleware($logisticsInternalRoles);
     Route::put('/trips/{id}', [LogisticsTripController::class, 'update'])->middleware($logisticsInternalRoles);
     Route::patch('/trips/{id}', [LogisticsTripController::class, 'update'])->middleware($logisticsInternalRoles);
     Route::post('/trips/{id}/assign-vendor', [LogisticsTripController::class, 'assignVendor'])->middleware($logisticsInternalRoles);
@@ -597,8 +598,9 @@ Route::prefix('v1/logistics')->group(function () {
 
         // Trip Management
         Route::post('/trips', [LogisticsTripController::class, 'store'])->middleware($logisticsInternalRoles);
-        Route::get('/trips', [LogisticsTripController::class, 'index'])->middleware($logisticsInternalRoles);
+        Route::get('/trips', [LogisticsTripController::class, 'index']);
         Route::get('/trips/{id}', [LogisticsTripController::class, 'show']);
+        Route::post('/trips/{id}/request-changes', [TripRequestWorkflowController::class, 'requestChanges'])->middleware($logisticsInternalRoles);
         Route::put('/trips/{id}', [LogisticsTripController::class, 'update'])->middleware($logisticsInternalRoles);
         Route::patch('/trips/{id}', [LogisticsTripController::class, 'update'])->middleware($logisticsInternalRoles);
         Route::post('/trips/{id}/assign-vendor', [LogisticsTripController::class, 'assignVendor'])->middleware($logisticsInternalRoles);
@@ -757,8 +759,9 @@ Route::prefix('logistics')->group(function () {
         Route::post('/vendors/{id}/invite', [LogisticsVendorController::class, 'invite'])->middleware($logisticsInternalRoles);
 
         Route::post('/trips', [LogisticsTripController::class, 'store'])->middleware($logisticsInternalRoles);
-        Route::get('/trips', [LogisticsTripController::class, 'index'])->middleware($logisticsInternalRoles);
+        Route::get('/trips', [LogisticsTripController::class, 'index']);
         Route::get('/trips/{id}', [LogisticsTripController::class, 'show']);
+        Route::post('/trips/{id}/request-changes', [TripRequestWorkflowController::class, 'requestChanges'])->middleware($logisticsInternalRoles);
         Route::put('/trips/{id}', [LogisticsTripController::class, 'update'])->middleware($logisticsInternalRoles);
         Route::patch('/trips/{id}', [LogisticsTripController::class, 'update'])->middleware($logisticsInternalRoles);
         Route::post('/trips/{id}/assign-vendor', [LogisticsTripController::class, 'assignVendor'])->middleware($logisticsInternalRoles);

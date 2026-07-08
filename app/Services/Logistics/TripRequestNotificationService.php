@@ -2,6 +2,7 @@
 
 namespace App\Services\Logistics;
 
+use App\Mail\TripChangesRequestedMail;
 use App\Mail\TripExternalPassengerConfirmedMail;
 use App\Mail\TripRequestRequesterUpdatedMail;
 use App\Models\Logistics\Trip;
@@ -127,19 +128,51 @@ class TripRequestNotificationService
         }
 
         $message = sprintf(
-            'Changes were requested on trip request %s%s',
+            'Changes were requested on trip request %s by %s%s',
             $trip->trip_code,
+            $reviewer->name,
             $reason ? ': ' . $reason : ''
         );
+
+        $actionUrl = '/trip-requests/' . $trip->id;
 
         $this->notifyUser(
             $requester,
             $trip,
             'trip_request_changes_requested',
-            'Changes requested',
+            'Changes requested on your trip request',
             $message,
-            '/trip-requests/' . $trip->id
+            $actionUrl,
+            [
+                'reviewer_id' => $reviewer->id,
+                'reviewer_name' => $reviewer->name,
+                'reason' => $reason,
+                'workflow_stage' => Trip::WORKFLOW_CHANGES_REQUESTED,
+                'approval_status' => 'changes_requested',
+                'icon' => 'alert-circle',
+                'color' => 'amber',
+                'priority' => 'high',
+            ]
         );
+
+        if (! $requester->email) {
+            return;
+        }
+
+        try {
+            Mail::to($requester->email)->send(new TripChangesRequestedMail(
+                $trip,
+                $requester,
+                $reviewer,
+                (string) ($reason ?? 'Please review and update your trip request.')
+            ));
+        } catch (\Throwable $e) {
+            Log::warning('Failed to email trip changes requested notification', [
+                'trip_request_id' => $trip->id,
+                'requester_id' => $requester->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
     }
 
     public function notifyDirectorApproved(Trip $trip, User $director): void
@@ -312,10 +345,17 @@ class TripRequestNotificationService
             ->each(fn (User $user) => $this->notifyUser($user, $trip, $type, $title, $message, $actionUrl));
     }
 
-    private function notifyUser(User $user, Trip $trip, string $type, string $title, string $message, string $actionUrl): void
-    {
+    private function notifyUser(
+        User $user,
+        Trip $trip,
+        string $type,
+        string $title,
+        string $message,
+        string $actionUrl,
+        array $extra = [],
+    ): void {
         try {
-            DatabaseNotifications::send($user, new LogisticsEventNotification($type, [
+            DatabaseNotifications::send($user, new LogisticsEventNotification($type, array_merge([
                 'title' => $title,
                 'message' => $message,
                 'action_url' => $actionUrl,
@@ -324,7 +364,7 @@ class TripRequestNotificationService
                 'icon' => 'truck',
                 'color' => 'blue',
                 'priority' => 'normal',
-            ]));
+            ], $extra)));
         } catch (\Throwable $e) {
             Log::warning('Trip request notification failed', [
                 'trip_id' => $trip->id,

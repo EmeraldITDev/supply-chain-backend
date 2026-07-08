@@ -14,6 +14,7 @@ use App\Support\ExternalPassengerRequest;
 use App\Support\InternationalTransportModeRequest;
 use App\Support\PassengerEligibility;
 use App\Support\TripBookingRules;
+use App\Support\TripDisplayStatus;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
@@ -515,6 +516,7 @@ class TripRequestWorkflowController extends ApiController
         $reason = (string) $request->input('reason');
         $metadata = is_array($trip->metadata) ? $trip->metadata : [];
         $trip->workflow_stage = Trip::WORKFLOW_CHANGES_REQUESTED;
+        $trip->approval_status = 'changes_requested';
         $trip->metadata = array_merge($metadata, [
             'changes_requested_at' => now()->toIso8601String(),
             'changes_requested_by' => $user->id,
@@ -635,6 +637,7 @@ class TripRequestWorkflowController extends ApiController
         $reason = (string) $request->input('reason');
         $metadata = is_array($trip->metadata) ? $trip->metadata : [];
         $trip->workflow_stage = Trip::WORKFLOW_CHANGES_REQUESTED;
+        $trip->approval_status = 'changes_requested';
         $trip->metadata = array_merge($metadata, [
             'director_returned_at' => now()->toIso8601String(),
             'director_returned_by' => $user->id,
@@ -1397,33 +1400,12 @@ class TripRequestWorkflowController extends ApiController
      */
     private function resolveDisplayStatus(Trip $trip, ?Trip $linkedTrip): string
     {
-        if (strtolower((string) $trip->status) === Trip::STATUS_CANCELLED) {
-            return 'rejected';
-        }
-
-        if ($linkedTrip) {
-            return match (strtolower((string) $linkedTrip->status)) {
-                Trip::STATUS_COMPLETED, Trip::STATUS_CLOSED => 'completed',
-                Trip::STATUS_IN_PROGRESS => 'in_progress',
-                Trip::STATUS_CANCELLED => 'rejected',
-                default => 'approved',
-            };
-        }
-
-        if ($this->isDeletableDraft($trip)) {
-            return 'draft';
-        }
-
-        if (strtolower((string) $trip->status) === Trip::STATUS_SUBMITTED) {
-            return 'pending';
-        }
-
-        return (string) $trip->status;
+        return TripDisplayStatus::resolve($trip, $linkedTrip);
     }
 
     private function displayStatusLabel(string $status): string
     {
-        return ucwords(str_replace('_', ' ', $status));
+        return TripDisplayStatus::label($status);
     }
 
     /**
