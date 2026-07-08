@@ -523,6 +523,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/dashboard/procurement-manager', [DashboardController::class, 'procurementManagerDashboard']);
     Route::get('/dashboard/logistics-statistics', [LogisticsDashboardController::class, 'stats'])->middleware('role:procurement_manager,logistics_manager,logistics_officer,supply_chain_director,admin,executive,chairman,finance');
     Route::get('/dashboard/supply-chain-director', [DashboardController::class, 'supplyChainDirectorDashboard']);
+    Route::get('/dashboard/executive', [DashboardController::class, 'executiveDashboard']);
     Route::get('/dashboard/vendor', [DashboardController::class, 'vendorDashboard']);
     Route::get('/dashboard/finance', [DashboardController::class, 'financeDashboard']);
     Route::get('/dashboard/recent-activities', [DashboardController::class, 'getRecentActivities']);

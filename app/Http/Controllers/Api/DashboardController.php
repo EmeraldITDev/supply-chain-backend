@@ -12,6 +12,7 @@ use App\Models\SRF;
 use App\Models\Vendor;
 use App\Models\VendorRegistration;
 use App\Services\DashboardStatsCache;
+use App\Services\MrfParallelFirstApprovalService;
 use App\Services\Finance\FinanceRoutingService;
 use App\Services\WorkflowStateService;
 use App\Support\ProcurementOverviewAccess;
@@ -201,6 +202,73 @@ class DashboardController extends Controller
 
         $listLimit = $this->dashboardListLimit($request);
 
+        // Vendors awaiting Supply Chain Director approval (pending registrations)
+        $pendingVendorRegistrationsQuery = VendorRegistration::query()
+            ->where('status', VendorRegistration::STATUS_PENDING);
+
+        $pendingVendorRegistrationsCount = (clone $pendingVendorRegistrationsQuery)->count();
+
+        $pendingVendorRegistrations = (clone $pendingVendorRegistrationsQuery)
+            ->orderByDesc('created_at')
+            ->limit($listLimit)
+            ->get()
+            ->map(function (VendorRegistration $reg) {
+                return [
+                    'id' => $reg->id,
+                    'companyName' => $reg->company_name,
+                    'category' => $reg->category,
+                    'email' => $reg->email,
+                    'contactPerson' => $reg->contact_person,
+                    'createdAt' => $reg->created_at?->toIso8601String(),
+                    'status' => $reg->status,
+                ];
+            });
+
+        // MRFs pending SCD first/initial approval (parallel first-approval stage, no approver yet)
+        $pendingMrfScdFirstApprovalQuery = MRF::query()
+            ->select(array_values(array_intersect(
+                [
+                    'id',
+                    'mrf_id',
+                    'formatted_id',
+                    'title',
+                    'category',
+                    'urgency',
+                    'requester_name',
+                    'estimated_cost',
+                    'created_at',
+                    'workflow_state',
+                    'current_stage',
+                    'first_approval_by_role',
+                ],
+                MRF::resolveListApiSelect(),
+            )))
+            ->where('workflow_state', MrfParallelFirstApprovalService::STATE)
+            ->whereNull('first_approval_by_role');
+
+        $pendingMrfScdFirstApprovalCount = (clone $pendingMrfScdFirstApprovalQuery)->count();
+
+        $pendingMrfScdFirstApproval = (clone $pendingMrfScdFirstApprovalQuery)
+            ->orderByDesc('created_at')
+            ->limit($listLimit)
+            ->get()
+            ->map(function (MRF $mrf) {
+                return [
+                    'id' => $mrf->id,
+                    'mrfId' => $mrf->mrf_id,
+                    'formattedId' => $mrf->formatted_id,
+                    'title' => $mrf->title,
+                    'category' => $mrf->category,
+                    'urgency' => $mrf->urgency,
+                    'requesterName' => $mrf->requester_name,
+                    'estimatedCost' => $mrf->estimated_cost !== null ? (float) $mrf->estimated_cost : null,
+                    'workflowState' => $mrf->workflow_state,
+                    'currentStage' => $mrf->current_stage,
+                    'firstApprovalByRole' => $mrf->first_approval_by_role,
+                    'createdAt' => $mrf->created_at?->toIso8601String(),
+                ];
+            });
+
         // SRFs waiting on Supply Chain Director (not returned here before — frontends that only read this dashboard never saw them)
         $srfsAwaitingSupplyChainDirectorApproval = SRF::query()
             ->select(TableColumnCache::filterExisting('s_r_f_s', [
@@ -246,9 +314,14 @@ class DashboardController extends Controller
                 ];
             });
 
+        $pendingSrfScdApprovalCount = SRF::query()
+            ->where('status', 'Pending')
+            ->where('current_stage', 'supply_chain_director_review')
+            ->count();
+
         $pendingTripApprovals = Trip::query()
             ->where('trip_code', 'like', 'TRQ-%')
-            ->where('workflow_stage', Trip::WORKFLOW_DIRECTOR_REVIEW)
+            ->where('workflow_stage', Trip::WORKFLOW_SCD_APPROVAL)
             ->where('status', Trip::STATUS_SUBMITTED)
             ->with('creator:id,name,email,department')
             ->orderByDesc('created_at')
@@ -297,6 +370,59 @@ class DashboardController extends Controller
                     'created_at' => $trip->created_at?->toIso8601String(),
                     'detailPath' => '/api/trip-requests/' . $trip->id,
                     'availableActions' => ['director_approve', 'director_reject', 'director_return'],
+                ];
+            });
+
+        $pendingTripApprovalsCount = Trip::query()
+            ->where('trip_code', 'like', 'TRQ-%')
+            ->where('workflow_stage', Trip::WORKFLOW_SCD_APPROVAL)
+            ->where('status', Trip::STATUS_SUBMITTED)
+            ->count();
+
+        // Trip POs awaiting SCD signature / final review
+        $pendingTripPurchaseOrdersQuery = Trip::query()
+            ->where('trip_code', 'like', 'TRQ-%')
+            ->where('workflow_stage', Trip::WORKFLOW_PO_PENDING_SIGN)
+            ->whereNotNull('unsigned_po_url')
+            ->where(function ($q) {
+                $q->whereNull('signed_po_url')
+                    ->orWhere('signed_po_url', '=', '');
+            });
+
+        $pendingPurchaseOrdersCount = (clone $pendingTripPurchaseOrdersQuery)->count();
+
+        $pendingPurchaseOrders = (clone $pendingTripPurchaseOrdersQuery)
+            ->with('creator:id,name,email,department')
+            ->orderByDesc('created_at')
+            ->limit($listLimit)
+            ->get()
+            ->map(function (Trip $trip) {
+                $requester = $trip->relationLoaded('creator') ? $trip->creator : null;
+
+                return [
+                    'id' => $trip->id,
+                    'tripCode' => $trip->trip_code,
+                    'trip_code' => $trip->trip_code,
+                    'title' => $trip->title,
+                    'purpose' => $trip->purpose,
+                    'origin' => $trip->origin,
+                    'destination' => $trip->destination,
+                    'requesterName' => $requester?->name,
+                    'requester_name' => $requester?->name,
+                    'requesterDepartment' => $requester?->department,
+                    'requester_department' => $requester?->department,
+                    'workflowStage' => $trip->workflow_stage,
+                    'workflow_stage' => $trip->workflow_stage,
+                    'status' => $trip->status,
+                    'approvalStatus' => $trip->approval_status,
+                    'approval_status' => $trip->approval_status,
+                    'poNumber' => $trip->po_number,
+                    'unsignedPoUrl' => $trip->unsigned_po_url,
+                    'unsigned_po_url' => $trip->unsigned_po_url,
+                    'signedPoUrl' => $trip->signed_po_url,
+                    'signed_po_url' => $trip->signed_po_url,
+                    'createdAt' => $trip->created_at?->toIso8601String(),
+                    'created_at' => $trip->created_at?->toIso8601String(),
                 ];
             });
 
@@ -365,8 +491,18 @@ class DashboardController extends Controller
             'metrics' => $metrics,
             'recentRegistrations' => $recentRegistrations,
             'srfsAwaitingSupplyChainDirectorApproval' => $srfsAwaitingSupplyChainDirectorApproval,
+            // New explicit SCD dashboard queues
+            'pending_vendor_registrations' => $pendingVendorRegistrations,
+            'pending_vendor_registrations_count' => $pendingVendorRegistrationsCount,
+            'pending_mrf_scd_first_approval' => $pendingMrfScdFirstApproval,
+            'pending_mrf_scd_first_approval_count' => $pendingMrfScdFirstApprovalCount,
+            'pending_srf_scd_approval' => $srfsAwaitingSupplyChainDirectorApproval,
+            'pending_srf_scd_approval_count' => $pendingSrfScdApprovalCount,
             'pending_trip_approvals' => $pendingTripApprovals,
             'pendingTripApprovals' => $pendingTripApprovals,
+            'pending_trip_approvals_count' => $pendingTripApprovalsCount,
+            'pending_purchase_orders' => $pendingPurchaseOrders,
+            'pending_purchase_orders_count' => $pendingPurchaseOrdersCount,
         ]);
     }
 
@@ -603,6 +739,82 @@ class DashboardController extends Controller
                 'financeMRFs' => $this->paginationMeta($financePaginated),
             ],
             'financeMRFs' => $financeMRFs,
+        ]);
+    }
+
+    /**
+     * Get Executive Dashboard
+     * Focused on Executive first-approval queue for MRFs.
+     */
+    public function executiveDashboard(Request $request)
+    {
+        $user = $request->user();
+
+        $allowedRoles = ['executive', 'director', 'admin'];
+        $hasAllowedRole =
+            (UserRoleNormalizer::supplyChainRole($user) !== null && in_array($user->scmRole(), $allowedRoles)) ||
+            (method_exists($user, 'hasAnyRole') && $user->hasAnyRole($allowedRoles));
+
+        if (! $hasAllowedRole) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Insufficient permissions',
+                'code' => 'FORBIDDEN',
+            ], 403);
+        }
+
+        $listLimit = $this->dashboardListLimit($request);
+
+        // MRFs routed to Executive for first/initial approval (parallel first-approval stage, no approver yet)
+        $pendingExecutiveFirstApprovalQuery = MRF::query()
+            ->select(array_values(array_intersect(
+                [
+                    'id',
+                    'mrf_id',
+                    'formatted_id',
+                    'title',
+                    'category',
+                    'urgency',
+                    'requester_name',
+                    'estimated_cost',
+                    'created_at',
+                    'workflow_state',
+                    'current_stage',
+                    'first_approval_by_role',
+                ],
+                MRF::resolveListApiSelect(),
+            )))
+            ->where('workflow_state', MrfParallelFirstApprovalService::STATE)
+            ->whereNull('first_approval_by_role');
+
+        $pendingExecutiveFirstApprovalCount = (clone $pendingExecutiveFirstApprovalQuery)->count();
+
+        $pendingExecutiveFirstApproval = (clone $pendingExecutiveFirstApprovalQuery)
+            ->orderByDesc('created_at')
+            ->limit($listLimit)
+            ->get()
+            ->map(function (MRF $mrf) {
+                return [
+                    'id' => $mrf->id,
+                    'mrfId' => $mrf->mrf_id,
+                    'formattedId' => $mrf->formatted_id,
+                    'title' => $mrf->title,
+                    'category' => $mrf->category,
+                    'urgency' => $mrf->urgency,
+                    'requesterName' => $mrf->requester_name,
+                    'estimatedCost' => $mrf->estimated_cost !== null ? (float) $mrf->estimated_cost : null,
+                    'workflowState' => $mrf->workflow_state,
+                    'currentStage' => $mrf->current_stage,
+                    'firstApprovalByRole' => $mrf->first_approval_by_role,
+                    'createdAt' => $mrf->created_at?->toIso8601String(),
+                ];
+            });
+
+        return response()->json([
+            'success' => true,
+            'listLimit' => $listLimit,
+            'pending_mrf_executive_first_approval' => $pendingExecutiveFirstApproval,
+            'pending_mrf_executive_first_approval_count' => $pendingExecutiveFirstApprovalCount,
         ]);
     }
 
