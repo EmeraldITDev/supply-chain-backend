@@ -551,6 +551,7 @@ class TripRequestWorkflowController extends ApiController
 
         $metadata = is_array($trip->metadata) ? $trip->metadata : [];
         $trip->workflow_stage = Trip::WORKFLOW_DIRECTOR_APPROVED;
+        $trip->approval_status = 'director_approved';
         $trip->metadata = array_merge($metadata, [
             'director_approved_at' => now()->toIso8601String(),
             'director_approved_by' => $user->id,
@@ -592,6 +593,7 @@ class TripRequestWorkflowController extends ApiController
         $reason = $request->input('reason');
         $metadata = is_array($trip->metadata) ? $trip->metadata : [];
         $trip->status = Trip::STATUS_CANCELLED;
+        $trip->approval_status = 'rejected';
         $trip->metadata = array_merge($metadata, [
             'director_rejected_at' => now()->toIso8601String(),
             'director_rejected_by' => $user->id,
@@ -602,7 +604,7 @@ class TripRequestWorkflowController extends ApiController
 
         $requester = $trip->creator ?? User::find($trip->created_by);
         if ($requester) {
-            $this->tripRequestNotifications->notifyDirectorRejected($trip, $requester, $reason);
+            $this->tripRequestNotifications->notifyDirectorRejected($trip, $user, $requester, $reason);
         }
 
         return $this->success([
@@ -637,7 +639,7 @@ class TripRequestWorkflowController extends ApiController
         $reason = (string) $request->input('reason');
         $metadata = is_array($trip->metadata) ? $trip->metadata : [];
         $trip->workflow_stage = Trip::WORKFLOW_CHANGES_REQUESTED;
-        $trip->approval_status = 'changes_requested';
+        $trip->approval_status = 'revision_required';
         $trip->metadata = array_merge($metadata, [
             'director_returned_at' => now()->toIso8601String(),
             'director_returned_by' => $user->id,
@@ -648,7 +650,7 @@ class TripRequestWorkflowController extends ApiController
 
         $requester = $trip->creator ?? User::find($trip->created_by);
         if ($requester) {
-            $this->tripRequestNotifications->notifyDirectorReturned($trip, $requester, $reason);
+            $this->tripRequestNotifications->notifyDirectorReturned($trip, $user, $requester, $reason);
         }
 
         return $this->success([
@@ -1140,7 +1142,7 @@ class TripRequestWorkflowController extends ApiController
             return false;
         }
 
-        return in_array($user->scmRole(), ['supply_chain_director', 'supply_chain', 'admin'], true);
+        return in_array($user->scmRole(), ['supply_chain_director', 'supply_chain', 'director', 'admin'], true);
     }
 
     /**

@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Activity;
+use App\Models\Logistics\Trip;
 use App\Models\MRF;
 use App\Models\Quotation;
 use App\Models\RFQ;
@@ -15,6 +16,7 @@ use App\Services\Finance\FinanceRoutingService;
 use App\Services\WorkflowStateService;
 use App\Support\ProcurementOverviewAccess;
 use App\Support\TableColumnCache;
+use App\Support\TripDisplayStatus;
 use App\Support\UserRoleNormalizer;
 use App\Support\VendorCategoryDisplay;
 use Illuminate\Http\Request;
@@ -244,6 +246,60 @@ class DashboardController extends Controller
                 ];
             });
 
+        $pendingTripApprovals = Trip::query()
+            ->where('trip_code', 'like', 'TRQ-%')
+            ->where('workflow_stage', Trip::WORKFLOW_DIRECTOR_REVIEW)
+            ->where('status', Trip::STATUS_SUBMITTED)
+            ->with('creator:id,name,email,department')
+            ->orderByDesc('created_at')
+            ->limit($listLimit)
+            ->get()
+            ->map(function (Trip $trip) {
+                $requester = $trip->relationLoaded('creator') ? $trip->creator : null;
+                $displayStatus = TripDisplayStatus::resolve($trip);
+
+                return [
+                    'id' => $trip->id,
+                    'tripCode' => $trip->trip_code,
+                    'trip_code' => $trip->trip_code,
+                    'title' => $trip->title,
+                    'purpose' => $trip->purpose,
+                    'origin' => $trip->origin,
+                    'destination' => $trip->destination,
+                    'requesterName' => $requester?->name,
+                    'requester_name' => $requester?->name,
+                    'requesterDepartment' => $requester?->department,
+                    'requester_department' => $requester?->department,
+                    'requester' => $requester ? [
+                        'id' => $requester->id,
+                        'name' => $requester->name,
+                        'email' => $requester->email,
+                        'department' => $requester->department,
+                    ] : null,
+                    'workflowStage' => $trip->workflow_stage,
+                    'workflow_stage' => $trip->workflow_stage,
+                    'workflowStageLabel' => 'Pending Director Approval',
+                    'workflow_stage_label' => 'Pending Director Approval',
+                    'status' => $trip->status,
+                    'approvalStatus' => $trip->approval_status,
+                    'approval_status' => $trip->approval_status,
+                    'displayStatus' => $displayStatus,
+                    'display_status' => $displayStatus,
+                    'displayStatusLabel' => TripDisplayStatus::label($displayStatus),
+                    'display_status_label' => TripDisplayStatus::label($displayStatus),
+                    'scheduledDepartureAt' => $trip->scheduled_departure_at?->toIso8601String(),
+                    'scheduled_departure_at' => $trip->scheduled_departure_at?->toIso8601String(),
+                    'scheduledArrivalAt' => $trip->scheduled_arrival_at?->toIso8601String(),
+                    'scheduled_arrival_at' => $trip->scheduled_arrival_at?->toIso8601String(),
+                    'bookingScope' => $trip->booking_scope,
+                    'booking_scope' => $trip->booking_scope,
+                    'createdAt' => $trip->created_at?->toIso8601String(),
+                    'created_at' => $trip->created_at?->toIso8601String(),
+                    'detailPath' => '/api/trip-requests/' . $trip->id,
+                    'availableActions' => ['director_approve', 'director_reject', 'director_return'],
+                ];
+            });
+
         // Get all vendor registrations (pending and recent)
         $recentRegistrations = VendorRegistration::with(['vendor', 'approver'])
             ->orderBy('created_at', 'desc')
@@ -276,6 +332,11 @@ class DashboardController extends Controller
             'pendingSrfDirectorApprovals' => SRF::where('status', 'Pending')
                 ->where('current_stage', 'supply_chain_director_review')
                 ->count(),
+            'pendingTripApprovals' => Trip::query()
+                ->where('trip_code', 'like', 'TRQ-%')
+                ->where('workflow_stage', Trip::WORKFLOW_DIRECTOR_REVIEW)
+                ->where('status', Trip::STATUS_SUBMITTED)
+                ->count(),
         ]);
 
         $metrics = DashboardStatsCache::remember('dashboard.supply_chain_director.metrics', fn () => [
@@ -304,6 +365,8 @@ class DashboardController extends Controller
             'metrics' => $metrics,
             'recentRegistrations' => $recentRegistrations,
             'srfsAwaitingSupplyChainDirectorApproval' => $srfsAwaitingSupplyChainDirectorApproval,
+            'pending_trip_approvals' => $pendingTripApprovals,
+            'pendingTripApprovals' => $pendingTripApprovals,
         ]);
     }
 

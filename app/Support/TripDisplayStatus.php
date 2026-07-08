@@ -12,12 +12,21 @@ final class TripDisplayStatus
             return 'rejected';
         }
 
+        $approvalStatus = strtolower((string) ($trip->approval_status ?? ''));
+        if ($approvalStatus === 'revision_required') {
+            return 'revision_required';
+        }
+
         if ($trip->workflow_stage === Trip::WORKFLOW_CHANGES_REQUESTED) {
             return 'changes_requested';
         }
 
         if ($trip->workflow_stage === Trip::WORKFLOW_DIRECTOR_REVIEW) {
             return 'under_review';
+        }
+
+        if ($trip->workflow_stage === Trip::WORKFLOW_DIRECTOR_APPROVED) {
+            return 'approved';
         }
 
         if ($linkedTrip) {
@@ -46,6 +55,7 @@ final class TripDisplayStatus
             'pending' => 'Submitted',
             'under_review' => 'Under Review',
             'changes_requested' => 'Changes Requested',
+            'revision_required' => 'Revision Required',
             'approved' => 'Approved',
             'in_progress' => 'In Progress',
             'completed' => 'Completed',

@@ -31,4 +31,17 @@ class TripDisplayStatusTest extends TestCase
         $this->assertSame('under_review', TripDisplayStatus::resolve($trip));
         $this->assertSame('Under Review', TripDisplayStatus::label('under_review'));
     }
+
+    public function test_revision_required_maps_from_approval_status(): void
+    {
+        $trip = new Trip([
+            'trip_code' => 'TRQ-20260708-TEST',
+            'status' => Trip::STATUS_SUBMITTED,
+            'workflow_stage' => Trip::WORKFLOW_CHANGES_REQUESTED,
+            'approval_status' => 'revision_required',
+        ]);
+
+        $this->assertSame('revision_required', TripDisplayStatus::resolve($trip));
+        $this->assertSame('Revision Required', TripDisplayStatus::label('revision_required'));
+    }
 }

@@ -147,6 +147,9 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/trips', [LogisticsTripController::class, 'index']);
     Route::get('/trips/{id}', [LogisticsTripController::class, 'show']);
     Route::post('/trips/{id}/request-changes', [TripRequestWorkflowController::class, 'requestChanges'])->middleware($logisticsInternalRoles);
+    Route::post('/trips/{id}/director-approve', [TripRequestWorkflowController::class, 'directorApprove']);
+    Route::post('/trips/{id}/director-reject', [TripRequestWorkflowController::class, 'directorReject']);
+    Route::post('/trips/{id}/director-return', [TripRequestWorkflowController::class, 'directorReturn']);
     Route::put('/trips/{id}', [LogisticsTripController::class, 'update'])->middleware($logisticsInternalRoles);
     Route::patch('/trips/{id}', [LogisticsTripController::class, 'update'])->middleware($logisticsInternalRoles);
     Route::post('/trips/{id}/assign-vendor', [LogisticsTripController::class, 'assignVendor'])->middleware($logisticsInternalRoles);
@@ -601,6 +604,9 @@ Route::prefix('v1/logistics')->group(function () {
         Route::get('/trips', [LogisticsTripController::class, 'index']);
         Route::get('/trips/{id}', [LogisticsTripController::class, 'show']);
         Route::post('/trips/{id}/request-changes', [TripRequestWorkflowController::class, 'requestChanges'])->middleware($logisticsInternalRoles);
+    Route::post('/trips/{id}/director-approve', [TripRequestWorkflowController::class, 'directorApprove']);
+    Route::post('/trips/{id}/director-reject', [TripRequestWorkflowController::class, 'directorReject']);
+    Route::post('/trips/{id}/director-return', [TripRequestWorkflowController::class, 'directorReturn']);
         Route::put('/trips/{id}', [LogisticsTripController::class, 'update'])->middleware($logisticsInternalRoles);
         Route::patch('/trips/{id}', [LogisticsTripController::class, 'update'])->middleware($logisticsInternalRoles);
         Route::post('/trips/{id}/assign-vendor', [LogisticsTripController::class, 'assignVendor'])->middleware($logisticsInternalRoles);
@@ -762,6 +768,9 @@ Route::prefix('logistics')->group(function () {
         Route::get('/trips', [LogisticsTripController::class, 'index']);
         Route::get('/trips/{id}', [LogisticsTripController::class, 'show']);
         Route::post('/trips/{id}/request-changes', [TripRequestWorkflowController::class, 'requestChanges'])->middleware($logisticsInternalRoles);
+    Route::post('/trips/{id}/director-approve', [TripRequestWorkflowController::class, 'directorApprove']);
+    Route::post('/trips/{id}/director-reject', [TripRequestWorkflowController::class, 'directorReject']);
+    Route::post('/trips/{id}/director-return', [TripRequestWorkflowController::class, 'directorReturn']);
         Route::put('/trips/{id}', [LogisticsTripController::class, 'update'])->middleware($logisticsInternalRoles);
         Route::patch('/trips/{id}', [LogisticsTripController::class, 'update'])->middleware($logisticsInternalRoles);
         Route::post('/trips/{id}/assign-vendor', [LogisticsTripController::class, 'assignVendor'])->middleware($logisticsInternalRoles);

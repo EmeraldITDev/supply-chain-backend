@@ -177,7 +177,7 @@ class TripRequestNotificationService
 
     public function notifyDirectorApproved(Trip $trip, User $director): void
     {
-        $message = sprintf(
+        $lmMessage = sprintf(
             'Trip request %s was approved by %s. Convert it to a logistics request when ready.',
             $trip->trip_code,
             $director->name
@@ -188,18 +188,67 @@ class TripRequestNotificationService
             ['logistics_manager', 'logistics_officer'],
             'trip_request_director_approved',
             'Ready for logistics conversion',
-            $message,
-            '/trip-requests/' . $trip->id
+            $lmMessage,
+            '/trip-requests/' . $trip->id,
+            [
+                'director_id' => $director->id,
+                'director_name' => $director->name,
+                'workflow_stage' => Trip::WORKFLOW_DIRECTOR_APPROVED,
+                'approval_status' => 'director_approved',
+                'icon' => 'check-circle',
+                'color' => 'green',
+                'priority' => 'high',
+            ]
+        );
+
+        $requester = $trip->creator ?? User::find($trip->created_by);
+        if (! $requester) {
+            return;
+        }
+
+        $requesterMessage = sprintf(
+            'Your trip request %s was approved by Supervising Director %s and is awaiting logistics conversion.',
+            $trip->trip_code,
+            $director->name
+        );
+
+        $this->notifyUser(
+            $requester,
+            $trip,
+            'trip_request_director_approved',
+            'Trip request approved by director',
+            $requesterMessage,
+            '/trip-requests/' . $trip->id,
+            [
+                'director_id' => $director->id,
+                'director_name' => $director->name,
+                'workflow_stage' => Trip::WORKFLOW_DIRECTOR_APPROVED,
+                'approval_status' => 'director_approved',
+                'icon' => 'check-circle',
+                'color' => 'green',
+                'priority' => 'normal',
+            ]
         );
     }
 
-    public function notifyDirectorRejected(Trip $trip, User $requester, ?string $reason = null): void
+    public function notifyDirectorRejected(Trip $trip, User $director, User $requester, ?string $reason = null): void
     {
         $message = sprintf(
-            'Trip request %s was rejected by the Supervising Director%s.',
+            'Trip request %s was rejected by Supervising Director %s%s.',
             $trip->trip_code,
+            $director->name,
             $reason ? ': ' . $reason : ''
         );
+
+        $extra = [
+            'director_id' => $director->id,
+            'director_name' => $director->name,
+            'reason' => $reason,
+            'approval_status' => 'rejected',
+            'icon' => 'x-circle',
+            'color' => 'red',
+            'priority' => 'high',
+        ];
 
         $this->notifyUser(
             $requester,
@@ -207,17 +256,40 @@ class TripRequestNotificationService
             'trip_request_director_rejected',
             'Trip request rejected',
             $message,
-            '/department'
+            '/department',
+            $extra
+        );
+
+        $this->notifyUsersByRoles(
+            $trip,
+            ['logistics_manager', 'logistics_officer'],
+            'trip_request_director_rejected',
+            'Trip request rejected by director',
+            $message,
+            '/trip-requests/' . $trip->id,
+            $extra
         );
     }
 
-    public function notifyDirectorReturned(Trip $trip, User $requester, ?string $reason = null): void
+    public function notifyDirectorReturned(Trip $trip, User $director, User $requester, ?string $reason = null): void
     {
         $message = sprintf(
-            'Trip request %s was returned for revision%s.',
+            'Trip request %s was returned for revision by Supervising Director %s%s.',
             $trip->trip_code,
+            $director->name,
             $reason ? ': ' . $reason : ''
         );
+
+        $extra = [
+            'director_id' => $director->id,
+            'director_name' => $director->name,
+            'reason' => $reason,
+            'workflow_stage' => Trip::WORKFLOW_CHANGES_REQUESTED,
+            'approval_status' => 'revision_required',
+            'icon' => 'alert-circle',
+            'color' => 'amber',
+            'priority' => 'high',
+        ];
 
         $this->notifyUser(
             $requester,
@@ -225,7 +297,18 @@ class TripRequestNotificationService
             'trip_request_returned',
             'Returned for revision',
             $message,
-            '/trip-requests/' . $trip->id
+            '/trip-requests/' . $trip->id,
+            $extra
+        );
+
+        $this->notifyUsersByRoles(
+            $trip,
+            ['logistics_manager', 'logistics_officer'],
+            'trip_request_returned',
+            'Trip request returned by director',
+            $message,
+            '/trip-requests/' . $trip->id,
+            $extra
         );
     }
 
@@ -337,12 +420,13 @@ class TripRequestNotificationService
         string $title,
         string $message,
         string $actionUrl,
+        array $extra = [],
     ): void {
         User::query()
             ->whereIn('supply_chain_role', $roles)
             ->whereNotNull('email')
             ->get()
-            ->each(fn (User $user) => $this->notifyUser($user, $trip, $type, $title, $message, $actionUrl));
+            ->each(fn (User $user) => $this->notifyUser($user, $trip, $type, $title, $message, $actionUrl, $extra));
     }
 
     private function notifyUser(
