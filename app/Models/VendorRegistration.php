@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Enums\VendorRegistrationStatus;
+use App\Services\DashboardStatsCache;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -15,6 +16,17 @@ class VendorRegistration extends Model
     public const STATUS_PENDING = 'Pending';
     public const STATUS_APPROVED = 'Approved';
     public const STATUS_REJECTED = 'Rejected';
+
+    protected static function booted(): void
+    {
+        static::saved(function () {
+            DashboardStatsCache::forgetAll();
+        });
+        static::deleted(function () {
+            DashboardStatsCache::forgetAll();
+        });
+    }
+
     protected $fillable = [
         'company_name',
         'category',

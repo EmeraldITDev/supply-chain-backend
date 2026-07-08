@@ -4,7 +4,6 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Activity;
-use App\Models\Logistics\Trip;
 use App\Models\MRF;
 use App\Models\Quotation;
 use App\Models\RFQ;
@@ -12,12 +11,10 @@ use App\Models\SRF;
 use App\Models\Vendor;
 use App\Models\VendorRegistration;
 use App\Services\DashboardStatsCache;
-use App\Services\MrfParallelFirstApprovalService;
 use App\Services\Finance\FinanceRoutingService;
+use App\Services\RoleDashboardQueueService;
 use App\Services\WorkflowStateService;
 use App\Support\ProcurementOverviewAccess;
-use App\Support\TableColumnCache;
-use App\Support\TripDisplayStatus;
 use App\Support\UserRoleNormalizer;
 use App\Support\VendorCategoryDisplay;
 use Illuminate\Http\Request;
@@ -25,6 +22,10 @@ use Illuminate\Support\Facades\DB;
 
 class DashboardController extends Controller
 {
+    public function __construct(private RoleDashboardQueueService $roleDashboardQueues)
+    {
+    }
+
     /**
      * Get Procurement Manager Dashboard
      */
@@ -201,269 +202,32 @@ class DashboardController extends Controller
         }
 
         $listLimit = $this->dashboardListLimit($request);
+        $scdCounts = $this->roleDashboardQueues->scdPendingCounts();
 
-        // Vendors awaiting Supply Chain Director approval (pending registrations)
-        $pendingVendorRegistrationsQuery = VendorRegistration::query()
-            ->where('status', VendorRegistration::STATUS_PENDING);
+        $pendingVendorRegistrations = $this->roleDashboardQueues->pendingVendorRegistrationItems($listLimit);
+        $pendingMrfScdFirstApproval = $this->roleDashboardQueues->pendingMrfParallelFirstApprovalItems($listLimit);
+        $srfsAwaitingSupplyChainDirectorApproval = $this->roleDashboardQueues->pendingSrfScdApprovalItems($listLimit);
+        $pendingTripApprovals = $this->roleDashboardQueues->pendingTripScdApprovalItems($listLimit);
+        $pendingPurchaseOrders = $this->roleDashboardQueues->pendingTripPoSignatureItems($listLimit);
+        $recentRegistrations = $this->roleDashboardQueues->recentVendorRegistrationItems();
 
-        $pendingVendorRegistrationsCount = (clone $pendingVendorRegistrationsQuery)->count();
-
-        $pendingVendorRegistrations = (clone $pendingVendorRegistrationsQuery)
-            ->orderByDesc('created_at')
-            ->limit($listLimit)
-            ->get()
-            ->map(function (VendorRegistration $reg) {
-                return [
-                    'id' => $reg->id,
-                    'companyName' => $reg->company_name,
-                    'category' => $reg->category,
-                    'email' => $reg->email,
-                    'contactPerson' => $reg->contact_person,
-                    'createdAt' => $reg->created_at?->toIso8601String(),
-                    'status' => $reg->status,
-                ];
-            });
-
-        // MRFs pending SCD first/initial approval (parallel first-approval stage, no approver yet)
-        $pendingMrfScdFirstApprovalQuery = MRF::query()
-            ->select(array_values(array_intersect(
-                [
-                    'id',
-                    'mrf_id',
-                    'formatted_id',
-                    'title',
-                    'category',
-                    'urgency',
-                    'requester_name',
-                    'estimated_cost',
-                    'created_at',
-                    'workflow_state',
-                    'current_stage',
-                    'first_approval_by_role',
-                ],
-                MRF::resolveListApiSelect(),
-            )))
-            ->where('workflow_state', MrfParallelFirstApprovalService::STATE)
-            ->whereNull('first_approval_by_role');
-
-        $pendingMrfScdFirstApprovalCount = (clone $pendingMrfScdFirstApprovalQuery)->count();
-
-        $pendingMrfScdFirstApproval = (clone $pendingMrfScdFirstApprovalQuery)
-            ->orderByDesc('created_at')
-            ->limit($listLimit)
-            ->get()
-            ->map(function (MRF $mrf) {
-                return [
-                    'id' => $mrf->id,
-                    'mrfId' => $mrf->mrf_id,
-                    'formattedId' => $mrf->formatted_id,
-                    'title' => $mrf->title,
-                    'category' => $mrf->category,
-                    'urgency' => $mrf->urgency,
-                    'requesterName' => $mrf->requester_name,
-                    'estimatedCost' => $mrf->estimated_cost !== null ? (float) $mrf->estimated_cost : null,
-                    'workflowState' => $mrf->workflow_state,
-                    'currentStage' => $mrf->current_stage,
-                    'firstApprovalByRole' => $mrf->first_approval_by_role,
-                    'createdAt' => $mrf->created_at?->toIso8601String(),
-                ];
-            });
-
-        // SRFs waiting on Supply Chain Director (not returned here before — frontends that only read this dashboard never saw them)
-        $srfsAwaitingSupplyChainDirectorApproval = SRF::query()
-            ->select(TableColumnCache::filterExisting('s_r_f_s', [
-                'id', 'srf_id', 'formatted_id', 'title', 'service_type', 'description', 'justification',
-                'duration', 'department', 'requester_id', 'requester_name', 'current_stage',
-                'urgency', 'estimated_cost', 'created_at', 'date',
-            ]))
-            ->where('status', 'Pending')
-            ->where('current_stage', 'supply_chain_director_review')
-            ->with(['requester:id,name,email'])
-            ->orderByDesc('created_at')
-            ->limit($listLimit)
-            ->get()
-            ->map(function (SRF $srf) {
-                $requesterName = $srf->requester_name
-                    ?: ($srf->relationLoaded('requester') && $srf->requester ? $srf->requester->name : null);
-
-                return [
-                    'id' => $srf->id,
-                    'srfId' => $srf->srf_id,
-                    'formattedId' => $srf->formatted_id,
-                    'title' => $srf->title,
-                    'serviceType' => $srf->service_type,
-                    'service_type' => $srf->service_type,
-                    'description' => $srf->description,
-                    'justification' => $srf->justification,
-                    'duration' => $srf->duration,
-                    'department' => $srf->department,
-                    'requesterName' => $requesterName,
-                    'requester_name' => $requesterName,
-                    'requester' => [
-                        'id' => (int) $srf->requester_id,
-                        'name' => $requesterName,
-                        'email' => $srf->requester?->email,
-                    ],
-                    'currentStage' => $srf->current_stage,
-                    'current_stage' => $srf->current_stage,
-                    'urgency' => $srf->urgency,
-                    'estimatedCost' => $srf->estimated_cost !== null ? (float) $srf->estimated_cost : null,
-                    'estimated_cost' => $srf->estimated_cost !== null ? (float) $srf->estimated_cost : null,
-                    'createdAt' => $srf->created_at->toIso8601String(),
-                    'submittedDate' => $srf->date ? $srf->date->format('Y-m-d') : null,
-                ];
-            });
-
-        $pendingSrfScdApprovalCount = SRF::query()
-            ->where('status', 'Pending')
-            ->where('current_stage', 'supply_chain_director_review')
-            ->count();
-
-        $pendingTripApprovals = Trip::query()
-            ->where('trip_code', 'like', 'TRQ-%')
-            ->where('workflow_stage', Trip::WORKFLOW_SCD_APPROVAL)
-            ->where('status', Trip::STATUS_SUBMITTED)
-            ->with('creator:id,name,email,department')
-            ->orderByDesc('created_at')
-            ->limit($listLimit)
-            ->get()
-            ->map(function (Trip $trip) {
-                $requester = $trip->relationLoaded('creator') ? $trip->creator : null;
-                $displayStatus = TripDisplayStatus::resolve($trip);
-
-                return [
-                    'id' => $trip->id,
-                    'tripCode' => $trip->trip_code,
-                    'trip_code' => $trip->trip_code,
-                    'title' => $trip->title,
-                    'purpose' => $trip->purpose,
-                    'origin' => $trip->origin,
-                    'destination' => $trip->destination,
-                    'requesterName' => $requester?->name,
-                    'requester_name' => $requester?->name,
-                    'requesterDepartment' => $requester?->department,
-                    'requester_department' => $requester?->department,
-                    'requester' => $requester ? [
-                        'id' => $requester->id,
-                        'name' => $requester->name,
-                        'email' => $requester->email,
-                        'department' => $requester->department,
-                    ] : null,
-                    'workflowStage' => $trip->workflow_stage,
-                    'workflow_stage' => $trip->workflow_stage,
-                    'workflowStageLabel' => 'Pending Director Approval',
-                    'workflow_stage_label' => 'Pending Director Approval',
-                    'status' => $trip->status,
-                    'approvalStatus' => $trip->approval_status,
-                    'approval_status' => $trip->approval_status,
-                    'displayStatus' => $displayStatus,
-                    'display_status' => $displayStatus,
-                    'displayStatusLabel' => TripDisplayStatus::label($displayStatus),
-                    'display_status_label' => TripDisplayStatus::label($displayStatus),
-                    'scheduledDepartureAt' => $trip->scheduled_departure_at?->toIso8601String(),
-                    'scheduled_departure_at' => $trip->scheduled_departure_at?->toIso8601String(),
-                    'scheduledArrivalAt' => $trip->scheduled_arrival_at?->toIso8601String(),
-                    'scheduled_arrival_at' => $trip->scheduled_arrival_at?->toIso8601String(),
-                    'bookingScope' => $trip->booking_scope,
-                    'booking_scope' => $trip->booking_scope,
-                    'createdAt' => $trip->created_at?->toIso8601String(),
-                    'created_at' => $trip->created_at?->toIso8601String(),
-                    'detailPath' => '/api/trip-requests/' . $trip->id,
-                    'availableActions' => ['director_approve', 'director_reject', 'director_return'],
-                ];
-            });
-
-        $pendingTripApprovalsCount = Trip::query()
-            ->where('trip_code', 'like', 'TRQ-%')
-            ->where('workflow_stage', Trip::WORKFLOW_SCD_APPROVAL)
-            ->where('status', Trip::STATUS_SUBMITTED)
-            ->count();
-
-        // Trip POs awaiting SCD signature / final review
-        $pendingTripPurchaseOrdersQuery = Trip::query()
-            ->where('trip_code', 'like', 'TRQ-%')
-            ->where('workflow_stage', Trip::WORKFLOW_PO_PENDING_SIGN)
-            ->whereNotNull('unsigned_po_url')
-            ->where(function ($q) {
-                $q->whereNull('signed_po_url')
-                    ->orWhere('signed_po_url', '=', '');
-            });
-
-        $pendingPurchaseOrdersCount = (clone $pendingTripPurchaseOrdersQuery)->count();
-
-        $pendingPurchaseOrders = (clone $pendingTripPurchaseOrdersQuery)
-            ->with('creator:id,name,email,department')
-            ->orderByDesc('created_at')
-            ->limit($listLimit)
-            ->get()
-            ->map(function (Trip $trip) {
-                $requester = $trip->relationLoaded('creator') ? $trip->creator : null;
-
-                return [
-                    'id' => $trip->id,
-                    'tripCode' => $trip->trip_code,
-                    'trip_code' => $trip->trip_code,
-                    'title' => $trip->title,
-                    'purpose' => $trip->purpose,
-                    'origin' => $trip->origin,
-                    'destination' => $trip->destination,
-                    'requesterName' => $requester?->name,
-                    'requester_name' => $requester?->name,
-                    'requesterDepartment' => $requester?->department,
-                    'requester_department' => $requester?->department,
-                    'workflowStage' => $trip->workflow_stage,
-                    'workflow_stage' => $trip->workflow_stage,
-                    'status' => $trip->status,
-                    'approvalStatus' => $trip->approval_status,
-                    'approval_status' => $trip->approval_status,
-                    'poNumber' => $trip->po_number,
-                    'unsignedPoUrl' => $trip->unsigned_po_url,
-                    'unsigned_po_url' => $trip->unsigned_po_url,
-                    'signedPoUrl' => $trip->signed_po_url,
-                    'signed_po_url' => $trip->signed_po_url,
-                    'createdAt' => $trip->created_at?->toIso8601String(),
-                    'created_at' => $trip->created_at?->toIso8601String(),
-                ];
-            });
-
-        // Get all vendor registrations (pending and recent)
-        $recentRegistrations = VendorRegistration::with(['vendor', 'approver'])
-            ->orderBy('created_at', 'desc')
-            ->limit(20)
-            ->get()
-            ->map(function($reg) {
-                return [
-                    'id' => $reg->id,
-                    'companyName' => $reg->company_name,
-                    'category' => $reg->category,
-                    'status' => $reg->status,
-                    'approvedBy' => $reg->approver ? $reg->approver->name : null,
-                    'approvedAt' => $reg->approved_at ? $reg->approved_at->toIso8601String() : null,
-                    'createdAt' => $reg->created_at->toIso8601String(),
-                ];
-            });
-
-        $stats = DashboardStatsCache::remember('dashboard.supply_chain_director.stats', fn () => [
-            'totalVendors' => Vendor::count(),
-            'activeVendors' => Vendor::where('status', 'Active')->count(),
-            'pendingRegistrations' => VendorRegistration::where('status', 'Pending')->count(),
-            'approvedRegistrations' => VendorRegistration::where('status', 'Approved')->count(),
-            'rejectedRegistrations' => VendorRegistration::where('status', 'Rejected')->count(),
-            'totalMRFs' => MRF::count(),
-            'pendingMRFs' => MRF::where('status', 'pending')->count(),
-            'totalRFQs' => RFQ::count(),
-            'activeRFQs' => RFQ::where('status', 'Active')->count(),
-            'totalQuotations' => Quotation::count(),
-            'pendingQuotations' => Quotation::where('status', 'Pending')->count(),
-            'pendingSrfDirectorApprovals' => SRF::where('status', 'Pending')
-                ->where('current_stage', 'supply_chain_director_review')
-                ->count(),
-            'pendingTripApprovals' => Trip::query()
-                ->where('trip_code', 'like', 'TRQ-%')
-                ->where('workflow_stage', Trip::WORKFLOW_DIRECTOR_REVIEW)
-                ->where('status', Trip::STATUS_SUBMITTED)
-                ->count(),
-        ]);
+        $stats = DashboardStatsCache::remember('dashboard.supply_chain_director.stats', function () use ($scdCounts) {
+            return [
+                'totalVendors' => Vendor::count(),
+                'activeVendors' => Vendor::where('status', 'Active')->count(),
+                'pendingRegistrations' => $scdCounts['pending_vendor_registrations'],
+                'approvedRegistrations' => VendorRegistration::where('status', 'Approved')->count(),
+                'rejectedRegistrations' => VendorRegistration::where('status', 'Rejected')->count(),
+                'totalMRFs' => MRF::count(),
+                'pendingMRFs' => MRF::where('status', 'pending')->count(),
+                'totalRFQs' => RFQ::count(),
+                'activeRFQs' => RFQ::where('status', 'Active')->count(),
+                'totalQuotations' => Quotation::count(),
+                'pendingQuotations' => Quotation::where('status', 'Pending')->count(),
+                'pendingSrfDirectorApprovals' => $scdCounts['pending_srf_scd_approval'],
+                'pendingTripApprovals' => $scdCounts['pending_trip_approvals'],
+            ];
+        });
 
         $metrics = DashboardStatsCache::remember('dashboard.supply_chain_director.metrics', fn () => [
             'averageQuotationAmount' => Quotation::where('status', 'Approved')->avg('price') ?? 0,
@@ -493,16 +257,16 @@ class DashboardController extends Controller
             'srfsAwaitingSupplyChainDirectorApproval' => $srfsAwaitingSupplyChainDirectorApproval,
             // New explicit SCD dashboard queues
             'pending_vendor_registrations' => $pendingVendorRegistrations,
-            'pending_vendor_registrations_count' => $pendingVendorRegistrationsCount,
+            'pending_vendor_registrations_count' => $scdCounts['pending_vendor_registrations'],
             'pending_mrf_scd_first_approval' => $pendingMrfScdFirstApproval,
-            'pending_mrf_scd_first_approval_count' => $pendingMrfScdFirstApprovalCount,
+            'pending_mrf_scd_first_approval_count' => $scdCounts['pending_mrf_scd_first_approval'],
             'pending_srf_scd_approval' => $srfsAwaitingSupplyChainDirectorApproval,
-            'pending_srf_scd_approval_count' => $pendingSrfScdApprovalCount,
+            'pending_srf_scd_approval_count' => $scdCounts['pending_srf_scd_approval'],
             'pending_trip_approvals' => $pendingTripApprovals,
             'pendingTripApprovals' => $pendingTripApprovals,
-            'pending_trip_approvals_count' => $pendingTripApprovalsCount,
+            'pending_trip_approvals_count' => $scdCounts['pending_trip_approvals'],
             'pending_purchase_orders' => $pendingPurchaseOrders,
-            'pending_purchase_orders_count' => $pendingPurchaseOrdersCount,
+            'pending_purchase_orders_count' => $scdCounts['pending_purchase_orders'],
         ]);
     }
 
@@ -764,57 +528,15 @@ class DashboardController extends Controller
         }
 
         $listLimit = $this->dashboardListLimit($request);
+        $executiveCounts = $this->roleDashboardQueues->executivePendingCounts();
 
-        // MRFs routed to Executive for first/initial approval (parallel first-approval stage, no approver yet)
-        $pendingExecutiveFirstApprovalQuery = MRF::query()
-            ->select(array_values(array_intersect(
-                [
-                    'id',
-                    'mrf_id',
-                    'formatted_id',
-                    'title',
-                    'category',
-                    'urgency',
-                    'requester_name',
-                    'estimated_cost',
-                    'created_at',
-                    'workflow_state',
-                    'current_stage',
-                    'first_approval_by_role',
-                ],
-                MRF::resolveListApiSelect(),
-            )))
-            ->where('workflow_state', MrfParallelFirstApprovalService::STATE)
-            ->whereNull('first_approval_by_role');
-
-        $pendingExecutiveFirstApprovalCount = (clone $pendingExecutiveFirstApprovalQuery)->count();
-
-        $pendingExecutiveFirstApproval = (clone $pendingExecutiveFirstApprovalQuery)
-            ->orderByDesc('created_at')
-            ->limit($listLimit)
-            ->get()
-            ->map(function (MRF $mrf) {
-                return [
-                    'id' => $mrf->id,
-                    'mrfId' => $mrf->mrf_id,
-                    'formattedId' => $mrf->formatted_id,
-                    'title' => $mrf->title,
-                    'category' => $mrf->category,
-                    'urgency' => $mrf->urgency,
-                    'requesterName' => $mrf->requester_name,
-                    'estimatedCost' => $mrf->estimated_cost !== null ? (float) $mrf->estimated_cost : null,
-                    'workflowState' => $mrf->workflow_state,
-                    'currentStage' => $mrf->current_stage,
-                    'firstApprovalByRole' => $mrf->first_approval_by_role,
-                    'createdAt' => $mrf->created_at?->toIso8601String(),
-                ];
-            });
+        $pendingExecutiveFirstApproval = $this->roleDashboardQueues->pendingMrfParallelFirstApprovalItems($listLimit);
 
         return response()->json([
             'success' => true,
             'listLimit' => $listLimit,
             'pending_mrf_executive_first_approval' => $pendingExecutiveFirstApproval,
-            'pending_mrf_executive_first_approval_count' => $pendingExecutiveFirstApprovalCount,
+            'pending_mrf_executive_first_approval_count' => $executiveCounts['pending_mrf_executive_first_approval'],
         ]);
     }
 

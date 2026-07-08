@@ -4,6 +4,7 @@ namespace App\Models\Logistics;
 
 use App\Models\Vendor;
 use App\Models\User;
+use App\Services\DashboardStatsCache;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -12,6 +13,16 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 class Trip extends Model
 {
     use HasFactory;
+
+    protected static function booted(): void
+    {
+        static::saved(function () {
+            DashboardStatsCache::forgetAll();
+        });
+        static::deleted(function () {
+            DashboardStatsCache::forgetAll();
+        });
+    }
 
     protected $table = 'logistics_trips';
 
@@ -207,5 +218,13 @@ class Trip extends Model
         $id = $metadata['logistics_trip_id'] ?? $metadata['logisticsTripId'] ?? null;
 
         return $id !== null ? (int) $id : null;
+    }
+
+    /**
+     * Trip requests created via the TRQ-* workflow (excludes logistics TRIP-* records).
+     */
+    public function scopeTripRequests($query)
+    {
+        return $query->where('trip_code', 'like', 'TRQ-%');
     }
 }

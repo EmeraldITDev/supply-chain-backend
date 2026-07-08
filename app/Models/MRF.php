@@ -11,6 +11,7 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\URL;
 use Illuminate\Support\Str;
 use App\Services\DashboardStatsCache;
+use App\Services\MrfParallelFirstApprovalService;
 use App\Services\WorkflowStateService;
 use App\Support\ListCountCache;
 use App\Support\PurchaseOrderCurrency;
@@ -160,6 +161,16 @@ class MRF extends Model
         }
 
         return $query->whereIn('workflow_state', $states);
+    }
+
+    /**
+     * MRFs awaiting parallel first approval (Executive or SCD).
+     */
+    public function scopePendingParallelFirstApproval($query)
+    {
+        return $query
+            ->where('workflow_state', MrfParallelFirstApprovalService::STATE)
+            ->whereNull('first_approval_by_role');
     }
 
     /**

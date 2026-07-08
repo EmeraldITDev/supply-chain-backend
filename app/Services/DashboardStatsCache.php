@@ -12,6 +12,9 @@ class DashboardStatsCache
         'dashboard.procurement_manager.stats',
         'dashboard.supply_chain_director.stats',
         'dashboard.supply_chain_director.metrics',
+        'dashboard.supply_chain_director.queues.counts',
+        'dashboard.supply_chain_director.recent_registrations',
+        'dashboard.executive.queues.counts',
         'dashboard.kpis',
         'dashboard.finance.stats',
     ];
