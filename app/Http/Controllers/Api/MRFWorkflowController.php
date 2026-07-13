@@ -1402,6 +1402,17 @@ class MRFWorkflowController extends Controller
      */
     public function generatePO(Request $request, $id)
     {
+        $genStarted = microtime(true);
+        Log::info('PO generation: request received', [
+            'route_id' => (string) $id,
+            'save_as_draft' => $request->boolean('save_as_draft') || $request->boolean('saveAsDraft'),
+            'has_file' => $request->hasFile('unsigned_po'),
+            'payload_keys' => array_values(array_filter(
+                array_keys($request->except(['password', 'token', 'authorization', 'unsigned_po'])),
+                static fn ($k) => is_string($k) && $k !== ''
+            )),
+        ]);
+
         $user = $request->user();
 
         // Check role (Spatie + users.role column)
@@ -1428,6 +1439,9 @@ class MRFWorkflowController extends Controller
 
         $fastTrack = $this->resolveFastTrackFlag($request);
         $allowMissingRfq = $request->boolean('allow_missing_rfq');
+        // Load RFQ before draft/final gates — draft path previously referenced
+        // undefined $rfq when allow_missing_rfq=true (intermittent 500s).
+        $rfq = RFQ::where('mrf_id', $mrf->id)->with('items')->first();
 
         $saveAsDraft = $request->boolean('save_as_draft', false)
             || $request->boolean('saveAsDraft', false);
@@ -1478,8 +1492,6 @@ class MRFWorkflowController extends Controller
                 ], 422);
             }
         }
-
-        $rfq = RFQ::where('mrf_id', $mrf->id)->with('items')->first();
 
         // Final PO generation: normal path uses canGeneratePO (RFQ + workflow).
         // Fast-track or explicit allow_missing_rfq with no RFQ uses the loose gate and
@@ -1700,7 +1712,7 @@ class MRFWorkflowController extends Controller
                 $taxAmount = (float) ($request->input('tax_amount', $request->input('taxAmount', 0)));
             }
 
-            $poType = strtolower((string) ($request->input('po_type') ?: 'goods'));
+            $poType = strtolower((string) ($request->input('po_type') ?: $mrf->po_type ?: 'goods'));
             $standardTerms = POTermsTemplate::query()
                 ->where('po_type', $poType)
                 ->where('is_active', true)
@@ -1708,6 +1720,19 @@ class MRFWorkflowController extends Controller
                 ->value('content');
             $customTerms = $request->input('custom_terms');
             $mergedTerms = $this->mergePoSpecialTerms($termsMode, $standardTerms, $customTerms);
+
+            $paymentTerms = $request->input('payment_terms', $request->input('paymentTerms', $mrf->po_payment_terms));
+            $deliveryDate = null;
+            foreach (['delivery_date', 'deliveryDate', 'expected_delivery_date'] as $dk) {
+                $raw = $request->input($dk);
+                if (is_string($raw) && trim($raw) !== '') {
+                    try {
+                        $deliveryDate = Carbon::parse($raw)->toDateString();
+                        break;
+                    } catch (\Throwable) {
+                    }
+                }
+            }
 
             $draftUpdate = [
                 'po_number' => $poNumber,
@@ -1717,15 +1742,33 @@ class MRFWorkflowController extends Controller
                 'po_special_terms' => $mergedTerms !== '' ? $mergedTerms : ($request->po_special_terms ?? null),
                 'custom_terms' => $customTerms,
                 'po_terms_mode' => $termsMode,
-                'invoice_submission_email' => $request->invoice_submission_email ?? null,
-                'invoice_submission_cc' => $request->invoice_submission_cc ?? null,
+                'po_type' => $poType,
+                'po_payment_terms' => is_string($paymentTerms) ? $paymentTerms : null,
+                'invoice_submission_email' => $request->input('invoice_submission_email', $request->input('invoiceSubmissionEmail')),
+                'invoice_submission_cc' => $request->input('invoice_submission_cc', $request->input('invoiceSubmissionCc')),
+                'remarks' => $request->has('remarks') ? $request->input('remarks') : $mrf->remarks,
+                'expected_delivery_date' => $deliveryDate ?? $mrf->expected_delivery_date,
                 'procurement_manager_id' => $user->id,
                 'currency' => PurchaseOrderCurrency::normalize($mrf->currency),
+                'po_generation_error' => null,
+                'po_generation_failed_at' => null,
             ];
 
             if ($mrf->is_po_linked || ($mrf->source ?? 'standard') === 'po_generated') {
                 $draftUpdate['linked_po_id'] = $poNumber;
             }
+
+            $existingCols = array_flip(\App\Support\TableColumnCache::columnsFor('m_r_f_s'));
+            if ($existingCols !== []) {
+                $draftUpdate = array_intersect_key($draftUpdate, $existingCols);
+            }
+
+            Log::info('PO generation: persisting fields before PDF queue', [
+                'mrf_id' => $mrf->mrf_id,
+                'po_number' => $poNumber,
+                'is_regeneration' => $isRegeneration,
+                'fields' => array_keys($draftUpdate),
+            ]);
 
             $mrf->update($draftUpdate);
 
@@ -1744,6 +1787,13 @@ class MRFWorkflowController extends Controller
                 ],
             )->afterResponse();
 
+            Log::info('PO generation queued', [
+                'mrf_id' => $mrf->mrf_id,
+                'po_number' => $poNumber,
+                'fast_track' => $fastTrack,
+                'elapsed_ms' => (int) round((microtime(true) - $genStarted) * 1000),
+            ]);
+
             return response()->json([
                 'success' => true,
                 'message' => 'PO generation queued',
@@ -1757,6 +1807,9 @@ class MRFWorkflowController extends Controller
                         'fastTracked' => $fastTrack,
                         'synthetic_po' => ! $rfq && ($fastTrack || $allowMissingRfq),
                         'syntheticPo' => ! $rfq && ($fastTrack || $allowMissingRfq),
+                    ],
+                    'timing_ms' => [
+                        'accept' => (int) round((microtime(true) - $genStarted) * 1000),
                     ],
                 ],
             ], 202);
@@ -2755,9 +2808,24 @@ class MRFWorkflowController extends Controller
      *
      * A subsequent call to generatePO without save_as_draft will finalise
      * the draft and clear po_draft_saved_at.
+     *
+     * Draft validation is intentionally loose — required-field checks that
+     * apply to finalisation must not block draft saves.
      */
     private function savePOAsDraft(Request $request, MRF $mrf, $user, bool $fastTrack = false)
     {
+        $startedAt = microtime(true);
+        $payloadKeys = array_values(array_filter(
+            array_keys($request->except(['password', 'token', 'authorization'])),
+            static fn ($k) => is_string($k) && $k !== ''
+        ));
+        Log::info('PO draft save started', [
+            'mrf_id' => $mrf->mrf_id,
+            'user_id' => $user->id ?? null,
+            'payload_keys' => $payloadKeys,
+            'fast_track' => $fastTrack,
+        ]);
+
         $validator = Validator::make($request->all(), [
             'po_number' => 'nullable|string|max:255',
             'po_type' => 'nullable|in:goods,services,logistics',
@@ -2771,15 +2839,31 @@ class MRFWorkflowController extends Controller
             'bypassExecutiveReview' => 'nullable|boolean',
             'allow_missing_rfq' => 'nullable|boolean',
             'ship_to_address' => 'nullable|string|max:1000',
+            'shipToAddress' => 'nullable|string|max:1000',
             'tax_rate' => 'nullable|numeric|min:0|max:100',
+            'taxRate' => 'nullable|numeric|min:0|max:100',
             'tax_amount' => 'nullable|numeric|min:0',
+            'taxAmount' => 'nullable|numeric|min:0',
             'invoice_submission_email' => 'nullable|string|max:255',
+            'invoiceSubmissionEmail' => 'nullable|string|max:255',
             'invoice_submission_cc' => 'nullable|string|max:500',
+            'invoiceSubmissionCc' => 'nullable|string|max:500',
             'remarks' => 'nullable|string',
             'currency' => PurchaseOrderCurrency::VALIDATION_RULE,
+            'delivery_date' => 'nullable|date',
+            'deliveryDate' => 'nullable|date',
+            'payment_terms' => 'nullable|string|max:2000',
+            'paymentTerms' => 'nullable|string|max:2000',
+            'expected_delivery_date' => 'nullable|date',
         ]);
 
         if ($validator->fails()) {
+            Log::warning('PO draft save validation failed', [
+                'mrf_id' => $mrf->mrf_id,
+                'errors' => $validator->errors()->toArray(),
+                'elapsed_ms' => (int) round((microtime(true) - $startedAt) * 1000),
+            ]);
+
             return response()->json([
                 'success' => false,
                 'error' => 'Validation failed',
@@ -2788,6 +2872,7 @@ class MRFWorkflowController extends Controller
             ], 422);
         }
 
+        $milestonesStarted = microtime(true);
         if (\App\Support\PaymentMilestoneRequest::provided($request)) {
             \App\Support\PaymentMilestoneRequest::mergeIntoRequest($request);
             try {
@@ -2796,6 +2881,12 @@ class MRFWorkflowController extends Controller
                 );
                 app(PaymentScheduleService::class)->applyFromRequestForPoDraft($mrf, $user, $request);
             } catch (\Illuminate\Validation\ValidationException $e) {
+                Log::warning('PO draft milestone validation failed', [
+                    'mrf_id' => $mrf->mrf_id,
+                    'errors' => $e->errors(),
+                    'elapsed_ms' => (int) round((microtime(true) - $startedAt) * 1000),
+                ]);
+
                 return response()->json([
                     'success' => false,
                     'error' => 'Validation failed',
@@ -2804,6 +2895,7 @@ class MRFWorkflowController extends Controller
                 ], 422);
             }
         }
+        $milestonesMs = (int) round((microtime(true) - $milestonesStarted) * 1000);
 
         // Assign a PO number on first draft save so drafts appear in po_list queries.
         $poNumber = trim((string) ($request->input('po_number') ?? ''));
@@ -2822,54 +2914,95 @@ class MRFWorkflowController extends Controller
         }
 
         $termsMode = $this->normalisePOTermsMode($request, $mrf);
-        $customTermsForValidation = $request->has('custom_terms')
-            ? trim((string) ($request->input('custom_terms') ?? ''))
-            : trim((string) ($mrf->custom_terms ?? ''));
-        if ($termsMode === 'custom' && $customTermsForValidation === '') {
-            return response()->json([
-                'success' => false,
-                'error' => 'When terms_mode is "custom", custom_terms must be provided and non-empty.',
-                'code' => 'VALIDATION_ERROR',
-            ], 422);
-        }
-
-        // Merge standard + custom terms for preview parity with finalisation.
-        $poType = strtolower((string) ($request->input('po_type') ?: 'goods'));
-        $standardTerms = null;
-        if (in_array($termsMode, ['standard', 'both'], true)) {
-            $standardTerms = POTermsTemplate::query()
-                ->where('po_type', $poType)
-                ->where('is_active', true)
-                ->latest('id')
-                ->value('content');
-        }
+        // Drafts may use terms_mode=custom with empty custom_terms — finalisation
+        // enforces non-empty; drafts must not.
         $customTerms = $request->has('custom_terms')
             ? $request->input('custom_terms')
             : $mrf->custom_terms;
-        $mergedTerms = $this->mergePoSpecialTerms($termsMode, $standardTerms, $customTerms);
 
-        $taxRate = $request->input('tax_rate', $mrf->tax_rate ?? 0);
-        $taxAmount = $request->has('tax_amount')
-            ? (float) $request->input('tax_amount')
+        $poType = strtolower((string) ($request->input('po_type') ?: $mrf->po_type ?: 'goods'));
+        if (! in_array($poType, ['goods', 'services', 'logistics'], true)) {
+            $poType = 'goods';
+        }
+
+        // Defer standard-terms template lookup + merge until finalise. Drafts only
+        // persist mode + custom_terms so saves stay under ~2s.
+        $termsStarted = microtime(true);
+        $mergedTerms = $request->input('po_special_terms', $mrf->po_special_terms);
+        $termsMs = (int) round((microtime(true) - $termsStarted) * 1000);
+
+        $taxRate = $request->input(
+            'tax_rate',
+            $request->input('taxRate', $mrf->tax_rate ?? 0)
+        );
+        $taxAmount = $request->has('tax_amount') || $request->has('taxAmount')
+            ? (float) $request->input('tax_amount', $request->input('taxAmount'))
             : ($mrf->tax_amount ?? 0);
+
+        $shipTo = $request->input(
+            'ship_to_address',
+            $request->input('shipToAddress', $mrf->ship_to_address)
+        );
+        $invoiceEmail = $request->input(
+            'invoice_submission_email',
+            $request->input('invoiceSubmissionEmail', $mrf->invoice_submission_email)
+        );
+        $invoiceCc = $request->input(
+            'invoice_submission_cc',
+            $request->input('invoiceSubmissionCc', $mrf->invoice_submission_cc)
+        );
+
+        $paymentTerms = $request->input('payment_terms', $request->input('paymentTerms'));
+        if ($paymentTerms === null && ! $request->exists('payment_terms') && ! $request->exists('paymentTerms')) {
+            $paymentTerms = $mrf->po_payment_terms;
+        }
+
+        $deliveryDate = null;
+        foreach (['delivery_date', 'deliveryDate', 'expected_delivery_date'] as $dk) {
+            $raw = $request->input($dk);
+            if (is_string($raw) && trim($raw) !== '') {
+                try {
+                    $deliveryDate = Carbon::parse($raw)->toDateString();
+                    break;
+                } catch (\Throwable) {
+                }
+            }
+        }
+        if ($deliveryDate === null && ! $request->exists('delivery_date') && ! $request->exists('deliveryDate')) {
+            $deliveryDate = $mrf->expected_delivery_date
+                ? $mrf->expected_delivery_date->toDateString()
+                : null;
+        }
+
+        $remarks = $request->has('remarks')
+            ? $request->input('remarks')
+            : $mrf->remarks;
 
         $isDraftUpdate = $mrf->isPoDraft();
 
         $this->applyRequestedCurrency($request, $mrf);
 
         $draftUpdate = [
-            'po_number' => $poNumber ?: $mrf->po_number, // preserve any existing number
-            'ship_to_address' => $request->input('ship_to_address', $mrf->ship_to_address),
+            'po_number' => $poNumber ?: $mrf->po_number,
+            'ship_to_address' => $shipTo,
             'tax_rate' => $taxRate,
             'tax_amount' => $taxAmount,
-            'po_special_terms' => $mergedTerms !== '' ? $mergedTerms : ($request->input('po_special_terms') ?? $mrf->po_special_terms),
-            'custom_terms' => $request->has('custom_terms') ? $request->input('custom_terms') : $mrf->custom_terms,
+            'po_special_terms' => $mergedTerms !== '' && $mergedTerms !== null
+                ? $mergedTerms
+                : ($request->input('po_special_terms') ?? $mrf->po_special_terms),
+            'custom_terms' => $customTerms,
             'po_terms_mode' => $termsMode,
-            'invoice_submission_email' => $request->input('invoice_submission_email', $mrf->invoice_submission_email),
-            'invoice_submission_cc' => $request->input('invoice_submission_cc', $mrf->invoice_submission_cc),
+            'po_type' => $poType,
+            'po_payment_terms' => is_string($paymentTerms) ? $paymentTerms : $mrf->po_payment_terms,
+            'invoice_submission_email' => $invoiceEmail,
+            'invoice_submission_cc' => $invoiceCc,
+            'remarks' => $remarks,
+            'expected_delivery_date' => $deliveryDate,
             'procurement_manager_id' => $user->id,
             'po_draft_saved_at' => now(),
             'currency' => PurchaseOrderCurrency::normalize($mrf->currency),
+            'po_generation_error' => null,
+            'po_generation_failed_at' => null,
         ];
 
         $resolvedPoNumber = $draftUpdate['po_number'];
@@ -2880,7 +3013,13 @@ class MRFWorkflowController extends Controller
             $draftUpdate['linked_po_id'] = $resolvedPoNumber;
         }
 
+        $dbStarted = microtime(true);
+        $existingCols = array_flip(\App\Support\TableColumnCache::columnsFor('m_r_f_s'));
+        if ($existingCols !== []) {
+            $draftUpdate = array_intersect_key($draftUpdate, $existingCols);
+        }
         $mrf->update($draftUpdate);
+        $dbMs = (int) round((microtime(true) - $dbStarted) * 1000);
 
         if (! $isDraftUpdate) {
             try {
@@ -2903,23 +3042,51 @@ class MRFWorkflowController extends Controller
             }
         }
 
+        $paymentMilestones = app(PaymentScheduleService::class)->paymentMilestonesForMrf($mrf);
+        $elapsedMs = (int) round((microtime(true) - $startedAt) * 1000);
+
+        Log::info('PO draft save completed', [
+            'mrf_id' => $mrf->mrf_id,
+            'po_number' => $draftUpdate['po_number'] ?? $mrf->po_number,
+            'elapsed_ms' => $elapsedMs,
+            'milestones_ms' => $milestonesMs,
+            'terms_ms' => $termsMs,
+            'db_write_ms' => $dbMs,
+            'fields_persisted' => array_keys($draftUpdate),
+        ]);
+
+        $savedAt = isset($draftUpdate['po_draft_saved_at'])
+            ? \Illuminate\Support\Carbon::parse($draftUpdate['po_draft_saved_at'])->toIso8601String()
+            : now()->toIso8601String();
+
         return response()->json([
             'success' => true,
             'message' => 'PO draft saved',
             'data' => [
-                'mrf' => [
-                    'id' => $mrf->mrf_id,
-                    'po_number' => $draftUpdate['po_number'],
-                    'poNumber' => $draftUpdate['po_number'],
-                    'po_draft_saved_at' => $draftUpdate['po_draft_saved_at']->toIso8601String(),
-                    'poDraftSavedAt' => $draftUpdate['po_draft_saved_at']->toIso8601String(),
-                    'workflow_state' => $mrf->workflow_state,
-                    'workflowState' => $mrf->workflow_state,
-                    'status' => $mrf->status,
-                    'fast_tracked' => $fastTrack,
-                    'fastTracked' => $fastTrack,
-                ],
+                'mrf' => array_merge(
+                    [
+                        'id' => $mrf->mrf_id,
+                        'workflow_state' => $mrf->workflow_state,
+                        'workflowState' => $mrf->workflow_state,
+                        'status' => $mrf->status,
+                        'fast_tracked' => $fastTrack,
+                        'fastTracked' => $fastTrack,
+                        'payment_milestones' => $paymentMilestones,
+                        'paymentMilestones' => $paymentMilestones,
+                    ],
+                    $mrf->poFormApiFields(),
+                    [
+                        'po_draft_saved_at' => $savedAt,
+                        'poDraftSavedAt' => $savedAt,
+                    ]
+                ),
                 'fast_tracked' => $fastTrack,
+                'timing_ms' => [
+                    'total' => $elapsedMs,
+                    'milestones' => $milestonesMs,
+                    'terms' => $termsMs,
+                    'db_write' => $dbMs,
+                ],
             ],
         ]);
     }

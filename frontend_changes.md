@@ -1283,3 +1283,56 @@ files.forEach((file) => formData.append("attachments[]", file));
 - Dashboard aggregate stats are cached for short intervals and invalidated when MRF/SRF models change.
 - Added guarded indexes for MRF/SRF status/stage/requester/date sorts plus attachment and line-item lookup paths.
 
+
+---
+
+## SCM Platform — PO Module Forensic Fix (Jul 2026)
+
+### Root causes addressed
+1. **Draft save intermittent 500** — `$rfq` was referenced on the draft path before it was loaded when `allow_missing_rfq=true`.
+2. **Draft fields missing on reopen** — `GET /api/mrfs/{id}` omitted `ship_to_address`, `tax_rate`, `delivery_date` / `expected_delivery_date`, `payment_terms` / `po_payment_terms`, `po_type`, and hydrate never restored them.
+3. **Edit PO slow** — full `show()` loaded 6 relations + attachments + vendor invoice for form hydrate.
+4. **Generate timeouts** — sync PDF already queued; failures were silent (no `po_generation_error`).
+5. **PO list / Finance AP** — leading-wildcard search; remaining-balance filtered after pagination.
+
+### Backend API changes
+
+#### `POST /api/mrfs/{id}/generate-po` with `save_as_draft: true`
+- Loose validation only (no finalise required-field checks).
+- Persists: `ship_to_address`, `tax_rate`, `tax_amount`, `custom_terms`, `po_terms_mode`, `po_type`, `po_payment_terms`, `invoice_*`, `remarks`, `expected_delivery_date`, `currency`.
+- Response `data.mrf` includes full PO form fields + `payment_milestones` + `timing_ms`.
+- Logs: `PO draft save started|completed` with `elapsed_ms`, `db_write_ms`, `payload_keys`.
+
+#### `POST /api/mrfs/{id}/generate-po` (finalise)
+- Auto-generation returns **202** `{ processing: true }` and queues `ProcessPurchaseOrderGenerationJob`.
+- On queue failure writes `po_generation_error` / `po_generation_failed_at` (surfaced on list/detail).
+- Step logs: validation, PDF start/end, DB write, queue dispatch.
+
+#### `GET /api/mrfs/{id}?for_po=1` (NEW query flag)
+- Lightweight hydrate for Create/Edit PO: only `priceComparisons` + payment milestones + `poFormApiFields()`.
+- Use this instead of the full MRF detail when opening the PO form.
+
+#### `GET /api/mrfs?po_list=1`
+- Search uses **prefix** `LIKE 'term%'` on `mrf_id` / `formatted_id` / `po_number` (index-friendly); requester name still allows contains for ≥3 chars.
+- Logs `PO list query completed` with `elapsed_ms` + `row_count`.
+
+#### Dashboards
+- `po_summary` / `poSummary` cached counts (`total`, `draft`, `pending`, `signed`, `rejected`, `completed`) on:
+  - `GET /api/dashboard/procurement-manager`
+  - `GET /api/dashboard/supply-chain-director`
+  - `GET /api/dashboard/executive`
+
+#### Finance AP open POs
+- `remainingBalance > 0` exclusion of fully-paid schedules moved **before** pagination.
+- `listForVendor($id, $page = 1, $perPage = 25)` — no hard 100-only path.
+
+#### Migration
+- `2026_07_13_150000_add_po_draft_and_generation_columns.php` — `po_type`, `po_payment_terms`, `po_generation_error`, `po_generation_failed_at`, partial index `mrfs_po_draft_active_idx`.
+
+### Frontend (emerald-supply-chain)
+- `procurementApi.getMRFForPO` → `GET /mrfs/{id}?for_po=1`
+- `CreatePOForm` hydrate restores delivery date, payment terms, po_type, ship-to, tax, milestones; always sends `delivery_date` + `payment_terms` on save.
+- Manual save waits for autosave (`isAutoSavingRef`) before acquiring lock.
+- Empty payment milestones treated as valid (optional).
+- Download prefers stored S3/HTTP URL before client jsPDF rebuild.
+- `pollForGeneratedPO` surfaces `po_generation_error` as a hard failure toast.

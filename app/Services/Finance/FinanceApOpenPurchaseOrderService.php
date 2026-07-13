@@ -30,9 +30,9 @@ class FinanceApOpenPurchaseOrderService
     /**
      * @return list<array<string, mixed>>
      */
-    public function listForVendor(int $scmVendorId): array
+    public function listForVendor(int $scmVendorId, int $page = 1, int $perPage = 25): array
     {
-        return $this->paginateForVendor($scmVendorId, 1, 100)->items();
+        return $this->paginateForVendor($scmVendorId, $page, $perPage)->items();
     }
 
     /**
@@ -44,7 +44,10 @@ class FinanceApOpenPurchaseOrderService
             return new \Illuminate\Pagination\LengthAwarePaginator([], 0, $perPage, $page);
         }
 
-        $paginator = MRF::query()
+        $paidStatuses = [PaymentMilestone::STATUS_PAID, PaymentMilestone::STATUS_COMPLETE];
+
+        // Exclude fully-paid schedules in SQL before pagination so page size / totals stay correct.
+        $query = MRF::query()
             ->select([
                 'id', 'mrf_id', 'formatted_id', 'scm_transaction_id', 'title', 'workflow_state',
                 'selected_vendor_id', 'po_number', 'po_signed_at', 'currency', 'estimated_cost',
@@ -53,7 +56,7 @@ class FinanceApOpenPurchaseOrderService
             ->with([
                 'paymentSchedule.milestones',
                 'selectedVendor:id,vendor_id,name',
-                'rfqs' => fn ($query) => $query
+                'rfqs' => fn ($q) => $q
                     ->select('id', 'mrf_id', 'selected_quotation_id')
                     ->with('selectedQuotation:id,quotation_id,total_amount')
                     ->orderByDesc('created_at')
@@ -63,17 +66,25 @@ class FinanceApOpenPurchaseOrderService
             ->whereNotNull('po_number')
             ->where('po_number', '!=', '')
             ->whereIn('workflow_state', self::PAYABLE_WORKFLOW_STATES)
+            ->where(function ($outer) use ($paidStatuses) {
+                $outer->whereDoesntHave('paymentSchedule')
+                    ->orWhereDoesntHave('paymentSchedule.milestones')
+                    ->orWhereHas('paymentSchedule.milestones', function ($m) use ($paidStatuses) {
+                        $m->whereNotIn('status', $paidStatuses);
+                    });
+            })
             ->orderByDesc('po_signed_at')
-            ->orderByDesc('id')
-            ->paginate($perPage, ['*'], 'page', $page);
+            ->orderByDesc('id');
 
-        $filtered = collect($paginator->items())
+        $paginator = $query->paginate($perPage, ['*'], 'page', $page);
+
+        $mapped = collect($paginator->items())
             ->map(fn (MRF $mrf) => $this->formatMrf($mrf))
             ->filter(fn (array $row) => ($row['remainingBalance'] ?? 0) > 0)
             ->values();
 
         return new \Illuminate\Pagination\LengthAwarePaginator(
-            $filtered->all(),
+            $mapped->all(),
             $paginator->total(),
             $paginator->perPage(),
             $paginator->currentPage(),

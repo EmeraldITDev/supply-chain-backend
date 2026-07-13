@@ -22,6 +22,10 @@ class ProcessPurchaseOrderGenerationJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
+    public int $tries = 2;
+
+    public int $timeout = 120;
+
     /**
      * @param  array<string, mixed>  $context
      */
@@ -36,6 +40,7 @@ class ProcessPurchaseOrderGenerationJob implements ShouldQueue
         PurchaseOrderPdfService $pdfService,
         PaymentScheduleService $paymentScheduleService,
     ): void {
+        $jobStarted = microtime(true);
         $mrf = MRF::query()->find($this->mrfPrimaryKey);
         $user = User::query()->find($this->userId);
 
@@ -52,14 +57,23 @@ class ProcessPurchaseOrderGenerationJob implements ShouldQueue
         $poData = $this->context['po_data'] ?? null;
 
         if (! is_array($poData)) {
+            $this->markFailed($mrf, 'PO generation job missing po_data payload.');
             Log::error('PO generation job missing po_data payload', ['mrf_id' => $mrf->mrf_id]);
 
             return;
         }
 
+        Log::info('PO generation job: PDF start', [
+            'mrf_id' => $mrf->mrf_id,
+            'po_number' => $poNumber,
+        ]);
+
         try {
+            $pdfStarted = microtime(true);
             $pdfBinary = $pdfService->renderWorkflowPdf($poData, $poNumber, $user);
+            $pdfMs = (int) round((microtime(true) - $pdfStarted) * 1000);
         } catch (\Throwable $e) {
+            $this->markFailed($mrf, 'PDF generation failed: '.$e->getMessage());
             Log::error('PO PDF generation failed in queue', [
                 'mrf_id' => $mrf->mrf_id,
                 'error' => $e->getMessage(),
@@ -68,12 +82,30 @@ class ProcessPurchaseOrderGenerationJob implements ShouldQueue
             return;
         }
 
-        $disk = config('filesystems.documents_disk', env('DOCUMENTS_DISK', 's3'));
-        $poFileName = 'po_'.$poNumber.'_'.time().'.pdf';
-        $poPath = 'purchase-orders/'.date('Y/m').'/'.$poFileName;
+        Log::info('PO generation job: PDF done', [
+            'mrf_id' => $mrf->mrf_id,
+            'pdf_ms' => $pdfMs,
+            'bytes' => strlen($pdfBinary),
+        ]);
 
-        Storage::disk($disk)->put($poPath, $pdfBinary);
-        $poUrl = $this->fileUrl($poPath, $disk);
+        try {
+            $disk = config('filesystems.documents_disk', env('DOCUMENTS_DISK', 's3'));
+            $poFileName = 'po_'.$poNumber.'_'.time().'.pdf';
+            $poPath = 'purchase-orders/'.date('Y/m').'/'.$poFileName;
+
+            $storeStarted = microtime(true);
+            Storage::disk($disk)->put($poPath, $pdfBinary);
+            $poUrl = $this->fileUrl($poPath, $disk);
+            $storeMs = (int) round((microtime(true) - $storeStarted) * 1000);
+        } catch (\Throwable $e) {
+            $this->markFailed($mrf, 'Failed to store PO PDF: '.$e->getMessage());
+            Log::error('PO PDF storage failed in queue', [
+                'mrf_id' => $mrf->mrf_id,
+                'error' => $e->getMessage(),
+            ]);
+
+            return;
+        }
 
         $taxRate = (float) ($this->context['tax_rate'] ?? 0);
         $taxAmount = (float) ($this->context['tax_amount'] ?? 0);
@@ -82,6 +114,7 @@ class ProcessPurchaseOrderGenerationJob implements ShouldQueue
         $isRegeneration = (bool) ($this->context['is_regeneration'] ?? false);
         $hasRfq = (bool) ($this->context['has_rfq'] ?? true);
 
+        $dbStarted = microtime(true);
         $mrf->update([
             'po_number' => $poNumber,
             'unsigned_po_url' => $poUrl,
@@ -93,7 +126,10 @@ class ProcessPurchaseOrderGenerationJob implements ShouldQueue
             'current_stage' => 'supply_chain',
             'rejection_reason' => null,
             'currency' => PurchaseOrderCurrency::normalize($mrf->currency),
+            'po_generation_error' => null,
+            'po_generation_failed_at' => null,
         ]);
+        $dbMs = (int) round((microtime(true) - $dbStarted) * 1000);
 
         $poTotal = $subtotal + $taxAmount;
         if ($poTotal <= 0) {
@@ -111,6 +147,38 @@ class ProcessPurchaseOrderGenerationJob implements ShouldQueue
             $isRegeneration,
             $hasRfq,
         );
+
+        Log::info('PO generation job completed', [
+            'mrf_id' => $mrf->mrf_id,
+            'po_number' => $poNumber,
+            'pdf_ms' => $pdfMs,
+            'store_ms' => $storeMs,
+            'db_ms' => $dbMs,
+            'elapsed_ms' => (int) round((microtime(true) - $jobStarted) * 1000),
+        ]);
+    }
+
+    public function failed(?\Throwable $e): void
+    {
+        $mrf = MRF::query()->find($this->mrfPrimaryKey);
+        if ($mrf) {
+            $this->markFailed($mrf, $e?->getMessage() ?? 'PO generation job failed after retries.');
+        }
+    }
+
+    private function markFailed(MRF $mrf, string $message): void
+    {
+        $cols = array_flip(\App\Support\TableColumnCache::columnsFor('m_r_f_s'));
+        $update = [
+            'po_generation_error' => mb_substr($message, 0, 2000),
+            'po_generation_failed_at' => now(),
+        ];
+        if ($cols !== []) {
+            $update = array_intersect_key($update, $cols);
+        }
+        if ($update !== []) {
+            $mrf->update($update);
+        }
     }
 
     private function fileUrl(string $filePath, string $disk): string

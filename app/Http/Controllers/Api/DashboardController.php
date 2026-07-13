@@ -169,6 +169,8 @@ class DashboardController extends Controller
         return response()->json([
             'success' => true,
             'stats' => $stats,
+            'po_summary' => DashboardStatsCache::poSummaryCounts(),
+            'poSummary' => DashboardStatsCache::poSummaryCounts(),
             'listLimit' => $listLimit,
             'pendingRegistrations' => $pendingRegistrations,
             'pendingMRFs' => $pendingMRFs,
@@ -253,6 +255,8 @@ class DashboardController extends Controller
             'success' => true,
             'stats' => $stats,
             'metrics' => $metrics,
+            'po_summary' => DashboardStatsCache::poSummaryCounts(),
+            'poSummary' => DashboardStatsCache::poSummaryCounts(),
             'recentRegistrations' => $recentRegistrations,
             'srfsAwaitingSupplyChainDirectorApproval' => $srfsAwaitingSupplyChainDirectorApproval,
             // New explicit SCD dashboard queues
@@ -535,6 +539,8 @@ class DashboardController extends Controller
         return response()->json([
             'success' => true,
             'listLimit' => $listLimit,
+            'po_summary' => DashboardStatsCache::poSummaryCounts(),
+            'poSummary' => DashboardStatsCache::poSummaryCounts(),
             'pending_mrf_executive_first_approval' => $pendingExecutiveFirstApproval,
             'pending_mrf_executive_first_approval_count' => $executiveCounts['pending_mrf_executive_first_approval'],
         ]);

@@ -35,14 +35,59 @@ class MRF extends Model
             }
         });
 
-        static::saved(function () {
-            DashboardStatsCache::forgetAll();
+        static::saved(function (MRF $mrf) {
             ListCountCache::bump('mrf');
+            // Draft autosaves mutate PO form fields frequently. Busting every
+            // dashboard cache on each keystroke-save makes draft saves and
+            // subsequent dashboard loads unnecessarily expensive.
+            if ($mrf->isPoDraftOnlyAttributeChange()) {
+                // PO draft/pending bucket counts still change on first draft save.
+                \Illuminate\Support\Facades\Cache::forget('dashboard.po.summary_counts');
+
+                return;
+            }
+            DashboardStatsCache::forgetAll();
         });
         static::deleted(function () {
             DashboardStatsCache::forgetAll();
             ListCountCache::bump('mrf');
         });
+    }
+
+    /**
+     * True when the latest save only touched PO draft / form fields (no workflow progress).
+     */
+    public function isPoDraftOnlyAttributeChange(): bool
+    {
+        $changed = array_keys($this->getChanges());
+        if ($changed === []) {
+            return false;
+        }
+
+        $draftOnly = [
+            'po_draft_saved_at',
+            'ship_to_address',
+            'tax_rate',
+            'tax_amount',
+            'po_special_terms',
+            'custom_terms',
+            'po_terms_mode',
+            'po_type',
+            'po_payment_terms',
+            'invoice_submission_email',
+            'invoice_submission_cc',
+            'remarks',
+            'expected_delivery_date',
+            'procurement_manager_id',
+            'currency',
+            'po_number',
+            'linked_po_id',
+            'updated_at',
+            'po_generation_error',
+            'po_generation_failed_at',
+        ];
+
+        return collect($changed)->diff($draftOnly)->isEmpty();
     }
 
     /**
@@ -66,6 +111,10 @@ class MRF extends Model
 
     /**
      * PO list rows: finalised POs (po_number) and in-progress drafts (po_draft_saved_at, no PDF yet).
+     *
+     * Uses index-friendly predicates: po_number equality / NOT NULL, and a single
+     * draft branch with (NULL OR '') on unsigned_po_url so planners can use
+     * mrfs_po_number_idx / mrfs_po_draft_saved_at_idx / mrfs_po_draft_active_idx.
      */
     public function scopeForPoList($query)
     {
@@ -74,10 +123,10 @@ class MRF extends Model
                 $inner->whereNotNull('po_number')->where('po_number', '!=', '');
             })->orWhere(function ($inner) {
                 $inner->whereNotNull('po_draft_saved_at')
-                    ->whereNull('unsigned_po_url');
-            })->orWhere(function ($inner) {
-                $inner->whereNotNull('po_draft_saved_at')
-                    ->where('unsigned_po_url', '=', '');
+                    ->where(function ($unsigned) {
+                        $unsigned->whereNull('unsigned_po_url')
+                            ->orWhere('unsigned_po_url', '=', '');
+                    });
             });
         });
     }
@@ -219,19 +268,85 @@ class MRF extends Model
     /**
      * Draft PO badge fields for list/detail responses.
      *
-     * @return array{is_po_draft: bool, isPoDraft: bool, po_draft_saved_at: ?string, poDraftSavedAt: ?string}
+     * @return array{
+     *   is_po_draft: bool,
+     *   isPoDraft: bool,
+     *   po_draft_saved_at: ?string,
+     *   poDraftSavedAt: ?string,
+     *   po_generation_error: ?string,
+     *   poGenerationError: ?string,
+     *   po_generation_failed_at: ?string,
+     *   poGenerationFailedAt: ?string
+     * }
      */
     public function poDraftApiFields(): array
     {
         $isDraft = $this->isPoDraft();
         $savedAt = $this->po_draft_saved_at?->toIso8601String();
+        $genError = filled($this->po_generation_error ?? null) ? (string) $this->po_generation_error : null;
+        $genFailedAt = $this->po_generation_failed_at?->toIso8601String();
 
         return [
             'is_po_draft' => $isDraft,
             'isPoDraft' => $isDraft,
             'po_draft_saved_at' => $savedAt,
             'poDraftSavedAt' => $savedAt,
+            'po_generation_error' => $genError,
+            'poGenerationError' => $genError,
+            'po_generation_failed_at' => $genFailedAt,
+            'poGenerationFailedAt' => $genFailedAt,
         ];
+    }
+
+    /**
+     * PO form fields for draft/edit hydrate (GET /mrfs/{id}?for_po=1 and draft save).
+     *
+     * @return array<string, mixed>
+     */
+    public function poFormApiFields(): array
+    {
+        $delivery = $this->expected_delivery_date
+            ? $this->expected_delivery_date->format('Y-m-d')
+            : null;
+        $paymentTerms = filled($this->po_payment_terms ?? null)
+            ? (string) $this->po_payment_terms
+            : null;
+
+        return array_merge([
+            'po_number' => $this->po_number,
+            'poNumber' => $this->po_number,
+            'po_type' => $this->po_type,
+            'poType' => $this->po_type,
+            'ship_to_address' => $this->ship_to_address,
+            'shipToAddress' => $this->ship_to_address,
+            'tax_rate' => $this->tax_rate !== null ? (float) $this->tax_rate : null,
+            'taxRate' => $this->tax_rate !== null ? (float) $this->tax_rate : null,
+            'tax_amount' => $this->tax_amount !== null ? (float) $this->tax_amount : null,
+            'taxAmount' => $this->tax_amount !== null ? (float) $this->tax_amount : null,
+            'custom_terms' => $this->custom_terms,
+            'customTerms' => $this->custom_terms,
+            'po_terms_mode' => $this->po_terms_mode,
+            'poTermsMode' => $this->po_terms_mode,
+            'terms_mode' => $this->po_terms_mode,
+            'termsMode' => $this->po_terms_mode,
+            'po_payment_terms' => $paymentTerms,
+            'poPaymentTerms' => $paymentTerms,
+            'payment_terms' => $paymentTerms,
+            'paymentTerms' => $paymentTerms,
+            'invoice_submission_email' => $this->invoice_submission_email,
+            'invoiceSubmissionEmail' => $this->invoice_submission_email,
+            'invoice_submission_cc' => $this->invoice_submission_cc,
+            'invoiceSubmissionCc' => $this->invoice_submission_cc,
+            'remarks' => $this->remarks,
+            'expected_delivery_date' => $delivery,
+            'expectedDeliveryDate' => $delivery,
+            'delivery_date' => $delivery,
+            'deliveryDate' => $delivery,
+            'unsigned_po_url' => $this->unsigned_po_url,
+            'unsignedPoUrl' => $this->unsigned_po_url,
+            'signed_po_url' => $this->signed_po_url,
+            'signedPoUrl' => $this->signed_po_url,
+        ], $this->currencyApiFields(), $this->poDraftApiFields());
     }
 
     /**
@@ -357,6 +472,10 @@ class MRF extends Model
         'invoice_submission_cc',
         'custom_terms',
         'po_terms_mode',
+        'po_type',
+        'po_payment_terms',
+        'po_generation_error',
+        'po_generation_failed_at',
         // Payment
         'payment_status',
         'payment_processed_at',
@@ -404,6 +523,7 @@ class MRF extends Model
         'po_generated_at' => 'datetime',
         'po_signed_at' => 'datetime',
         'po_draft_saved_at' => 'datetime',
+        'po_generation_failed_at' => 'datetime',
         // Note: tax_rate and tax_amount casts commented out until migration runs
         // Uncomment after running: php artisan migrate (migration: 2026_01_24_180004_add_po_details_to_m_r_f_s_table)
         // 'tax_rate' => 'decimal:2',
@@ -678,7 +798,8 @@ class MRF extends Model
         'scd_remarks', 'director_remarks', 'supply_chain_remarks', 'remarks',
         'chairman_approved', 'chairman_approved_at', 'chairman_remarks',
         'po_number', 'unsigned_po_url', 'unsigned_po_share_url', 'signed_po_url', 'signed_po_share_url',
-        'po_generated_at', 'po_terms_mode', 'source', 'is_po_linked', 'linked_po_id', 'po_draft_saved_at',
+        'po_generated_at', 'po_terms_mode', 'po_type', 'source', 'is_po_linked', 'linked_po_id', 'po_draft_saved_at',
+        'po_generation_error', 'po_generation_failed_at',
     ];
 
     /**

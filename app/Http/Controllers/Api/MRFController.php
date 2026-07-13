@@ -324,16 +324,25 @@ class MRFController extends Controller
             $query->whereDate('date', '<=', $request->date_to);
         }
 
-        // Search indexed identifier / requester columns (avoid unindexed title/description scans).
+        // Search indexed identifier / requester columns.
+        // Prefer prefix LIKE (no leading %) so B-tree indexes remain usable.
+        // Fall back to contains only for short tokens when prefix yields nothing
+        // would be too aggressive; use prefix for all PO/MRF identifier searches.
         if ($request->filled('search')) {
             $search = trim((string) $request->search);
             if ($search !== '') {
-                $like = '%'.$search.'%';
-                $query->where(function ($q) use ($like) {
-                    $q->where('mrf_id', 'like', $like)
-                        ->orWhere('formatted_id', 'like', $like)
-                        ->orWhere('po_number', 'like', $like)
-                        ->orWhere('requester_name', 'like', $like);
+                $escaped = str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $search);
+                $prefix = $escaped.'%';
+                $query->where(function ($q) use ($prefix, $escaped) {
+                    $q->where('mrf_id', 'like', $prefix)
+                        ->orWhere('formatted_id', 'like', $prefix)
+                        ->orWhere('po_number', 'like', $prefix)
+                        ->orWhere('requester_name', 'like', $prefix);
+                    // Exact substring still allowed for requester names (user expectation),
+                    // but only as OR on the denormalised requester_name column.
+                    if (strlen($escaped) >= 3) {
+                        $q->orWhere('requester_name', 'like', '%'.$escaped.'%');
+                    }
                 });
             }
         }
@@ -390,12 +399,25 @@ class MRFController extends Controller
             $query->where('requester_id', $user->id);
         }
 
+        $listStarted = microtime(true);
         $paginator = $this->paginateWithCachedCount($query, $request, 'mrf');
 
         $items = collect($paginator->items())
             ->map(fn (MRF $mrf) => $mrf->toListApiArray())
             ->values()
             ->all();
+
+        if ($isPoList) {
+            Log::info('PO list query completed', [
+                'elapsed_ms' => (int) round((microtime(true) - $listStarted) * 1000),
+                'row_count' => count($items),
+                'page' => $paginator->currentPage(),
+                'per_page' => $paginator->perPage(),
+                'total' => $paginator->total(),
+                'status' => $request->input('status'),
+                'search_len' => strlen(trim((string) $request->input('search', ''))),
+            ]);
+        }
 
         return response()->json($this->paginatedJsonResponse($paginator, $items));
         } catch (\Illuminate\Database\QueryException $e) {
@@ -494,6 +516,13 @@ class MRFController extends Controller
      */
     public function show(Request $request, $id)
     {
+        $startedAt = microtime(true);
+        $forPo = $request->boolean('for_po') || $request->boolean('forPo');
+
+        $with = $forPo
+            ? ['priceComparisons']
+            : ['requester', 'directorApprover', 'executiveApprover', 'priceComparisons', 'items', 'attachments.uploader:id,name,email'];
+
         $mrf = MRF::where(function ($query) use ($id) {
             $query->where('formatted_id', $id)
                 ->orWhere('mrf_id', $id);
@@ -502,7 +531,7 @@ class MRFController extends Controller
                 $query->orWhere('id', (int) $id);
             }
         })
-            ->with(['requester', 'directorApprover', 'executiveApprover', 'priceComparisons', 'items', 'attachments.uploader:id,name,email'])
+            ->with($with)
             ->first();
 
         if (!$mrf) {
@@ -511,6 +540,55 @@ class MRFController extends Controller
                 'error' => 'MRF not found',
                 'code' => 'NOT_FOUND'
             ], 404);
+        }
+
+        $paymentMilestones = app(PaymentScheduleService::class)->paymentMilestonesForMrf($mrf);
+
+        // Lightweight hydrate for Create PO / Edit PO form — skip unused relations & services.
+        if ($forPo) {
+            $priceComparisons = $mrf->priceComparisons->map(function ($row) {
+                return [
+                    'id' => $row->id,
+                    'purchase_order_id' => $row->purchase_order_id,
+                    'vendor_id' => $row->vendor_id,
+                    'manual_vendor' => $row->manual_vendor ?? null,
+                    'vendor_name' => $row->vendor_name ?? null,
+                    'item_description' => $row->item_description,
+                    'unit_price' => (float) $row->unit_price,
+                    'quantity' => (float) $row->quantity,
+                    'total_price' => (float) $row->total_price,
+                    'is_selected' => (bool) $row->is_selected,
+                    'selection_reason' => $row->selection_reason,
+                ];
+            })->values();
+
+            $payload = array_merge(
+                $mrf->scmTransactionApiFields(),
+                $mrf->poFormApiFields(),
+                [
+                    'id' => $mrf->mrf_id,
+                    'formattedId' => $mrf->formatted_id,
+                    'formatted_id' => $mrf->formatted_id,
+                    'title' => $mrf->title,
+                    'status' => $mrf->status,
+                    'currentStage' => $mrf->current_stage,
+                    'workflowState' => $mrf->workflow_state,
+                    'workflow_state' => $mrf->workflow_state,
+                    'priceComparisons' => $priceComparisons,
+                    'payment_milestones' => $paymentMilestones,
+                    'paymentMilestones' => $paymentMilestones,
+                ]
+            );
+
+            Log::info('PO detail fetch (for_po) completed', [
+                'mrf_id' => $mrf->mrf_id,
+                'elapsed_ms' => (int) round((microtime(true) - $startedAt) * 1000),
+                'relation_count' => 1,
+                'price_comparison_rows' => $priceComparisons->count(),
+                'milestone_count' => count($paymentMilestones),
+            ]);
+
+            return response()->json($payload);
         }
 
         $freshPOUrls = $request->boolean('fresh_po_urls')
@@ -524,7 +602,6 @@ class MRFController extends Controller
         $profitAndLoss = $request->boolean('include_pnl')
             ? app(LineItemBudgetService::class)->mrfProfitAndLoss($mrf)
             : null;
-        $paymentMilestones = app(PaymentScheduleService::class)->paymentMilestonesForMrf($mrf);
         $documentService = app(\App\Services\ProcurementDocumentService::class);
         $vendorId = $documentService->resolveVendorId($mrf);
         $vendorInvoiceDoc = $documentService->findActiveDocument(
@@ -536,8 +613,16 @@ class MRFController extends Controller
         $requesterEditService = app(RequesterEditWindowService::class);
         $attachments = app(AttachmentService::class)->payloadFor($mrf);
 
+        Log::info('PO/MRF detail fetch completed', [
+            'mrf_id' => $mrf->mrf_id,
+            'elapsed_ms' => (int) round((microtime(true) - $startedAt) * 1000),
+            'relation_count' => 6,
+            'for_po' => false,
+        ]);
+
         return response()->json(array_merge(
             $mrf->scmTransactionApiFields(),
+            $mrf->poFormApiFields(),
             $requesterEditService->metaForMrf($request->user(), $mrf),
             [
             'id' => $mrf->mrf_id,
@@ -616,6 +701,8 @@ class MRFController extends Controller
                     'id' => $row->id,
                     'purchase_order_id' => $row->purchase_order_id,
                     'vendor_id' => $row->vendor_id,
+                    'manual_vendor' => $row->manual_vendor ?? null,
+                    'vendor_name' => $row->vendor_name ?? null,
                     'item_description' => $row->item_description,
                     'unit_price' => (float) $row->unit_price,
                     'quantity' => (float) $row->quantity,
@@ -2427,6 +2514,7 @@ class MRFController extends Controller
      */
     private function streamUnsignedPOPdfResponse(string $id, bool $asAttachment)
     {
+        $startedAt = microtime(true);
         $mrf = $this->findMrfByAnyId((string) $id);
 
         if (!$mrf) {
@@ -2446,21 +2534,39 @@ class MRFController extends Controller
         }
 
         try {
+            $source = 'regenerated';
             $pdfContent = $this->resolveStoredUnsignedPoBinary($mrf);
-            if ($pdfContent === null) {
+            if ($pdfContent !== null) {
+                $source = 's3_cache';
+            } else {
+                $genStarted = microtime(true);
                 $pdfContent = $this->generatePOPDFFromMRF($mrf);
+                Log::info('PO download: PDF regenerated', [
+                    'mrf_id' => $mrf->mrf_id,
+                    'pdf_ms' => (int) round((microtime(true) - $genStarted) * 1000),
+                ]);
             }
+
             $filenameBase = $mrf->formatted_id ?: $mrf->po_number;
             $filename = "PO-{$filenameBase}.pdf";
             $disposition = $asAttachment ? 'attachment' : 'inline';
 
+            Log::info('PO download completed', [
+                'mrf_id' => $mrf->mrf_id,
+                'source' => $source,
+                'elapsed_ms' => (int) round((microtime(true) - $startedAt) * 1000),
+                'bytes' => is_string($pdfContent) ? strlen($pdfContent) : 0,
+            ]);
+
             return response($pdfContent, 200)
                 ->header('Content-Type', 'application/pdf')
-                ->header('Content-Disposition', $disposition . '; filename="' . $filename . '"');
+                ->header('Content-Disposition', $disposition . '; filename="' . $filename . '"')
+                ->header('X-PO-Source', $source);
         } catch (\Exception $e) {
             Log::error('Failed to stream unsigned PO PDF', [
                 'mrf_id' => $id,
                 'error' => $e->getMessage(),
+                'elapsed_ms' => (int) round((microtime(true) - $startedAt) * 1000),
                 'trace' => $e->getTraceAsString(),
             ]);
 
