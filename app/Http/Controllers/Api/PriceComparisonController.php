@@ -127,10 +127,28 @@ class PriceComparisonController extends Controller
                 /** @var array<string, Vendor> $vendorCache */
                 $vendorCache = [];
 
+                // Batch-resolve directory vendors once (avoids N+1 exists/select per row).
+                $publicVendorIds = collect($rows)
+                    ->map(fn ($row) => trim((string) ($row['vendor_id'] ?? '')))
+                    ->filter()
+                    ->unique()
+                    ->values()
+                    ->all();
+                /** @var \Illuminate\Support\Collection<string, Vendor> $vendorsByCode */
+                $vendorsByCode = $publicVendorIds === []
+                    ? collect()
+                    : Vendor::query()
+                        ->whereIn('vendor_id', $publicVendorIds)
+                        ->get()
+                        ->keyBy('vendor_id');
+
+                $now = now();
+                $insertRows = [];
+
                 foreach ($rows as $row) {
                     $publicVendorId = trim((string) ($row['vendor_id'] ?? ''));
                     if ($publicVendorId !== '') {
-                        $vendor = Vendor::query()->where('vendor_id', $publicVendorId)->first();
+                        $vendor = $vendorsByCode->get($publicVendorId);
                         if (!$vendor) {
                             throw new \InvalidArgumentException(
                                 'Vendor not found for code: '.$publicVendorId
@@ -160,7 +178,7 @@ class PriceComparisonController extends Controller
                     $quantity = (float) $row['quantity'];
                     $isSelected = filter_var($row['is_selected'] ?? false, FILTER_VALIDATE_BOOLEAN);
 
-                    $model = PriceComparison::create([
+                    $insertRows[] = [
                         'purchase_order_id' => $mrf->id,
                         'vendor_id' => $internalVendorId,
                         'item_description' => $row['item_description'],
@@ -169,9 +187,18 @@ class PriceComparisonController extends Controller
                         'total_price' => round($unitPrice * $quantity, 2),
                         'is_selected' => $isSelected,
                         'selection_reason' => $row['selection_reason'] ?? null,
-                    ]);
+                        'created_at' => $now,
+                        'updated_at' => $now,
+                    ];
+                }
 
-                    $ids[] = $model->id;
+                if ($insertRows !== []) {
+                    PriceComparison::query()->insert($insertRows);
+                    $ids = PriceComparison::query()
+                        ->where('purchase_order_id', $mrf->id)
+                        ->orderBy('id')
+                        ->pluck('id')
+                        ->all();
                 }
 
                 return $ids;

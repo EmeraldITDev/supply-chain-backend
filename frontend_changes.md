@@ -1336,3 +1336,23 @@ files.forEach((file) => formData.append("attachments[]", file));
 - Empty payment milestones treated as valid (optional).
 - Download prefers stored S3/HTTP URL before client jsPDF rebuild.
 - `pollForGeneratedPO` surfaces `po_generation_error` as a hard failure toast.
+
+---
+
+## SCM Platform — Emerald PO Template + Procurement CC (Jul 2026)
+
+### Download / generation
+- Unsigned PO downloads always use the **Emerald** layout (frontend jsPDF first; API regenerates Emerald Dompdf and refreshes S3).
+- Signed POs still open the stored signed PDF (signature must be preserved).
+- Response header `X-PO-Layout: emerald` on API unsigned download.
+
+### Invoice CC
+- Default invoice CC is now `lateef.olanrewaju@emeraldcfze.com, procurement@emeraldcfze.com`.
+- Backend always merges `procurement@emeraldcfze.com` into `invoice_submission_cc` on draft save / generate.
+- PO-generated notification recipients always include `procurement@emeraldcfze.com`.
+- Config keys: `scm.invoice_submission_cc`, `scm.po_cc_recipients`.
+
+### Performance (from Render logs)
+- `DashboardStatsCache::poSummaryCounts()` is a **single** aggregate query (not 6 COUNTs) + request memoisation.
+- `TableColumnCache` memoises within the request to avoid repeated DB-cache round-trips (~850ms each on Render).
+- Price comparison bulk save batch-loads vendors + bulk `insert` (was N+1 `create` per row).

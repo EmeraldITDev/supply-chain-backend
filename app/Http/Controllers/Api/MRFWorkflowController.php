@@ -29,6 +29,7 @@ use App\Services\PriceComparisonPoLineService;
 use App\Services\ProcurementDocumentService;
 use App\Services\QuotationAttachmentService;
 use App\Support\PurchaseOrderCurrency;
+use App\Support\PurchaseOrderInvoiceCc;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\Storage;
@@ -1745,7 +1746,11 @@ class MRFWorkflowController extends Controller
                 'po_type' => $poType,
                 'po_payment_terms' => is_string($paymentTerms) ? $paymentTerms : null,
                 'invoice_submission_email' => $request->input('invoice_submission_email', $request->input('invoiceSubmissionEmail')),
-                'invoice_submission_cc' => $request->input('invoice_submission_cc', $request->input('invoiceSubmissionCc')),
+                'invoice_submission_cc' => PurchaseOrderInvoiceCc::merge(
+                    $request->input('invoice_submission_cc', $request->input('invoiceSubmissionCc')),
+                    $mrf->invoice_submission_cc,
+                    PurchaseOrderInvoiceCc::defaultCc(),
+                ),
                 'remarks' => $request->has('remarks') ? $request->input('remarks') : $mrf->remarks,
                 'expected_delivery_date' => $deliveryDate ?? $mrf->expected_delivery_date,
                 'procurement_manager_id' => $user->id,
@@ -1862,7 +1867,11 @@ class MRFWorkflowController extends Controller
             'custom_terms' => $customTerms,
             'po_terms_mode' => $termsMode,
             'invoice_submission_email' => $request->invoice_submission_email ?? null,
-            'invoice_submission_cc' => $request->invoice_submission_cc ?? null,
+            'invoice_submission_cc' => PurchaseOrderInvoiceCc::merge(
+                $request->invoice_submission_cc ?? null,
+                $mrf->invoice_submission_cc,
+                PurchaseOrderInvoiceCc::defaultCc(),
+            ),
             'currency' => PurchaseOrderCurrency::normalize($mrf->currency),
         ];
 
@@ -2947,9 +2956,10 @@ class MRFWorkflowController extends Controller
             'invoice_submission_email',
             $request->input('invoiceSubmissionEmail', $mrf->invoice_submission_email)
         );
-        $invoiceCc = $request->input(
-            'invoice_submission_cc',
-            $request->input('invoiceSubmissionCc', $mrf->invoice_submission_cc)
+        $invoiceCc = PurchaseOrderInvoiceCc::merge(
+            $request->input('invoice_submission_cc', $request->input('invoiceSubmissionCc')),
+            $mrf->invoice_submission_cc,
+            PurchaseOrderInvoiceCc::defaultCc(),
         );
 
         $paymentTerms = $request->input('payment_terms', $request->input('paymentTerms'));

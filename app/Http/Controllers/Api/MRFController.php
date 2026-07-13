@@ -2534,16 +2534,32 @@ class MRFController extends Controller
         }
 
         try {
-            $source = 'regenerated';
-            $pdfContent = $this->resolveStoredUnsignedPoBinary($mrf);
-            if ($pdfContent !== null) {
-                $source = 's3_cache';
-            } else {
-                $genStarted = microtime(true);
-                $pdfContent = $this->generatePOPDFFromMRF($mrf);
-                Log::info('PO download: PDF regenerated', [
+            // Always render the Emerald layout for unsigned downloads.
+            // Legacy S3 objects may still be the pre-Emerald Dompdf template.
+            $genStarted = microtime(true);
+            $pdfContent = $this->generatePOPDFFromMRF($mrf);
+            $source = 'emerald_regenerated';
+            Log::info('PO download: Emerald PDF rendered', [
+                'mrf_id' => $mrf->mrf_id,
+                'pdf_ms' => (int) round((microtime(true) - $genStarted) * 1000),
+            ]);
+
+            // Refresh the stored unsigned PDF so subsequent S3 opens also use Emerald.
+            try {
+                $disk = $this->getStorageDisk();
+                $poPath = 'purchase-orders/'.date('Y/m').'/po_'.$mrf->po_number.'_emerald_'.time().'.pdf';
+                Storage::disk($disk)->put($poPath, $pdfContent);
+                $freshUrl = $this->getFileUrl($poPath, $disk);
+                if (! empty($freshUrl)) {
+                    $mrf->update([
+                        'unsigned_po_url' => $freshUrl,
+                        'unsigned_po_share_url' => $freshUrl,
+                    ]);
+                }
+            } catch (\Throwable $e) {
+                Log::warning('PO download: failed to refresh Emerald PDF on storage', [
                     'mrf_id' => $mrf->mrf_id,
-                    'pdf_ms' => (int) round((microtime(true) - $genStarted) * 1000),
+                    'error' => $e->getMessage(),
                 ]);
             }
 
@@ -2561,7 +2577,8 @@ class MRFController extends Controller
             return response($pdfContent, 200)
                 ->header('Content-Type', 'application/pdf')
                 ->header('Content-Disposition', $disposition . '; filename="' . $filename . '"')
-                ->header('X-PO-Source', $source);
+                ->header('X-PO-Source', $source)
+                ->header('X-PO-Layout', 'emerald');
         } catch (\Exception $e) {
             Log::error('Failed to stream unsigned PO PDF', [
                 'mrf_id' => $id,
@@ -2945,7 +2962,10 @@ class MRFController extends Controller
             'currency' => $currency,
             'payment_terms' => $paymentTerms,
             'invoice_submission_email' => $mrf->invoice_submission_email ?? config('scm.invoice_submission_email'),
-            'invoice_submission_cc' => $mrf->invoice_submission_cc ?? config('scm.invoice_submission_cc'),
+            'invoice_submission_cc' => \App\Support\PurchaseOrderInvoiceCc::merge(
+                $mrf->invoice_submission_cc,
+                \App\Support\PurchaseOrderInvoiceCc::defaultCc(),
+            ),
             'special_terms' => $mrf->po_special_terms,
             'mrf_department' => $mrf->department,
             'mrf_display_id' => $mrf->formatted_id ?: $mrf->mrf_id,

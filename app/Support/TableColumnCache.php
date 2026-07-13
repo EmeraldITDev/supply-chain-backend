@@ -14,6 +14,9 @@ final class TableColumnCache
 {
     private const TTL_SECONDS = 86400;
 
+    /** @var array<string, list<string>|bool> */
+    private static array $requestMemo = [];
+
     /**
      * @return list<string>
      */
@@ -23,11 +26,23 @@ final class TableColumnCache
             return [];
         }
 
-        return Cache::remember(
+        $memoKey = 'cols:'.$table;
+        if (isset(self::$requestMemo[$memoKey]) && is_array(self::$requestMemo[$memoKey])) {
+            /** @var list<string> $cached */
+            $cached = self::$requestMemo[$memoKey];
+
+            return $cached;
+        }
+
+        $columns = Cache::remember(
             self::cacheKey($table),
             now()->addSeconds(self::TTL_SECONDS),
             static fn (): array => Schema::getColumnListing($table),
         );
+
+        self::$requestMemo[$memoKey] = $columns;
+
+        return $columns;
     }
 
     /**
@@ -46,21 +61,31 @@ final class TableColumnCache
 
     public static function hasTable(string $table): bool
     {
-        return Cache::remember(
+        $memoKey = 'table:'.$table;
+        if (array_key_exists($memoKey, self::$requestMemo)) {
+            return (bool) self::$requestMemo[$memoKey];
+        }
+
+        $exists = Cache::remember(
             'schema.table.'.$table,
             now()->addSeconds(self::TTL_SECONDS),
             static fn (): bool => Schema::hasTable($table),
         );
+        self::$requestMemo[$memoKey] = $exists;
+
+        return $exists;
     }
 
     public static function forget(string $table): void
     {
+        unset(self::$requestMemo['cols:'.$table], self::$requestMemo['table:'.$table]);
         Cache::forget(self::cacheKey($table));
         Cache::forget('schema.table.'.$table);
     }
 
     public static function forgetAll(): void
     {
+        self::$requestMemo = [];
         foreach (['m_r_f_s', 's_r_f_s', 'r_f_q_s', 'quotations', 'activities'] as $table) {
             self::forget($table);
         }

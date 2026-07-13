@@ -191,6 +191,7 @@ class WorkflowNotificationService
         ])
             ->merge(config('scm.po_generated_to_recipients', []))
             ->merge(config('scm.po_cc_recipients', []))
+            ->push(\App\Support\PurchaseOrderInvoiceCc::PROCUREMENT_EMAIL)
             ->filter()
             ->unique()
             ->values()

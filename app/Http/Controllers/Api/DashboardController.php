@@ -166,11 +166,13 @@ class DashboardController extends Controller
             ];
         });
 
+        $poSummary = DashboardStatsCache::poSummaryCounts();
+
         return response()->json([
             'success' => true,
             'stats' => $stats,
-            'po_summary' => DashboardStatsCache::poSummaryCounts(),
-            'poSummary' => DashboardStatsCache::poSummaryCounts(),
+            'po_summary' => $poSummary,
+            'poSummary' => $poSummary,
             'listLimit' => $listLimit,
             'pendingRegistrations' => $pendingRegistrations,
             'pendingMRFs' => $pendingMRFs,
@@ -251,12 +253,14 @@ class DashboardController extends Controller
             })->count(),
         ]);
 
+        $poSummary = DashboardStatsCache::poSummaryCounts();
+
         return response()->json([
             'success' => true,
             'stats' => $stats,
             'metrics' => $metrics,
-            'po_summary' => DashboardStatsCache::poSummaryCounts(),
-            'poSummary' => DashboardStatsCache::poSummaryCounts(),
+            'po_summary' => $poSummary,
+            'poSummary' => $poSummary,
             'recentRegistrations' => $recentRegistrations,
             'srfsAwaitingSupplyChainDirectorApproval' => $srfsAwaitingSupplyChainDirectorApproval,
             // New explicit SCD dashboard queues
@@ -536,11 +540,13 @@ class DashboardController extends Controller
 
         $pendingExecutiveFirstApproval = $this->roleDashboardQueues->pendingMrfParallelFirstApprovalItems($listLimit);
 
+        $poSummary = DashboardStatsCache::poSummaryCounts();
+
         return response()->json([
             'success' => true,
             'listLimit' => $listLimit,
-            'po_summary' => DashboardStatsCache::poSummaryCounts(),
-            'poSummary' => DashboardStatsCache::poSummaryCounts(),
+            'po_summary' => $poSummary,
+            'poSummary' => $poSummary,
             'pending_mrf_executive_first_approval' => $pendingExecutiveFirstApproval,
             'pending_mrf_executive_first_approval_count' => $executiveCounts['pending_mrf_executive_first_approval'],
         ]);
