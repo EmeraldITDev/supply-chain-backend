@@ -1356,3 +1356,23 @@ files.forEach((file) => formData.append("attachments[]", file));
 - `DashboardStatsCache::poSummaryCounts()` is a **single** aggregate query (not 6 COUNTs) + request memoisation.
 - `TableColumnCache` memoises within the request to avoid repeated DB-cache round-trips (~850ms each on Render).
 - Price comparison bulk save batch-loads vendors + bulk `insert` (was N+1 `create` per row).
+
+### Performance root cause — DB-backed cache tax (Jul 13 2026)
+Render logs show **every** query (even `count(*)` on `notifications`) taking ~850–900ms — a per-query
+DB latency floor. With `CACHE_STORE=database`, every cache read/write is itself an ~850ms query, so
+caching was *adding* latency. Fixes:
+- New `App\Support\FastCache`: routes hot, short-TTL, per-instance-safe caches (schema columns, list
+  counts, dashboard stats, notification unread count) to the local **file** store instead of the slow
+  DB cache store. Auto-activates whenever `cache.default = database`; override with `CACHE_FAST_STORE`.
+- `GET /api/notifications` and `GET /api/notifications/unread-count`: `unread_count` is now served from a
+  15s FastCache entry (invalidated on mark-read / mark-all-read / delete). This drops the endpoint from
+  3 remote queries (~2.6s) to 2. Response contract is unchanged; the badge count may lag up to 15s.
+
+### REQUIRED Render env changes (infra — biggest win, not code)
+The ~850ms/query floor is the dominant cost of every slow screen. Set on the Render web service:
+- `CACHE_STORE=file` (or `redis` if a Redis instance is added) — stops cache ops hitting the DB.
+- `SESSION_DRIVER=file` (or `cookie`) — stops per-request session read/write DB queries.
+- `QUEUE_CONNECTION=redis`/`database` **with a running worker** (`php artisan queue:work`) for true
+  background PDF + email. `afterResponse()` already defers work off the client response, but a real
+  worker guarantees it. If the DB itself is the slow tier, upgrade the DB plan / co-locate the DB in the
+  same region as the web service — no code change removes a 850ms network floor.

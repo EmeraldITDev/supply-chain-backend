@@ -2,7 +2,6 @@
 
 namespace App\Support;
 
-use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Schema;
 
 /**
@@ -34,7 +33,7 @@ final class TableColumnCache
             return $cached;
         }
 
-        $columns = Cache::remember(
+        $columns = FastCache::store()->remember(
             self::cacheKey($table),
             now()->addSeconds(self::TTL_SECONDS),
             static fn (): array => Schema::getColumnListing($table),
@@ -66,7 +65,7 @@ final class TableColumnCache
             return (bool) self::$requestMemo[$memoKey];
         }
 
-        $exists = Cache::remember(
+        $exists = FastCache::store()->remember(
             'schema.table.'.$table,
             now()->addSeconds(self::TTL_SECONDS),
             static fn (): bool => Schema::hasTable($table),
@@ -79,8 +78,8 @@ final class TableColumnCache
     public static function forget(string $table): void
     {
         unset(self::$requestMemo['cols:'.$table], self::$requestMemo['table:'.$table]);
-        Cache::forget(self::cacheKey($table));
-        Cache::forget('schema.table.'.$table);
+        FastCache::store()->forget(self::cacheKey($table));
+        FastCache::store()->forget('schema.table.'.$table);
     }
 
     public static function forgetAll(): void

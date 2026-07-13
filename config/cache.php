@@ -19,6 +19,21 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Fast Store (hot internal caches)
+    |--------------------------------------------------------------------------
+    |
+    | Store used by App\Support\FastCache for high-frequency, short-TTL, and
+    | per-instance-safe derived caches (schema columns, list counts, dashboard
+    | stats, notification unread counts). When the default store is `database`
+    | every cache op is a remote SQL round-trip, so FastCache falls back to the
+    | local `file` store automatically. Set CACHE_FAST_STORE=redis to override.
+    |
+    */
+
+    'fast_store' => env('CACHE_FAST_STORE'),
+
+    /*
+    |--------------------------------------------------------------------------
     | Cache Stores
     |--------------------------------------------------------------------------
     |

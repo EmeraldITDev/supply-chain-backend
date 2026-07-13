@@ -3,7 +3,7 @@
 namespace App\Services;
 
 use App\Models\MRF;
-use Illuminate\Support\Facades\Cache;
+use App\Support\FastCache;
 use Illuminate\Support\Facades\DB;
 
 class DashboardStatsCache
@@ -112,17 +112,23 @@ class DashboardStatsCache
             return self::$requestMemo[$key];
         }
 
-        $value = Cache::remember($key, now()->addSeconds($ttlSeconds ?? self::TTL_SECONDS), $callback);
+        $value = FastCache::store()->remember($key, now()->addSeconds($ttlSeconds ?? self::TTL_SECONDS), $callback);
         self::$requestMemo[$key] = $value;
 
         return $value;
+    }
+
+    public static function forget(string $key): void
+    {
+        unset(self::$requestMemo[$key]);
+        FastCache::store()->forget($key);
     }
 
     public static function forgetAll(): void
     {
         self::$requestMemo = [];
         foreach (self::KEYS as $key) {
-            Cache::forget($key);
+            FastCache::store()->forget($key);
         }
     }
 }

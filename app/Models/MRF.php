@@ -42,7 +42,7 @@ class MRF extends Model
             // subsequent dashboard loads unnecessarily expensive.
             if ($mrf->isPoDraftOnlyAttributeChange()) {
                 // PO draft/pending bucket counts still change on first draft save.
-                \Illuminate\Support\Facades\Cache::forget('dashboard.po.summary_counts');
+                DashboardStatsCache::forget('dashboard.po.summary_counts');
 
                 return;
             }

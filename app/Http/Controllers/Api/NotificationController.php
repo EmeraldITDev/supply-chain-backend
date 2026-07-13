@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Services\NotificationService;
+use App\Support\FastCache;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Notifications\DatabaseNotification;
@@ -53,7 +54,10 @@ class NotificationController extends Controller
                     'from' => $notifications->firstItem(),
                     'to' => $notifications->lastItem(),
                 ],
-                'unread_count' => $user->unreadNotifications()->count(),
+                // Cached briefly so the list endpoint doesn't add a 3rd remote
+                // count query on every poll. Fresh count is available via
+                // markAsRead/markAllAsRead responses and the unreadCount route.
+                'unread_count' => $this->cachedUnreadCount($user),
             ]);
         } catch (\Exception $e) {
             \Log::error('Failed to fetch notifications', [
@@ -76,7 +80,7 @@ class NotificationController extends Controller
     {
         try {
             $user = $request->user();
-            $unreadCount = $user->unreadNotifications()->count();
+            $unreadCount = $this->cachedUnreadCount($user);
 
             return response()->json([
                 'success' => true,
@@ -140,6 +144,7 @@ class NotificationController extends Controller
             }
 
             $notification->markAsRead();
+            $this->forgetUnreadCount($user);
 
             $formattedNotification = $this->formatNotification($notification->fresh());
             $formattedNotification['read'] = true;
@@ -169,6 +174,7 @@ class NotificationController extends Controller
         try {
             $user = $request->user();
             $user->unreadNotifications->markAsRead();
+            $this->forgetUnreadCount($user);
 
             return response()->json([
                 'success' => true,
@@ -200,6 +206,7 @@ class NotificationController extends Controller
             }
 
             $notification->delete();
+            $this->forgetUnreadCount($user);
 
             return response()->json([
                 'success' => true,
@@ -222,6 +229,7 @@ class NotificationController extends Controller
         try {
             $user = $request->user();
             $user->notifications()->delete();
+            $this->forgetUnreadCount($user);
 
             return response()->json([
                 'success' => true,
@@ -394,5 +402,23 @@ class NotificationController extends Controller
         $limit = $request->input('limit', $request->input('per_page', 50));
 
         return min(100, max(1, (int) $limit));
+    }
+
+    /**
+     * Unread count cached for a short window in the fast (file) store so polling
+     * the notifications list / badge does not add a slow remote count query.
+     */
+    private function cachedUnreadCount($user): int
+    {
+        return (int) FastCache::store()->remember(
+            'notifications.unread.'.$user->getKey(),
+            now()->addSeconds(15),
+            static fn (): int => (int) $user->unreadNotifications()->count(),
+        );
+    }
+
+    private function forgetUnreadCount($user): void
+    {
+        FastCache::store()->forget('notifications.unread.'.$user->getKey());
     }
 }
