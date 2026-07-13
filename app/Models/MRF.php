@@ -37,6 +37,8 @@ class MRF extends Model
 
         static::saved(function (MRF $mrf) {
             ListCountCache::bump('mrf');
+            // PO list uses a separate ListCountCache scope (`mrf_po`).
+            ListCountCache::bump('mrf_po');
             // Draft autosaves mutate PO form fields frequently. Busting every
             // dashboard cache on each keystroke-save makes draft saves and
             // subsequent dashboard loads unnecessarily expensive.
@@ -51,6 +53,7 @@ class MRF extends Model
         static::deleted(function () {
             DashboardStatsCache::forgetAll();
             ListCountCache::bump('mrf');
+            ListCountCache::bump('mrf_po');
         });
     }
 

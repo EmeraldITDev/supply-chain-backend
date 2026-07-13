@@ -72,6 +72,62 @@ class MRFController extends Controller
     }
 
     /**
+     * Normalize quotation attachment JSON (legacy string / nested arrays) before hydrate.
+     *
+     * @param  mixed  $attachments
+     * @return list<mixed>
+     */
+    private function normalizeQuotationAttachmentsPayload($attachments): array
+    {
+        if ($attachments === null || $attachments === '' || $attachments === []) {
+            return [];
+        }
+
+        if (is_string($attachments)) {
+            return [$attachments];
+        }
+
+        if (! is_array($attachments)) {
+            return [];
+        }
+
+        $isAssoc = array_keys($attachments) !== range(0, count($attachments) - 1);
+        if ($isAssoc) {
+            return [$attachments];
+        }
+
+        $out = [];
+        foreach ($attachments as $a) {
+            if ($a === null || $a === '') {
+                continue;
+            }
+
+            if (is_string($a)) {
+                $out[] = $a;
+                continue;
+            }
+
+            if (! is_array($a)) {
+                continue;
+            }
+
+            $aIsAssoc = array_keys($a) !== range(0, count($a) - 1);
+            if ($aIsAssoc) {
+                $out[] = $a;
+                continue;
+            }
+
+            foreach ($a as $inner) {
+                if ($inner !== null && $inner !== '') {
+                    $out[] = $inner;
+                }
+            }
+        }
+
+        return array_values($out);
+    }
+
+    /**
      * Get the storage disk for documents
      */
     protected function getStorageDisk(): string
@@ -521,7 +577,7 @@ class MRFController extends Controller
 
         $with = $forPo
             ? ['priceComparisons.vendor:id,vendor_id,name']
-            : ['requester', 'directorApprover', 'executiveApprover', 'priceComparisons', 'items', 'attachments.uploader:id,name,email'];
+            : ['requester', 'directorApprover', 'executiveApprover', 'priceComparisons.vendor:id,vendor_id,name', 'items', 'attachments.uploader:id,name,email'];
 
         $mrf = MRF::where(function ($query) use ($id) {
             $query->where('formatted_id', $id)
@@ -592,14 +648,8 @@ class MRFController extends Controller
             return response()->json($payload);
         }
 
-        $freshPOUrls = $request->boolean('fresh_po_urls')
-            ? $this->generateFreshPOUrls($mrf)
-            : [
-                'unsigned_po_url' => $mrf->unsigned_po_url,
-                'unsigned_po_share_url' => $mrf->unsigned_po_share_url ?? $mrf->unsigned_po_url,
-                'signed_po_url' => $mrf->signed_po_url,
-                'signed_po_share_url' => $mrf->signed_po_share_url ?? $mrf->signed_po_url,
-            ];
+        // Always mint fresh PO links — stored S3 temp URLs expire and yield AccessDenied.
+        $freshPOUrls = $this->generateFreshPOUrls($mrf);
         $profitAndLoss = $request->boolean('include_pnl')
             ? app(LineItemBudgetService::class)->mrfProfitAndLoss($mrf)
             : null;
@@ -614,11 +664,38 @@ class MRFController extends Controller
         $requesterEditService = app(RequesterEditWindowService::class);
         $attachments = app(AttachmentService::class)->payloadFor($mrf);
 
+        $procurementDocuments = null;
+        if ($request->boolean('include_documents')) {
+            $procurementDocuments = $documentService->listGroupedForMrf($mrf);
+        }
+
+        $mappedItems = $mrf->items->map(fn ($item) => [
+            'id' => $item->id,
+            'itemName' => $item->item_name,
+            'item_name' => $item->item_name,
+            'quantity' => $item->quantity,
+            'unit' => $item->unit,
+            'unitPrice' => $item->unit_price !== null ? (float) $item->unit_price : null,
+            'unit_price' => $item->unit_price !== null ? (float) $item->unit_price : null,
+            'totalPrice' => $item->total_price !== null
+                ? (float) $item->total_price
+                : ($item->unit_price !== null ? (float) $item->unit_price * (float) $item->quantity : null),
+            'total_price' => $item->total_price !== null
+                ? (float) $item->total_price
+                : ($item->unit_price !== null ? (float) $item->unit_price * (float) $item->quantity : null),
+            'budgetAmount' => $item->budget_amount !== null ? (float) $item->budget_amount : null,
+            'budget_amount' => $item->budget_amount !== null ? (float) $item->budget_amount : null,
+            'quotedAmount' => $item->quoted_amount !== null ? (float) $item->quoted_amount : null,
+            'quoted_amount' => $item->quoted_amount !== null ? (float) $item->quoted_amount : null,
+        ])->values();
+
         Log::info('PO/MRF detail fetch completed', [
             'mrf_id' => $mrf->mrf_id,
             'elapsed_ms' => (int) round((microtime(true) - $startedAt) * 1000),
             'relation_count' => 6,
             'for_po' => false,
+            'include_pnl' => $profitAndLoss !== null,
+            'include_documents' => $procurementDocuments !== null,
         ]);
 
         return response()->json(array_merge(
@@ -685,10 +762,10 @@ class MRFController extends Controller
             'unsignedPoUrl' => $freshPOUrls['unsigned_po_url'] ?? $mrf->unsigned_po_url,
             'unsigned_po_share_url' => $freshPOUrls['unsigned_po_share_url'] ?? $mrf->unsigned_po_share_url,
             'unsignedPoShareUrl' => $freshPOUrls['unsigned_po_share_url'] ?? $mrf->unsigned_po_share_url,
-            'signed_po_url' => $mrf->signed_po_url,
-            'signedPoUrl' => $mrf->signed_po_url,
-            'signed_po_share_url' => $mrf->signed_po_share_url,
-            'signedPoShareUrl' => $mrf->signed_po_share_url,
+            'signed_po_url' => $freshPOUrls['signed_po_url'] ?? $mrf->signed_po_url,
+            'signedPoUrl' => $freshPOUrls['signed_po_url'] ?? $mrf->signed_po_url,
+            'signed_po_share_url' => $freshPOUrls['signed_po_share_url'] ?? $mrf->signed_po_share_url,
+            'signedPoShareUrl' => $freshPOUrls['signed_po_share_url'] ?? $mrf->signed_po_share_url,
             'po_generated_at' => $mrf->po_generated_at?->toIso8601String(),
             'poGeneratedAt' => $mrf->po_generated_at?->toIso8601String(),
             'po_signed_at' => $mrf->po_signed_at?->toIso8601String(),
@@ -701,9 +778,9 @@ class MRFController extends Controller
                 return [
                     'id' => $row->id,
                     'purchase_order_id' => $row->purchase_order_id,
-                    'vendor_id' => $row->vendor_id,
+                    'vendor_id' => $row->vendor?->vendor_id ?? $row->vendor_id,
                     'manual_vendor' => $row->manual_vendor ?? null,
-                    'vendor_name' => $row->vendor_name ?? null,
+                    'vendor_name' => $row->vendor?->name ?? $row->vendor_name ?? null,
                     'item_description' => $row->item_description,
                     'unit_price' => (float) $row->unit_price,
                     'quantity' => (float) $row->quantity,
@@ -721,49 +798,15 @@ class MRFController extends Controller
             'attachment_name' => $mrf->attachment_name,
             'attachments' => $attachments,
             'documents' => $attachments,
-            'items' => $mrf->items->map(fn ($item) => [
-                'id' => $item->id,
-                'itemName' => $item->item_name,
-                'item_name' => $item->item_name,
-                'quantity' => $item->quantity,
-                'unit' => $item->unit,
-                'unitPrice' => $item->unit_price !== null ? (float) $item->unit_price : null,
-                'unit_price' => $item->unit_price !== null ? (float) $item->unit_price : null,
-                'totalPrice' => $item->total_price !== null
-                    ? (float) $item->total_price
-                    : ($item->unit_price !== null ? (float) $item->unit_price * (float) $item->quantity : null),
-                'total_price' => $item->total_price !== null
-                    ? (float) $item->total_price
-                    : ($item->unit_price !== null ? (float) $item->unit_price * (float) $item->quantity : null),
-                'budgetAmount' => $item->budget_amount !== null ? (float) $item->budget_amount : null,
-                'budget_amount' => $item->budget_amount !== null ? (float) $item->budget_amount : null,
-                'quotedAmount' => $item->quoted_amount !== null ? (float) $item->quoted_amount : null,
-                'quoted_amount' => $item->quoted_amount !== null ? (float) $item->quoted_amount : null,
-            ])->values(),
-            'line_items' => $mrf->items->map(fn ($item) => [
-                'id' => $item->id,
-                'itemName' => $item->item_name,
-                'item_name' => $item->item_name,
-                'quantity' => $item->quantity,
-                'unit' => $item->unit,
-                'unitPrice' => $item->unit_price !== null ? (float) $item->unit_price : null,
-                'unit_price' => $item->unit_price !== null ? (float) $item->unit_price : null,
-                'totalPrice' => $item->total_price !== null
-                    ? (float) $item->total_price
-                    : ($item->unit_price !== null ? (float) $item->unit_price * (float) $item->quantity : null),
-                'total_price' => $item->total_price !== null
-                    ? (float) $item->total_price
-                    : ($item->unit_price !== null ? (float) $item->unit_price * (float) $item->quantity : null),
-                'budgetAmount' => $item->budget_amount !== null ? (float) $item->budget_amount : null,
-                'budget_amount' => $item->budget_amount !== null ? (float) $item->budget_amount : null,
-                'quotedAmount' => $item->quoted_amount !== null ? (float) $item->quoted_amount : null,
-                'quoted_amount' => $item->quoted_amount !== null ? (float) $item->quoted_amount : null,
-            ])->values(),
+            'items' => $mappedItems,
+            'line_items' => $mappedItems,
             'profitAndLoss' => $profitAndLoss,
             'payment_milestones' => $paymentMilestones,
             'paymentMilestones' => $paymentMilestones,
             'vendorInvoice' => $vendorInvoice,
             'vendor_invoice' => $vendorInvoice,
+            'procurementDocuments' => $procurementDocuments,
+            'procurement_documents' => $procurementDocuments,
             ]
         ));
     }
@@ -927,6 +970,7 @@ class MRFController extends Controller
 
         // Collect all quotations from all RFQs
         // Exclude rejected quotations from active view (they remain accessible for historical tracking)
+        $quotationAttachmentService = app(QuotationAttachmentService::class);
         $allQuotations = collect();
         foreach ($rfqs as $rfq) {
             foreach ($rfq->quotations as $quotation) {
@@ -986,54 +1030,11 @@ class MRFController extends Controller
                     'validityDays' => $quotation->validity_days,
                     'warrantyPeriod' => $quotation->warranty_period,
                     'notes' => $quotation->notes,
-                    'attachments' => app(QuotationAttachmentService::class)->hydrateAttachments((function($attachments) {
-                        if ($attachments === null || $attachments === '' || $attachments === []) {
-                            return [];
-                        }
-
-                        if (is_string($attachments)) {
-                            return [$attachments];
-                        }
-
-                        if (!is_array($attachments)) {
-                            return [];
-                        }
-
-                        $isAssoc = array_keys($attachments) !== range(0, count($attachments) - 1);
-                        if ($isAssoc) {
-                            return [$attachments];
-                        }
-
-                        $out = [];
-                        foreach ($attachments as $a) {
-                            if ($a === null || $a === '') {
-                                continue;
-                            }
-
-                            if (is_string($a)) {
-                                $out[] = $a;
-                                continue;
-                            }
-
-                            if (!is_array($a)) {
-                                continue;
-                            }
-
-                            $aIsAssoc = array_keys($a) !== range(0, count($a) - 1);
-                            if ($aIsAssoc) {
-                                $out[] = $a;
-                                continue;
-                            }
-
-                            foreach ($a as $inner) {
-                                if ($inner !== null && $inner !== '') {
-                                    $out[] = $inner;
-                                }
-                            }
-                        }
-
-                        return array_values($out);
-                    })($quotation->attachments), false),
+                    // signUrls=false — full-details is for metadata; signed URLs minted when opened.
+                    'attachments' => $quotationAttachmentService->hydrateAttachments(
+                        $this->normalizeQuotationAttachmentsPayload($quotation->attachments),
+                        false
+                    ),
                     'status' => $quotation->status,
                     'reviewStatus' => $quotation->review_status ?? 'pending',
                     'submittedAt' => $quotation->submitted_at ? $quotation->submitted_at->toIso8601String() : null,
@@ -2535,8 +2536,9 @@ class MRFController extends Controller
         }
 
         try {
-            $isEmeraldStored = is_string($mrf->unsigned_po_url)
-                && str_contains((string) $mrf->unsigned_po_url, '_emerald_');
+            $storedPath = $this->extractFilePathFromUrl((string) $mrf->unsigned_po_url)
+                ?? (string) $mrf->unsigned_po_url;
+            $isEmeraldStored = str_contains($storedPath, '_emerald_');
 
             $pdfContent = null;
             $source = 'emerald_regenerated';

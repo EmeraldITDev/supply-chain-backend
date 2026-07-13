@@ -70,14 +70,19 @@ class SRFController extends Controller
         }
 
         // Search indexed identifier columns (srf_id, formatted_id, requester_name).
+        // Prefer prefix match on identifiers so B-tree indexes can be used.
         if ($request->filled('search')) {
             $search = trim((string) $request->search);
             if ($search !== '') {
-                $like = '%'.$search.'%';
-                $query->where(function ($q) use ($like) {
-                    $q->where('srf_id', 'like', $like)
-                        ->orWhere('formatted_id', 'like', $like)
-                        ->orWhere('requester_name', 'like', $like);
+                $escaped = str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $search);
+                $prefix = $escaped.'%';
+                $contains = '%'.$escaped.'%';
+                $query->where(function ($q) use ($prefix, $contains, $search) {
+                    $q->where('srf_id', 'like', $prefix)
+                        ->orWhere('formatted_id', 'like', $prefix);
+                    if (strlen($search) >= 3) {
+                        $q->orWhere('requester_name', 'like', $contains);
+                    }
                 });
             }
         }

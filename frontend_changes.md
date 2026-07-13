@@ -1376,3 +1376,44 @@ The ~850ms/query floor is the dominant cost of every slow screen. Set on the Ren
   background PDF + email. `afterResponse()` already defers work off the client response, but a real
   worker guarantees it. If the DB itself is the slow tier, upgrade the DB plan / co-locate the DB in the
   same region as the web service — no code change removes a 850ms network floor.
+
+---
+
+## SCM Platform — Procurement Performance & Storage Audit Fix (Jul 13 2026)
+
+### Backend (this deploy)
+
+| Area | Fix |
+|------|-----|
+| **Procurement dashboard** | Pending MRF/SRF/registration/quotation **lists** cached 60s via FastCache (stats already 5m). SRF pending status uses case-insensitive match. |
+| **MRF detail** | Always mints **fresh** unsigned/signed PO links (stream URL preferred). Opt-in `?include_documents=1` and existing `?include_pnl=1` to avoid extra nested round-trips. Duplicate `items`/`line_items` mapping removed. |
+| **Procurement documents** | `GET /mrfs/{id}/procurement-documents` (and any `transform()`) **re-signs S3 URLs from `file_path` on every request** — never return DB-cached pre-signed URLs (fixes `AccessDenied` / `Request has expired`). |
+| **Reports** | `ReportCache` now uses **FastCache** (not DB cache store). |
+| **PO list counts** | `ListCountCache` scope `mrf_po` is bumped on MRF save/delete (was stale forever). PO/SRF search uses **prefix** on identifiers. |
+| **Emerald PO PDF** | Generation job stores filenames with `_emerald_`; download serves Emerald only (`X-PO-Layout: emerald`). |
+
+### Frontend REQUIRED changes (emerald-supply-chain)
+
+1. **PO download — kill green/jsPDF path**  
+   Never open raw S3/`unsigned_po_url` from a stale API cache and **never** rebuild with client jsPDF. Always:
+   - `GET /api/mrfs/{id}/download-po` (auth), or  
+   - Follow `unsignedPoUrl` only when it is the **Laravel signed stream** URL returned by a **fresh** MRF/PO detail fetch.  
+   Expect header `X-PO-Layout: emerald`.
+
+2. **Procurement documents**  
+   On open/download, use `fileUrl` / `file_url` from a **just-fetched** `GET /mrfs/{id}/procurement-documents` (or MRF show with `include_documents=1`). Do not persist document links in React state across sessions/tabs.
+
+3. **MRF details modal**  
+   Prefer **one** hydrate when possible:  
+   `GET /mrfs/{id}?include_pnl=1&include_documents=1`  
+   then reuse `profitAndLoss` + `procurementDocuments` instead of mounting panels that each hit `/line-item-pnl` and `/procurement-documents` independently after a blank 25s wait. Keep `full-details` for quotation timeline only when the user opens that section.
+
+4. **Edit / Create PO**  
+   - Hydrate with `GET /mrfs/{id}?for_po=1` or `GET /pos/{id}` — **not** full MRF show.  
+   - Vendor/MRF selects: **async search only** — `GET /vendors?dropdown=1&search=…`, `GET /mrfs?dropdown=1&search=…`. Never `getAll()` vendors/MRFs on modal mount.
+
+5. **Dashboard / Reports**  
+   Do not block first paint on non-critical widgets; stats/lists are now server-cached, but still show shell UI immediately. Reports re-hit cache after date-range change; avoid refetch spam.
+
+6. **Service Requests table**  
+   Keep `GET /srfs` without `include_line_items` (default). Paginate; do not client-accumulate all pages for the table view.

@@ -90,7 +90,9 @@ class ProcessPurchaseOrderGenerationJob implements ShouldQueue
 
         try {
             $disk = config('filesystems.documents_disk', env('DOCUMENTS_DISK', 's3'));
-            $poFileName = 'po_'.$poNumber.'_'.time().'.pdf';
+            // `_emerald_` marker lets download endpoints serve this archive
+            // without regenerating; content is always Emerald layout.
+            $poFileName = 'po_'.$poNumber.'_emerald_'.time().'.pdf';
             $poPath = 'purchase-orders/'.date('Y/m').'/'.$poFileName;
 
             $storeStarted = microtime(true);

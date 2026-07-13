@@ -12,6 +12,7 @@ class DashboardStatsCache
 
     private const KEYS = [
         'dashboard.procurement_manager.stats',
+        'dashboard.procurement_manager.lists',
         'dashboard.supply_chain_director.stats',
         'dashboard.supply_chain_director.metrics',
         'dashboard.supply_chain_director.queues.counts',

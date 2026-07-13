@@ -54,82 +54,118 @@ class DashboardController extends Controller
 
         $listLimit = $this->dashboardListLimit($request);
 
-        // Get pending vendor registrations
-        $pendingRegistrations = VendorRegistration::where('status', 'Pending')
-            ->orderBy('created_at', 'desc')
-            ->limit($listLimit)
-            ->get()
-            ->map(function($reg) {
-                return [
-                    'id' => $reg->id,
-                    'companyName' => $reg->company_name,
-                    'category' => $reg->category,
-                    'email' => $reg->email,
-                    'contactPerson' => $reg->contact_person,
-                    'createdAt' => $reg->created_at->toIso8601String(),
-                ];
-            });
+        $lists = DashboardStatsCache::remember(
+            'dashboard.procurement_manager.lists',
+            function () {
+                // Cache at the max allowed list size; callers slice to their limit.
+                $listLimit = 50;
 
-        // Get pending MRFs
-        $pendingMRFs = MRF::query()
-            ->select(array_values(array_intersect(
-                ['id', 'mrf_id', 'formatted_id', 'title', 'category', 'urgency', 'requester_name', 'estimated_cost', 'created_at', 'source', 'is_po_linked', 'linked_po_id', 'po_draft_saved_at', 'unsigned_po_url'],
-                MRF::resolveListApiSelect(),
-            )))
-            ->where('status', 'pending')
-            ->orderBy('created_at', 'desc')
-            ->limit($listLimit)
-            ->get()
-            ->map(function($mrf) {
-                return array_merge($mrf->poOriginApiFields(), $mrf->poDraftApiFields(), [
-                    'id' => $mrf->id,
-                    'mrfId' => $mrf->mrf_id,
-                    'title' => $mrf->title,
-                    'category' => $mrf->category,
-                    'urgency' => $mrf->urgency,
-                    'requesterName' => $mrf->requester_name,
-                    'estimatedCost' => $mrf->estimated_cost,
-                    'createdAt' => $mrf->created_at->toIso8601String(),
-                ]);
-            });
+                $pendingRegistrations = VendorRegistration::where('status', 'Pending')
+                    ->orderBy('created_at', 'desc')
+                    ->limit($listLimit)
+                    ->get(['id', 'company_name', 'category', 'email', 'contact_person', 'created_at'])
+                    ->map(function ($reg) {
+                        return [
+                            'id' => $reg->id,
+                            'companyName' => $reg->company_name,
+                            'category' => $reg->category,
+                            'email' => $reg->email,
+                            'contactPerson' => $reg->contact_person,
+                            'createdAt' => $reg->created_at->toIso8601String(),
+                        ];
+                    })
+                    ->values()
+                    ->all();
 
-        // Get pending SRFs
-        $pendingSRFs = SRF::query()
-            ->select(array_values(array_intersect(
-                ['id', 'srf_id', 'formatted_id', 'title', 'requester_name', 'created_at'],
-                SRF::resolveListApiSelect(),
-            )))
-            ->where('status', 'Pending')
-            ->orderBy('created_at', 'desc')
-            ->limit($listLimit)
-            ->get()
-            ->map(function($srf) {
-                return [
-                    'id' => $srf->id,
-                    'srfId' => $srf->srf_id,
-                    'title' => $srf->title,
-                    'category' => $srf->category,
-                    'requesterName' => $srf->requester_name,
-                    'createdAt' => $srf->created_at->toIso8601String(),
-                ];
-            });
+                $pendingMRFs = MRF::query()
+                    ->select(array_values(array_intersect(
+                        ['id', 'mrf_id', 'formatted_id', 'title', 'category', 'urgency', 'requester_name', 'estimated_cost', 'created_at', 'source', 'is_po_linked', 'linked_po_id', 'po_draft_saved_at', 'unsigned_po_url'],
+                        MRF::resolveListApiSelect(),
+                    )))
+                    ->where('status', 'pending')
+                    ->orderBy('created_at', 'desc')
+                    ->limit($listLimit)
+                    ->get()
+                    ->map(function ($mrf) {
+                        return array_merge($mrf->poOriginApiFields(), $mrf->poDraftApiFields(), [
+                            'id' => $mrf->id,
+                            'mrfId' => $mrf->mrf_id,
+                            'title' => $mrf->title,
+                            'category' => $mrf->category,
+                            'urgency' => $mrf->urgency,
+                            'requesterName' => $mrf->requester_name,
+                            'estimatedCost' => $mrf->estimated_cost,
+                            'createdAt' => $mrf->created_at->toIso8601String(),
+                        ]);
+                    })
+                    ->values()
+                    ->all();
 
-        // Get pending quotations
-        $pendingQuotations = Quotation::where('status', 'Pending')
-            ->with(['rfq', 'vendor'])
-            ->orderBy('created_at', 'desc')
-            ->limit($listLimit)
-            ->get()
-            ->map(function($quote) {
+                $pendingSRFs = SRF::query()
+                    ->select(array_values(array_intersect(
+                        ['id', 'srf_id', 'formatted_id', 'title', 'requester_name', 'created_at'],
+                        SRF::resolveListApiSelect(),
+                    )))
+                    ->whereRaw('LOWER(status) = ?', ['pending'])
+                    ->orderBy('created_at', 'desc')
+                    ->limit($listLimit)
+                    ->get()
+                    ->map(function ($srf) {
+                        return [
+                            'id' => $srf->id,
+                            'srfId' => $srf->srf_id,
+                            'title' => $srf->title,
+                            'category' => $srf->category ?? null,
+                            'requesterName' => $srf->requester_name,
+                            'createdAt' => $srf->created_at->toIso8601String(),
+                        ];
+                    })
+                    ->values()
+                    ->all();
+
+                $pendingQuotations = Quotation::query()
+                    ->select(['id', 'quotation_id', 'rfq_id', 'vendor_id', 'price', 'created_at', 'status'])
+                    ->where('status', 'Pending')
+                    ->with([
+                        'rfq:id,rfq_id',
+                        'vendor:id,name',
+                    ])
+                    ->orderBy('created_at', 'desc')
+                    ->limit($listLimit)
+                    ->get()
+                    ->map(function ($quote) {
+                        return [
+                            'id' => $quote->id,
+                            'quotationId' => $quote->quotation_id,
+                            'rfqId' => $quote->rfq ? $quote->rfq->rfq_id : null,
+                            'vendorName' => $quote->vendor ? $quote->vendor->name : null,
+                            'amount' => $quote->price,
+                            'createdAt' => $quote->created_at->toIso8601String(),
+                        ];
+                    })
+                    ->values()
+                    ->all();
+
                 return [
-                    'id' => $quote->id,
-                    'quotationId' => $quote->quotation_id,
-                    'rfqId' => $quote->rfq ? $quote->rfq->rfq_id : null,
-                    'vendorName' => $quote->vendor ? $quote->vendor->name : null,
-                    'amount' => $quote->price,
-                    'createdAt' => $quote->created_at->toIso8601String(),
+                    'listLimit' => $listLimit,
+                    'pendingRegistrations' => $pendingRegistrations,
+                    'pendingMRFs' => $pendingMRFs,
+                    'pendingSRFs' => $pendingSRFs,
+                    'pendingQuotations' => $pendingQuotations,
                 ];
-            });
+            },
+            60
+        );
+
+        // If cached under a different listLimit, re-slice to the requested cap.
+        $slice = static function (array $rows) use ($listLimit): array {
+            return array_slice($rows, 0, $listLimit);
+        };
+
+        $pendingRegistrations = $slice($lists['pendingRegistrations'] ?? []);
+        $pendingMRFs = $slice($lists['pendingMRFs'] ?? []);
+        $pendingSRFs = $slice($lists['pendingSRFs'] ?? []);
+        $pendingQuotations = $slice($lists['pendingQuotations'] ?? []);
 
         $stats = DashboardStatsCache::remember('dashboard.procurement_manager.stats', function () {
             $pendingRegistrationsCount = VendorRegistration::where('status', 'Pending')->count();
@@ -154,7 +190,7 @@ class DashboardController extends Controller
             return [
                 'pendingRegistrations' => $pendingRegistrationsCount,
                 'pendingMRFs' => MRF::where('status', 'pending')->count(),
-                'pendingSRFs' => SRF::where('status', 'Pending')->count(),
+                'pendingSRFs' => SRF::whereRaw('LOWER(status) = ?', ['pending'])->count(),
                 'pendingQuotations' => Quotation::where('status', 'Pending')->count(),
                 'totalVendors' => $totalVendorsCount,
                 'pendingKYC' => $pendingRegistrationsCount,

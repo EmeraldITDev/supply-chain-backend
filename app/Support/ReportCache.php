@@ -2,15 +2,19 @@
 
 namespace App\Support;
 
-use Illuminate\Support\Facades\Cache;
-
+/**
+ * Short-TTL cache for report/analytics aggregates.
+ *
+ * Routes through FastCache so CACHE_STORE=database does not add ~850ms
+ * remote SQL round-trips on every report page load.
+ */
 class ReportCache
 {
     public const TTL_SECONDS = 300;
 
     public static function remember(string $key, callable $callback): mixed
     {
-        return Cache::remember($key, self::TTL_SECONDS, $callback);
+        return FastCache::store()->remember($key, self::TTL_SECONDS, $callback);
     }
 
     /**

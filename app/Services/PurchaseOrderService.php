@@ -52,12 +52,16 @@ class PurchaseOrderService
         if ($request->filled('search')) {
             $search = trim((string) $request->search);
             if ($search !== '') {
-                $like = '%'.$search.'%';
-                $query->where(function ($q) use ($like) {
-                    $q->where('mrf_id', 'like', $like)
-                        ->orWhere('formatted_id', 'like', $like)
-                        ->orWhere('po_number', 'like', $like)
-                        ->orWhere('requester_name', 'like', $like);
+                $escaped = str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $search);
+                $prefix = $escaped.'%';
+                $contains = '%'.$escaped.'%';
+                $query->where(function ($q) use ($prefix, $contains, $search) {
+                    $q->where('mrf_id', 'like', $prefix)
+                        ->orWhere('formatted_id', 'like', $prefix)
+                        ->orWhere('po_number', 'like', $prefix);
+                    if (strlen($search) >= 3) {
+                        $q->orWhere('requester_name', 'like', $contains);
+                    }
                 });
             }
         }
@@ -189,7 +193,7 @@ class PurchaseOrderService
             ])->values(),
             'paymentMilestones' => $paymentMilestones,
             'poGeneratedAt' => $mrf->po_generated_at?->toIso8601String(),
-            'unsignedPoUrl' => $mrf->unsigned_po_url,
+            'unsignedPoUrl' => $mrf->freshUnsignedPoStreamUrl() ?? $mrf->unsigned_po_url,
             'signedPoUrl' => $mrf->signed_po_url,
         ]);
     }

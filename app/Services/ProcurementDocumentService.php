@@ -293,6 +293,10 @@ class ProcurementDocumentService
 
     public function transform(ProcurementDocument $document): array
     {
+        // Never return a cached pre-signed URL from the DB — S3 temp URLs expire
+        // (AccessDenied / Request has expired). Sign fresh from file_path on every read.
+        $fileUrl = $this->freshUrlForDocument($document);
+
         return DocumentDisplayPayload::withCamelCaseAliases([
             'id' => $document->id,
             'mrfId' => $document->mrf_id,
@@ -300,7 +304,7 @@ class ProcurementDocumentService
             'type' => $document->type,
             'fileName' => $document->file_name,
             'filePath' => $document->file_path,
-            'fileUrl' => $document->file_url,
+            'fileUrl' => $fileUrl,
             'uploadedBy' => $document->uploader ? [
                 'id' => $document->uploader->id,
                 'name' => $document->uploader->name,
@@ -310,6 +314,31 @@ class ProcurementDocumentService
             'isActive' => $document->is_active,
             'metadata' => $document->metadata,
         ]);
+    }
+
+    /**
+     * Build a fresh download URL for a procurement document.
+     * Prefers signing the storage path; falls back to the stored URL only for
+     * legacy rows where file_path is missing or is itself an external URL.
+     */
+    public function freshUrlForDocument(ProcurementDocument $document): string
+    {
+        $path = trim((string) ($document->file_path ?? ''));
+        $storedUrl = trim((string) ($document->file_url ?? ''));
+
+        if ($path !== '' && ! str_contains($path, '://')) {
+            try {
+                return $this->refreshFileUrl($path);
+            } catch (\Throwable $e) {
+                Log::warning('Failed to refresh procurement document URL', [
+                    'document_id' => $document->id,
+                    'path' => $path,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+
+        return $storedUrl !== '' ? $storedUrl : $path;
     }
 
     public function refreshFileUrl(string $filePath, ?string $disk = null): string
