@@ -68,25 +68,41 @@ class PriceComparisonController extends Controller
             ], 404);
         }
 
-        if ($mrf->priceComparisons()->count() === 0) {
-            $mrf->syncPriceComparisonsFromQuotations();
-        }
-
-        $schedule = app(PaymentScheduleService::class)->findForMrf($mrf);
-        $scheduleSummary = $schedule ? app(PaymentScheduleService::class)->summaryText($schedule) : null;
-
         $rows = $mrf->priceComparisons()
             ->with('vendor:id,vendor_id,name')
             ->orderByDesc('is_selected')
             ->orderBy('id')
-            ->get()
-            ->map(fn (PriceComparison $row) => $this->serializeRow($row, $scheduleSummary));
+            ->get();
+
+        if ($rows->isEmpty()) {
+            $mrf->syncPriceComparisonsFromQuotations();
+            $rows = $mrf->priceComparisons()
+                ->with('vendor:id,vendor_id,name')
+                ->orderByDesc('is_selected')
+                ->orderBy('id')
+                ->get();
+        }
+
+        // Skip payment-schedule hydration for lightweight list consumers (?lite=1 / for_po).
+        $lite = $request->boolean('lite') || $request->boolean('for_po');
+        $schedule = null;
+        $scheduleSummary = null;
+        if (! $lite) {
+            $schedule = app(PaymentScheduleService::class)->findForMrf($mrf);
+            $scheduleSummary = $schedule ? app(PaymentScheduleService::class)->summaryText($schedule) : null;
+        }
 
         return response()->json([
             'success' => true,
-            'paymentSchedule' => $schedule ? app(PaymentScheduleService::class)->toApiArray($schedule) : null,
-            'payment_schedule' => $schedule ? app(PaymentScheduleService::class)->toApiArray($schedule) : null,
-            'data' => $rows->values(),
+            'paymentSchedule' => ($schedule && ! $lite)
+                ? app(PaymentScheduleService::class)->toApiArray($schedule)
+                : null,
+            'payment_schedule' => ($schedule && ! $lite)
+                ? app(PaymentScheduleService::class)->toApiArray($schedule)
+                : null,
+            'data' => $rows
+                ->map(fn (PriceComparison $row) => $this->serializeRow($row, $scheduleSummary))
+                ->values(),
         ]);
     }
 

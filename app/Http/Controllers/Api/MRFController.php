@@ -520,7 +520,7 @@ class MRFController extends Controller
         $forPo = $request->boolean('for_po') || $request->boolean('forPo');
 
         $with = $forPo
-            ? ['priceComparisons']
+            ? ['priceComparisons.vendor:id,vendor_id,name']
             : ['requester', 'directorApprover', 'executiveApprover', 'priceComparisons', 'items', 'attachments.uploader:id,name,email'];
 
         $mrf = MRF::where(function ($query) use ($id) {
@@ -550,9 +550,10 @@ class MRFController extends Controller
                 return [
                     'id' => $row->id,
                     'purchase_order_id' => $row->purchase_order_id,
-                    'vendor_id' => $row->vendor_id,
+                    'vendor_id' => $row->vendor?->vendor_id ?? $row->vendor_id,
+                    'vendor_internal_id' => $row->vendor_id,
+                    'vendor_name' => $row->vendor?->name,
                     'manual_vendor' => $row->manual_vendor ?? null,
-                    'vendor_name' => $row->vendor_name ?? null,
                     'item_description' => $row->item_description,
                     'unit_price' => (float) $row->unit_price,
                     'quantity' => (float) $row->quantity,
@@ -2534,33 +2535,45 @@ class MRFController extends Controller
         }
 
         try {
-            // Always render the Emerald layout for unsigned downloads.
-            // Legacy S3 objects may still be the pre-Emerald Dompdf template.
-            $genStarted = microtime(true);
-            $pdfContent = $this->generatePOPDFFromMRF($mrf);
-            $source = 'emerald_regenerated';
-            Log::info('PO download: Emerald PDF rendered', [
-                'mrf_id' => $mrf->mrf_id,
-                'pdf_ms' => (int) round((microtime(true) - $genStarted) * 1000),
-            ]);
+            $isEmeraldStored = is_string($mrf->unsigned_po_url)
+                && str_contains((string) $mrf->unsigned_po_url, '_emerald_');
 
-            // Refresh the stored unsigned PDF so subsequent S3 opens also use Emerald.
-            try {
-                $disk = $this->getStorageDisk();
-                $poPath = 'purchase-orders/'.date('Y/m').'/po_'.$mrf->po_number.'_emerald_'.time().'.pdf';
-                Storage::disk($disk)->put($poPath, $pdfContent);
-                $freshUrl = $this->getFileUrl($poPath, $disk);
-                if (! empty($freshUrl)) {
-                    $mrf->update([
-                        'unsigned_po_url' => $freshUrl,
-                        'unsigned_po_share_url' => $freshUrl,
+            $pdfContent = null;
+            $source = 'emerald_regenerated';
+
+            if ($isEmeraldStored) {
+                $pdfContent = $this->resolveStoredUnsignedPoBinary($mrf);
+                if (is_string($pdfContent) && $pdfContent !== '') {
+                    $source = 's3_emerald_cache';
+                }
+            }
+
+            // Legacy / missing Emerald archive: render once, store with _emerald_ marker, then serve.
+            if ($pdfContent === null) {
+                $genStarted = microtime(true);
+                $pdfContent = $this->generatePOPDFFromMRF($mrf);
+                Log::info('PO download: Emerald PDF rendered', [
+                    'mrf_id' => $mrf->mrf_id,
+                    'pdf_ms' => (int) round((microtime(true) - $genStarted) * 1000),
+                ]);
+
+                try {
+                    $disk = $this->getStorageDisk();
+                    $poPath = 'purchase-orders/'.date('Y/m').'/po_'.$mrf->po_number.'_emerald_'.time().'.pdf';
+                    Storage::disk($disk)->put($poPath, $pdfContent);
+                    $freshUrl = $this->getFileUrl($poPath, $disk);
+                    if (! empty($freshUrl)) {
+                        $mrf->update([
+                            'unsigned_po_url' => $freshUrl,
+                            'unsigned_po_share_url' => $freshUrl,
+                        ]);
+                    }
+                } catch (\Throwable $e) {
+                    Log::warning('PO download: failed to refresh Emerald PDF on storage', [
+                        'mrf_id' => $mrf->mrf_id,
+                        'error' => $e->getMessage(),
                     ]);
                 }
-            } catch (\Throwable $e) {
-                Log::warning('PO download: failed to refresh Emerald PDF on storage', [
-                    'mrf_id' => $mrf->mrf_id,
-                    'error' => $e->getMessage(),
-                ]);
             }
 
             $filenameBase = $mrf->formatted_id ?: $mrf->po_number;
