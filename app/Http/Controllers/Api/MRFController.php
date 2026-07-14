@@ -598,7 +598,13 @@ class MRFController extends Controller
             ], 404);
         }
 
-        $paymentMilestones = app(PaymentScheduleService::class)->paymentMilestonesForMrf($mrf);
+        $paymentScheduleService = app(PaymentScheduleService::class);
+        // Create/Edit PO hydrate only needs the milestone rows — use the light
+        // fetch (no creator relation) to shave a remote round trip. The full
+        // MRF detail view keeps the standard fetch.
+        $paymentMilestones = $forPo
+            ? $paymentScheduleService->paymentMilestonesForMrfLight($mrf)
+            : $paymentScheduleService->paymentMilestonesForMrf($mrf);
 
         // Lightweight hydrate for Create PO / Edit PO form — skip unused relations & services.
         if ($forPo) {

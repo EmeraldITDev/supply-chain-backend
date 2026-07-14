@@ -35,7 +35,11 @@ class NotificationController extends Controller
                 $query->whereNull('read_at');
             }
 
-            $notifications = $query->paginate($perPage);
+            // simplePaginate avoids the extra COUNT(*) query that paginate()
+            // runs on every poll. The notifications dropdown only needs the page
+            // of items + the unread badge count, never the grand total, so this
+            // removes one ~900ms remote query from each poll.
+            $notifications = $query->simplePaginate($perPage);
 
             $formattedNotifications = collect($notifications->items())
                 ->map(fn (DatabaseNotification $notification) => $this->formatNotification($notification))
@@ -47,12 +51,11 @@ class NotificationController extends Controller
                 'data' => $formattedNotifications,
                 'notifications' => $formattedNotifications,
                 'pagination' => [
-                    'total' => $notifications->total(),
                     'per_page' => $notifications->perPage(),
                     'current_page' => $notifications->currentPage(),
-                    'last_page' => $notifications->lastPage(),
                     'from' => $notifications->firstItem(),
                     'to' => $notifications->lastItem(),
+                    'has_more' => $notifications->hasMorePages(),
                 ],
                 // Cached briefly so the list endpoint doesn't add a 3rd remote
                 // count query on every poll. Fresh count is available via
@@ -410,9 +413,13 @@ class NotificationController extends Controller
      */
     private function cachedUnreadCount($user): int
     {
+        // TTL must outlive the frontend poll interval (30s) so the badge count
+        // is served from the fast file cache instead of re-running the remote
+        // COUNT(*) on every poll. Freshness is preserved because
+        // markAsRead/markAllAsRead/new-notification paths call forgetUnreadCount().
         return (int) FastCache::store()->remember(
             'notifications.unread.'.$user->getKey(),
-            now()->addSeconds(15),
+            now()->addSeconds(90),
             static fn (): int => (int) $user->unreadNotifications()->count(),
         );
     }

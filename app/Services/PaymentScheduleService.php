@@ -116,6 +116,22 @@ class PaymentScheduleService
         return $this->paymentMilestonesForApi($this->findForMrf($mrf));
     }
 
+    /**
+     * Milestones only, for hot read paths (Create/Edit PO hydrate). Skips the
+     * `creator` eager-load that findForMrf() pulls in — on this remote DB every
+     * avoided relation is a ~900ms round trip saved, and the PO form never uses
+     * the schedule's creator.
+     */
+    public function paymentMilestonesForMrfLight(MRF $mrf): array
+    {
+        $schedule = PaymentSchedule::query()
+            ->where('mrf_id', $mrf->id)
+            ->with('milestones')
+            ->first();
+
+        return $this->paymentMilestonesForApi($schedule);
+    }
+
     public function assertEditable(PaymentSchedule $schedule, ?MRF $mrf = null): void
     {
         if ($this->scheduleIsLockedForEditing($schedule, $mrf)) {
