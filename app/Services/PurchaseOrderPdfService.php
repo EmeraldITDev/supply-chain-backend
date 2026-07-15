@@ -5,7 +5,6 @@ namespace App\Services;
 use App\Support\PurchaseOrderCurrency;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\View;
-\Illuminate\Support\Facades\Log::info('vendor array keys:', array_keys($vendor));
 
 class PurchaseOrderPdfService
 {

@@ -20,64 +20,70 @@
         .company-name { font-size: 16px; font-weight: bold; margin-bottom: 6px; }
         .company-contact { font-size: 8.5px; line-height: 1.5; color: #222; margin-bottom: 4px; }
         .company-contact a { color: #222; }
-        .document-title { font-size: 28px; font-weight: 300; color: #1f4c6b; margin: 0 0 16px; letter-spacing: 0.01em; }
-        .meta-table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
+        .company-contact a.website { color: #1a4b8c; text-decoration: underline; }
+        .document-title { font-size: 28px; font-weight: 300; color: #4696b9; margin: 0 0 16px; letter-spacing: 0.01em; }
+        .meta-table { width: 100%; border-collapse: collapse; margin-bottom: 20px; border-bottom: 1px solid #cbd5e1; }
         .meta-table th,
         .meta-table td { vertical-align: top; padding: 6px 6px; }
-        .meta-table th { font-size: 8.5px; font-weight: bold; text-transform: uppercase; letter-spacing: 0.08em; color: #333; }
+        .meta-table th { font-size: 8.5px; font-weight: bold; text-transform: uppercase; letter-spacing: 0.08em; color: #333; text-align: left; }
         .meta-table td { font-size: 10px; line-height: 1.45; }
-        .meta-value { margin-top: 4px; }
-        .meta-value strong { font-weight: bold; }
+        .meta-value { margin-top: 2px; }
+        .meta-value.strong { font-weight: bold; }
+        .meta-sub { font-size: 8.5px; color: #555; margin-top: 2px; }
         .meta-group { margin-bottom: 8px; }
-        .items-table { width: 100%; border-collapse: collapse; margin-bottom: 20px; font-size: 9px; }
-        .items-table th { padding: 10px 8px; background: #f1f5f9; color: #1f2937; font-weight: bold; text-align: left; border-bottom: 1px solid #cbd5e1; }
-        .items-table td { padding: 10px 8px; border-bottom: 1px solid #e2e8f0; vertical-align: top; }
-        .items-table tbody tr:last-child td { border-bottom: 1px dashed #94a3b8; }
-        .items-table .col-category { width: 16%; }
-        .items-table .col-qty { width: 8%; text-align: center; }
-        .items-table .col-rate { width: 16%; text-align: right; }
-        .items-table .col-tax { width: 10%; text-align: center; }
+        .meta-group .footer-label { font-size: 8.5px; text-transform: uppercase; letter-spacing: 0.08em; color: #333; }
+        .items-table { width: 100%; border-collapse: collapse; margin-bottom: 0; font-size: 9px; }
+        .items-table th { padding: 8px 6px; background: #c8e4f0; color: #2d4152; font-weight: bold; text-align: left; }
+        .items-table td { padding: 8px 6px; border-bottom: 1px solid #e2e8f0; vertical-align: top; }
+        .items-table .col-category { width: 20%; }
+        .items-table .col-qty { width: 6%; text-align: right; }
+        .items-table .col-rate { width: 14%; text-align: right; }
+        .items-table .col-tax { width: 8%; text-align: right; }
         .items-table .col-amount { width: 16%; text-align: right; }
-        .item-category { font-weight: bold; font-size: 9px; margin-bottom: 3px; }
+        .item-category { font-weight: bold; }
+        .dashed-sep { border: none; border-top: 1px dashed #94a3b8; margin: 10px 0 14px; }
         .footer-table { width: 100%; border-collapse: collapse; margin-bottom: 18px; }
-        .footer-left { width: 68%; padding-right: 14px; vertical-align: top; font-size: 9px; }
-        .footer-right { width: 32%; vertical-align: top; }
-        .footer-block { margin-bottom: 10px; line-height: 1.45; }
+        .footer-left { width: 65%; padding-right: 14px; vertical-align: top; font-size: 9px; }
+        .footer-right { width: 35%; vertical-align: top; }
+        .footer-block { margin-bottom: 8px; line-height: 1.45; }
         .footer-label { font-weight: bold; }
-        .terms-list { list-style: none; padding-left: 14px; margin: 6px 0 0; }
+        .terms-list { list-style: none; padding-left: 0; margin: 4px 0 0; }
         .terms-list li { margin-bottom: 2px; }
+        .payment-schedule { width: 100%; border-collapse: collapse; margin-top: 4px; font-size: 8.5px; }
+        .payment-schedule th,
+        .payment-schedule td { border: 1px solid #cbd5e1; padding: 4px 6px; text-align: left; }
+        .payment-schedule th { background: #f1f5f9; font-weight: bold; }
+        .payment-schedule td.num { text-align: right; }
         .totals-table { width: 100%; border-collapse: collapse; font-size: 9px; }
-        .totals-table td { padding: 8px 10px; border: 1px solid #cbd5e1; }
+        .totals-table td { padding: 6px 8px; border: 1px solid #000; }
         .totals-table .t-label { font-weight: bold; }
         .totals-table .t-val { text-align: right; }
-        .totals-table tr.grand td { font-weight: bold; background: #f8fafc; }
-        .approval-block { margin-top: 20px; font-size: 9px; }
-        .approval-block .label { font-weight: bold; margin-bottom: 6px; }
-        .approval-block .name { margin-bottom: 10px; }
-        .signature-img { max-width: 160px; max-height: 70px; display: block; margin-bottom: 8px; }
-        .signature-rule { border: none; border-top: 1px solid #94a3b8; margin: 10px 0; }
-        .signature-row { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; }
+        .totals-table tr.grand td { font-weight: bold; background: #e5e7eb; }
+        .approval-block { margin-top: 20px; font-size: 9px; width: 45%; }
+        .approval-block .label { font-weight: bold; margin-bottom: 4px; }
+        .approval-block .name { margin-bottom: 4px; }
+        .signature-img { max-width: 160px; max-height: 60px; display: block; margin: 0 0 2px; }
+        .signature-rule { border: none; border-top: 1px solid #000; margin: 4px 0 10px; }
     </style>
 </head>
 <body>
-        <table class="header-table">
-            <tr>
-                <td class="header-left">
-                    <div class="company-name">{{ $company['name'] }}</div>
-                    <div class="company-contact">{!! nl2br(e($company['address'] ?? '')) !!}</div>
-                    @if (!empty($company['email']))
-                        <div class="company-contact"><a href="mailto:{{ $company['email'] }}">{{ $company['email'] }}</a></div>
-                    @endif
-                    @if (!empty($company['website']))
-                        <div class="company-contact"><a href="{{ $company['website'] }}">{{ $company['website'] }}</a></div>
-                    @endif
-                </td>
-                <td class="header-right">
-                    {!! $logo_html !!}
-                </td>
-            </tr>
-        </table>
-
+    <table class="header-table">
+        <tr>
+            <td class="header-left">
+                <div class="company-name">{{ $company['name'] }}</div>
+                <div class="company-contact">{!! nl2br(e($company['address'] ?? '')) !!}</div>
+                @if (!empty($company['email']))
+                    <div class="company-contact"><a href="mailto:{{ $company['email'] }}">{{ $company['email'] }}</a></div>
+                @endif
+                @if (!empty($company['website']))
+                    <div class="company-contact"><a class="website" href="{{ $company['website'] }}">{{ $company['website'] }}</a></div>
+                @endif
+            </td>
+            <td class="header-right">
+                {!! $logo_html !!}
+            </td>
+        </tr>
+    </table>
 
     <div class="document-title">{{ $document_title }}</div>
 
@@ -89,18 +95,18 @@
         </tr>
         <tr>
             <td>
-                <div class="meta-value">{{ $supplier_code_display }}</div>
+                <div class="meta-value strong">{{ $supplier_name }}</div>
+                @if (!empty($supplier_code_display) && $supplier_code_display !== $supplier_name)
+                    <div class="meta-sub">{{ $supplier_code_display }}</div>
+                @endif
             </td>
             <td>
                 <div class="meta-value">{{ $ship_to_company }}</div>
             </td>
             <td>
-                <div class="meta-group">
-                    <div class="footer-label">P.O. NO.</div>
-                    <div class="meta-value strong">{{ $po_number }}</div>
-                </div>
-                <div class="meta-group">
-                    <div class="footer-label">DATE</div>
+                <div class="meta-value strong">{{ $po_number }}</div>
+                <div class="meta-group" style="margin-top:8px;">
+                    <div class="footer-label">Date</div>
                     <div class="meta-value">{{ $po_date_short }}</div>
                 </div>
             </td>
@@ -110,7 +116,7 @@
     <table class="items-table">
         <thead>
             <tr>
-                <th class="col-category">CATEGORY</th>
+                <th class="col-category">&nbsp;</th>
                 <th>DESCRIPTION</th>
                 <th class="col-qty">QTY</th>
                 <th class="col-rate">RATE</th>
@@ -121,7 +127,7 @@
         <tbody>
             @foreach ($line_items as $line)
                 <tr>
-                    <td class="col-category" style="font-weight:bold;text-transform:capitalize;">{{ $line['category'] }}</td>
+                    <td class="col-category item-category">{{ $line['category'] }}</td>
                     <td>{{ $line['description'] }}</td>
                     <td class="col-qty">{{ $line['qty'] }}</td>
                     <td class="col-rate">{{ $line['rate'] }}</td>
@@ -131,6 +137,8 @@
             @endforeach
         </tbody>
     </table>
+
+    <hr class="dashed-sep" />
 
     <table class="footer-table">
         <tr>
@@ -146,7 +154,7 @@
                 </div>
 
                 <div class="footer-block">
-                    <span class="footer-label">Standard terms:</span>
+                    <div class="footer-label">Standard terms:</div>
                     <ul class="terms-list">
                         @foreach ($standard_terms_lines as $term)
                             <li>- {{ $term }}</li>
@@ -154,10 +162,38 @@
                     </ul>
                 </div>
 
-                <div class="footer-block">
-                    <span class="footer-label">Payment Terms:</span>
-                    {{ $payment_terms_display }}
-                </div>
+                @if (!empty($has_payment_milestones))
+                    <div class="footer-block">
+                        <div class="footer-label">Payment Schedule:</div>
+                        <table class="payment-schedule">
+                            <thead>
+                                <tr>
+                                    <th style="width:20px;">#</th>
+                                    <th>Milestone</th>
+                                    <th style="width:36px;" class="num">%</th>
+                                    <th style="width:80px;" class="num">Amount</th>
+                                    <th>Trigger</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach ($payment_milestones as $m)
+                                    <tr>
+                                        <td class="num">{{ $m['milestone_number'] ?? $loop->iteration }}</td>
+                                        <td>{{ $m['label'] ?? '' }}</td>
+                                        <td class="num">{{ $m['percentage'] ?? '' }}</td>
+                                        <td class="num">{{ $m['amount_display'] ?? $m['amount'] ?? '' }}</td>
+                                        <td>{{ $m['trigger_label'] ?? $m['trigger'] ?? '' }}</td>
+                                    </tr>
+                                @endforeach
+                            </tbody>
+                        </table>
+                    </div>
+                @else
+                    <div class="footer-block">
+                        <span class="footer-label">Payment Terms:</span>
+                        {{ $payment_terms_display }}
+                    </div>
+                @endif
 
                 <div class="footer-block">
                     <span class="footer-label">Contract type:</span>
@@ -188,10 +224,8 @@
         <div class="name">{{ $approved_by_name }}</div>
         {!! $signature_html !!}
         <hr class="signature-rule" />
-        <div class="signature-row">
-            <div class="label">Date</div>
-            <div>{{ $approved_by_date }}</div>
-        </div>
+        <div class="label">Date</div>
+        <div>{{ $approved_by_date }}</div>
         <hr class="signature-rule" />
     </div>
 </body>
