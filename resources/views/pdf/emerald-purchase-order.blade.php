@@ -83,6 +83,27 @@
         .footer-lbl { font-weight: bold; }
         .terms-list { margin: 4px 0 6px 0; padding-left: 0; list-style: none; }
         .terms-list li { margin-bottom: 2px; }
+        .milestones-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 6px 0 12px;
+            font-size: 8px;
+        }
+        .milestones-table th,
+        .milestones-table td {
+            border: 1px solid #dcdcdc;
+            padding: 5px 4px;
+            vertical-align: top;
+        }
+        .milestones-table th {
+            background: #eef7fb;
+            font-weight: bold;
+            text-align: left;
+        }
+        .milestones-table .col-number { width: 32px; text-align: center; }
+        .milestones-table .col-percentage { width: 58px; text-align: right; }
+        .milestones-table .col-amount { width: 90px; text-align: right; white-space: nowrap; }
+        .milestones-table .col-trigger { width: 110px; }
         .totals-table {
             width: 100%;
             border-collapse: collapse;
@@ -183,10 +204,36 @@
                         @endforeach
                     </ul>
                 @endif
-                <div class="footer-line">
-                    <span class="footer-lbl">Payment Terms:</span>
-                    {{ $payment_terms_display }}
-                </div>
+                @if (!empty($payment_milestones))
+                    <div class="footer-line" style="margin-top: 8px;"><span class="footer-lbl">Payment schedule:</span></div>
+                    <table class="milestones-table">
+                        <thead>
+                            <tr>
+                                <th class="col-number">No.</th>
+                                <th>Milestone</th>
+                                <th class="col-percentage">%</th>
+                                <th class="col-amount">Amount</th>
+                                <th class="col-trigger">Trigger</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach ($payment_milestones as $milestone)
+                                <tr>
+                                    <td class="col-number">{{ $milestone['number'] ?? '' }}</td>
+                                    <td>{{ $milestone['label'] ?? '' }}</td>
+                                    <td class="col-percentage">{{ $milestone['percentage'] ?? '' }}</td>
+                                    <td class="col-amount">{{ $milestone['amount'] ?? '' }}</td>
+                                    <td class="col-trigger">{{ $milestone['trigger'] ?? '' }}</td>
+                                </tr>
+                            @endforeach
+                        </tbody>
+                    </table>
+                @else
+                    <div class="footer-line">
+                        <span class="footer-lbl">Payment Terms:</span>
+                        {{ $payment_terms_display }}
+                    </div>
+                @endif
                 <div class="footer-line">
                     <span class="footer-lbl">Contract type:</span>
                     {{ $contract_type_display }}

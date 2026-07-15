@@ -2973,6 +2973,7 @@ class MRFController extends Controller
             'total' => $total,
             'currency' => $currency,
             'payment_terms' => $paymentTerms,
+            'payment_milestones' => app(PaymentScheduleService::class)->paymentMilestonesForMrf($mrf),
             'invoice_submission_email' => $mrf->invoice_submission_email ?? config('scm.invoice_submission_email'),
             'invoice_submission_cc' => \App\Support\PurchaseOrderInvoiceCc::merge(
                 $mrf->invoice_submission_cc,

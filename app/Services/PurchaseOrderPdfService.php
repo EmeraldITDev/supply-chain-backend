@@ -162,6 +162,7 @@ class PurchaseOrderPdfService
         $tax = (float) $data['tax'];
         $total = (float) $data['total'];
         $currency = $data['currency'] ?? 'NGN';
+        $paymentMilestones = $data['payment_milestones'] ?? [];
         $categoryLine = $this->resolveCategoryLine(
             (string) ($data['mrf_category'] ?? ''),
             (string) ($data['mrf_department'] ?? ''),
@@ -226,6 +227,7 @@ class PurchaseOrderPdfService
             specialTerms: (string) ($data['special_terms'] ?? ''),
             paymentTermsRaw: (string) ($data['payment_terms'] ?? ''),
             contractType: (string) ($data['contract_type'] ?? ''),
+            paymentMilestones: $paymentMilestones,
         ));
     }
 
@@ -279,6 +281,7 @@ class PurchaseOrderPdfService
             $tax = ($subtotal * $taxRate) / 100;
         }
         $total = $subtotal + $tax;
+        $paymentMilestones = $data['payment_milestones'] ?? [];
         $currency = PurchaseOrderCurrency::normalize($mrf['currency'] ?? $quotation['currency'] ?? 'NGN');
 
         $shipTo = (string) ($data['ship_to'] ?? $mrf['ship_to_address'] ?? env('COMPANY_ADDRESS', $company['address'] ?? ''));
@@ -305,6 +308,7 @@ class PurchaseOrderPdfService
             specialTerms: (string) ($mrf['po_special_terms'] ?? $data['special_terms'] ?? ''),
             paymentTermsRaw: (string) ($mrf['po_payment_terms'] ?? $quotation['payment_terms'] ?? ''),
             contractType: (string) ($mrf['contract_type'] ?? ''),
+            paymentMilestones: $paymentMilestones,
         ));
     }
 
@@ -336,6 +340,7 @@ class PurchaseOrderPdfService
         string $specialTerms = '',
         string $paymentTermsRaw = '',
         string $contractType = '',
+        array $paymentMilestones = [],
     ): array {
         $company = $this->normalizeCompany($company);
 
@@ -352,6 +357,8 @@ class PurchaseOrderPdfService
             'standard_terms_lines' => $this->resolveStandardTermsLines($poType, $termsMode, $customTerms, $specialTerms),
             'payment_terms_display' => $this->resolvePaymentTermsDisplay($paymentTermsRaw, $customTerms),
             'contract_type_display' => $this->formatContractType($contractType),
+            'payment_milestones' => $paymentMilestones,
+            'has_payment_milestones' => $paymentMilestones !== [],
             'subtotal' => $this->fmtMoney($subtotal),
             'tax' => $this->fmtMoney($tax),
             'total' => $this->fmtMoney($total),
