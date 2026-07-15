@@ -3015,6 +3015,15 @@ class MRFWorkflowController extends Controller
             'po_generation_failed_at' => null,
         ];
 
+        // Persist selected vendor when provided from the PO modal (vendor directory selection)
+        if ($request->exists('selectedVendorId') && filled($request->input('selectedVendorId'))) {
+            $sv = $request->input('selectedVendorId');
+            $vendor = Vendor::query()->where('vendor_id', $sv)->first();
+            if ($vendor) {
+                $draftUpdate['selected_vendor_id'] = $vendor->id;
+            }
+        }
+
         $resolvedPoNumber = $draftUpdate['po_number'];
         if (
             filled($resolvedPoNumber)
