@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Support\PurchaseOrderCurrency;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\View;
+\Illuminate\Support\Facades\Log::info('vendor array keys:', array_keys($vendor));
 
 class PurchaseOrderPdfService
 {
@@ -334,6 +335,7 @@ class PurchaseOrderPdfService
      * @return array<string, mixed>
      */
     private function baseViewVars(
+
         array $company,
         array $vendor,
         string $shipTo,

@@ -60,7 +60,6 @@
     </style>
 </head>
 <body>
-    <div style="width: 100%; height: 80px; margin-bottom: 16px; overflow: hidden;">
         <table class="header-table">
             <tr>
                 <td class="header-left">
@@ -78,7 +77,7 @@
                 </td>
             </tr>
         </table>
-    </div>
+
 
     <div class="document-title">{{ $document_title }}</div>
 
@@ -122,7 +121,7 @@
         <tbody>
             @foreach ($line_items as $line)
                 <tr>
-                    <td class="col-category">{{ $line['category'] }}</td>
+                    <td class="col-category" style="font-weight:bold;text-transform:capitalize;">{{ $line['category'] }}</td>
                     <td>{{ $line['description'] }}</td>
                     <td class="col-qty">{{ $line['qty'] }}</td>
                     <td class="col-rate">{{ $line['rate'] }}</td>
