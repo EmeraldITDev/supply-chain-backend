@@ -60,23 +60,25 @@
     </style>
 </head>
 <body>
-    <table class="header-table">
-        <tr>
-            <td class="header-left">
-                <div class="company-name">{{ $company['name'] }}</div>
-                <div class="company-contact">{!! nl2br(e($company['address'] ?? '')) !!}</div>
-                @if (!empty($company['email']))
-                    <div class="company-contact"><a href="mailto:{{ $company['email'] }}">{{ $company['email'] }}</a></div>
-                @endif
-                @if (!empty($company['website']))
-                    <div class="company-contact"><a href="{{ $company['website'] }}">{{ $company['website'] }}</a></div>
-                @endif
-            </td>
-            <td class="header-right">
-                {!! $logo_html !!}
-            </td>
-        </tr>
-    </table>
+    <div style="width: 100%; height: 80px; margin-bottom: 16px; overflow: hidden;">
+        <table class="header-table">
+            <tr>
+                <td class="header-left">
+                    <div class="company-name">{{ $company['name'] }}</div>
+                    <div class="company-contact">{!! nl2br(e($company['address'] ?? '')) !!}</div>
+                    @if (!empty($company['email']))
+                        <div class="company-contact"><a href="mailto:{{ $company['email'] }}">{{ $company['email'] }}</a></div>
+                    @endif
+                    @if (!empty($company['website']))
+                        <div class="company-contact"><a href="{{ $company['website'] }}">{{ $company['website'] }}</a></div>
+                    @endif
+                </td>
+                <td class="header-right">
+                    {!! $logo_html !!}
+                </td>
+            </tr>
+        </table>
+    </div>
 
     <div class="document-title">{{ $document_title }}</div>
 

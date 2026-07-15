@@ -60,13 +60,13 @@ class PurchaseOrderPdfService
         return View::make(self::EMERALD_LAYOUT_VIEW, $viewData)->render();
     }
     /**
-     * Embed company logo as HTML for Dompdf (data URI). Prefer Emerald assets in public/images.
-     * Dompdf needs PHP GD (or compatible stack) to rasterize PNG/JPEG in PDFs; without GD, use text-only branding.
+     * Resolve logo data URI for Dompdf (embedded base64). Prefer Emerald assets in public/images.
+     * Dompdf needs PHP GD (or compatible stack) to rasterize PNG/JPEG in PDFs; without GD, returns empty string.
      */
-    public function logoHtml(): string
+    public function logoDataUri(): string
     {
         if (!extension_loaded('gd')) {
-            return '<div class="logo-wrap" style="text-align:right;"><img src="' . $dataUri . '" alt="Logo" style="width:90px;height:auto;max-height:60px;" /></div>';
+            return '';
         }
 
         $logoPaths = [
@@ -85,11 +85,26 @@ class PurchaseOrderPdfService
                 $mimeType = is_array($imageInfo) && isset($imageInfo['mime']) ? $imageInfo['mime'] : 'image/png';
                 $dataUri = 'data:' . $mimeType . ';base64,' . base64_encode($imageData);
 
-                return '<div class="logo-wrap"><img src="' . $dataUri . '" alt="Logo" class="logo-img" /></div>';
+                return $dataUri;
             }
         }
 
-        return '<div class="logo-placeholder" style="text-align:right;font-size:10px;color:#999;">LOGO</div>';
+        return '';
+    }
+
+    /**
+     * Embed company logo as HTML for Dompdf (data URI). Prefer Emerald assets in public/images.
+     * Dompdf needs PHP GD (or compatible stack) to rasterize PNG/JPEG in PDFs; without GD, use text-only branding.
+     */
+    public function logoHtml(): string
+    {
+        $dataUri = $this->logoDataUri();
+
+        if ($dataUri !== '') {
+            return '<img src="' . $dataUri . '" alt="Emerald Logo" style="width: 80px; height: auto; max-height: 60px; float: right;" />';
+        }
+
+        return '<div style="text-align:right;font-size:10px;color:#999;">LOGO</div>';
     }
 
     /**
