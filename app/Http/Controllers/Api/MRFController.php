@@ -253,6 +253,55 @@ class MRFController extends Controller
             return $path ?: null;
         }
 
+        // For other storage URLs, try to return the path after the last slash.
+        $parsed = parse_url($urlOrPath);
+        if (isset($parsed['path'])) {
+            return ltrim($parsed['path'], '/');
+        }
+
+        return null;
+    }
+
+    /**
+     * Resolve the signable/storage path for a signed PO URL or path.
+     */
+    private function resolveSignedPoStoragePath(string $signedPoUrl, string $disk): ?string
+    {
+        $candidate = $this->extractFilePathFromUrl($signedPoUrl);
+        $candidates = [];
+
+        if ($candidate !== null && $candidate !== '') {
+            $candidates[] = $candidate;
+            $candidates[] = ltrim($candidate, '/');
+            $candidates[] = basename($candidate);
+            $candidates[] = 'purchase-orders/signed/' . basename($candidate);
+            $candidates[] = 'purchase-orders/signed/' . ltrim($candidate, 'purchase-orders/signed/');
+        }
+
+        if (str_contains($signedPoUrl, '/purchase-orders/signed/')) {
+            $candidates[] = ltrim(substr($signedPoUrl, strpos($signedPoUrl, '/purchase-orders/signed/') + 1), '/');
+        }
+
+        foreach (array_unique($candidates) as $path) {
+            if ($path === '' || !Storage::disk($disk)->exists($path)) {
+                continue;
+            }
+
+            Log::info('Resolved signed PO storage path', [
+                'signed_po_url' => $signedPoUrl,
+                'resolved_path' => $path,
+                'disk' => $disk,
+            ]);
+
+            return $path;
+        }
+
+        Log::warning('Unable to resolve signed PO storage path', [
+            'signed_po_url' => $signedPoUrl,
+            'disk' => $disk,
+            'candidates' => $candidates,
+        ]);
+
         return null;
     }
 
@@ -2841,45 +2890,14 @@ class MRFController extends Controller
         try {
             $disk = $this->getStorageDisk();
 
-            // Extract file path using our helper method
-            $filePath = $this->extractFilePathFromUrl($mrf->signed_po_url);
+            // Resolve a storage path from the stored signed PO URL or path.
+            $filePath = $this->resolveSignedPoStoragePath($mrf->signed_po_url, $disk);
 
             if (empty($filePath)) {
-                throw new \Exception('Could not extract file path from stored URL');
+                throw new \Exception('Could not resolve signed PO storage path from stored URL');
             }
 
-            // Try the extracted path
-            if (!Storage::disk($disk)->exists($filePath)) {
-                // Try alternative paths
-                $alternatives = [
-                    'purchase-orders/signed/' . basename($filePath),
-                    ltrim($filePath, '/'),
-                    'purchase-orders/signed/' . ltrim($filePath, 'purchase-orders/signed/')
-                ];
-
-                $found = false;
-                foreach ($alternatives as $alt) {
-                    if (Storage::disk($disk)->exists($alt)) {
-                        $filePath = $alt;
-                        $found = true;
-                        Log::info('Found signed PO at alternative path', [
-                            'mrf_id' => $id,
-                            'alternative_path' => $alt
-                        ]);
-                        break;
-                    }
-                }
-
-                if (!$found) {
-                    Log::error('Signed PO file not found in S3', [
-                        'mrf_id' => $id,
-                        'expected_path' => $filePath,
-                        'tried_alternatives' => $alternatives,
-                        'stored_url' => $mrf->signed_po_url
-                    ]);
-                    throw new \Exception('Signed PO file not found in storage. File may have been deleted or path is incorrect.');
-                }
-            }
+            $pdfContent = Storage::disk($disk)->get($filePath);
 
             $pdfContent = Storage::disk($disk)->get($filePath);
             $filename = "PO_Signed_{$mrf->po_number}.pdf";
