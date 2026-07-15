@@ -171,23 +171,34 @@ class VendorController extends Controller
     private function dropdownIndex(Request $request): \Illuminate\Http\JsonResponse
     {
         $search = trim((string) $request->input('search', $request->input('q', '')));
-        if ($search === '') {
+        $allowEmpty = $request->boolean('allow_empty') || $request->boolean('allowEmpty');
+        $limit = (int) max(1, min(100, (int) $request->input('limit', 20)));
+
+        if ($search === '' && ! $allowEmpty) {
             return response()->json([
                 'success' => true,
                 'data' => [],
             ]);
         }
 
-        $term = '%'.$search.'%';
-        $items = Vendor::query()
-            ->forDirectory(false)
-            ->where(function ($q) use ($term) {
+        $itemsQuery = Vendor::query()->forDirectory(false)->select(['vendor_id', 'name']);
+
+        if ($search !== '') {
+            // Sanitize search term and match across common fields (name, vendor_id, email, phone)
+            $sanitized = str_replace(['%','\\'], ['', '\\'], $search);
+            $term = '%' . $sanitized . '%';
+
+            $itemsQuery->where(function ($q) use ($term) {
                 $q->where('name', 'like', $term)
-                    ->orWhere('vendor_id', 'like', $term);
-            })
-            ->select(['vendor_id', 'name'])
+                    ->orWhere('vendor_id', 'like', $term)
+                    ->orWhere('email', 'like', $term)
+                    ->orWhere('phone', 'like', $term);
+            });
+        }
+
+        $items = $itemsQuery
             ->orderBy('name')
-            ->limit(20)
+            ->limit($limit)
             ->get()
             ->map(fn ($vendor) => [
                 'id' => $vendor->vendor_id,
