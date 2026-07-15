@@ -41,6 +41,10 @@
             margin-bottom: 4px;
             font-size: 8.5px;
         }
+        .items-table th {
+            text-transform: uppercase;
+            letter-spacing: 0.02em;
+        }
         .meta-values td { width: 33.33%; vertical-align: top; padding-right: 8px; }
         .meta-values .po-num { font-weight: bold; }
         .meta-date { margin: 4px 0 10px; font-size: 8px; }

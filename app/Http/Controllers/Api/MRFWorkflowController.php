@@ -3567,9 +3567,9 @@ class MRFWorkflowController extends Controller
         $companyName = env('COMPANY_NAME', config('app.name', 'Emerald Industrial Co. FZE'));
         $companyAddress = env('COMPANY_ADDRESS', '');
         $companyPhone = env('COMPANY_PHONE', '');
-        $companyEmail = env('COMPANY_EMAIL', config('mail.from.address', ''));
+        $companyEmail = 'info@emeraldcfze.com';
         $companyTaxId = env('COMPANY_TAX_ID', '');
-        $companyWebsite = env('COMPANY_WEBSITE', 'https://emeraldcfze.com/');
+        $companyWebsite = 'https://emeraldcfze.com/';
 
         // Format items for PO template
         $formattedItems = $items->map(function($item) {

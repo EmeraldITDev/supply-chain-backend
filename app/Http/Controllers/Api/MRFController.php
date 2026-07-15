@@ -2947,10 +2947,10 @@ class MRFController extends Controller
         $company = [
             'name'    => env('COMPANY_NAME', 'Emerald Industrial Co. FZE'),
             'address' => env('COMPANY_ADDRESS', 'Plot A10, Calabar Free Trade Zone, Calabar, Cross River 540001 NG'),
-            'email'   => env('COMPANY_EMAIL', 'info@emeraldcfze.com'),
+            'email'   => 'info@emeraldcfze.com',
             'phone'   => env('COMPANY_PHONE', ''),
             'tax_id'  => env('COMPANY_TAX_ID', ''),
-            'website' => env('COMPANY_WEBSITE', 'https://emeraldcfze.com/'),
+            'website' => 'https://emeraldcfze.com/',
         ];
 
         $shipToAddress = $mrf->ship_to_address

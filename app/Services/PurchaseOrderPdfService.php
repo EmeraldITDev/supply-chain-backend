@@ -375,11 +375,21 @@ class PurchaseOrderPdfService
      */
     private function normalizeCompany(array $company): array
     {
+        $email = trim((string) ($company['email'] ?? ''));
+        if ($email === '') {
+            $email = 'info@emeraldcfze.com';
+        }
+
+        $website = trim((string) ($company['website'] ?? ''));
+        if ($website === '') {
+            $website = 'https://emeraldcfze.com/';
+        }
+
         return [
             'name' => (string) ($company['name'] ?? env('COMPANY_NAME', 'Emerald Industrial Co. FZE')),
             'address' => (string) ($company['address'] ?? env('COMPANY_ADDRESS', 'Plot A10, Calabar Free Trade Zone, Calabar, Cross River 540001 NG')),
-            'email' => (string) ($company['email'] ?? env('COMPANY_EMAIL', 'info@emeraldcfze.com')),
-            'website' => (string) ($company['website'] ?? env('COMPANY_WEBSITE', 'https://emeraldcfze.com/')),
+            'email' => $email,
+            'website' => $website,
         ];
     }
 
