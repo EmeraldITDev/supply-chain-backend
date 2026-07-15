@@ -73,9 +73,7 @@
                 @endif
             </td>
             <td class="header-right">
-                <img src="{{ $logo_path }}"
-                    style="width: 90px; height: auto; max-height: 60px;"
-                    alt="{{ $company['name'] }}" />
+                {!! $logo_html !!}
             </td>
         </tr>
     </table>
