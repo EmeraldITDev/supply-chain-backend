@@ -348,12 +348,14 @@ class PurchaseOrderPdfService
             'logo_html' => $this->logoHtml(),
             'company' => $company,
             'supplier_name' => (string) ($vendor['name'] ?? ''),
-            'ship_to_display' => $shipTo !== '' ? $shipTo : (string) ($company['name'] ?? ''),
+            'supplier_code_display' => $this->supplierCodeDisplay($vendor),
+            'ship_to_company' => (string) ($company['name'] ?? ''),
             'po_number' => $poNumber,
             'po_date_short' => $poDate->format('d/m/Y'),
             'document_title' => 'Purchase Order',
             'line_items' => $lineItems,
-            'invoice_submission_line' => $this->buildInvoiceSubmissionLine($invoiceEmail, $invoiceCc),
+            'invoice_submission_to' => $this->resolveInvoiceSubmissionTo($invoiceEmail),
+            'invoice_submission_cc' => $this->resolveInvoiceSubmissionCc($invoiceCc),
             'standard_terms_lines' => $this->resolveStandardTermsLines($poType, $termsMode, $customTerms, $specialTerms),
             'payment_terms_display' => $this->resolvePaymentTermsDisplay($paymentTermsRaw, $customTerms),
             'contract_type_display' => $this->formatContractType($contractType),
@@ -367,6 +369,43 @@ class PurchaseOrderPdfService
             'approved_by_date' => $approvedByDate,
             'signature_html' => $this->signatureHtml($signatureImageUrl),
         ];
+    }
+
+    private function supplierCodeDisplay(array $vendor): string
+    {
+        if (! empty($vendor['vendor_id'])) {
+            return (string) $vendor['vendor_id'];
+        }
+
+        if (! empty($vendor['vendor_code'])) {
+            return (string) $vendor['vendor_code'];
+        }
+
+        if (! empty($vendor['id'])) {
+            return (string) $vendor['id'];
+        }
+
+        return (string) ($vendor['name'] ?? 'Supplier');
+    }
+
+    private function resolveInvoiceSubmissionTo(string $email): string
+    {
+        $email = trim($email);
+        if ($email !== '') {
+            return $email;
+        }
+
+        return 'accountpayables@emeraldcfze.com';
+    }
+
+    private function resolveInvoiceSubmissionCc(string $cc): string
+    {
+        $cc = trim($cc);
+        if ($cc !== '') {
+            return $cc;
+        }
+
+        return 'lateef.olanrewaju@emeraldcfze.com, procurement@emeraldcfze.com';
     }
 
     /**
