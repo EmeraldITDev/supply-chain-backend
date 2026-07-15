@@ -143,6 +143,11 @@ class PurchaseOrderPdfService
     }
 
     /**
+     * Canonical approver block on generated PO PDFs (matches frontend Emerald layout).
+     */
+    public const EMERALD_PO_APPROVER_NAME = 'Mrs. Viva Musa';
+
+    /**
      * PO PDF from MRFController dataset (Eloquent item models).
      *
      * @param  array<string, mixed>  $data
@@ -157,7 +162,10 @@ class PurchaseOrderPdfService
         $tax = (float) $data['tax'];
         $total = (float) $data['total'];
         $currency = $data['currency'] ?? 'NGN';
-        $mrfDepartment = isset($data['mrf_department']) ? trim((string) $data['mrf_department']) : '';
+        $categoryLine = $this->resolveCategoryLine(
+            (string) ($data['mrf_category'] ?? ''),
+            (string) ($data['mrf_department'] ?? ''),
+        );
 
         $poDateRaw = (string) $data['po_date'];
         try {
@@ -169,31 +177,28 @@ class PurchaseOrderPdfService
         }
 
         $lineItems = [];
-        $rowIndex = 0;
         foreach ($items as $item) {
-            $itemName = $item->item_name ?? $item->name ?? 'Item';
-            $description = (string) ($item->description ?? $item->specifications ?? '');
+            $itemName = trim((string) ($item->item_name ?? $item->name ?? 'Item'));
+            $extraDesc = trim((string) ($item->description ?? $item->specifications ?? ''));
+            $description = $itemName;
+            if ($extraDesc !== '' && strcasecmp($extraDesc, $itemName) !== 0) {
+                $description = $extraDesc;
+            }
             $quantity = (float) ($item->quantity ?? 1);
             $unitPrice = (float) ($item->unit_price ?? (($item->total_price ?? 0) / max($quantity, 1)));
             $lineTotal = $unitPrice * $quantity;
 
-            $deptPrefix = $rowIndex === 0 ? ($mrfDepartment !== '' ? $mrfDepartment : null) : null;
-
             $lineItems[] = [
-                'description_segments' => $this->descriptionSegments($deptPrefix, $itemName, $description),
+                'category' => $categoryLine,
+                'description' => $description,
                 'qty' => $this->fmtQty($quantity),
                 'rate' => $this->fmtMoney($unitPrice),
-                'tax_label' => $taxRate > 0 ? rtrim(rtrim(number_format($taxRate, 2, '.', ''), '0'), '.') . '%' : '—',
+                'tax_label' => $this->fmtTaxLabel($taxRate),
                 'amount' => $this->fmtMoney($lineTotal),
             ];
-            $rowIndex++;
         }
 
-        $paymentTerms = (string) ($data['payment_terms'] ?? '');
-        $paymentMilestones = $data['payment_milestones'] ?? [];
-        $additionalNotes = $this->buildAdditionalNotesMrf($data);
-
-        $approverName = (string) ($data['approved_by_name'] ?? env('PO_APPROVER_NAME', ''));
+        $approverName = (string) ($data['approved_by_name'] ?? self::EMERALD_PO_APPROVER_NAME);
         $approverDate = (string) ($data['approved_by_date'] ?? '');
         if ($approverName !== '' && $approverDate === '') {
             $approverDate = $poDate->format('F j, Y');
@@ -202,21 +207,25 @@ class PurchaseOrderPdfService
         return $this->renderEmeraldLayout($this->baseViewVars(
             $company,
             $vendor,
-            $data['ship_to'],
+            (string) ($data['ship_to'] ?? ''),
             $data['po_number'],
             $poDate,
             $lineItems,
-            $paymentTerms,
-            $additionalNotes,
             $subtotal,
             $tax,
             $total,
             $currency,
-            $tax > 0 || $taxRate > 0,
             $approverName,
             $approverDate,
             $data['signature_image_url'] ?? null,
-            is_array($paymentMilestones) ? $paymentMilestones : [],
+            invoiceEmail: (string) ($data['invoice_submission_email'] ?? ''),
+            invoiceCc: (string) ($data['invoice_submission_cc'] ?? ''),
+            poType: (string) ($data['po_type'] ?? 'goods'),
+            termsMode: (string) ($data['po_terms_mode'] ?? 'standard'),
+            customTerms: (string) ($data['custom_terms'] ?? ''),
+            specialTerms: (string) ($data['special_terms'] ?? ''),
+            paymentTermsRaw: (string) ($data['payment_terms'] ?? ''),
+            contractType: (string) ($data['contract_type'] ?? ''),
         ));
     }
 
@@ -232,12 +241,15 @@ class PurchaseOrderPdfService
         $vendor = $data['vendor'];
         $company = $this->normalizeCompany($data['company']);
         $items = $data['items'];
+        $taxRate = (float) ($data['tax_rate'] ?? $mrf['tax_rate'] ?? 0);
 
         $date = now()->setTimezone('Africa/Lagos');
-        $mrfDepartment = trim((string) ($mrf['department'] ?? ''));
+        $categoryLine = $this->resolveCategoryLine(
+            (string) ($mrf['category'] ?? ''),
+            (string) ($mrf['department'] ?? ''),
+        );
 
         $lineItems = [];
-        $rowIndex = 0;
         $subtotal = 0.0;
         foreach ($items as $item) {
             $qty = (float) ($item['quantity'] ?? 1);
@@ -245,49 +257,31 @@ class PurchaseOrderPdfService
             $lineTotal = (float) ($item['total_price'] ?? ($unitPrice * $qty));
             $subtotal += $lineTotal;
 
-            $name = (string) ($item['item_name'] ?? $item['name'] ?? 'Item');
-            $desc = (string) ($item['description'] ?? $item['specifications'] ?? '');
-            $deptPrefix = $rowIndex === 0 ? ($mrfDepartment !== '' ? $mrfDepartment : null) : null;
+            $name = trim((string) ($item['item_name'] ?? $item['name'] ?? 'Item'));
+            $desc = trim((string) ($item['description'] ?? $item['specifications'] ?? ''));
+            $description = $name;
+            if ($desc !== '' && strcasecmp($desc, $name) !== 0) {
+                $description = $desc;
+            }
 
             $lineItems[] = [
-                'description_segments' => $this->descriptionSegments($deptPrefix, $name, $desc),
+                'category' => $categoryLine,
+                'description' => $description,
                 'qty' => $this->fmtQty($qty),
                 'rate' => $this->fmtMoney($unitPrice),
-                'tax_label' => '—',
+                'tax_label' => $this->fmtTaxLabel($taxRate),
                 'amount' => $this->fmtMoney($lineTotal),
             ];
-            $rowIndex++;
         }
 
-        $tax = 0.0;
+        $tax = (float) ($data['tax_amount'] ?? 0);
+        if ($tax <= 0 && $taxRate > 0) {
+            $tax = ($subtotal * $taxRate) / 100;
+        }
         $total = $subtotal + $tax;
         $currency = PurchaseOrderCurrency::normalize($mrf['currency'] ?? $quotation['currency'] ?? 'NGN');
 
-        $shipTo = env('COMPANY_ADDRESS', $company['address'] ?? '');
-        $paymentMilestones = is_array($data['payment_milestones'] ?? null) ? $data['payment_milestones'] : [];
-        // Structured milestone table replaces legacy free-text payment terms on workflow POs.
-        $paymentTerms = '';
-
-        $additionalParts = [];
-        if (!empty($quotation['delivery_days'])) {
-            $additionalParts[] = 'Delivery: ' . $quotation['delivery_days'] . ' days';
-        } elseif (!empty($quotation['delivery_date'])) {
-            $d = $quotation['delivery_date'];
-            try {
-                $additionalParts[] = 'Delivery date: ' . Carbon::parse($d)->format('F d, Y');
-            } catch (\Throwable) {
-                $additionalParts[] = 'Delivery date: ' . (string) $d;
-            }
-        }
-        if (!empty($quotation['warranty_period'])) {
-            $additionalParts[] = 'Warranty: ' . $quotation['warranty_period'];
-        }
-        if (!empty($quotation['validity_days'])) {
-            $additionalParts[] = 'Validity: ' . $quotation['validity_days'] . ' days';
-        }
-        $mrfDisplayId = (string) (($mrf['formatted_id'] ?? $mrf['formattedId'] ?? $mrf['id'] ?? '') ?: '');
-        $additionalParts[] = 'MRF: ' . $mrfDisplayId . ' — ' . ($mrf['title'] ?? '');
-        $additionalParts[] = 'Payment shall be made according to the payment terms above. Goods must be delivered as per specifications with proper documentation.';
+        $shipTo = (string) ($data['ship_to'] ?? $mrf['ship_to_address'] ?? env('COMPANY_ADDRESS', $company['address'] ?? ''));
 
         return $this->renderEmeraldLayout($this->baseViewVars(
             $company,
@@ -296,17 +290,21 @@ class PurchaseOrderPdfService
             $poNumber,
             $date,
             $lineItems,
-            $paymentTerms,
-            implode("\n\n", array_filter($additionalParts)),
             $subtotal,
             $tax,
             $total,
             $currency,
-            false,
-            (string) ($user->name ?? ''),
+            self::EMERALD_PO_APPROVER_NAME,
             $date->format('F j, Y'),
             $data['signature_image_url'] ?? null,
-            $paymentMilestones,
+            invoiceEmail: (string) ($data['invoice_submission_email'] ?? $mrf['invoice_submission_email'] ?? ''),
+            invoiceCc: (string) ($data['invoice_submission_cc'] ?? $mrf['invoice_submission_cc'] ?? ''),
+            poType: (string) ($mrf['po_type'] ?? 'goods'),
+            termsMode: (string) ($mrf['po_terms_mode'] ?? 'standard'),
+            customTerms: (string) ($mrf['custom_terms'] ?? ''),
+            specialTerms: (string) ($mrf['po_special_terms'] ?? $data['special_terms'] ?? ''),
+            paymentTermsRaw: (string) ($mrf['po_payment_terms'] ?? $quotation['payment_terms'] ?? ''),
+            contractType: (string) ($mrf['contract_type'] ?? ''),
         ));
     }
 
@@ -323,17 +321,21 @@ class PurchaseOrderPdfService
         string $poNumber,
         Carbon $poDate,
         array $lineItems,
-        string $paymentTerms,
-        string $additionalNotes,
         float $subtotal,
         float $tax,
         float $total,
         string $currency,
-        bool $showTaxBreakdown,
         string $approvedByName,
         string $approvedByDate,
         ?string $signatureImageUrl = null,
-        array $paymentMilestones = [],
+        string $invoiceEmail = '',
+        string $invoiceCc = '',
+        string $poType = 'goods',
+        string $termsMode = 'standard',
+        string $customTerms = '',
+        string $specialTerms = '',
+        string $paymentTermsRaw = '',
+        string $contractType = '',
     ): array {
         $company = $this->normalizeCompany($company);
 
@@ -341,22 +343,20 @@ class PurchaseOrderPdfService
             'logo_html' => $this->logoHtml(),
             'company' => $company,
             'supplier_name' => (string) ($vendor['name'] ?? ''),
-            'supplier_address' => (string) ($vendor['address'] ?? ''),
-            'buyer_name' => (string) ($company['name'] ?? ''),
-            'ship_to_address' => $shipTo,
+            'ship_to_display' => $shipTo !== '' ? $shipTo : (string) ($company['name'] ?? ''),
             'po_number' => $poNumber,
             'po_date_short' => $poDate->format('d/m/Y'),
             'document_title' => 'Purchase Order',
             'line_items' => $lineItems,
-            'payment_terms' => $paymentTerms,
-            'payment_milestones' => $paymentMilestones,
-            'additional_notes' => trim($additionalNotes),
+            'invoice_submission_line' => $this->buildInvoiceSubmissionLine($invoiceEmail, $invoiceCc),
+            'standard_terms_lines' => $this->resolveStandardTermsLines($poType, $termsMode, $customTerms, $specialTerms),
+            'payment_terms_display' => $this->resolvePaymentTermsDisplay($paymentTermsRaw, $customTerms),
+            'contract_type_display' => $this->formatContractType($contractType),
             'subtotal' => $this->fmtMoney($subtotal),
             'tax' => $this->fmtMoney($tax),
             'total' => $this->fmtMoney($total),
             'currency' => $currency,
-            'show_tax_breakdown' => $showTaxBreakdown,
-            'approved_by_name' => $approvedByName,
+            'approved_by_name' => $approvedByName !== '' ? $approvedByName : self::EMERALD_PO_APPROVER_NAME,
             'approved_by_date' => $approvedByDate,
             'signature_html' => $this->signatureHtml($signatureImageUrl),
         ];
@@ -370,63 +370,138 @@ class PurchaseOrderPdfService
     {
         return [
             'name' => (string) ($company['name'] ?? env('COMPANY_NAME', 'Emerald Industrial Co. FZE')),
-            'address' => (string) ($company['address'] ?? env('COMPANY_ADDRESS', '')),
-            'email' => (string) ($company['email'] ?? env('COMPANY_EMAIL', '')),
+            'address' => (string) ($company['address'] ?? env('COMPANY_ADDRESS', 'Plot A10, Calabar Free Trade Zone, Calabar, Cross River 540001 NG')),
+            'email' => (string) ($company['email'] ?? env('COMPANY_EMAIL', 'info@emeraldcfze.com')),
             'website' => (string) ($company['website'] ?? env('COMPANY_WEBSITE', 'https://emeraldcfze.com/')),
         ];
     }
 
-    /**
-     * @param  array<string, mixed>  $data
-     */
-    private function buildAdditionalNotesMrf(array $data): string
+    private function resolveCategoryLine(string $category, string $department): string
     {
-        $parts = [];
-        if (!empty($data['mrf_display_id'])) {
-            $parts[] = 'MRF: ' . (string) $data['mrf_display_id'];
-        }
-        if (!empty($data['invoice_submission_email'])) {
-            $cc = !empty($data['invoice_submission_cc']) ? ' cc: ' . $data['invoice_submission_cc'] : '';
-            $parts[] = 'Invoice submission: ' . $data['invoice_submission_email'] . $cc;
-        }
-        if (!empty($data['special_terms'])) {
-            $parts[] = $data['special_terms'];
-        } else {
-            $parts[] = "Standard terms:\n"
-                . "- All items must be high quality, brand new and according to the specification.\n"
-                . "- All packages must be clearly marked.\n"
-                . "- Package contents must be marked with item number, material number, description, manufacturer's part number and quantity.\n"
-                . "- Small items with the same part numbers must be tagged and packed together.\n"
-                . "- Items must be packed in a sturdy case to withstand handling.\n"
-                . '- Delivery must be accompanied by Airway Bill, Invoice and Delivery Note, duly signed by an Emerald representative at site.';
+        $raw = trim($category !== '' ? $category : $department);
+
+        if ($raw === '') {
+            return 'Procurement';
         }
 
-        return implode("\n\n", array_filter($parts));
+        return str_replace('-', ' ', $raw);
+    }
+
+    private function fmtTaxLabel(float $taxRate): string
+    {
+        if ($taxRate <= 0) {
+            return '0%';
+        }
+
+        return rtrim(rtrim(number_format($taxRate, 2, '.', ''), '0'), '.').'%';
+    }
+
+    private function buildInvoiceSubmissionLine(string $email, string $cc): string
+    {
+        $to = trim($email) !== '' ? trim($email) : 'accountpayables@emeraldcfze.com';
+        $ccLine = trim($cc);
+        if ($ccLine === '') {
+            $ccLine = 'lateef.olanrewaju@emeraldcfze.com, procurement@emeraldcfze.com';
+        }
+
+        return 'Invoice submission: '.$to.' cc: '.$ccLine;
     }
 
     /**
-     * @return list<array{text: string, class: string}>
+     * @return list<string>
      */
-    private function descriptionSegments(?string $departmentPrefix, string $itemName, string $description): array
+    private function resolveStandardTermsLines(
+        string $poType,
+        string $termsMode,
+        string $customTerms,
+        string $specialTerms,
+    ): array {
+        $mode = strtolower(trim($termsMode));
+        if (! in_array($mode, ['standard', 'custom', 'both'], true)) {
+            $mode = 'standard';
+        }
+
+        $templateLines = $this->templateTermLines($poType);
+        $customLines = $this->splitTermLines($customTerms);
+        $specialLines = $this->splitTermLines($specialTerms);
+
+        if ($mode === 'custom') {
+            return $customLines !== [] ? $customLines : ($specialLines !== [] ? $specialLines : $templateLines);
+        }
+
+        if ($mode === 'both') {
+            return array_values(array_unique(array_merge($templateLines, $customLines, $specialLines)));
+        }
+
+        return $templateLines;
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function templateTermLines(string $poType): array
     {
-        $segments = [];
-        if ($departmentPrefix !== null && trim($departmentPrefix) !== '') {
-            foreach (preg_split('/\r\n|\r|\n/', $departmentPrefix) as $ln) {
-                $t = trim($ln);
-                if ($t !== '') {
-                    $segments[] = ['text' => $t, 'class' => 'sub'];
-                }
+        $key = in_array(strtolower($poType), ['goods', 'services', 'logistics'], true)
+            ? strtolower($poType)
+            : 'goods';
+        $body = (string) (config("po_terms_templates.{$key}") ?? config('po_terms_templates.goods', ''));
+
+        return $this->splitTermLines($body);
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function splitTermLines(string $text): array
+    {
+        if (trim($text) === '') {
+            return [];
+        }
+
+        return array_values(array_filter(array_map(
+            static function (string $line): string {
+                $line = trim($line);
+                $line = preg_replace('/^Standard terms:\s*/i', '', $line) ?? $line;
+
+                return ltrim($line, "-•* \t");
+            },
+            preg_split('/\r\n|\r|\n/', $text) ?: [],
+        )));
+    }
+
+    private function resolvePaymentTermsDisplay(string $paymentTermsRaw, string $customTerms): string
+    {
+        $raw = trim($paymentTermsRaw);
+        if ($raw !== '') {
+            return $raw;
+        }
+
+        if (preg_match('/Payment\s*Terms:\s*([^\n]+)/i', $customTerms, $m)) {
+            $parsed = trim($m[1] ?? '');
+            if ($parsed !== '') {
+                return $parsed;
             }
         }
 
-        $segments[] = ['text' => $itemName, 'class' => 'title'];
+        return 'Net 30 days';
+    }
 
-        $desc = trim($description);
-        if ($desc !== '' && strcasecmp($desc, trim($itemName)) !== 0) {
-            $segments[] = ['text' => $desc, 'class' => 'sub'];
+    private function formatContractType(?string $raw): string
+    {
+        $value = trim((string) $raw);
+        if ($value === '') {
+            return '—';
         }
 
-        return $segments;
+        $key = strtolower($value);
+        $labels = [
+            'emerald' => 'Emerald Contract',
+            'oando' => 'Oando Contract',
+            'dangote' => 'Dangote Contract',
+            'heritage' => 'Heritage Contract',
+        ];
+
+        return $labels[$key] ?? $value;
     }
 
     private function fmtMoney(float $amount): string

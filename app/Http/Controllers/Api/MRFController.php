@@ -2542,46 +2542,32 @@ class MRFController extends Controller
         }
 
         try {
-            $storedPath = $this->extractFilePathFromUrl((string) $mrf->unsigned_po_url)
-                ?? (string) $mrf->unsigned_po_url;
-            $isEmeraldStored = str_contains($storedPath, '_emerald_');
-
-            $pdfContent = null;
+            // Always render from the canonical Emerald layout — never serve a
+            // previously stored PDF blob, which may use a deprecated layout.
+            $genStarted = microtime(true);
+            $pdfContent = $this->generatePOPDFFromMRF($mrf);
             $source = 'emerald_regenerated';
+            Log::info('PO download: Emerald PDF rendered', [
+                'mrf_id' => $mrf->mrf_id,
+                'pdf_ms' => (int) round((microtime(true) - $genStarted) * 1000),
+            ]);
 
-            if ($isEmeraldStored) {
-                $pdfContent = $this->resolveStoredUnsignedPoBinary($mrf);
-                if (is_string($pdfContent) && $pdfContent !== '') {
-                    $source = 's3_emerald_cache';
-                }
-            }
-
-            // Legacy / missing Emerald archive: render once, store with _emerald_ marker, then serve.
-            if ($pdfContent === null) {
-                $genStarted = microtime(true);
-                $pdfContent = $this->generatePOPDFFromMRF($mrf);
-                Log::info('PO download: Emerald PDF rendered', [
-                    'mrf_id' => $mrf->mrf_id,
-                    'pdf_ms' => (int) round((microtime(true) - $genStarted) * 1000),
-                ]);
-
-                try {
-                    $disk = $this->getStorageDisk();
-                    $poPath = 'purchase-orders/'.date('Y/m').'/po_'.$mrf->po_number.'_emerald_'.time().'.pdf';
-                    Storage::disk($disk)->put($poPath, $pdfContent);
-                    $freshUrl = $this->getFileUrl($poPath, $disk);
-                    if (! empty($freshUrl)) {
-                        $mrf->update([
-                            'unsigned_po_url' => $freshUrl,
-                            'unsigned_po_share_url' => $freshUrl,
-                        ]);
-                    }
-                } catch (\Throwable $e) {
-                    Log::warning('PO download: failed to refresh Emerald PDF on storage', [
-                        'mrf_id' => $mrf->mrf_id,
-                        'error' => $e->getMessage(),
+            try {
+                $disk = $this->getStorageDisk();
+                $poPath = 'purchase-orders/'.date('Y/m').'/po_'.$mrf->po_number.'_emerald_v2_'.time().'.pdf';
+                Storage::disk($disk)->put($poPath, $pdfContent);
+                $freshUrl = $this->getFileUrl($poPath, $disk);
+                if (! empty($freshUrl)) {
+                    $mrf->update([
+                        'unsigned_po_url' => $freshUrl,
+                        'unsigned_po_share_url' => $freshUrl,
                     ]);
                 }
+            } catch (\Throwable $e) {
+                Log::warning('PO download: failed to refresh Emerald PDF on storage', [
+                    'mrf_id' => $mrf->mrf_id,
+                    'error' => $e->getMessage(),
+                ]);
             }
 
             $filenameBase = $mrf->formatted_id ?: $mrf->po_number;
@@ -2941,15 +2927,16 @@ class MRFController extends Controller
         }
 
         $company = [
-            'name'    => env('COMPANY_NAME', 'Emerald Industrial Co. CFZE'),
+            'name'    => env('COMPANY_NAME', 'Emerald Industrial Co. FZE'),
             'address' => env('COMPANY_ADDRESS', 'Plot A10, Calabar Free Trade Zone, Calabar, Cross River 540001 NG'),
-            'email'   => env('COMPANY_EMAIL', 'temitope.lawal@emeraldcfze.com'),
+            'email'   => env('COMPANY_EMAIL', 'info@emeraldcfze.com'),
             'phone'   => env('COMPANY_PHONE', ''),
             'tax_id'  => env('COMPANY_TAX_ID', ''),
             'website' => env('COMPANY_WEBSITE', 'https://emeraldcfze.com/'),
         ];
 
-        $shipToAddress = $mrf->ship_to_address ?? config('app.ship_to_address', 'Sapetro Towers, Victoria Island, Lagos, Lagos 100001 NGA');
+        $shipToAddress = $mrf->ship_to_address
+            ?: config('app.ship_to_address', 'Emerald Industrial Co. FZE');
 
         $poDate = $mrf->po_generated_at ? \Carbon\Carbon::parse($mrf->po_generated_at)->format('d/m/Y') : now()->format('d/m/Y');
 
@@ -2968,6 +2955,10 @@ class MRFController extends Controller
         }
 
         $total = $subtotal + $tax;
+
+        $paymentTerms = $mrf->po_payment_terms
+            ?: $paymentTerms
+            ?: 'Net 30 days';
 
         return app(PurchaseOrderPdfService::class)->renderMrfPdf([
             'po_number' => $mrf->po_number,
@@ -2988,8 +2979,14 @@ class MRFController extends Controller
                 \App\Support\PurchaseOrderInvoiceCc::defaultCc(),
             ),
             'special_terms' => $mrf->po_special_terms,
+            'custom_terms' => $mrf->custom_terms,
+            'po_terms_mode' => $mrf->po_terms_mode,
+            'po_type' => $mrf->po_type ?: 'goods',
+            'contract_type' => $mrf->contract_type,
+            'mrf_category' => $mrf->category,
             'mrf_department' => $mrf->department,
             'mrf_display_id' => $mrf->formatted_id ?: $mrf->mrf_id,
+            'approved_by_name' => PurchaseOrderPdfService::EMERALD_PO_APPROVER_NAME,
         ]);
     }
 

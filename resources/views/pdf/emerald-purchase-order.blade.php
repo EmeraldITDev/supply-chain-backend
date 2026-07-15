@@ -8,157 +8,111 @@
         body {
             font-family: DejaVu Sans, Arial, Helvetica, sans-serif;
             font-size: 10px;
-            line-height: 1.4;
+            line-height: 1.35;
             color: #000;
-            padding: 18px 22px 28px;
+            padding: 16px 20px 24px;
         }
-        .top-band {
-            width: 100%;
-            border-collapse: collapse;
-            margin-bottom: 14px;
-        }
-        .top-band td { vertical-align: top; }
-        .brand-cell { width: 62%; padding-right: 12px; }
-        .logo-row { margin-bottom: 8px; }
-        .logo-wrap { display: block; }
-        .logo-img { max-width: 200px; max-height: 64px; object-fit: contain; display: block; }
-        .logo-placeholder {
-            width: 160px; height: 52px; border: 1px solid #ccc;
-            text-align: center; line-height: 52px; font-size: 9px; color: #666;
-        }
-        .company-name {
-            font-size: 12px;
-            font-weight: bold;
-            margin-bottom: 4px;
-        }
-        .company-lines {
-            font-size: 9.5px;
-            color: #111;
-            white-space: pre-wrap;
-        }
+        .header-table { width: 100%; border-collapse: collapse; margin-bottom: 10px; }
+        .header-table td { vertical-align: top; }
+        .brand-block { width: 68%; }
+        .logo-row { margin-bottom: 6px; min-height: 20px; }
+        .logo-img { max-width: 180px; max-height: 56px; object-fit: contain; display: block; }
+        .logo-placeholder { width: 140px; height: 44px; border: 1px solid #ccc; text-align: center; line-height: 44px; font-size: 9px; color: #666; }
+        .company-name { font-size: 11px; font-weight: bold; margin-bottom: 3px; }
+        .company-line { font-size: 9px; color: #111; }
         .doc-title {
             font-size: 20px;
-            font-weight: bold;
-            margin-top: 16px;
-            letter-spacing: 0.02em;
+            font-weight: normal;
+            color: #4696b9;
+            margin-top: 10px;
+            letter-spacing: 0.01em;
         }
-        .pair-grid {
+        .meta-labels {
             width: 100%;
-            border-collapse: collapse;
-            margin: 16px 0 12px;
-        }
-        .pair-grid td {
-            width: 50%;
-            vertical-align: top;
-            border: 1px solid #000;
-            padding: 10px 12px;
-            min-height: 72px;
-        }
-        .pair-label {
+            margin: 12px 0 2px;
+            font-size: 8px;
             font-weight: bold;
-            font-size: 10px;
             text-transform: uppercase;
-            margin-bottom: 8px;
             letter-spacing: 0.04em;
         }
-        .pair-body {
-            font-size: 9.5px;
+        .meta-labels td { width: 33.33%; vertical-align: bottom; padding-right: 8px; }
+        .meta-values {
+            width: 100%;
+            margin-bottom: 4px;
+            font-size: 8.5px;
         }
-        .pair-body .primary { font-weight: bold; margin-bottom: 4px; }
-        .po-meta {
-            margin: 10px 0 14px;
-            font-size: 10px;
-        }
-        .po-meta span { margin-right: 28px; }
-        .po-meta strong { font-weight: bold; }
+        .meta-values td { width: 33.33%; vertical-align: top; padding-right: 8px; }
+        .meta-values .po-num { font-weight: bold; }
+        .meta-date { margin: 4px 0 10px; font-size: 8px; }
+        .meta-date .lbl { font-weight: bold; text-transform: uppercase; margin-right: 6px; }
+        .rule { border-top: 1px solid #b4b4b4; margin: 8px 0 10px; }
         .items-table {
             width: 100%;
             border-collapse: collapse;
-            margin-bottom: 14px;
-            font-size: 9.5px;
+            margin-bottom: 10px;
+            font-size: 8px;
         }
         .items-table th {
-            background: #0d4f3c;
-            color: #fff;
-            border: 1px solid #000;
-            padding: 8px 6px;
+            background: #c8e4f0;
+            color: #2d4152;
+            border: none;
+            padding: 6px 4px;
             font-weight: bold;
             text-align: left;
         }
-        .items-table th.col-qty { text-align: center; width: 44px; }
-        .items-table th.col-rate { text-align: right; width: 88px; }
-        .items-table th.col-tax { text-align: center; width: 52px; }
-        .items-table th.col-amt { text-align: right; width: 96px; }
+        .items-table th.col-qty { text-align: center; width: 36px; }
+        .items-table th.col-rate { text-align: right; width: 72px; }
+        .items-table th.col-tax { text-align: center; width: 40px; }
+        .items-table th.col-amt { text-align: right; width: 80px; }
         .items-table td {
-            border: 1px solid #000;
-            padding: 8px 6px;
+            border-bottom: 1px solid #dcdcdc;
+            padding: 6px 4px;
             vertical-align: top;
         }
         .items-table td.col-qty { text-align: center; }
         .items-table td.col-rate { text-align: right; white-space: nowrap; }
         .items-table td.col-tax { text-align: center; }
         .items-table td.col-amt { text-align: right; white-space: nowrap; }
-        .desc-line { margin-bottom: 2px; }
-        .desc-line.sub { font-size: 8.5px; color: #333; }
-        .desc-line.title { font-weight: bold; font-size: 10px; }
-        .payment-block {
-            margin: 16px 0 12px;
-            font-size: 9.5px;
-        }
-        .payment-block .lbl {
-            font-weight: bold;
-            margin-bottom: 6px;
-        }
-        .payment-text {
-            white-space: pre-wrap;
-            max-width: 100%;
-        }
-        .notes-block {
-            margin-top: 12px;
-            font-size: 8.5px;
-            color: #333;
-        }
-        .notes-block .lbl { font-weight: bold; margin-bottom: 4px; color: #000; }
-        .totals-wrap {
-            width: 100%;
-            margin: 14px 0 20px;
-        }
+        .desc-category { font-weight: bold; font-size: 8px; margin-bottom: 2px; }
+        .desc-body { font-size: 8px; }
+        .footer-wrap { width: 100%; margin-top: 10px; }
+        .footer-wrap td { vertical-align: top; }
+        .footer-left { width: 58%; padding-right: 12px; font-size: 8px; }
+        .footer-right { width: 42%; }
+        .footer-line { margin-bottom: 3px; }
+        .footer-lbl { font-weight: bold; }
+        .terms-list { margin: 4px 0 6px 0; padding-left: 0; list-style: none; }
+        .terms-list li { margin-bottom: 2px; }
         .totals-table {
-            width: 260px;
-            margin-left: auto;
+            width: 100%;
             border-collapse: collapse;
-            font-size: 10px;
+            font-size: 8.5px;
         }
         .totals-table td {
-            padding: 5px 8px;
             border: 1px solid #000;
+            padding: 5px 6px;
         }
         .totals-table .t-label { font-weight: bold; text-align: left; }
         .totals-table .t-val { text-align: right; white-space: nowrap; }
-        .totals-table tr.grand td { font-weight: bold; background: #f5f5f5; }
-        .approval {
-            margin-top: 28px;
-            max-width: 280px;
-            font-size: 10px;
-        }
+        .totals-table tr.grand td { font-weight: bold; background: #ebebeb; }
+        .approval { margin-top: 18px; max-width: 280px; font-size: 9px; }
         .approval .lbl { font-weight: bold; margin-bottom: 4px; }
-        .approval .val { margin-bottom: 14px; min-height: 14px; }
-        .approval .rule { border-bottom: 1px solid #000; min-height: 1px; margin-top: 4px; margin-bottom: 10px; }
-        .signature-img { max-width: 140px; max-height: 60px; display: block; margin-bottom: 8px; }
+        .approval .val { margin-bottom: 10px; min-height: 12px; }
+        .signature-img { max-width: 130px; max-height: 52px; display: block; margin-bottom: 6px; }
     </style>
 </head>
 <body>
-    <table class="top-band">
+    <table class="header-table">
         <tr>
-            <td class="brand-cell">
+            <td class="brand-block">
                 <div class="logo-row">{!! $logo_html !!}</div>
                 <div class="company-name">{{ $company['name'] }}</div>
-                <div class="company-lines">{!! nl2br(e($company['address'] ?? '')) !!}</div>
+                <div class="company-line">{!! nl2br(e($company['address'] ?? '')) !!}</div>
                 @if (!empty($company['email']))
-                    <div class="company-lines" style="margin-top: 4px;">{{ $company['email'] }}</div>
+                    <div class="company-line" style="margin-top: 3px;">{{ $company['email'] }}</div>
                 @endif
                 @if (!empty($company['website']))
-                    <div class="company-lines">{{ $company['website'] }}</div>
+                    <div class="company-line">{{ $company['website'] }}</div>
                 @endif
                 <div class="doc-title">{{ $document_title }}</div>
             </td>
@@ -166,33 +120,26 @@
         </tr>
     </table>
 
-    <table class="pair-grid">
+    <table class="meta-labels">
         <tr>
-            <td>
-                <div class="pair-label">Supplier</div>
-                <div class="pair-body">
-                    <div class="primary">{{ $supplier_name }}</div>
-                    @if ($supplier_address !== '')
-                        <div>{!! nl2br(e($supplier_address)) !!}</div>
-                    @endif
-                </div>
-            </td>
-            <td>
-                <div class="pair-label">Ship To</div>
-                <div class="pair-body">
-                    <div class="primary">{{ $buyer_name }}</div>
-                    @if ($ship_to_address !== '')
-                        <div>{!! nl2br(e($ship_to_address)) !!}</div>
-                    @endif
-                </div>
-            </td>
+            <td>Supplier</td>
+            <td>Ship To</td>
+            <td>P.O. No.</td>
         </tr>
     </table>
-
-    <div class="po-meta">
-        <span><strong>P.O. NO.</strong> {{ $po_number }}</span>
-        <span><strong>DATE</strong> {{ $po_date_short }}</span>
+    <table class="meta-values">
+        <tr>
+            <td>{{ $supplier_name }}</td>
+            <td>{{ $ship_to_display }}</td>
+            <td class="po-num">{{ $po_number }}</td>
+        </tr>
+    </table>
+    <div class="meta-date">
+        <span class="lbl">Date</span>
+        <span>{{ $po_date_short }}</span>
     </div>
+
+    <div class="rule"></div>
 
     <table class="items-table">
         <thead>
@@ -208,11 +155,10 @@
             @foreach ($line_items as $line)
                 <tr>
                     <td>
-                        @foreach ($line['description_segments'] as $seg)
-                            @if (($seg['text'] ?? '') !== '')
-                                <div class="desc-line {{ $seg['class'] ?? '' }}">{!! nl2br(e($seg['text'])) !!}</div>
-                            @endif
-                        @endforeach
+                        @if (!empty($line['category']))
+                            <div class="desc-category">{{ $line['category'] }}</div>
+                        @endif
+                        <div class="desc-body">{{ $line['description'] }}</div>
                     </td>
                     <td class="col-qty">{{ $line['qty'] }}</td>
                     <td class="col-rate">{{ $line['rate'] }}</td>
@@ -223,61 +169,47 @@
         </tbody>
     </table>
 
-    <div class="payment-block">
-        <div class="lbl">PAYMENT TERMS:</div>
-        @if (!empty($payment_milestones))
-            <table class="items-table payment-milestones-table">
-                <thead>
+    <table class="footer-wrap">
+        <tr>
+            <td class="footer-left">
+                @if (!empty($invoice_submission_line))
+                    <div class="footer-line">{{ $invoice_submission_line }}</div>
+                @endif
+                @if (!empty($standard_terms_lines))
+                    <div class="footer-line" style="margin-top: 8px;"><span class="footer-lbl">Standard terms:</span></div>
+                    <ul class="terms-list">
+                        @foreach ($standard_terms_lines as $term)
+                            <li>- {{ $term }}</li>
+                        @endforeach
+                    </ul>
+                @endif
+                <div class="footer-line">
+                    <span class="footer-lbl">Payment Terms:</span>
+                    {{ $payment_terms_display }}
+                </div>
+                <div class="footer-line">
+                    <span class="footer-lbl">Contract type:</span>
+                    {{ $contract_type_display }}
+                </div>
+            </td>
+            <td class="footer-right">
+                <table class="totals-table">
                     <tr>
-                        <th style="width:8%">#</th>
-                        <th style="width:22%">Milestone</th>
-                        <th style="width:12%">Percentage</th>
-                        <th style="width:18%">Amount</th>
-                        <th style="width:40%">Trigger</th>
+                        <td class="t-label">SUBTOTAL</td>
+                        <td class="t-val">{{ $subtotal }}</td>
                     </tr>
-                </thead>
-                <tbody>
-                    @foreach ($payment_milestones as $milestone)
-                        <tr>
-                            <td>{{ $milestone['number'] ?? '' }}</td>
-                            <td>{{ $milestone['label'] ?? '' }}</td>
-                            <td>{{ $milestone['percentage'] ?? '' }}</td>
-                            <td>{{ $milestone['amount'] ?? '' }}</td>
-                            <td>{{ $milestone['trigger'] ?? '' }}</td>
-                        </tr>
-                    @endforeach
-                </tbody>
-            </table>
-        @elseif (!empty($payment_terms))
-            <div class="payment-text">{!! nl2br(e($payment_terms)) !!}</div>
-        @endif
-    </div>
-
-    @if ($additional_notes !== '')
-        <div class="notes-block">
-            <div class="lbl">NOTES:</div>
-            <div class="payment-text">{!! nl2br(e($additional_notes)) !!}</div>
-        </div>
-    @endif
-
-    <div class="totals-wrap">
-        <table class="totals-table">
-            <tr>
-                <td class="t-label">SUBTOTAL</td>
-                <td class="t-val">{{ $subtotal }}</td>
-            </tr>
-            @if ($show_tax_breakdown)
-                <tr>
-                    <td class="t-label">TAX</td>
-                    <td class="t-val">{{ $tax }}</td>
-                </tr>
-            @endif
-            <tr class="grand">
-                <td class="t-label">TOTAL {{ $currency }}</td>
-                <td class="t-val">{{ $total }}</td>
-            </tr>
-        </table>
-    </div>
+                    <tr>
+                        <td class="t-label">TAX</td>
+                        <td class="t-val">{{ $tax }}</td>
+                    </tr>
+                    <tr class="grand">
+                        <td class="t-label">TOTAL {{ $currency }}</td>
+                        <td class="t-val">{{ $total }}</td>
+                    </tr>
+                </table>
+            </td>
+        </tr>
+    </table>
 
     <div class="approval">
         <div class="lbl">Approved By</div>

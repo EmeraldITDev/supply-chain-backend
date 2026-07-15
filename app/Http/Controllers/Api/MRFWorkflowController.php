@@ -3250,7 +3250,12 @@ class MRFWorkflowController extends Controller
         $currency = (string) ($mrf->currency ?? 'NGN');
         $total = $items->sum(static fn ($o) => (float) ($o->total_price ?? 0));
 
-        $paymentTerms = (string) ($request->input('payment_terms') ?? $request->input('paymentTerms') ?? '30 days after invoice submission.');
+        $paymentTerms = (string) (
+            $mrf->po_payment_terms
+            ?? $request->input('payment_terms')
+            ?? $request->input('paymentTerms')
+            ?? 'Net 30 days'
+        );
         $validityDays = (int) ($request->input('validity_days', $request->input('validityDays', 30)));
         $warranty = $request->input('warranty_period', $request->input('warrantyPeriod'));
 
@@ -3314,17 +3319,7 @@ class MRFWorkflowController extends Controller
         $payload = [
             'success' => true,
             'data' => [
-                'mrf' => [
-                    'id' => $mrf->mrf_id,
-                    'title' => $mrf->title,
-                    'description' => $mrf->description,
-                    'justification' => $mrf->justification,
-                    'requester_name' => $mrf->requester_name,
-                    'department' => $mrf->department,
-                    'estimated_cost' => $mrf->estimated_cost,
-                    'currency' => $currency,
-                    'date' => $mrf->date ?? $mrf->created_at,
-                ],
+                'mrf' => $this->mrfBlockForPoPdf($mrf, $currency),
                 'rfq' => [
                     'id' => $mrf->mrf_id . '-SYN-RFQ',
                     'title' => (string) ($mrf->title ?? 'Requisition'),
@@ -3593,17 +3588,7 @@ class MRFWorkflowController extends Controller
         $result = [
             'success' => true,
             'data' => [
-                'mrf' => [
-                    'id' => $mrf->mrf_id,
-                    'title' => $mrf->title,
-                    'description' => $mrf->description,
-                    'justification' => $mrf->justification,
-                    'requester_name' => $mrf->requester_name,
-                    'department' => $mrf->department,
-                    'estimated_cost' => $mrf->estimated_cost,
-                    'currency' => $mrf->currency ?? 'NGN',
-                    'date' => $mrf->date ?? $mrf->created_at,
-                ],
+                'mrf' => $this->mrfBlockForPoPdf($mrf),
                 'rfq' => [
                     'id' => $rfq->rfq_id,
                     'title' => $rfq->title,
@@ -3643,6 +3628,38 @@ class MRFWorkflowController extends Controller
         $result['data'] = $this->enrichPoPayloadWithPaymentSchedule($mrf, $result['data']);
 
         return $result;
+    }
+
+    /**
+     * MRF fields required by {@see PurchaseOrderPdfService::htmlFromWorkflow()}.
+     *
+     * @return array<string, mixed>
+     */
+    private function mrfBlockForPoPdf(MRF $mrf, ?string $currency = null): array
+    {
+        return [
+            'id' => $mrf->mrf_id,
+            'formatted_id' => $mrf->formatted_id,
+            'title' => $mrf->title,
+            'description' => $mrf->description,
+            'justification' => $mrf->justification,
+            'requester_name' => $mrf->requester_name,
+            'department' => $mrf->department,
+            'category' => $mrf->category,
+            'estimated_cost' => $mrf->estimated_cost,
+            'currency' => $currency ?? $mrf->currency ?? 'NGN',
+            'date' => $mrf->date ?? $mrf->created_at,
+            'contract_type' => $mrf->contract_type,
+            'po_type' => $mrf->po_type ?: 'goods',
+            'po_terms_mode' => $mrf->po_terms_mode,
+            'custom_terms' => $mrf->custom_terms,
+            'po_payment_terms' => $mrf->po_payment_terms,
+            'po_special_terms' => $mrf->po_special_terms,
+            'ship_to_address' => $mrf->ship_to_address,
+            'invoice_submission_email' => $mrf->invoice_submission_email,
+            'invoice_submission_cc' => $mrf->invoice_submission_cc,
+            'tax_rate' => $mrf->tax_rate,
+        ];
     }
 
     /**
