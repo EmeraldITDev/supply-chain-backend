@@ -66,7 +66,7 @@ class PurchaseOrderPdfService
     public function logoHtml(): string
     {
         if (!extension_loaded('gd')) {
-            return '<div class="logo-wrap logo-text-fallback" style="font-weight:bold;font-size:11px;color:#0d5c3f;">Emerald</div>';
+            return '<div class="logo-wrap" style="text-align:right;"><img src="' . $dataUri . '" alt="Logo" style="width:90px;height:auto;max-height:60px;" /></div>';
         }
 
         $logoPaths = [
@@ -89,7 +89,7 @@ class PurchaseOrderPdfService
             }
         }
 
-        return '<div class="logo-placeholder">LOGO</div>';
+        return '<div class="logo-placeholder" style="text-align:right;font-size:10px;color:#999;">LOGO</div>';
     }
 
     /**

@@ -72,7 +72,11 @@
                     <div class="company-contact"><a href="{{ $company['website'] }}">{{ $company['website'] }}</a></div>
                 @endif
             </td>
-            <td class="header-right">{!! $logo_html !!}</td>
+            <td class="header-right">
+                <img src="{{ $logo_path }}"
+                    style="width: 90px; height: auto; max-height: 60px;"
+                    alt="{{ $company['name'] }}" />
+            </td>
         </tr>
     </table>
 
