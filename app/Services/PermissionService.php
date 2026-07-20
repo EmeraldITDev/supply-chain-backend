@@ -578,7 +578,26 @@ class PermissionService
 
     private function workflowStateAllowsProcurementDocuments(MRF $mrf): bool
     {
-        return $this->workflowStateAllowsGrnDocument($mrf);
+        $currentState = $mrf->workflow_state ?? WorkflowStateService::STATE_MRF_CREATED;
+
+        // Allow document uploads during PO draft/creation stages and all post-signature stages
+        $allowedStates = [
+            // PO draft and creation stages (fast-track PO)
+            WorkflowStateService::STATE_PROCUREMENT_REVIEW,
+            WorkflowStateService::STATE_PROCUREMENT_APPROVED,
+            WorkflowStateService::STATE_VENDOR_SELECTED,
+            WorkflowStateService::STATE_PO_GENERATED,
+            // Post-signature stages (normal workflow)
+            WorkflowStateService::STATE_PO_SIGNED,
+            WorkflowStateService::STATE_DELIVERY_CONFIRMATION_PENDING,
+            WorkflowStateService::STATE_DELIVERY_CONFIRMATION_COMPLETE,
+            WorkflowStateService::STATE_FINANCE_HANDOFF_PENDING,
+            WorkflowStateService::STATE_GRN_REQUESTED,
+            WorkflowStateService::STATE_GRN_COMPLETED,
+            WorkflowStateService::STATE_PAYMENT_PROCESSED,
+        ];
+
+        return in_array($currentState, $allowedStates, true);
     }
 
     /**
