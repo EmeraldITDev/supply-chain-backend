@@ -131,13 +131,14 @@ class ProcurementDocumentController extends Controller
 
         if ($isMultiFile) {
             $documentsList = $request->input('documents', []);
-            $uploadedFiles = $request->file('documents', []);
 
             foreach ($documentsList as $index => $document) {
-                if (isset($uploadedFiles[$index])) {
+                // Access nested files using dot notation: documents.{index}.file
+                $file = $request->file("documents.{$index}.file");
+                if ($file) {
                     $documents[] = [
                         'type' => (string) ($document['type'] ?? 'other'),
-                        'file' => $uploadedFiles[$index],
+                        'file' => $file,
                         'remarks' => $document['remarks'] ?? null,
                     ];
                 }
