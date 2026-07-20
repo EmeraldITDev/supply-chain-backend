@@ -330,4 +330,12 @@ class ProcurementDocumentController extends Controller
         }
     }
 
+    private function findMrf(string $id): ?MRF
+    {
+        return MRF::query()
+            ->where('mrf_id', $id)
+            ->orWhere('id', (int) $id)
+            ->first();
+    }
+
 }
