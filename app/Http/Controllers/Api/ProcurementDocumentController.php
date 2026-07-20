@@ -246,17 +246,88 @@ class ProcurementDocumentController extends Controller
         return response()->json($responseData, count($documents) === 1 && count($failed) === 0 ? 201 : 200);
     }
 
-    private function findMrf(string $id): ?MRF
+    public function destroy(Request $request, string $id, string $documentId)
     {
-        return MRF::query()
-            ->where(function ($query) use ($id) {
-                $query->where('formatted_id', $id)
-                    ->orWhere('mrf_id', $id);
+        $mrf = $this->findMrf($id);
 
-                if (is_numeric($id)) {
-                    $query->orWhere('id', (int) $id);
-                }
-            })
+        if (! $mrf) {
+            return response()->json([
+                'success' => false,
+                'error' => 'MRF not found',
+                'code' => 'NOT_FOUND',
+            ], 404);
+        }
+
+        $document = ProcurementDocument::query()
+            ->where('id', (int) $documentId)
+            ->where('mrf_id', $mrf->id)
             ->first();
+
+        if (! $document) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Document not found',
+                'code' => 'NOT_FOUND',
+            ], 404);
+        }
+
+        $user = $request->user();
+
+        // Only procurement roles and upload author can delete
+        if (! $this->permissionService->userActsAsProcurement($user) && $document->uploaded_by !== $user->id) {
+            return response()->json([
+                'success' => false,
+                'error' => 'You do not have permission to delete this document.',
+                'code' => 'FORBIDDEN',
+            ], 403);
+        }
+
+        try {
+            // Soft-delete by marking inactive (preserves audit trail)
+            $document->update(['is_active' => false]);
+
+            // If this was a GRN document, clear legacy GRN fields
+            if ($document->type === ProcurementDocument::TYPE_GRN) {
+                $mrf->update([
+                    'grn_completed' => false,
+                    'grn_completed_at' => null,
+                    'grn_completed_by' => null,
+                    'grn_url' => null,
+                    'grn_share_url' => null,
+                ]);
+            }
+
+            // Notify Finance AP of the change if applicable
+            if (in_array($document->type, [
+                ProcurementDocument::TYPE_GRN,
+                ProcurementDocument::TYPE_WAYBILL,
+                ProcurementDocument::TYPE_JCC,
+                ProcurementDocument::TYPE_DELIVERY_CONFIRMATION,
+            ], true)) {
+                app(FinanceApWorkflowOrchestrator::class)->afterOperationalDocumentChanged($mrf, $user);
+            }
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Document deleted successfully',
+                'data' => [
+                    'mrfId' => $mrf->mrf_id,
+                    'documentId' => $document->id,
+                ],
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Procurement document deletion failed', [
+                'mrf_id' => $mrf->mrf_id,
+                'document_id' => $document->id,
+                'error' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'error' => 'Failed to delete document',
+                'code' => 'DELETION_FAILED',
+            ], 500);
+        }
     }
+
 }

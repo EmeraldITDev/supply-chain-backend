@@ -427,6 +427,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/mrfs/{id}/complete-grn', [\App\Http\Controllers\Api\GRNController::class, 'completeGRN']);
     Route::get('/mrfs/{id}/procurement-documents', [\App\Http\Controllers\Api\ProcurementDocumentController::class, 'index']);
     Route::post('/mrfs/{id}/procurement-documents', [\App\Http\Controllers\Api\ProcurementDocumentController::class, 'store']);
+    Route::delete('/mrfs/{id}/procurement-documents/{documentId}', [\App\Http\Controllers\Api\ProcurementDocumentController::class, 'destroy']);
     Route::get('/mrfs/{id}/payment-schedule', [\App\Http\Controllers\Api\PaymentScheduleController::class, 'show']);
     Route::post('/mrfs/{id}/payment-schedule', [\App\Http\Controllers\Api\PaymentScheduleController::class, 'store']);
     Route::put('/mrfs/{id}/payment-schedule', [\App\Http\Controllers\Api\PaymentScheduleController::class, 'update']);
