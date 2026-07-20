@@ -7,12 +7,15 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Procurement\StorePurchaseOrderRequest;
 use App\Http\Requests\Procurement\UpdatePurchaseOrderRequest;
 use App\Models\MRF;
+use App\Models\ProcurementDocument;
 use App\Services\FinanceAp\ClosureReadinessService;
+use App\Services\ProcurementDocumentService;
 use App\Services\PurchaseOrderService;
 use App\Services\WorkflowStateService;
 use App\Support\RequestLineItemParser;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\UploadedFile;
 
 class PurchaseOrderController extends Controller
 {
@@ -85,6 +88,10 @@ class PurchaseOrderController extends Controller
 
         $mrf = $this->purchaseOrders->createDraft($request->user(), $validated);
 
+        if ($request->hasFile('documents')) {
+            $this->attachDocumentsToMrf($request, $mrf);
+        }
+
         return response()->json([
             'success' => true,
             'message' => 'Purchase order created',
@@ -113,6 +120,11 @@ class PurchaseOrderController extends Controller
         $validated['items'] = RequestLineItemParser::resolve($request);
 
         $updated = $this->purchaseOrders->updateDraft($mrf, $validated);
+
+        if ($request->hasFile('documents')) {
+            $this->attachDocumentsToMrf($request, $updated);
+        }
+
         $fresh = $this->purchaseOrders->findForEdit($updated->mrf_id) ?? $updated;
 
         return response()->json([
@@ -221,6 +233,59 @@ class PurchaseOrderController extends Controller
             })
             ->first();
     }
+
+    private function attachDocumentsToMrf(Request $request, MRF $mrf): void
+    {
+        $documentService = app(ProcurementDocumentService::class);
+        $user = $request->user();
+        $vendorId = $documentService->resolveVendorId($mrf);
+        $documents = $request->input('documents', []);
+        $files = $request->file('documents', []);
+
+        if (! is_array($documents) || ! is_array($files)) {
+            return;
+        }
+
+        foreach ($documents as $index => $docMeta) {
+            if (! isset($files[$index]['file'])) {
+                continue;
+            }
+
+            $file = $files[$index]['file'];
+            if (! $file instanceof UploadedFile) {
+                continue;
+            }
+
+            $type = (string) ($docMeta['type'] ?? ProcurementDocument::TYPE_OTHER);
+            if (! in_array($type, [
+                ProcurementDocument::TYPE_GRN,
+                ProcurementDocument::TYPE_WAYBILL,
+                ProcurementDocument::TYPE_JCC,
+                ProcurementDocument::TYPE_PFI,
+                ProcurementDocument::TYPE_DELIVERY_CONFIRMATION,
+                ProcurementDocument::TYPE_OTHER,
+            ], true)) {
+                $type = ProcurementDocument::TYPE_OTHER;
+            }
+
+            try {
+                $documentService->storeUpload(
+                    $mrf,
+                    $file,
+                    $type,
+                    $user,
+                    $vendorId,
+                );
+            } catch (\Throwable $e) {
+                \Illuminate\Support\Facades\Log::warning('Failed to attach document during PO creation', [
+                    'mrf_id' => $mrf->mrf_id,
+                    'type' => $type,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+    }
+
 
     private function ensurePoAccess(Request $request): ?JsonResponse
     {

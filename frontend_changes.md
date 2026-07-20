@@ -1417,3 +1417,172 @@ The ~850ms/query floor is the dominant cost of every slow screen. Set on the Ren
 
 6. **Service Requests table**  
    Keep `GET /srfs` without `include_line_items` (default). Paginate; do not client-accumulate all pages for the table view.
+
+---
+
+## PO Document Upload & Visibility — Multi-File Support (Jul 20 2026)
+
+### Problem
+- Single-file uploads only; procurement teams need to batch-upload multiple documents (GRN, waybill, JCC, PFI, delivery confirmation, etc.) in one request.
+- Document visibility was limited to requester and procurement; Supply Chain Director, Executive, and Logistics Manager roles could not view PO documents.
+- Fast-track PO creation (manual, without RFQ) had no support for attaching documents on creation/update.
+
+### Backend changes
+
+#### Role / Permission expansion
+- `PermissionService::canViewDocument()` now grants full document visibility to:
+  - `supply_chain_director`, `supply_chain`
+  - `executive`, `director`
+  - `logistics_manager`, `logistics`
+  - `finance`, `finance_officer`
+  - `procurement_manager`, `procurement`, `procurement_officer`
+  - `admin`
+  
+  Plus: Logistics Manager (read-only overview role) sees read-only document types per `ProcurementOverviewAccess::readOnlyDocumentTypes()`.
+
+- `ProcurementOverviewAccess` role arrays expanded:
+  - `DELIVERY_DOCUMENT_ROLES`: Added `procurement_officer`, `logistics_officer` support for GRN/waybill/JCC uploads.
+  - `MANAGEMENT_ROLES`: Added `procurement_officer` for fast-track PO access.
+
+#### Multi-file document upload endpoint (MODIFIED)
+
+**`POST /api/mrfs/{id}/procurement-documents`** now accepts **two formats**:
+
+**Single file (backward compatible):**
+```json
+{
+  "type": "grn",
+  "file": (multipart file),
+  "remarks": "optional notes"
+}
+```
+
+**Multiple files (NEW):**
+```json
+{
+  "documents": [
+    {
+      "type": "grn",
+      "file": (multipart file),
+      "remarks": "optional notes"
+    },
+    {
+      "type": "waybill",
+      "file": (multipart file),
+      "remarks": "optional notes"
+    }
+  ]
+}
+```
+
+**Response (NEW):**
+```json
+{
+  "success": true,
+  "message": "Document uploaded successfully",
+  "data": {
+    "documents": [
+      {
+        "id": 123,
+        "type": "grn",
+        "fileName": "grn_2026.pdf",
+        "fileUrl": "https://s3.../procurement-documents/.../grn_2026.pdf?X-Amz-Signature=...",
+        "uploadedAt": "2026-07-20T10:30:00Z",
+        "uploadedBy": { "id": 42, "name": "Jane Doe" }
+      }
+    ],
+    "failed": [
+      {
+        "index": 1,
+        "type": "jcc",
+        "fileName": "jcc_doc.pdf",
+        "status": "failed",
+        "error": "You do not have permission to upload this document type at the current workflow stage."
+      }
+    ]
+  }
+}
+```
+
+**Error case (all uploads failed):**
+```json
+{
+  "success": false,
+  "message": "Some documents uploaded successfully",
+  "error": "All document uploads failed",
+  "code": "UPLOAD_FAILED",
+  "data": {
+    "documents": [],
+    "failed": [...]
+  }
+}
+```
+Returns **422** if all documents fail, **200/201** if at least one succeeds.
+
+#### Document list / retrieval endpoint (MODIFIED)
+
+**`GET /api/mrfs/{id}/procurement-documents`** now **enforces view permissions per document**:
+- Only documents the user is authorized to view are returned (filtered by `PermissionService::canViewDocument()`).
+- Each document in `documentsByType` and `activeByType` is permission-gated at retrieval time (not just at creation).
+- Fresh S3 pre-signed URLs are generated on every request (unchanged behavior; prevents `AccessDenied`).
+
+#### Fast-track PO creation / update with documents (NEW)
+
+**`POST /api/pos`** (Create PO) now accepts optional `documents[]`:
+
+```json
+{
+  "title": "Office Supplies",
+  "category": "Supplies",
+  "estimatedCost": 50000,
+  "currency": "NGN",
+  "items": [
+    { "itemName": "Chairs", "quantity": 10, "unit": "pcs", "budgetAmount": 30000 }
+  ],
+  "documents": [
+    {
+      "type": "pfi",
+      "file": (multipart file),
+      "remarks": "PFI from vendor"
+    }
+  ]
+}
+```
+
+**`PUT /api/pos/{id}`** (Update PO) accepts documents the same way.
+
+**Response:** Same as PO create/update; documents are stored as attachments to the MRF and do not block the response. Failed document uploads are logged but do not fail the PO creation.
+
+#### Validation rules (UPDATED)
+
+- `StorePurchaseOrderRequest::rules()` now accepts:
+  - `documents`: nullable array
+  - `documents.*.file`: file, mimes: pdf,jpg,jpeg,png,doc,docx, max 20MB
+  - `documents.*.type`: nullable string, max 50 chars
+  - `documents.*.remarks`: nullable string, max 2000 chars
+
+- `UpdatePurchaseOrderRequest::rules()`: Same document validation as create.
+
+### Frontend implementation checklist
+
+- [ ] **Multi-file upload UI**: On PO/document upload modal, allow selecting multiple files with per-file type/remarks fields.
+- [ ] **Document list** (`GET /api/mrfs/{id}/procurement-documents`):
+  - Always re-fetch before displaying documents (do not cache in React state across page load/tab switch).
+  - Handle the new `failed[]` array in response (show upload errors to user).
+  - Display fresh `fileUrl` on every download/preview (do not persist S3 URLs).
+- [ ] **PO creation form**: Add optional **Documents** section below items. On submit, build `documents[]` array from file inputs and pass to `POST /api/pos`.
+- [ ] **Dashboard / PO detail view**: Grant document visibility to users with roles: `supply_chain_director`, `supply_chain`, `executive`, `director`, `logistics_manager`, `logistics`. Show "Documents" panel when user is authorized.
+- [ ] **Permission checks**: Replace single-role view logic with multi-role list (Logistics Manager can now see PO documents in overview).
+
+### Migration / deployment
+
+**No database migrations required.** Permission changes are backend-only; table schemas unchanged.
+
+**Backward compatibility:** Single-file `POST /api/mrfs/{id}/procurement-documents` continues to work; multi-file is opt-in.
+
+**Testing:**
+- Upload multiple files to a PO; verify all or partial success in response.
+- Verify unauthorized upload returns 403 with clear error message.
+- Verify Logistics Manager sees documents in overview (read-only).
+- Verify fresh S3 URLs on every document list fetch.
+

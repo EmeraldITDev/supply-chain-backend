@@ -39,6 +39,10 @@ class StorePurchaseOrderRequest extends FormRequest
             'shipToAddress' => 'nullable|string|max:1000',
             'taxRate' => 'nullable|numeric|min:0|max:100',
             'taxAmount' => 'nullable|numeric|min:0',
+            'documents' => 'nullable|array',
+            'documents.*.file' => 'nullable|file|mimes:pdf,jpg,jpeg,png,doc,docx|max:20480',
+            'documents.*.type' => 'nullable|string|max:50',
+            'documents.*.remarks' => 'nullable|string|max:2000',
         ], RequestLineItemParser::validationRules());
     }
 

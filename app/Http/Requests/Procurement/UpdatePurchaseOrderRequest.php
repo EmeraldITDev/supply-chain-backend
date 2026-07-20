@@ -43,6 +43,10 @@ class UpdatePurchaseOrderRequest extends FormRequest
             'invoiceSubmissionEmail' => 'nullable|string|max:255',
             'invoiceSubmissionCc' => 'nullable|string|max:500',
             'selectedVendorId' => 'nullable|string|max:50',
+            'documents' => 'nullable|array',
+            'documents.*.file' => 'nullable|file|mimes:pdf,jpg,jpeg,png,doc,docx|max:20480',
+            'documents.*.type' => 'nullable|string|max:50',
+            'documents.*.remarks' => 'nullable|string|max:2000',
         ], RequestLineItemParser::validationRules());
     }
 

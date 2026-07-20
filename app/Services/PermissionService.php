@@ -105,7 +105,7 @@ class PermissionService
             return true;
         }
 
-        $allowed = ['procurement', 'procurement_manager', 'admin'];
+        $allowed = ['procurement', 'procurement_manager', 'procurement_officer', 'admin'];
 
         foreach ($this->userRoleSlugCandidates($user) as $slug) {
             if (in_array($slug, $allowed, true)) {
@@ -595,7 +595,7 @@ class PermissionService
      */
     public function canManageUsers(User $user): bool
     {
-        return $user->can_manage_users === true || 
+        return $user->can_manage_users === true ||
                $user->is_admin === true ||
                in_array($user->scmRole(), ['procurement', 'procurement_manager', 'executive', 'supply_chain_director', 'admin']);
     }
@@ -626,8 +626,20 @@ class PermissionService
             return in_array($documentType, ProcurementOverviewAccess::readOnlyDocumentTypes(), true);
         }
 
-        // Executive, Procurement, Finance can view all documents
-        if (in_array($user->scmRole(), ['executive', 'procurement', 'procurement_manager', 'finance', 'finance_officer', 'supply_chain_director', 'admin'])) {
+        // Executive, Procurement, Finance, Supply Chain and Logistics can view all documents
+        if (in_array($user->scmRole(), [
+            'executive',
+            'director',
+            'procurement',
+            'procurement_manager',
+            'finance',
+            'finance_officer',
+            'supply_chain_director',
+            'supply_chain',
+            'logistics_manager',
+            'logistics',
+            'admin',
+        ], true)) {
             return true;
         }
 
@@ -646,7 +658,7 @@ class PermissionService
     public function getAvailableActions(User $user, MRF $mrf): array
     {
         $isClosed = $this->isMRFClosed($mrf);
-        
+
         // If MRF is closed, no actions are available
         if ($isClosed) {
             $routing = app(FinanceRoutingService::class)->routingMeta($mrf);
@@ -688,7 +700,7 @@ class PermissionService
 
         $canManageDeliveryConfirmation = $this->canManageDeliveryConfirmation($user, $mrf);
         $showDeliveryConfirmationPanel = $this->showDeliveryConfirmationPanel($mrf);
-        
+
         $routing = app(FinanceRoutingService::class)->routingMeta($mrf);
 
         $requesterEdit = app(RequesterEditWindowService::class)->metaForMrf($user, $mrf);
@@ -731,7 +743,7 @@ class PermissionService
                 ProcurementDocument::TYPE_DELIVERY_CONFIRMATION
             ),
         ];
-        
+
         // Build list of available action keys
         $availableActions = ['view']; // Always can view
         if ($actions['canEdit']) $availableActions[] = 'edit';
@@ -756,7 +768,7 @@ class PermissionService
         if ($actions['canUploadWaybill']) $availableActions[] = 'upload_waybill';
         if ($actions['canUploadJcc']) $availableActions[] = 'upload_jcc';
         if ($actions['canUploadDeliveryConfirmation']) $availableActions[] = 'upload_delivery_confirmation';
-        
+
         $actions['availableActions'] = $availableActions;
 
         if (ProcurementOverviewAccess::isProcurementOverviewOnly($user)) {
@@ -836,7 +848,7 @@ class PermissionService
     public function getDashboardData(User $user): array
     {
         $role = strtolower((string) (UserRoleNormalizer::supplyChainRole($user) ?? ''));
-        
+
         return match($role) {
             'employee', 'staff', 'regular_staff' => [
                 'can_create_mrf' => true,

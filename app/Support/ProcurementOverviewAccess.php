@@ -20,6 +20,7 @@ class ProcurementOverviewAccess
     public const MANAGEMENT_ROLES = [
         'procurement_manager',
         'procurement',
+        'procurement_officer',
         'supply_chain_director',
         'supply_chain',
         'executive',
@@ -31,6 +32,7 @@ class ProcurementOverviewAccess
     public const DELIVERY_DOCUMENT_ROLES = [
         'procurement',
         'procurement_manager',
+        'procurement_officer',
         'supply_chain_director',
         'supply_chain',
         'logistics_manager',
