@@ -100,15 +100,23 @@ class ProcurementDocumentController extends Controller
             ], 404);
         }
 
-        $validator = Validator::make($request->all(), [
-            'type' => ['required_without:documents', 'string', Rule::in(self::UPLOADABLE_TYPES)],
-            'file' => 'required_without:documents|file|mimes:pdf,jpg,jpeg,png,doc,docx|max:20480',
-            'remarks' => 'nullable|string|max:2000',
-            'documents' => 'required_without:file|array|min:1',
-            'documents.*.type' => ['required_with:documents', 'string', Rule::in(self::UPLOADABLE_TYPES)],
-            'documents.*.file' => 'required_with:documents|file|mimes:pdf,jpg,jpeg,png,doc,docx|max:20480',
-            'documents.*.remarks' => 'nullable|string|max:2000',
-        ]);
+        // Determine if this is a single-file or multi-file upload
+        $isMultiFile = $request->has('documents') && is_array($request->input('documents'));
+
+        if ($isMultiFile) {
+            $validator = Validator::make($request->all(), [
+                'documents' => 'required|array|min:1',
+                'documents.*.type' => ['required', 'string', Rule::in(self::UPLOADABLE_TYPES)],
+                'documents.*.file' => 'required|file|mimes:pdf,jpg,jpeg,png,doc,docx|max:20480',
+                'documents.*.remarks' => 'nullable|string|max:2000',
+            ]);
+        } else {
+            $validator = Validator::make($request->all(), [
+                'type' => ['required', 'string', Rule::in(self::UPLOADABLE_TYPES)],
+                'file' => 'required|file|mimes:pdf,jpg,jpeg,png,doc,docx|max:20480',
+                'remarks' => 'nullable|string|max:2000',
+            ]);
+        }
 
         if ($validator->fails()) {
             return response()->json([
@@ -120,22 +128,29 @@ class ProcurementDocumentController extends Controller
         }
 
         $documents = [];
-        $uploadedDocuments = $request->file('documents', []);
 
-        if ($request->has('documents')) {
-            foreach ($request->input('documents', []) as $index => $document) {
-                $documents[] = [
-                    'type' => $document['type'] ?? null,
-                    'file' => $uploadedDocuments[$index]['file'] ?? null,
-                    'remarks' => $document['remarks'] ?? null,
-                ];
+        if ($isMultiFile) {
+            $documentsList = $request->input('documents', []);
+            $uploadedFiles = $request->file('documents', []);
+
+            foreach ($documentsList as $index => $document) {
+                if (isset($uploadedFiles[$index])) {
+                    $documents[] = [
+                        'type' => (string) ($document['type'] ?? 'other'),
+                        'file' => $uploadedFiles[$index],
+                        'remarks' => $document['remarks'] ?? null,
+                    ];
+                }
             }
         } else {
-            $documents[] = [
-                'type' => $request->input('type'),
-                'file' => $request->file('file'),
-                'remarks' => $request->input('remarks'),
-            ];
+            $file = $request->file('file');
+            if ($file) {
+                $documents[] = [
+                    'type' => (string) $request->input('type', 'other'),
+                    'file' => $file,
+                    'remarks' => $request->input('remarks'),
+                ];
+            }
         }
 
         $user = $request->user();
@@ -144,7 +159,7 @@ class ProcurementDocumentController extends Controller
         $failed = [];
 
         foreach ($documents as $index => $documentPayload) {
-            $type = (string) ($documentPayload['type'] ?? '');
+            $type = (string) ($documentPayload['type'] ?? 'other');
             $file = $documentPayload['file'];
             $remarks = $documentPayload['remarks'] ?? null;
             $result = [
