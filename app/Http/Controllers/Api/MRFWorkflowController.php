@@ -3111,13 +3111,21 @@ class MRFWorkflowController extends Controller
     }
 
     /**
-     * Generate the authoritative PO number in the canonical format
+     * Generate the authoritative PO number from a specific vendor object.
      * PO-DDMMYY-SupplierToken-NNNN (serial resets per supplier per day).
      * Mirrors the frontend formatter in src/utils/poNumber.ts.
+     *
+     * CRITICAL: Must be passed the SAME vendor object used for PDF rendering
+     * to ensure PO number and displayed supplier match.
      */
-    private function generatePONumber(MRF $mrf): string
+    private function generatePONumber(MRF $mrf, ?Vendor $vendor = null): string
     {
-        $supplierName = $this->resolveSupplierNameForPo($mrf);
+        // If vendor not passed, use legacy resolution (backward compatibility)
+        if (!$vendor) {
+            $supplierName = $this->resolveSupplierNameForPo($mrf);
+        } else {
+            $supplierName = (string) $vendor->name;
+        }
 
         return app(\App\Services\PoNumberGenerator::class)->generate($supplierName);
     }
@@ -3125,6 +3133,9 @@ class MRFWorkflowController extends Controller
     /**
      * Resolve the supplier/vendor name used for the PO number token. Prefers the
      * selected price-comparison supplier, then the MRF's selected vendor.
+     *
+     * DEPRECATED: Use generatePONumber() with explicit vendor parameter instead.
+     * This method maintains legacy behavior only.
      */
     private function resolveSupplierNameForPo(MRF $mrf): string
     {
@@ -3150,16 +3161,23 @@ class MRFWorkflowController extends Controller
      * Prefer RFQ-backed PO data; when there is no RFQ, build a synthetic payload
      * only when fast_track or allow_missing_rfq is set (Procurement Overview flows).
      *
-     * @return array{success: bool, data?: array<string, mixed>, error?: string, code?: string, status?: int}
+     * Returns array with 'resolved_vendor' key containing the authoritative Vendor object
+     * used for both PO number generation and PDF rendering. This ensures consistency.
+     *
+     * @return array{success: bool, data?: array<string, mixed>, resolved_vendor?: ?Vendor, error?: string, code?: string, status?: int}
      */
     private function resolvePoGenerationPayload(MRF $mrf, ?RFQ $rfq, Request $request, bool $fastTrack, bool $allowMissingRfq): array
     {
         if ($rfq) {
-            return $this->fetchPOData($mrf, $rfq);
+            $result = $this->fetchPOData($mrf, $rfq);
+            // fetchPOData already includes resolved_vendor in returned array
+            return $result;
         }
 
         if ($fastTrack || $allowMissingRfq) {
-            return $this->buildSyntheticPoPayload($mrf, $request);
+            $result = $this->buildSyntheticPoPayload($mrf, $request);
+            // buildSyntheticPoPayload already includes resolved_vendor in returned array
+            return $result;
         }
 
         return [
