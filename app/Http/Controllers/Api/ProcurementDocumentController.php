@@ -334,7 +334,7 @@ class ProcurementDocumentController extends Controller
     {
         return MRF::query()
             ->where('mrf_id', $id)
-            ->orWhere('id', (int) $id)
+            ->orWhere('formatted_id', $id)
             ->first();
     }
 
