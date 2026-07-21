@@ -12,22 +12,28 @@ return new class extends Migration
      */
     public function up(): void
     {
-        DB::statement('ALTER TABLE m_r_f_s DROP CONSTRAINT IF EXISTS m_r_f_s_workflow_state_check');
+        if (! Schema::hasTable('m_r_f_s')) {
+            return;
+        }
 
-        DB::statement("
-            UPDATE m_r_f_s
-            SET workflow_state = 'supply_chain_director_review'
-            WHERE workflow_state = 'procurement_review'
-        ");
+        if (Schema::getConnection()->getDriverName() !== 'sqlite') {
+            DB::statement('ALTER TABLE m_r_f_s DROP CONSTRAINT IF EXISTS m_r_f_s_workflow_state_check');
 
-        DB::statement("
-            ALTER TABLE m_r_f_s
-            ADD CONSTRAINT m_r_f_s_workflow_state_check
-            CHECK (workflow_state IN (
-                'executive_review',
-                'supply_chain_director_review'
-            ))
-        ");
+            DB::statement("
+                UPDATE m_r_f_s
+                SET workflow_state = 'supply_chain_director_review'
+                WHERE workflow_state = 'procurement_review'
+            ");
+
+            DB::statement("
+                ALTER TABLE m_r_f_s
+                ADD CONSTRAINT m_r_f_s_workflow_state_check
+                CHECK (workflow_state IN (
+                    'executive_review',
+                    'supply_chain_director_review'
+                ))
+            ");
+        }
     }
 
     /**

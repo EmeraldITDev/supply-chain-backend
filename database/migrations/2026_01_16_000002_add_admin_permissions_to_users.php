@@ -11,9 +11,17 @@ return new class extends Migration
      */
     public function up(): void
     {
+        if (! Schema::hasTable('users')) {
+            return;
+        }
+
         Schema::table('users', function (Blueprint $table) {
-            $table->boolean('is_admin')->default(false)->after('role');
-            $table->boolean('can_manage_users')->default(false)->after('is_admin');
+            if (! Schema::hasColumn('users', 'is_admin')) {
+                $table->boolean('is_admin')->default(false)->after('role');
+            }
+            if (! Schema::hasColumn('users', 'can_manage_users')) {
+                $table->boolean('can_manage_users')->default(false)->after('is_admin');
+            }
         });
     }
 

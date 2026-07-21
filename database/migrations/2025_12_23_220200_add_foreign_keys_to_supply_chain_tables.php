@@ -8,10 +8,10 @@ return new class extends Migration
 {
     /**
      * Run the migrations.
-     * 
+     *
      * This migration adds foreign key constraints that were removed from initial table creation
      * to avoid dependency issues when tables are created in alphabetical order.
-     * 
+     *
      * Adds foreign keys to:
      * - quotations (rfq_id, vendor_id)
      * - vendor_registrations (vendor_id)
@@ -19,15 +19,21 @@ return new class extends Migration
      */
     public function up(): void
     {
+        $connection = Schema::getConnection();
+        $isSqlite = $connection->getDriverName() === 'sqlite';
+
         // Check if foreign keys already exist before adding them (idempotent migration)
-        $quotationsForeignKeys = \DB::select("
-            SELECT CONSTRAINT_NAME 
-            FROM information_schema.KEY_COLUMN_USAGE 
-            WHERE TABLE_SCHEMA = DATABASE() 
-            AND TABLE_NAME = 'quotations' 
-            AND REFERENCED_TABLE_NAME IS NOT NULL
-        ");
-        $existingQuotationsKeys = array_column($quotationsForeignKeys, 'CONSTRAINT_NAME');
+        $existingQuotationsKeys = [];
+        if (! $isSqlite) {
+            $quotationsForeignKeys = \DB::select("
+                SELECT CONSTRAINT_NAME
+                FROM information_schema.KEY_COLUMN_USAGE
+                WHERE TABLE_SCHEMA = DATABASE()
+                AND TABLE_NAME = 'quotations'
+                AND REFERENCED_TABLE_NAME IS NOT NULL
+            ");
+            $existingQuotationsKeys = array_column($quotationsForeignKeys, 'CONSTRAINT_NAME');
+        }
 
         Schema::table('quotations', function (Blueprint $table) use ($existingQuotationsKeys) {
             // Add foreign key constraints after r_f_q_s and vendors tables are created
@@ -39,14 +45,17 @@ return new class extends Migration
             }
         });
 
-        $vendorRegistrationsForeignKeys = \DB::select("
-            SELECT CONSTRAINT_NAME 
-            FROM information_schema.KEY_COLUMN_USAGE 
-            WHERE TABLE_SCHEMA = DATABASE() 
-            AND TABLE_NAME = 'vendor_registrations' 
-            AND REFERENCED_TABLE_NAME IS NOT NULL
-        ");
-        $existingVendorRegKeys = array_column($vendorRegistrationsForeignKeys, 'CONSTRAINT_NAME');
+        $existingVendorRegKeys = [];
+        if (! $isSqlite) {
+            $vendorRegistrationsForeignKeys = \DB::select("
+                SELECT CONSTRAINT_NAME
+                FROM information_schema.KEY_COLUMN_USAGE
+                WHERE TABLE_SCHEMA = DATABASE()
+                AND TABLE_NAME = 'vendor_registrations'
+                AND REFERENCED_TABLE_NAME IS NOT NULL
+            ");
+            $existingVendorRegKeys = array_column($vendorRegistrationsForeignKeys, 'CONSTRAINT_NAME');
+        }
 
         Schema::table('vendor_registrations', function (Blueprint $table) use ($existingVendorRegKeys) {
             // Add foreign key constraint after vendors table is created
@@ -55,14 +64,17 @@ return new class extends Migration
             }
         });
 
-        $rfqVendorsForeignKeys = \DB::select("
-            SELECT CONSTRAINT_NAME 
-            FROM information_schema.KEY_COLUMN_USAGE 
-            WHERE TABLE_SCHEMA = DATABASE() 
-            AND TABLE_NAME = 'rfq_vendors' 
-            AND REFERENCED_TABLE_NAME IS NOT NULL
-        ");
-        $existingRfqVendorKeys = array_column($rfqVendorsForeignKeys, 'CONSTRAINT_NAME');
+        $existingRfqVendorKeys = [];
+        if (! $isSqlite) {
+            $rfqVendorsForeignKeys = \DB::select("
+                SELECT CONSTRAINT_NAME
+                FROM information_schema.KEY_COLUMN_USAGE
+                WHERE TABLE_SCHEMA = DATABASE()
+                AND TABLE_NAME = 'rfq_vendors'
+                AND REFERENCED_TABLE_NAME IS NOT NULL
+            ");
+            $existingRfqVendorKeys = array_column($rfqVendorsForeignKeys, 'CONSTRAINT_NAME');
+        }
 
         Schema::table('rfq_vendors', function (Blueprint $table) use ($existingRfqVendorKeys) {
             // Add foreign key constraints after r_f_q_s and vendors tables are created

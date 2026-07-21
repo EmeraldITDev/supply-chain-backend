@@ -8,12 +8,19 @@ use App\Http\Controllers\Controller;
 class ApiController extends Controller
 {
     use ResolvesPaginatedLists;
+
     protected function success(array $data = [], int $status = 200)
     {
-        return response()->json([
+        $payload = [
             'success' => true,
             'data' => $data,
-        ], $status);
+        ];
+
+        foreach ($data as $key => $value) {
+            $payload[$key] = $value;
+        }
+
+        return response()->json($payload, $status);
     }
 
     protected function error(string $message, string $code, int $status = 400, array $errors = []): \Illuminate\Http\JsonResponse

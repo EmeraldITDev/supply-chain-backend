@@ -11,17 +11,25 @@ return new class extends Migration
      */
     public function up(): void
     {
+        if (! Schema::hasTable('m_r_f_s')) {
+            return;
+        }
+
         Schema::table('m_r_f_s', function (Blueprint $table) {
-            $table->string('contract_type', 50)->nullable()->after('category')
-                ->comment('Contract type: emerald, oando, dangote, heritage');
+            if (! Schema::hasColumn('m_r_f_s', 'contract_type')) {
+                $table->string('contract_type', 50)->nullable()->after('category')
+                    ->comment('Contract type: emerald, oando, dangote, heritage');
+            }
         });
-        
-        // Add check constraint for contract_type
-        \DB::statement("
-            ALTER TABLE m_r_f_s
-            ADD CONSTRAINT m_r_f_s_contract_type_check 
-            CHECK (contract_type IS NULL OR contract_type IN ('emerald', 'oando', 'dangote', 'heritage'));
-        ");
+
+        if (Schema::getConnection()->getDriverName() !== 'sqlite') {
+            // Add check constraint for contract_type
+            \DB::statement("
+                ALTER TABLE m_r_f_s
+                ADD CONSTRAINT m_r_f_s_contract_type_check
+                CHECK (contract_type IS NULL OR contract_type IN ('emerald', 'oando', 'dangote', 'heritage'));
+            ");
+        }
     }
 
     /**

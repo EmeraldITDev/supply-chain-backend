@@ -18,19 +18,31 @@ return new class extends Migration
      */
     public function up(): void
     {
-        Schema::table('m_r_f_s', function (Blueprint $table) {
-            // Drop existing check constraints on contract_type
-            DB::statement('ALTER TABLE m_r_f_s DROP CONSTRAINT IF EXISTS m_r_f_s_contract_type_check');
+        if (! Schema::hasTable('m_r_f_s')) {
+            return;
+        }
 
-            // Modify column to varchar without constraint
-            // This allows arbitrary strings while preserving existing data
-            $table->string('contract_type', 100)->change()->nullable();
-        });
+        if (Schema::getConnection()->getDriverName() !== 'sqlite') {
+            Schema::table('m_r_f_s', function (Blueprint $table) {
+                // Drop existing check constraints on contract_type
+                DB::statement('ALTER TABLE m_r_f_s DROP CONSTRAINT IF EXISTS m_r_f_s_contract_type_check');
+
+                // Modify column to varchar without constraint
+                // This allows arbitrary strings while preserving existing data
+                $table->string('contract_type', 100)->change()->nullable();
+            });
+        } else {
+            Schema::table('m_r_f_s', function (Blueprint $table) {
+                if (! Schema::hasColumn('m_r_f_s', 'contract_type')) {
+                    $table->string('contract_type', 100)->nullable();
+                }
+            });
+        }
 
         // Add routed_reason column if it doesn't exist
         // This tracks why an MRF was routed to a particular stage
         // Values: 'standard_contract_type', 'custom_contract_type', 'logistics_exception'
-        if (!Schema::hasColumn('m_r_f_s', 'routed_reason')) {
+        if (! Schema::hasColumn('m_r_f_s', 'routed_reason')) {
             Schema::table('m_r_f_s', function (Blueprint $table) {
                 $table->string('routed_reason', 100)->nullable()
                     ->after('contract_type')

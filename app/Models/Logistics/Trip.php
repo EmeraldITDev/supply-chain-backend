@@ -34,6 +34,7 @@ class Trip extends Model
     public const STATUS_COMPLETED = 'completed';
     public const STATUS_CLOSED = 'closed';
     public const STATUS_CANCELLED = 'cancelled';
+    public const STATUS_CONVERTED_TO_JOURNEY = 'converted_to_journey';
 
     public const TYPE_PERSONNEL = 'personnel';
     public const TYPE_MATERIAL = 'material';
@@ -89,6 +90,16 @@ class Trip extends Model
         'cancelled_by',
         'cancelled_at',
         'notes',
+        'accommodation_required',
+        'accommodation_name',
+        'accommodation_address',
+        'accommodation_contact',
+        'accommodation_details',
+        'accommodation_estimated_cost',
+        'escort_required',
+        'escort_description',
+        'estimated_cost',
+        'comments',
         'metadata',
     ];
 
@@ -102,6 +113,10 @@ class Trip extends Model
         'passenger_user_ids' => 'array',
         'external_passengers' => 'array',
         'external_driver' => 'array',
+        'accommodation_required' => 'boolean',
+        'escort_required' => 'boolean',
+        'accommodation_estimated_cost' => 'float',
+        'estimated_cost' => 'float',
     ];
 
     /**

@@ -120,6 +120,15 @@ return new class extends Migration
             return $row !== null;
         }
 
+        if ($driver === 'sqlite') {
+            $row = $connection->selectOne(
+                'SELECT 1 FROM sqlite_master WHERE type = ? AND name = ? AND tbl_name = ?',
+                ['index', $index, $table],
+            );
+
+            return $row !== null;
+        }
+
         return false;
     }
 };

@@ -9,7 +9,7 @@ return new class extends Migration
 {
     /**
      * Run the migrations.
-     * 
+     *
      * This migration updates the workflow_state check constraint to include all new workflow states.
      * PostgreSQL doesn't support altering enum types directly, so we need to:
      * 1. Drop the old constraint
@@ -18,37 +18,45 @@ return new class extends Migration
      */
     public function up(): void
     {
+        if (! Schema::hasTable('m_r_f_s')) {
+            return;
+        }
+
+        if (Schema::getConnection()->getDriverName() === 'sqlite') {
+            return;
+        }
+
         // For PostgreSQL, we need to drop the old check constraint and create a new one
         // Since the column might be an enum or have a check constraint, we handle both cases
-        
+
         DB::statement("
             ALTER TABLE m_r_f_s
             DROP CONSTRAINT IF EXISTS m_r_f_s_workflow_state_check;
         ");
-        
+
         // If workflow_state is an enum type, we need to convert it to varchar/text first
         // Check if it's an enum type
         $isEnum = DB::select("
-            SELECT data_type 
-            FROM information_schema.columns 
-            WHERE table_name = 'm_r_f_s' 
+            SELECT data_type
+            FROM information_schema.columns
+            WHERE table_name = 'm_r_f_s'
             AND column_name = 'workflow_state'
             AND data_type = 'USER-DEFINED'
         ");
-        
+
         if (!empty($isEnum)) {
             // Convert enum to text/varchar
             DB::statement("
-                ALTER TABLE m_r_f_s 
-                ALTER COLUMN workflow_state TYPE text 
+                ALTER TABLE m_r_f_s
+                ALTER COLUMN workflow_state TYPE text
                 USING workflow_state::text;
             ");
         }
-        
+
         // Now add check constraint with all new workflow states
         DB::statement("
             ALTER TABLE m_r_f_s
-            ADD CONSTRAINT m_r_f_s_workflow_state_check 
+            ADD CONSTRAINT m_r_f_s_workflow_state_check
             CHECK (workflow_state IN (
                 'mrf_created',
                 'executive_review',
@@ -78,11 +86,11 @@ return new class extends Migration
             ALTER TABLE m_r_f_s
             DROP CONSTRAINT IF EXISTS m_r_f_s_workflow_state_check;
         ");
-        
+
         // Restore old check constraint with old values
         DB::statement("
             ALTER TABLE m_r_f_s
-            ADD CONSTRAINT m_r_f_s_workflow_state_check 
+            ADD CONSTRAINT m_r_f_s_workflow_state_check
             CHECK (workflow_state IN (
                 'mrf_created',
                 'mrf_approved',

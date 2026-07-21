@@ -12,6 +12,7 @@ use App\Services\WorkflowNotificationService;
 use App\Support\DatabaseNotifications;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Str;
 
 class TripRequestNotificationService
 {
@@ -77,13 +78,15 @@ class TripRequestNotificationService
             $trip->destination ?? '—'
         );
 
+        $actionUrl = $this->buildFrontendUrl('/trip-requests/' . $trip->id);
+
         $this->notifyUsersByRoles(
             $trip,
             ['logistics_manager', 'logistics_officer', 'supply_chain_director', 'supply_chain', 'procurement_manager', 'procurement'],
             'trip_request_submitted',
             'New trip request',
             $message,
-            '/trip-requests/' . $trip->id
+            $actionUrl
         );
 
         $emails = User::query()
@@ -116,7 +119,7 @@ class TripRequestNotificationService
             'trip_request_director_review',
             'Trip request awaiting approval',
             $message,
-            '/trip-requests/' . $trip->id
+            $this->buildFrontendUrl('/trip-requests/' . $trip->id)
         );
     }
 
@@ -134,7 +137,7 @@ class TripRequestNotificationService
             $reason ? ': ' . $reason : ''
         );
 
-        $actionUrl = '/trip-requests/' . $trip->id;
+        $actionUrl = $this->buildFrontendUrl('/trip-requests/' . $trip->id);
 
         $this->notifyUser(
             $requester,
@@ -378,7 +381,7 @@ class TripRequestNotificationService
             'trip_request_rejected',
             'Trip request rejected',
             $message,
-            '/department'
+            $this->buildFrontendUrl('/department')
         );
     }
 
@@ -427,6 +430,32 @@ class TripRequestNotificationService
             ->whereNotNull('email')
             ->get()
             ->each(fn (User $user) => $this->notifyUser($user, $trip, $type, $title, $message, $actionUrl, $extra));
+    }
+
+    public function notifyLogisticsReviewAction(Trip $trip, User $reviewer, string $action, ?string $reason = null): void
+    {
+        $message = match ($action) {
+            'forward' => sprintf('Trip request %s was forwarded to the Supply Chain Director by %s.', $trip->trip_code, $reviewer->name),
+            'request_changes' => sprintf('Trip request %s requires changes from the requester: %s', $trip->trip_code, $reason ?: 'No reason provided'),
+            'reject' => sprintf('Trip request %s was rejected by %s%s', $trip->trip_code, $reviewer->name, $reason ? ': ' . $reason : ''),
+            default => sprintf('Trip request %s received a review update from %s.', $trip->trip_code, $reviewer->name),
+        };
+
+        $this->notifyUsersByRoles(
+            $trip,
+            ['supply_chain_director', 'supply_chain', 'logistics_manager', 'logistics_officer', 'procurement_manager', 'procurement'],
+            'trip_request_review',
+            'Trip request review update',
+            $message,
+            $this->buildFrontendUrl('/trip-requests/' . $trip->id)
+        );
+    }
+
+    private function buildFrontendUrl(string $path): string
+    {
+        $base = rtrim((string) config('app.frontend_url', config('app.url', 'http://localhost')), '/');
+
+        return $base . '/' . ltrim($path, '/');
     }
 
     private function notifyUser(

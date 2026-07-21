@@ -12,50 +12,56 @@ return new class extends Migration
      */
     public function up(): void
     {
+        if (! Schema::hasTable('quotations')) {
+            return;
+        }
+
         Schema::table('quotations', function (Blueprint $table) {
             // Add review_status if it doesn't exist
-            if (!Schema::hasColumn('quotations', 'review_status')) {
+            if (! Schema::hasColumn('quotations', 'review_status')) {
                 $table->string('review_status', 50)->default('pending')->after('status');
             }
-            
+
             // Add revision_notes if it doesn't exist
-            if (!Schema::hasColumn('quotations', 'revision_notes')) {
+            if (! Schema::hasColumn('quotations', 'revision_notes')) {
                 $table->text('revision_notes')->nullable()->after('rejection_reason');
             }
-            
+
             // Ensure rejection_reason exists (should already exist)
-            if (!Schema::hasColumn('quotations', 'rejection_reason')) {
+            if (! Schema::hasColumn('quotations', 'rejection_reason')) {
                 $table->text('rejection_reason')->nullable()->after('review_status');
             }
-            
+
             // Ensure reviewed_by and reviewed_at exist
-            if (!Schema::hasColumn('quotations', 'reviewed_by')) {
+            if (! Schema::hasColumn('quotations', 'reviewed_by')) {
                 $table->foreignId('reviewed_by')->nullable()->after('revision_notes')
                     ->constrained('users')->onDelete('set null');
             }
-            
-            if (!Schema::hasColumn('quotations', 'reviewed_at')) {
+
+            if (! Schema::hasColumn('quotations', 'reviewed_at')) {
                 $table->timestamp('reviewed_at')->nullable()->after('reviewed_by');
             }
         });
-        
-        // Add check constraint for review_status
-        DB::statement("
-            ALTER TABLE quotations
-            DROP CONSTRAINT IF EXISTS quotations_review_status_check;
-        ");
-        
-        DB::statement("
-            ALTER TABLE quotations
-            ADD CONSTRAINT quotations_review_status_check 
-            CHECK (review_status IN (
-                'pending',
-                'under_review',
-                'approved',
-                'rejected',
-                'revision_requested'
-            ));
-        ");
+
+        if (Schema::getConnection()->getDriverName() !== 'sqlite') {
+            // Add check constraint for review_status
+            DB::statement("
+                ALTER TABLE quotations
+                DROP CONSTRAINT IF EXISTS quotations_review_status_check;
+            ");
+
+            DB::statement("
+                ALTER TABLE quotations
+                ADD CONSTRAINT quotations_review_status_check
+                CHECK (review_status IN (
+                    'pending',
+                    'under_review',
+                    'approved',
+                    'rejected',
+                    'revision_requested'
+                ));
+            ");
+        }
     }
 
     /**
@@ -65,7 +71,7 @@ return new class extends Migration
     {
         Schema::table('quotations', function (Blueprint $table) {
             DB::statement("ALTER TABLE quotations DROP CONSTRAINT IF EXISTS quotations_review_status_check;");
-            
+
             if (Schema::hasColumn('quotations', 'reviewed_at')) {
                 $table->dropColumn('reviewed_at');
             }

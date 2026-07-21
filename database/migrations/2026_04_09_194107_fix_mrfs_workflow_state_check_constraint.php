@@ -11,40 +11,46 @@ return new class extends Migration
      */
     public function up(): void
     {
-        DB::statement("
-            ALTER TABLE m_r_f_s
-            DROP CONSTRAINT IF EXISTS m_r_f_s_workflow_state_check
-        ");
+        if (! Schema::hasTable('m_r_f_s')) {
+            return;
+        }
 
-        DB::statement("
-            ALTER TABLE m_r_f_s
-            ADD CONSTRAINT m_r_f_s_workflow_state_check
-            CHECK (
-                workflow_state IN (
-                    'mrf_created',
-                    'supply_chain_director_review',
-                    'supply_chain_director_approved',
-                    'supply_chain_director_rejected',
-                    'procurement_review',
-                    'procurement_approved',
-                    'rfq_issued',
-                    'quotations_received',
-                    'quotations_evaluated',
-                    'po_generated',
-                    'po_signed',
-                    'closed',
-                    'executive_review',
-                    'executive_approved',
-                    'executive_rejected',
-                    'vendor_selected',
-                    'invoice_received',
-                    'invoice_approved',
-                    'payment_processed',
-                    'grn_requested',
-                    'grn_completed'
+        if (Schema::getConnection()->getDriverName() !== 'sqlite') {
+            DB::statement("
+                ALTER TABLE m_r_f_s
+                DROP CONSTRAINT IF EXISTS m_r_f_s_workflow_state_check
+            ");
+
+            DB::statement("
+                ALTER TABLE m_r_f_s
+                ADD CONSTRAINT m_r_f_s_workflow_state_check
+                CHECK (
+                    workflow_state IN (
+                        'mrf_created',
+                        'supply_chain_director_review',
+                        'supply_chain_director_approved',
+                        'supply_chain_director_rejected',
+                        'procurement_review',
+                        'procurement_approved',
+                        'rfq_issued',
+                        'quotations_received',
+                        'quotations_evaluated',
+                        'po_generated',
+                        'po_signed',
+                        'closed',
+                        'executive_review',
+                        'executive_approved',
+                        'executive_rejected',
+                        'vendor_selected',
+                        'invoice_received',
+                        'invoice_approved',
+                        'payment_processed',
+                        'grn_requested',
+                        'grn_completed'
+                    )
                 )
-            )
-        ");
+            ");
+        }
     }
 
     /**

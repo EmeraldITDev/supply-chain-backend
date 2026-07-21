@@ -8,7 +8,7 @@ return new class extends Migration
 {
     /**
      * Run the migrations.
-     * 
+     *
      * This migration adds foreign key constraints that were removed from initial table creation
      * to avoid dependency issues when tables are created in alphabetical order.
      */
@@ -41,9 +41,25 @@ return new class extends Migration
      */
     private function addForeignKeyIfNotExists(string $table, string $constraintName, callable $callback): void
     {
-        // Check if constraint exists
+        if (! Schema::hasTable($table)) {
+            return;
+        }
+
+        $connection = Schema::getConnection();
+        if ($connection->getDriverName() === 'sqlite') {
+            try {
+                Schema::table($table, $callback);
+            } catch (\Throwable $e) {
+                // SQLite test environments do not expose table constraint metadata reliably,
+                // so we skip duplicate/unsupported constraint checks here.
+            }
+
+            return;
+        }
+
+        // Check if constraint exists for non-SQLite databases.
         $exists = \DB::select(
-            "SELECT constraint_name FROM information_schema.table_constraints 
+            "SELECT constraint_name FROM information_schema.table_constraints
              WHERE table_name = ? AND constraint_name = ? AND constraint_type = 'FOREIGN KEY'",
             [$table, $constraintName]
         );

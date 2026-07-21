@@ -8,6 +8,86 @@ This document is the source of truth for the React/Lovable frontend. **Before wi
 
 ---
 
+## Logistics Trip Request Workflow (NEW / MODIFIED)
+
+### POST /api/trip-requests
+**Roles:** Any authenticated requester who can create trip requests.
+
+**Request body schema:**
+- `destination` (string, required): Final destination.
+- `purpose` (string, required): Trip purpose.
+- `origin` (string, optional): Departure origin; defaults to `Office`.
+- `scheduled_departure_at` (datetime string, required): ISO-8601 departure date/time.
+- `scheduled_arrival_at` (datetime string, optional): ISO-8601 expected arrival date/time.
+- `passenger_user_ids` (array of integers, required): Internal passenger user IDs.
+- `external_passengers` (array, optional): External passenger payloads.
+- `booking_scope` or `bookingScope` (string, optional): Booking scope such as `within_state`.
+- `trip_type` or `tripType` (string, optional): Legacy trip type alias.
+- `accommodation_required` (boolean, required): Whether accommodation is required.
+- `accommodation_name` (string, optional): Preferred accommodation name.
+- `accommodation_address` (string, optional): Accommodation address.
+- `accommodation_contact` (string, optional): Contact number.
+- `accommodation_details` (string, optional): Free-text details.
+- `accommodation_estimated_cost` (number, optional): Estimated accommodation cost in NGN.
+- `escort_required` (boolean, required): Whether escort is required.
+- `escort_description` (string, optional): Preferred escort arrangement.
+- `save_as_draft` / `saveAsDraft` / `isDraft` (boolean, optional): Persist as draft instead of submitted.
+
+**Response shape:**
+- `success` (boolean)
+- `trip` (object): full trip-request payload including `id`, `trip_code`, `purpose`, `destination`, `status`, `workflow_stage`, `accommodation_required`, `accommodation_name`, `accommodation_address`, `accommodation_contact`, `accommodation_details`, `accommodation_estimated_cost`, `escort_required`, `escort_description`, `comments`, `audit_trail`, `approval_status`.
+- `bookingRules` (object): lead-time and booking guidance.
+
+**Frontend usage:** Use this endpoint when the requester creates a new trip request. Show accommodation and escort fields immediately, submit them with the request, and render the returned `trip` payload in the detail screen.
+
+### PUT /api/trip-requests/{id}
+**Roles:** The requester who created the trip request while the edit window is still open.
+
+**Request body schema:** Same fields as create, with each field optional except that the payload may include any subset of the supported values.
+
+**Response shape:**
+- `success` (boolean)
+- `trip` (object): updated trip request payload with the latest accommodation and escort fields.
+
+**Frontend usage:** Use this for requester-side edits before the request is locked. Refresh the detail view after save and preserve the latest accommodation and escort values.
+
+### POST /api/trip-requests/{id}/logistics-review
+**Roles:** Logistics Manager / Logistics Officer.
+
+**Request body schema:**
+- `action` (string, required): `forward`, `request_changes`, or `reject`.
+- `reason` (string, optional but required for `request_changes` and `reject`): Review reason.
+- `comments` (string, optional): Logistics comments.
+- `accommodation_name` (string, optional): Updated accommodation preference.
+- `accommodation_address` (string, optional): Updated address.
+- `accommodation_contact` (string, optional): Updated contact number.
+- `accommodation_details` (string, optional): Updated details.
+- `accommodation_estimated_cost` (number, optional): Updated estimated cost.
+- `escort_description` (string, optional): Updated escort request.
+- `estimated_cost` (number, optional): Updated estimated trip cost.
+
+**Response shape:**
+- `success` (boolean)
+- `trip` (object): trip request payload after review updates.
+- `auditTrail` (array): every edit logged with `field_name`, `original_value`, `new_value`, `reason`, `editor_name`, `created_at`.
+- `message` (string)
+
+**Frontend usage:** Use this endpoint from the logistics review screen. Show the review form, require a reason for change requests/rejections, and render the returned `auditTrail` in the supply-chain review detail view.
+
+### GET /api/trip-requests/{id}
+**Roles:** Any authenticated staff member.
+
+**Query parameters:**
+- `include_progress` (boolean, optional): Include workflow progress summary.
+
+**Response shape:**
+- `success` (boolean)
+- `trip` (object): full trip-request detail including requester profile, accommodation and escort fields, comments, `audit_trail`, and available action flags.
+
+**Frontend usage:** Use this endpoint whenever the user opens a trip request detail page. Read `audit_trail` for the full edit history and use the accommodation/escort fields for the review UI.
+
+---
+
 ## 0. HRIS / SCM Role Separation (BREAKING — update all role UI)
 
 ### Problem

@@ -231,6 +231,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::put('/trip-requests/{id}', [TripRequestWorkflowController::class, 'update']);
     Route::post('/trip-requests/{id}/confirm', [TripRequestWorkflowController::class, 'confirm']);
     Route::post('/trip-requests/{id}/forward', [TripRequestWorkflowController::class, 'forward']);
+    Route::post('/trip-requests/{id}/logistics-review', [TripRequestWorkflowController::class, 'logisticsReview']);
     Route::post('/trip-requests/{id}/request-changes', [TripRequestWorkflowController::class, 'requestChanges']);
     Route::post('/trip-requests/{id}/director-approve', [TripRequestWorkflowController::class, 'directorApprove']);
     Route::post('/trip-requests/{id}/director-reject', [TripRequestWorkflowController::class, 'directorReject']);

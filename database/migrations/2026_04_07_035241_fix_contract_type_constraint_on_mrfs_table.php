@@ -11,13 +11,19 @@ return new class extends Migration
      */
     public function up(): void
     {
-        DB::statement('ALTER TABLE m_r_f_s DROP CONSTRAINT IF EXISTS m_r_f_s_contract_type_check');
+        if (! Schema::hasTable('m_r_f_s')) {
+            return;
+        }
 
-        DB::statement("
-            ALTER TABLE m_r_f_s
-            ADD CONSTRAINT m_r_f_s_contract_type_check
-            CHECK (contract_type IN ('emerald', 'oando', 'heritage', 'dangote'))
-        ");
+        if (Schema::getConnection()->getDriverName() !== 'sqlite') {
+            DB::statement('ALTER TABLE m_r_f_s DROP CONSTRAINT IF EXISTS m_r_f_s_contract_type_check');
+
+            DB::statement("
+                ALTER TABLE m_r_f_s
+                ADD CONSTRAINT m_r_f_s_contract_type_check
+                CHECK (contract_type IN ('emerald', 'oando', 'heritage', 'dangote'))
+            ");
+        }
     }
 
     /**
