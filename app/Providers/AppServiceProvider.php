@@ -3,7 +3,9 @@
 namespace App\Providers;
 
 use App\Models\Vendor;
+use App\Models\MRF;
 use App\Observers\VendorObserver;
+use App\Observers\MrfObserver;
 use Illuminate\Support\Facades\URL;
 use Illuminate\Support\ServiceProvider;
 use Laravel\Sanctum\Sanctum;
@@ -24,6 +26,7 @@ class AppServiceProvider extends ServiceProvider
     public function boot(): void
     {
         Vendor::observe(VendorObserver::class);
+        MRF::observe(MrfObserver::class);
 
         // Render (and most hosts) terminate TLS at the edge; APP_URL must match.
         // If APP_URL is still http:// while the SPA is https://, absolute URLs from

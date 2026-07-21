@@ -3132,14 +3132,41 @@ class MRFWorkflowController extends Controller
      */
     private function generatePONumber(MRF $mrf, ?Vendor $vendor = null): string
     {
-        // If vendor not passed, use legacy resolution (backward compatibility)
-        if (!$vendor) {
-            $supplierName = $this->resolveSupplierNameForPo($mrf);
-        } else {
-            $supplierName = (string) $vendor->name;
+        // Resolve a Vendor object if not explicitly provided so we have a
+        // single authoritative source for both the supplier token and the
+        // persisted selected_vendor_id on the MRF.
+        if (! $vendor) {
+            $lineService = app(PriceComparisonPoLineService::class);
+            $rows = $lineService->selectedSupplierRows($mrf);
+            $resolved = $lineService->resolveVendorFromRows($rows);
+
+            if ($resolved && trim((string) $resolved->name) !== '') {
+                $vendor = $resolved;
+            } elseif ($mrf->selected_vendor_id) {
+                $vendor = $mrf->selectedVendor;
+            }
         }
 
-        return app(\App\Services\PoNumberGenerator::class)->generate($supplierName);
+        $supplierName = $vendor ? (string) $vendor->name : $this->resolveSupplierNameForPo($mrf);
+
+        // Wrap PO number allocation and persistence of selected_vendor_id in
+        // a single DB transaction so the sequence allocation and MRF update
+        // cannot get out of sync.
+        return DB::transaction(function () use ($mrf, $vendor, $supplierName) {
+            $poNumber = app(\App\Services\PoNumberGenerator::class)->generate($supplierName);
+
+            if ($vendor && ($mrf->selected_vendor_id !== $vendor->id)) {
+                DB::table('m_r_f_s')
+                    ->where('id', $mrf->id)
+                    ->update(['selected_vendor_id' => $vendor->id]);
+
+                // Keep the in-memory model consistent for callers that still
+                // hold the $mrf instance.
+                $mrf->selected_vendor_id = $vendor->id;
+            }
+
+            return $poNumber;
+        });
     }
 
     /**
