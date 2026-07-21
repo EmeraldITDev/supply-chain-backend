@@ -1574,8 +1574,10 @@ class MRFWorkflowController extends Controller
                         ], 422);
         }
 
-            // Use provided PO number, existing draft number, or auto-generate
-            $poNumber = $request->po_number ?? $mrf->po_number ?? $this->generatePONumber($mrf);
+            // Use provided PO number or existing draft number; defer auto-generation
+            // until after we resolve the payload's vendor so the PO number token
+            // is derived from the same vendor record used for the PDF.
+            $poNumber = $request->po_number ?? $mrf->po_number ?? null;
         } else {
             // Mode 2: Auto-Generation (JSON body)
             $validator = Validator::make($request->all(), [
@@ -1606,8 +1608,10 @@ class MRFWorkflowController extends Controller
                 ], 422);
             }
 
-            // Use provided PO number, existing draft number, or auto-generate
-            $poNumber = $request->po_number ?? $mrf->po_number ?? $this->generatePONumber($mrf);
+            // Use provided PO number or existing draft number; defer auto-generation
+            // until after we resolve the payload's vendor so the PO number token
+            // is derived from the same vendor record used for the PDF.
+            $poNumber = $request->po_number ?? $mrf->po_number ?? null;
         }
 
         $this->applyRequestedCurrency($request, $mrf);
@@ -1695,6 +1699,14 @@ class MRFWorkflowController extends Controller
                     'error' => $poData['error'],
                     'code' => $poData['code'],
                 ], $poData['status'] ?? 400);
+            }
+
+            // If we deferred PO generation earlier, generate now using the
+            // authoritative vendor resolved for the payload so the slug used
+            // for the PO number matches the vendor shown in the PDF.
+            if (empty($poNumber)) {
+                $resolvedVendor = $poData['resolved_vendor'] ?? null;
+                $poNumber = $this->generatePONumber($mrf, $resolvedVendor ?? null);
             }
 
             $taxRate = (float) ($request->input('tax_rate', $request->input('taxRate', 0)));
@@ -3376,6 +3388,10 @@ class MRFWorkflowController extends Controller
 
         $payload['data'] = $this->enrichPoPayloadWithPaymentSchedule($mrf, $payload['data']);
 
+        // Pass back the authoritative Vendor object used to build the payload
+        // so callers (and tests) can generate PO numbers from the same source.
+        $payload['resolved_vendor'] = $vendor;
+
         return $payload;
     }
 
@@ -3653,6 +3669,10 @@ class MRFWorkflowController extends Controller
         ];
 
         $result['data'] = $this->enrichPoPayloadWithPaymentSchedule($mrf, $result['data']);
+
+        // Include the resolved Vendor object so callers can rely on a single
+        // source of truth for both PO number generation and PDF rendering.
+        $result['resolved_vendor'] = $vendor;
 
         return $result;
     }

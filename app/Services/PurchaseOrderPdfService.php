@@ -5,6 +5,8 @@ namespace App\Services;
 use App\Support\PurchaseOrderCurrency;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\View;
+use Illuminate\Support\Str;
+use Illuminate\Support\Facades\Log;
 
 class PurchaseOrderPdfService
 {
@@ -171,6 +173,7 @@ class PurchaseOrderPdfService
     {
         $company = $data['company'];
         $vendor = $data['vendor'];
+        $poNumber = (string) ($data['po_number'] ?? '');
         $items = $data['items'];
         $taxRate = (float) ($data['tax_rate'] ?? 0);
         $subtotal = (float) $data['subtotal'];
@@ -184,6 +187,19 @@ class PurchaseOrderPdfService
         );
 
         $poDateRaw = (string) $data['po_date'];
+
+        // Runtime assertion: ensure vendor slug in PO number matches vendor name
+        if ($poNumber !== '' && ! Str::contains(strtoupper($poNumber), strtoupper(Str::slug($vendor['name'] ?? '', '')))) {
+            Log::error('PO vendor mismatch', [
+                'po_number' => $poNumber,
+                'vendor_name' => $vendor['name'] ?? null,
+                'vendor_id' => $vendor['id'] ?? null,
+            ]);
+
+            throw new \RuntimeException(
+                "PO generation aborted: vendor in PO number does not match vendor in payload. PO: {$poNumber} | Vendor: {$vendor['name']}"
+            );
+        }
         try {
             $poDate = preg_match('/^\d{1,2}\/\d{1,2}\/\d{4}$/', $poDateRaw)
                 ? Carbon::createFromFormat('d/m/Y', $poDateRaw)
@@ -256,6 +272,18 @@ class PurchaseOrderPdfService
         $mrf = $data['mrf'];
         $quotation = $data['quotation'];
         $vendor = $data['vendor'];
+        // Runtime assertion: ensure vendor slug in PO number matches vendor name
+        if ($poNumber !== '' && ! Str::contains(strtoupper($poNumber), strtoupper(Str::slug($vendor['name'] ?? '', '')))) {
+            Log::error('PO vendor mismatch', [
+                'po_number' => $poNumber,
+                'vendor_name' => $vendor['name'] ?? null,
+                'vendor_id' => $vendor['id'] ?? null,
+            ]);
+
+            throw new \RuntimeException(
+                "PO generation aborted: vendor in PO number does not match vendor in payload. PO: {$poNumber} | Vendor: {$vendor['name']}"
+            );
+        }
         $company = $this->normalizeCompany($data['company']);
         $items = $data['items'];
         $taxRate = (float) ($data['tax_rate'] ?? $mrf['tax_rate'] ?? 0);
