@@ -78,15 +78,13 @@ class TripRequestNotificationService
             $trip->destination ?? '—'
         );
 
-        $actionUrl = $this->buildFrontendUrl('/trip-requests/' . $trip->id);
-
         $this->notifyUsersByRoles(
             $trip,
             ['logistics_manager', 'logistics_officer', 'supply_chain_director', 'supply_chain', 'procurement_manager', 'procurement'],
             'trip_request_submitted',
             'New trip request',
             $message,
-            $actionUrl
+            '/trip-requests/' . $trip->id
         );
 
         $emails = User::query()
@@ -119,7 +117,7 @@ class TripRequestNotificationService
             'trip_request_director_review',
             'Trip request awaiting approval',
             $message,
-            $this->buildFrontendUrl('/trip-requests/' . $trip->id)
+            '/trip-requests/' . $trip->id
         );
     }
 
@@ -137,15 +135,12 @@ class TripRequestNotificationService
             $reason ? ': ' . $reason : ''
         );
 
-        $actionUrl = $this->buildFrontendUrl('/trip-requests/' . $trip->id);
-
         $this->notifyUser(
             $requester,
             $trip,
             'trip_request_changes_requested',
             'Changes requested on your trip request',
-            $message,
-            $actionUrl,
+            '/trip-requests/' . $trip->id,
             [
                 'reviewer_id' => $reviewer->id,
                 'reviewer_name' => $reviewer->name,
@@ -381,7 +376,7 @@ class TripRequestNotificationService
             'trip_request_rejected',
             'Trip request rejected',
             $message,
-            $this->buildFrontendUrl('/department')
+            '/department'
         );
     }
 
@@ -447,15 +442,8 @@ class TripRequestNotificationService
             'trip_request_review',
             'Trip request review update',
             $message,
-            $this->buildFrontendUrl('/trip-requests/' . $trip->id)
+            '/trip-requests/' . $trip->id
         );
-    }
-
-    private function buildFrontendUrl(string $path): string
-    {
-        $base = rtrim((string) config('app.frontend_url', config('app.url', 'http://localhost')), '/');
-
-        return $base . '/' . ltrim($path, '/');
     }
 
     private function notifyUser(
