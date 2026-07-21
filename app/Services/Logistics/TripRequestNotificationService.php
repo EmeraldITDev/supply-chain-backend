@@ -119,6 +119,15 @@ class TripRequestNotificationService
             $message,
             '/trip-requests/' . $trip->id
         );
+
+        User::query()
+            ->whereIn('supply_chain_role', ['supply_chain_director', 'supply_chain'])
+            ->whereNotNull('email')
+            ->pluck('email')
+            ->filter()
+            ->unique(fn ($e) => strtolower((string) $e))
+            ->values()
+            ->each(fn (string $email) => $this->workflowNotifications->notifyTripRequestForwardedToDirectorEmail($trip, $forwardedBy, (string) $email));
     }
 
     public function notifyChangesRequested(Trip $trip, User $reviewer, ?string $reason = null): void

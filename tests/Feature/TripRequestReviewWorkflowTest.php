@@ -2,9 +2,11 @@
 
 namespace Tests\Feature;
 
+use App\Mail\TripRequestForwardedMail;
 use App\Models\Logistics\Trip;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Mail;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
@@ -107,5 +109,60 @@ class TripRequestReviewWorkflowTest extends TestCase
         ]);
 
         $this->assertNotEmpty($response->json('trip.audit_trail'));
+    }
+
+    public function test_forwarding_trip_request_sends_email_to_supply_chain_director(): void
+    {
+        Mail::fake();
+
+        $logisticsManager = User::factory()->create([
+            'name' => 'Logistics Manager',
+            'email' => 'logistics@example.com',
+            'supply_chain_role' => 'logistics_manager',
+        ]);
+
+        $director = User::factory()->create([
+            'name' => 'SCD',
+            'email' => 'director@example.com',
+            'supply_chain_role' => 'supply_chain_director',
+        ]);
+
+        $trip = Trip::create([
+            'trip_code' => 'TRQ-20260721-TEST2',
+            'title' => 'Trip request: Lagos',
+            'purpose' => 'Site visit',
+            'origin' => 'Abuja',
+            'destination' => 'Lagos',
+            'scheduled_departure_at' => now()->addDays(3),
+            'scheduled_arrival_at' => now()->addDays(3)->addHours(2),
+            'passenger_user_ids' => [$logisticsManager->id],
+            'status' => Trip::STATUS_SUBMITTED,
+            'workflow_stage' => Trip::WORKFLOW_TRIP_REQUEST,
+            'approval_status' => 'submitted',
+            'trip_type' => Trip::TYPE_PERSONNEL,
+            'booking_scope' => Trip::BOOKING_SCOPE_WITHIN_STATE,
+            'accommodation_required' => true,
+            'accommodation_name' => 'Hotel A',
+            'accommodation_estimated_cost' => 5000000,
+            'escort_required' => true,
+            'escort_description' => 'Police escort',
+        ]);
+
+        Sanctum::actingAs($logisticsManager);
+
+        $response = $this->postJson('/api/trip-requests/' . $trip->id . '/logistics-review', [
+            'accommodation_name' => 'Hotel B',
+            'accommodation_estimated_cost' => 3200000,
+            'escort_description' => 'Armed guard',
+            'comments' => 'Approved for budget review',
+            'reason' => 'Hotel A exceeds approved budget',
+            'action' => 'forward',
+        ]);
+
+        $response->assertOk();
+
+        Mail::assertSent(TripRequestForwardedMail::class, function (TripRequestForwardedMail $mail) use ($director) {
+            return $mail->hasTo($director->email);
+        });
     }
 }
