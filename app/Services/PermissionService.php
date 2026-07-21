@@ -505,6 +505,15 @@ class PermissionService
             return false;
         }
 
+        // Allow uploads immediately after a PO number is present even if the
+        // workflow_state has not yet been transitioned to PO_GENERATED. This
+        // covers the direct PO generation flow where the frontend saves the
+        // PO number and then uploads documents before the async PDF job
+        // completes and updates workflow_state.
+        if (trim((string) ($mrf->po_number ?? '')) !== '') {
+            return $this->canManageDeliveryDocuments($user);
+        }
+
         if ($type === ProcurementDocument::TYPE_GRN) {
             return $this->canCompleteGRN($user, $mrf);
         }
