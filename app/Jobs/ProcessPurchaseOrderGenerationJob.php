@@ -94,6 +94,13 @@ class ProcessPurchaseOrderGenerationJob implements ShouldQueue
             $poFileName = 'po_'.$poNumber.'_emerald_v2_'.time().'.pdf';
             $poPath = 'purchase-orders/'.date('Y/m').'/'.$poFileName;
 
+            if ($disk !== 's3') {
+                $directory = dirname($poPath);
+                if (! empty($directory) && ! Storage::disk($disk)->exists($directory)) {
+                    Storage::disk($disk)->makeDirectory($directory, 0755, true);
+                }
+            }
+
             $storeStarted = microtime(true);
             Storage::disk($disk)->put($poPath, $pdfBinary);
             $poUrl = $this->fileUrl($poPath, $disk);

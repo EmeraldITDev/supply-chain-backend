@@ -2582,12 +2582,19 @@ class MRFController extends Controller
             ], 404);
         }
 
-        if (empty($mrf->unsigned_po_url) || empty($mrf->po_number)) {
+        if (empty($mrf->po_number)) {
             return response()->json([
                 'success' => false,
                 'error' => 'PO not generated yet',
                 'code' => 'NO_PO',
             ], 404);
+        }
+
+        if (empty($mrf->unsigned_po_url)) {
+            Log::info('PO download: unsigned_po_url missing, regenerating PDF from current MRF data', [
+                'mrf_id' => $mrf->mrf_id,
+                'po_number' => $mrf->po_number,
+            ]);
         }
 
         try {
@@ -2604,6 +2611,12 @@ class MRFController extends Controller
             try {
                 $disk = $this->getStorageDisk();
                 $poPath = 'purchase-orders/'.date('Y/m').'/po_'.$mrf->po_number.'_emerald_v2_'.time().'.pdf';
+                if ($disk !== 's3') {
+                    $directory = dirname($poPath);
+                    if (! empty($directory) && ! Storage::disk($disk)->exists($directory)) {
+                        Storage::disk($disk)->makeDirectory($directory, 0755, true);
+                    }
+                }
                 Storage::disk($disk)->put($poPath, $pdfContent);
                 $freshUrl = $this->getFileUrl($poPath, $disk);
                 if (! empty($freshUrl)) {
