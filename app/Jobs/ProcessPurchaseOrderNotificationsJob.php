@@ -43,7 +43,7 @@ class ProcessPurchaseOrderNotificationsJob implements ShouldQueue
             return;
         }
 
-        $action = $this->isRegeneration ? 'updated' : 'generated_po';
+        $action = $this->isRegeneration ? 'approved' : 'generated_po';
         $remarks = $this->isRegeneration
             ? "PO regenerated after rejection: {$this->poNumber}"
             : "PO generated: {$this->poNumber}";
