@@ -13,14 +13,13 @@
             padding: 20px;
         }
         a { color: inherit; text-decoration: none; }
-        a:hover { text-decoration: underline; }
         .header-table { width: 100%; border-collapse: collapse; margin-bottom: 18px; }
         .header-left { width: 70%; vertical-align: top; }
         .header-right { width: 30%; text-align: right; vertical-align: top; }
         .company-name { font-size: 16px; font-weight: bold; margin-bottom: 6px; }
         .company-contact { font-size: 8.5px; line-height: 1.5; color: #222; margin-bottom: 4px; }
         .company-contact a { color: #222; }
-        .company-contact a.website { color: #1a4b8c; text-decoration: underline; }
+        .company-contact a.website { color: #1a4b8c; text-decoration: none; }
         .document-title { font-size: 28px; font-weight: 300; color: #4696b9; margin: 0 0 16px; letter-spacing: 0.01em; }
         .meta-table { width: 100%; border-collapse: collapse; margin-bottom: 20px; border-bottom: 1px solid #cbd5e1; }
         .meta-table th,
@@ -70,10 +69,10 @@
     <table class="header-table">
         <tr>
             <td class="header-left">
-                <div class="company-name">{{ $company['name'] }}</div>
+                <div class="company-name">{{ $company['name'] ?? 'Emerald Industrial Co. FZE' }}</div>
                 <div class="company-contact">{!! nl2br(e($company['address'] ?? '')) !!}</div>
                 @if (!empty($company['email']))
-                    <div class="company-contact"><a href="mailto:{{ $company['email'] }}">{{ $company['email'] }}</a></div>
+                    <div class="company-contact">{{ $company['email'] }}</div>
                 @endif
                 @if (!empty($company['website']))
                     <div class="company-contact"><a class="website" href="{{ $company['website'] }}">{{ $company['website'] }}</a></div>
@@ -85,7 +84,7 @@
         </tr>
     </table>
 
-    <div class="document-title">{{ $document_title }}</div>
+    <div class="document-title">{{ $document_title ?? 'Purchase Order' }}</div>
 
     <table class="meta-table">
         <tr>
@@ -143,13 +142,10 @@
     <table class="footer-table">
         <tr>
             <td class="footer-left">
-                <div class="footer-block">
-                    <span class="footer-label">Invoice submission:</span>
-                    <a href="mailto:{{ $invoice_submission_to }}">{{ $invoice_submission_to }}</a>
+                <div class="footer-block" style="margin-bottom: 12px;">
+                    <span class="footer-label">Invoice submission:</span> {{ $invoice_submission_to }}
                     @if (!empty($invoice_submission_cc))
-                        <br />
-                        <span class="footer-label">cc:</span>
-                        {{ $invoice_submission_cc }}
+                        cc: {{ $invoice_submission_cc }}
                     @endif
                 </div>
 
