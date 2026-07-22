@@ -51,14 +51,16 @@ class MrfObserver
 
         $slug = Str::slug($vendor->name ?? '', '');
         if ($slug !== '' && ! Str::contains(strtoupper($po), strtoupper($slug))) {
-            Log::error('MRF saving: PO number vendor slug mismatch', [
+            Log::info('MRF saving: PO number vendor slug mismatch. Wiping old PO number to allow auto-regeneration.', [
                 'mrf_id' => $mrf->mrf_id ?? $mrf->id ?? null,
                 'po_number' => $po,
                 'vendor_name' => $vendor->name ?? null,
                 'vendor_id' => $vendorId,
             ]);
 
-            throw new \RuntimeException('PO vendor mismatch: vendor slug not present in po_number');
+            // SELF-HEALING: Instead of crashing, wipe the invalid PO number
+            $mrf->po_number = null;
+            return;
         }
     }
 }
