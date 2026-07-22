@@ -27,12 +27,53 @@ class PoNumberGenerator
 
     /**
      * Strip all non-alphanumeric characters, preserve casing, cap length.
-     * Accepts a Vendor model or string name to guarantee consistency.
+     * Intelligently extracts the clean name whether given a Model, Array, JSON, or ID code.
      */
-    public function normalizeSupplierToken(Vendor|string|null $supplier): string
+    public function normalizeSupplierToken(mixed $supplier): string
     {
-        $name = $supplier instanceof Vendor ? $supplier->name : $supplier;
-        $token = preg_replace('/[^A-Za-z0-9]/', '', (string) $name) ?? '';
+        $name = null;
+
+        // 1. If passed an Eloquent Vendor Model
+        if ($supplier instanceof Vendor) {
+            $name = $supplier->name ?: $supplier->code;
+        } 
+        // 2. If passed an array (e.g., ['id' => 211, 'vendor_id' => 'V158', 'name' => 'FEMBOSCO...'])
+        elseif (is_array($supplier) || $supplier instanceof \ArrayAccess) {
+            $name = $supplier['name'] ?? $supplier['company_name'] ?? $supplier['vendor_name'] ?? null;
+        } 
+        // 3. If passed a JSON string or serialized object string
+        elseif (is_string($supplier) && (str_starts_with(trim($supplier), '{') || str_starts_with(trim($supplier), '['))) {
+            $decoded = json_decode($supplier, true);
+            if (is_array($decoded)) {
+                $name = $decoded['name'] ?? $decoded['company_name'] ?? $decoded['vendor_name'] ?? null;
+            }
+        } 
+        // 4. If passed a standard PHP object with a name property
+        elseif (is_object($supplier) && isset($supplier->name)) {
+            $name = $supplier->name;
+        } 
+        // 5. If passed a string or number (like "FEMBOSCO" or "V158")
+        elseif (is_scalar($supplier)) {
+            $name = trim((string) $supplier);
+            
+            // If it passed a vendor code or ID like "V158" or "14", look up the real company name from DB!
+            if (preg_match('/^(V?\d+)$/i', $name)) {
+                $dbVendor = Vendor::where('code', $name)
+                    ->orWhere('vendor_id', $name)
+                    ->orWhere('id', $name)
+                    ->first();
+                    
+                if ($dbVendor && !empty($dbVendor->name)) {
+                    $name = $dbVendor->name;
+                }
+            }
+        }
+
+        // Fallback if name extraction failed
+        $name = $name ?: (is_scalar($supplier) ? (string) $supplier : '');
+        
+        // Strip non-alphanumeric characters for clean PO numbering
+        $token = preg_replace('/[^A-Za-z0-9]/', '', $name) ?? '';
 
         if ($token === '') {
             return self::FALLBACK_TOKEN;
@@ -59,7 +100,7 @@ class PoNumberGenerator
     /**
      * Build (without allocating a serial) the prefix for a supplier on a day.
      */
-    public function prefixFor(Vendor|string $supplier, ?\DateTimeInterface $date = null): string
+    public function prefixFor(mixed $supplier, ?\DateTimeInterface $date = null): string
     {
         return 'PO-' . $this->formatDatePart($date) . '-' . $this->normalizeSupplierToken($supplier) . '-';
     }
@@ -67,16 +108,15 @@ class PoNumberGenerator
     /**
      * Allocate and return the next unique PO number for the supplier/day.
      */
-    public function generate(Vendor|string $supplier, ?\DateTimeInterface $date = null): string
+    public function generate(mixed $supplier, ?\DateTimeInterface $date = null): string
     {
         $datePart = $this->formatDatePart($date);
         $token = $this->normalizeSupplierToken($supplier);
         $prefix = "PO-{$datePart}-{$token}-";
         
-        // Scope by vendor ID when a Vendor object is passed to prevent string-drift sequence fragmentation
-        $scopeKey = $supplier instanceof Vendor 
-            ? "{$datePart}|ID:{$supplier->id}|{$token}" 
-            : "{$datePart}|{$token}";
+        // Scope cleanly to avoid collisions
+        $vendorId = $supplier instanceof Vendor ? $supplier->id : (is_array($supplier) ? ($supplier['id'] ?? null) : null);
+        $scopeKey = $vendorId ? "{$datePart}|ID:{$vendorId}|{$token}" : "{$datePart}|{$token}";
 
         for ($attempt = 0; $attempt < 10; $attempt++) {
             $serial = $this->nextSerial($scopeKey, $prefix);
@@ -87,13 +127,11 @@ class PoNumberGenerator
             }
         }
 
-        // Extremely defensive fallback: append a short unique suffix.
         return $prefix . $this->formatSerial($this->nextSerial($scopeKey, $prefix)) . '-' . strtoupper(substr(uniqid('', true), -4));
     }
 
     /**
      * Atomically increment and return the serial for the scope key.
-     * PostgreSQL-safe: Avoids try/catch QueryException blocks that permanently abort active transactions.
      */
     private function nextSerial(string $scopeKey, string $prefix): int
     {
@@ -104,7 +142,6 @@ class PoNumberGenerator
                 ->first();
 
             if (! $sequence) {
-                // Use firstOrCreate to prevent PostgreSQL transaction aborts during concurrent inserts
                 PoNumberSequence::query()->firstOrCreate(
                     ['scope_key' => $scopeKey],
                     ['last_serial' => $this->highestExistingSerial($prefix)]
@@ -124,7 +161,7 @@ class PoNumberGenerator
     }
 
     /**
-     * Check across all possible order tables to ensure the PO number does not already exist.
+     * Check across all possible order tables safely by verifying the column exists first.
      */
     private function poNumberExists(string $poNumber): bool
     {
@@ -132,9 +169,9 @@ class PoNumberGenerator
             return true;
         }
 
-        // Safely check dedicated PO, SRF, or Logistics tables if they exist in your database schema
+        // Only query tables if they actually possess the po_number column (Prevented SQL crash!)
         foreach (['purchase_orders', 's_r_f_s', 'logistics_requests'] as $table) {
-            if (Schema::hasTable($table) && DB::table($table)->where('po_number', $poNumber)->exists()) {
+            if (Schema::hasColumn($table, 'po_number') && DB::table($table)->where('po_number', $poNumber)->exists()) {
                 return true;
             }
         }
@@ -152,7 +189,7 @@ class PoNumberGenerator
 
         $tables = ['m_r_f_s'];
         foreach (['purchase_orders', 's_r_f_s', 'logistics_requests'] as $table) {
-            if (Schema::hasTable($table)) {
+            if (Schema::hasColumn($table, 'po_number')) {
                 $tables[] = $table;
             }
         }
