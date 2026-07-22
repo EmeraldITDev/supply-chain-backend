@@ -2582,7 +2582,7 @@ class MRFController extends Controller
             ], 404);
         }
 
-        if (empty($mrf->po_number)) {
+        if (empty($mrf->po_number) && empty($mrf->unsigned_po_url)) {
             return response()->json([
                 'success' => false,
                 'error' => 'PO not generated yet',
@@ -2590,10 +2590,26 @@ class MRFController extends Controller
             ], 404);
         }
 
-        if (empty($mrf->unsigned_po_url)) {
-            Log::info('PO download: unsigned_po_url missing, regenerating PDF from current MRF data', [
+        if (empty($mrf->po_number) && !empty($mrf->unsigned_po_url)) {
+            $storedPdf = $this->resolveStoredUnsignedPoBinary($mrf);
+            if (is_string($storedPdf) && $storedPdf !== '') {
+                Log::info('PO download: serving stored unsigned PO PDF for MRF with missing po_number', [
+                    'mrf_id' => $mrf->mrf_id,
+                    'unsigned_po_url' => $mrf->unsigned_po_url,
+                ]);
+
+                $filenameBase = $mrf->formatted_id ?: $mrf->mrf_id;
+                $filename = "PO-{$filenameBase}.pdf";
+
+                return response($storedPdf, 200)
+                    ->header('Content-Type', 'application/pdf')
+                    ->header('Content-Disposition', 'inline; filename="'.$filename.'"')
+                    ->header('X-PO-Source', 'stored_pdf');
+            }
+
+            Log::warning('PO download: unable to resolve stored unsigned PO PDF for MRF with missing po_number; falling back to regeneration', [
                 'mrf_id' => $mrf->mrf_id,
-                'po_number' => $mrf->po_number,
+                'unsigned_po_url' => $mrf->unsigned_po_url,
             ]);
         }
 
@@ -2992,7 +3008,7 @@ class MRFController extends Controller
             ?: 'Net 30 days';
 
         return app(PurchaseOrderPdfService::class)->renderMrfPdf([
-            'po_number' => $mrf->po_number,
+            'po_number' => $mrf->po_number ?: ($mrf->formatted_id ?: $mrf->mrf_id),
             'po_date' => $poDate,
             'company' => $company,
             'vendor' => $vendorPdf,

@@ -125,6 +125,8 @@ class MRF extends Model
             $q->where(function ($inner) {
                 $inner->whereNotNull('po_number')->where('po_number', '!=', '');
             })->orWhere(function ($inner) {
+                $inner->whereNotNull('unsigned_po_url')->where('unsigned_po_url', '!=', '');
+            })->orWhere(function ($inner) {
                 $inner->whereNotNull('po_draft_saved_at')
                     ->where(function ($unsigned) {
                         $unsigned->whereNull('unsigned_po_url')
@@ -980,7 +982,7 @@ class MRF extends Model
      */
     public function freshUnsignedPoStreamUrl(): ?string
     {
-        if (empty($this->po_number) || empty($this->unsigned_po_url)) {
+        if (empty($this->unsigned_po_url)) {
             return null;
         }
 
