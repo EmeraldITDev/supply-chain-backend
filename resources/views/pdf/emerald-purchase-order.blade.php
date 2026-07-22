@@ -101,7 +101,7 @@
                 @endif
             </td>
             <td>
-                <div class="meta-value">{{ $ship_to_company }}</div>
+                <div class="meta-value">{{ $ship_to_address ?? $ship_to_company }}</div>
             </td>
             <td>
                 <div class="meta-value strong">{{ $po_number }}</div>
