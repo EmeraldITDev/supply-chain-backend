@@ -1710,8 +1710,17 @@ class MRFWorkflowController extends Controller
             // If we deferred PO generation earlier, generate now using the
             // authoritative vendor resolved for the payload so the slug used
             // for the PO number matches the vendor shown in the PDF.
+            // NEW: Detect if the old PO number has the wrong company name and force a regeneration
+            
+            $resolvedVendor = $poData['resolved_vendor'] ?? null;
+            $expectedToken = app(\App\Services\PoNumberGenerator::class)->normalizeSupplierToken($resolvedVendor);
+
+            if (!empty($poNumber) && !str_contains((string) $poNumber, $expectedToken)) {
+                // The existing PO number contains a different company name! Wipe it.
+                $poNumber = null;
+            }
+
             if (empty($poNumber)) {
-                $resolvedVendor = $poData['resolved_vendor'] ?? null;
                 $poNumber = $this->generatePONumber($mrf, $resolvedVendor ?? null);
             }
 
