@@ -1697,6 +1697,11 @@ class MRFWorkflowController extends Controller
             }
         } else {
             // Mode 2: Auto-Generation — persist draft fields, queue PDF + notifications.
+            if ($isRegeneration) {
+                $mrf->po_number = null;
+                $request->merge(['po_number' => null]);
+                $poNumber = null;
+            }
             $poData = $this->resolvePoGenerationPayload($mrf, $rfq, $request, $fastTrack, $allowMissingRfq);
 
             if (! $poData['success']) {
@@ -1711,7 +1716,7 @@ class MRFWorkflowController extends Controller
             // authoritative vendor resolved for the payload so the slug used
             // for the PO number matches the vendor shown in the PDF.
             // NEW: Detect if the old PO number has the wrong company name and force a regeneration
-            
+
             $resolvedVendor = $poData['resolved_vendor'] ?? null;
             $expectedToken = app(\App\Services\PoNumberGenerator::class)->normalizeSupplierToken($resolvedVendor);
 
