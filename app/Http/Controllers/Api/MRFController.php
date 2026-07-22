@@ -625,7 +625,7 @@ class MRFController extends Controller
         $forPo = $request->boolean('for_po') || $request->boolean('forPo');
 
         $with = $forPo
-            ? ['priceComparisons.vendor:id,vendor_id,name']
+            ? ['priceComparisons.vendor:id,vendor_id,name', 'selectedVendor:id,vendor_id,name,email,phone,address,contact_person']
             : ['requester', 'directorApprover', 'executiveApprover', 'priceComparisons.vendor:id,vendor_id,name', 'items', 'attachments.uploader:id,name,email'];
 
         $mrf = MRF::where(function ($query) use ($id) {

@@ -1791,6 +1791,16 @@ class MRFWorkflowController extends Controller
                 'po_generation_failed_at' => null,
             ];
 
+            $resolvedVendor = $poData['resolved_vendor'] ?? null;
+            if ($resolvedVendor) {
+                $draftUpdate['selected_vendor_id'] = $resolvedVendor->id;
+            } else {
+                $selectedVendor = $this->resolveSelectedVendor($request, $mrf);
+                if ($selectedVendor) {
+                    $draftUpdate['selected_vendor_id'] = $selectedVendor->id;
+                }
+            }
+
             if ($mrf->is_po_linked || ($mrf->source ?? 'standard') === 'po_generated') {
                 $draftUpdate['linked_po_id'] = $poNumber;
             }
@@ -1822,7 +1832,10 @@ class MRFWorkflowController extends Controller
                     'is_regeneration' => $isRegeneration,
                     'has_rfq' => (bool) $rfq,
                 ],
-            )->afterResponse();
+            )
+                ->onConnection('database')
+                ->onQueue(config('queue.connections.database.queue', 'default'))
+                ->afterResponse();
 
             Log::info('PO generation queued', [
                 'mrf_id' => $mrf->mrf_id,
@@ -3047,13 +3060,9 @@ class MRFWorkflowController extends Controller
             'po_generation_failed_at' => null,
         ];
 
-        // Persist selected vendor when provided from the PO modal (vendor directory selection)
-        if ($request->exists('selectedVendorId') && filled($request->input('selectedVendorId'))) {
-            $sv = $request->input('selectedVendorId');
-            $vendor = Vendor::query()->where('vendor_id', $sv)->first();
-            if ($vendor) {
-                $draftUpdate['selected_vendor_id'] = $vendor->id;
-            }
+        $selectedVendor = $this->resolveSelectedVendor($request, $mrf);
+        if ($selectedVendor) {
+            $draftUpdate['selected_vendor_id'] = $selectedVendor->id;
         }
 
         $resolvedPoNumber = $draftUpdate['po_number'];
@@ -3169,9 +3178,9 @@ class MRFWorkflowController extends Controller
 
     // 2. Wrap PO number allocation and persistence in a single DB transaction
     return DB::transaction(function () use ($mrf, $vendor, $supplierName) {
-        
+
         // --- THIS IS THE CRITICAL CHANGE ---
-        // Instead of passing only $supplierName (a string), we pass $vendor (the exact Database Model) 
+        // Instead of passing only $supplierName (a string), we pass $vendor (the exact Database Model)
         // if we have it, falling back to $supplierName only if $vendor is null.
         $poNumber = app(\App\Services\PoNumberGenerator::class)->generate($vendor ?: $supplierName);
         // -----------------------------------
@@ -3814,6 +3823,46 @@ class MRFWorkflowController extends Controller
         }
 
         return $standard . "\n\n" . $custom;
+    }
+
+    private function resolveSelectedVendor(Request $request, MRF $mrf): ?Vendor
+    {
+        foreach (['selectedVendorId', 'selected_vendor_id', 'vendor_id', 'vendorId', 'vendor_uuid', 'vendorUuid', 'synthetic_vendor_id'] as $key) {
+            $value = $request->input($key);
+            if ($value === null || $value === '') {
+                continue;
+            }
+
+            if (is_array($value)) {
+                $candidate = $value['id'] ?? $value['vendor_id'] ?? $value['vendorId'] ?? null;
+                if ($candidate === null || $candidate === '') {
+                    continue;
+                }
+                $value = $candidate;
+            }
+
+            if (is_numeric($value) || is_string($value)) {
+                $trimmed = trim((string) $value);
+                if ($trimmed === '') {
+                    continue;
+                }
+
+                $vendor = Vendor::query()->where('vendor_id', $trimmed)->first();
+                if (! $vendor && is_numeric($trimmed)) {
+                    $vendor = Vendor::query()->find((int) $trimmed);
+                }
+
+                if ($vendor) {
+                    return $vendor;
+                }
+            }
+        }
+
+        if (! empty($mrf->selected_vendor_id)) {
+            return Vendor::query()->find($mrf->selected_vendor_id);
+        }
+
+        return null;
     }
 
     /**

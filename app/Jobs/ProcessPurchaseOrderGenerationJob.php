@@ -154,7 +154,9 @@ class ProcessPurchaseOrderGenerationJob implements ShouldQueue
             $fastTrack,
             $isRegeneration,
             $hasRfq,
-        );
+        )
+            ->onConnection('database')
+            ->onQueue(config('queue.connections.database.queue', 'default'));
 
         Log::info('PO generation job completed', [
             'mrf_id' => $mrf->mrf_id,

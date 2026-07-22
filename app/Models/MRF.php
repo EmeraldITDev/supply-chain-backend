@@ -317,6 +317,28 @@ class MRF extends Model
             ? (string) $this->po_payment_terms
             : null;
 
+        $selectedVendor = null;
+        $selectedVendorId = null;
+
+        if ($this->relationLoaded('selectedVendor')) {
+            $selectedVendor = $this->selectedVendor;
+        } elseif (! empty($this->selected_vendor_id)) {
+            $selectedVendor = $this->selectedVendor()->first();
+        }
+
+        if ($selectedVendor) {
+            $selectedVendorId = (string) ($selectedVendor->vendor_id ?? '');
+            $selectedVendor = [
+                'id' => $selectedVendor->vendor_id,
+                'vendor_id' => $selectedVendor->vendor_id,
+                'name' => $selectedVendor->name,
+                'email' => $selectedVendor->email,
+                'phone' => $selectedVendor->phone,
+                'address' => $selectedVendor->address,
+                'contact_person' => $selectedVendor->contact_person,
+            ];
+        }
+
         return array_merge([
             'po_number' => $this->po_number,
             'poNumber' => $this->po_number,
@@ -351,6 +373,10 @@ class MRF extends Model
             'unsignedPoUrl' => $this->unsigned_po_url,
             'signed_po_url' => $this->signed_po_url,
             'signedPoUrl' => $this->signed_po_url,
+            'selected_vendor_id' => $this->selected_vendor_id !== null ? (int) $this->selected_vendor_id : null,
+            'selectedVendorId' => $selectedVendorId,
+            'selected_vendor' => $selectedVendor,
+            'selectedVendor' => $selectedVendor,
         ], $this->currencyApiFields(), $this->poDraftApiFields());
     }
 
