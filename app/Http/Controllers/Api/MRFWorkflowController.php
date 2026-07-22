@@ -1829,7 +1829,7 @@ class MRFWorkflowController extends Controller
                         'accept' => (int) round((microtime(true) - $genStarted) * 1000),
                     ],
                 ],
-            ], 202);
+            ], 200);
         }
 
         // Calculate tax if tax_rate is provided (file upload path only)
@@ -1967,7 +1967,7 @@ class MRFWorkflowController extends Controller
                 'fastTracked' => $fastTrack,
                 'synthetic_po' => ! $rfq && ($fastTrack || $allowMissingRfq),
                 'syntheticPo' => ! $rfq && ($fastTrack || $allowMissingRfq),
-                'priceComparisons' => $mrf->priceComparisons()->get(),
+                'priceComparisons' => $mrf->priceComparisons()->select('id', 'mrf_id', 'vendor_id', 'total_price', 'is_selected')->get()->toArray(),
                     'payment_milestones' => $paymentMilestones,
                     'paymentMilestones' => $paymentMilestones,
                     ...$mrf->currencyApiFields(),
