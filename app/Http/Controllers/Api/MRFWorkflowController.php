@@ -3911,7 +3911,10 @@ class MRFWorkflowController extends Controller
     private function findMrfByAnyId(string $id, array $with = []): ?MRF
     {
         $query = MRF::query()->where(function ($q) use ($id) {
-            $q->where('mrf_id', $id)->orWhere('formatted_id', $id);
+            $q->where('mrf_id', $id)
+                ->orWhere('formatted_id', $id)
+                ->orWhere('po_number', $id)
+                ->orWhere('linked_po_id', $id);
             if ($id !== '' && is_numeric((string) $id)) {
                 $q->orWhere('id', (int) $id);
             }

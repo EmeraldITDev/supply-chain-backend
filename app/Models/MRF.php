@@ -339,9 +339,11 @@ class MRF extends Model
             ];
         }
 
+        $poNumber = $this->effectivePoNumber();
+
         return array_merge([
-            'po_number' => $this->po_number,
-            'poNumber' => $this->po_number,
+            'po_number' => $poNumber,
+            'poNumber' => $poNumber,
             'po_type' => $this->po_type,
             'poType' => $this->po_type,
             'ship_to_address' => $this->ship_to_address,
@@ -402,6 +404,19 @@ class MRF extends Model
             'linked_po_id' => $linkedPoId,
             'linkedPoId' => $linkedPoId,
         ];
+    }
+
+    public function effectivePoNumber(): ?string
+    {
+        if (filled($this->po_number)) {
+            return $this->po_number;
+        }
+
+        if (filled($this->linked_po_id)) {
+            return $this->linked_po_id;
+        }
+
+        return null;
     }
 
     /**

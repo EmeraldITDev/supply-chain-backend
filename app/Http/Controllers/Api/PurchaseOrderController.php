@@ -225,7 +225,8 @@ class PurchaseOrderController extends Controller
             ->where(function ($query) use ($id) {
                 $query->where('formatted_id', $id)
                     ->orWhere('mrf_id', $id)
-                    ->orWhere('po_number', $id);
+                    ->orWhere('po_number', $id)
+                    ->orWhere('linked_po_id', $id);
 
                 if (is_numeric($id)) {
                     $query->orWhere('id', (int) $id);

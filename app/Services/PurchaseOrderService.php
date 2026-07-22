@@ -58,7 +58,8 @@ class PurchaseOrderService
                 $query->where(function ($q) use ($prefix, $contains, $search) {
                     $q->where('mrf_id', 'like', $prefix)
                         ->orWhere('formatted_id', 'like', $prefix)
-                        ->orWhere('po_number', 'like', $prefix);
+                        ->orWhere('po_number', 'like', $prefix)
+                        ->orWhere('linked_po_id', 'like', $prefix);
                     if (strlen($search) >= 3) {
                         $q->orWhere('requester_name', 'like', $contains);
                     }
@@ -86,12 +87,14 @@ class PurchaseOrderService
     public function mapListRow(MRF $mrf): array
     {
         $vendor = $mrf->relationLoaded('selectedVendor') ? $mrf->selectedVendor : null;
+        $poNumber = $mrf->effectivePoNumber();
 
         return array_merge($mrf->poOriginApiFields(), $mrf->poDraftApiFields(), [
             'id' => $mrf->mrf_id,
             'numericId' => $mrf->id,
             'formattedId' => $mrf->formatted_id,
-            'poNumber' => $mrf->po_number,
+            'po_number' => $poNumber,
+            'poNumber' => $poNumber,
             'title' => $mrf->title,
             'status' => $mrf->status,
             'workflowState' => $mrf->workflow_state,
@@ -117,7 +120,8 @@ class PurchaseOrderService
             ->where(function ($query) use ($id) {
                 $query->where('formatted_id', $id)
                     ->orWhere('mrf_id', $id)
-                    ->orWhere('po_number', $id);
+                    ->orWhere('po_number', $id)
+                    ->orWhere('linked_po_id', $id);
 
                 if (is_numeric($id)) {
                     $query->orWhere('id', (int) $id);
@@ -140,11 +144,14 @@ class PurchaseOrderService
     {
         $paymentMilestones = $this->paymentScheduleService->paymentMilestonesForMrf($mrf);
 
+        $poNumber = $mrf->effectivePoNumber();
+
         return array_merge($mrf->poOriginApiFields(), $mrf->poDraftApiFields(), $mrf->currencyApiFields(), [
             'id' => $mrf->mrf_id,
             'numericId' => $mrf->id,
             'formattedId' => $mrf->formatted_id,
-            'poNumber' => $mrf->po_number,
+            'po_number' => $poNumber,
+            'poNumber' => $poNumber,
             'title' => $mrf->title,
             'category' => $mrf->category,
             'contractType' => $mrf->contract_type,

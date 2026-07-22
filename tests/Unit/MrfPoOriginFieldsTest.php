@@ -31,4 +31,19 @@ class MrfPoOriginFieldsTest extends TestCase
         ));
         $this->assertFalse(MRF::inferPoGeneratedFromJustification('Standard procurement request.'));
     }
+
+    public function test_po_form_api_fields_falls_back_to_linked_po_id_when_po_number_missing(): void
+    {
+        $mrf = new MRF([
+            'source' => 'po_generated',
+            'is_po_linked' => true,
+            'linked_po_id' => 'PO-2026-0615093045-A1B2C',
+            'po_number' => null,
+        ]);
+
+        $fields = $mrf->poFormApiFields();
+
+        $this->assertSame('PO-2026-0615093045-A1B2C', $fields['po_number']);
+        $this->assertSame('PO-2026-0615093045-A1B2C', $fields['poNumber']);
+    }
 }

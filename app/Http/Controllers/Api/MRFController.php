@@ -63,7 +63,9 @@ class MRFController extends Controller
     {
         return MRF::where(function ($query) use ($id) {
             $query->where('formatted_id', $id)
-                ->orWhere('mrf_id', $id);
+                ->orWhere('mrf_id', $id)
+                ->orWhere('po_number', $id)
+                ->orWhere('linked_po_id', $id);
 
             if (is_numeric($id)) {
                 $query->orWhere('id', (int) $id);
@@ -351,11 +353,12 @@ class MRFController extends Controller
 
         $like = '%'.$search.'%';
         $items = MRF::query()
-            ->select(['id', 'mrf_id', 'formatted_id', 'title', 'po_number'])
+            ->select(['id', 'mrf_id', 'formatted_id', 'title', 'po_number', 'linked_po_id'])
             ->where(function ($q) use ($like) {
                 $q->where('mrf_id', 'like', $like)
                     ->orWhere('formatted_id', 'like', $like)
                     ->orWhere('po_number', 'like', $like)
+                    ->orWhere('linked_po_id', 'like', $like)
                     ->orWhere('title', 'like', $like);
             })
             ->orderByDesc('updated_at')
@@ -366,7 +369,7 @@ class MRFController extends Controller
                 'mrfId' => $mrf->mrf_id,
                 'formattedId' => $mrf->formatted_id,
                 'title' => $mrf->title,
-                'poNumber' => $mrf->po_number,
+                'poNumber' => $mrf->effectivePoNumber(),
                 'label' => trim(($mrf->formatted_id ?: $mrf->mrf_id).' — '.($mrf->title ?? '')),
             ])
             ->values()
