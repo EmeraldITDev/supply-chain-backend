@@ -220,13 +220,16 @@ class PaymentScheduleService
         $this->validateMilestonePercentages($milestones);
 
         return DB::transaction(function () use ($mrf, $user, $input, $milestones) {
-            $schedule = PaymentSchedule::create([
-                'mrf_id' => $mrf->id,
-                'template_name' => $input['template_key'] ?? $input['templateKey'] ?? null,
-                'total_percentage_check' => 100,
-                'created_by' => $user->id,
-                'version' => 1,
-            ]);
+            $schedule = PaymentSchedule::updateOrCreate(
+                ['mrf_id' => $mrf->id], // The unique lookup condition
+                [
+                    'template_name' => $templateName ?? null,
+                    'total_percentage_check' => 100,
+                    'created_by' => $user->id,
+                    'version' => 1,
+                    // ... any other attributes you were passing in
+                ]
+            );
 
             $this->persistMilestones($schedule, $milestones);
 
