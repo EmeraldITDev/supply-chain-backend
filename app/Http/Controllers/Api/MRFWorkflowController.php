@@ -3131,43 +3131,43 @@ class MRFWorkflowController extends Controller
      * to ensure PO number and displayed supplier match.
      */
     private function generatePONumber(MRF $mrf, ?Vendor $vendor = null): string
-    {
-        // Resolve a Vendor object if not explicitly provided so we have a
-        // single authoritative source for both the supplier token and the
-        // persisted selected_vendor_id on the MRF.
-        if (! $vendor) {
-            $lineService = app(PriceComparisonPoLineService::class);
-            $rows = $lineService->selectedSupplierRows($mrf);
-            $resolved = $lineService->resolveVendorFromRows($rows);
+{
+    // 1. Resolve the authoritative Vendor object if not explicitly provided
+    if (! $vendor) {
+        $lineService = app(PriceComparisonPoLineService::class);
+        $rows = $lineService->selectedSupplierRows($mrf);
+        $resolved = $lineService->resolveVendorFromRows($rows);
 
-            if ($resolved && trim((string) $resolved->name) !== '') {
-                $vendor = $resolved;
-            } elseif ($mrf->selected_vendor_id) {
-                $vendor = $mrf->selectedVendor;
-            }
+        if ($resolved && trim((string) $resolved->name) !== '') {
+            $vendor = $resolved;
+        } elseif ($mrf->selected_vendor_id) {
+            $vendor = $mrf->selectedVendor;
+        }
+    }
+
+    $supplierName = $vendor ? (string) $vendor->name : $this->resolveSupplierNameForPo($mrf);
+
+    // 2. Wrap PO number allocation and persistence in a single DB transaction
+    return DB::transaction(function () use ($mrf, $vendor, $supplierName) {
+        
+        // --- THIS IS THE CRITICAL CHANGE ---
+        // Instead of passing only $supplierName (a string), we pass $vendor (the exact Database Model) 
+        // if we have it, falling back to $supplierName only if $vendor is null.
+        $poNumber = app(\App\Services\PoNumberGenerator::class)->generate($vendor ?: $supplierName);
+        // -----------------------------------
+
+        if ($vendor && ($mrf->selected_vendor_id !== $vendor->id)) {
+            DB::table('m_r_f_s')
+                ->where('id', $mrf->id)
+                ->update(['selected_vendor_id' => $vendor->id]);
+
+            // Keep the in-memory model consistent for callers that still hold the $mrf instance.
+            $mrf->selected_vendor_id = $vendor->id;
         }
 
-        $supplierName = $vendor ? (string) $vendor->name : $this->resolveSupplierNameForPo($mrf);
-
-        // Wrap PO number allocation and persistence of selected_vendor_id in
-        // a single DB transaction so the sequence allocation and MRF update
-        // cannot get out of sync.
-        return DB::transaction(function () use ($mrf, $vendor, $supplierName) {
-            $poNumber = app(\App\Services\PoNumberGenerator::class)->generate($supplierName);
-
-            if ($vendor && ($mrf->selected_vendor_id !== $vendor->id)) {
-                DB::table('m_r_f_s')
-                    ->where('id', $mrf->id)
-                    ->update(['selected_vendor_id' => $vendor->id]);
-
-                // Keep the in-memory model consistent for callers that still
-                // hold the $mrf instance.
-                $mrf->selected_vendor_id = $vendor->id;
-            }
-
-            return $poNumber;
-        });
-    }
+        return $poNumber;
+    });
+}
 
     /**
      * Resolve the supplier/vendor name used for the PO number token. Prefers the
