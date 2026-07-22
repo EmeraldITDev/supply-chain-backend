@@ -1617,12 +1617,18 @@ class MRFWorkflowController extends Controller
         $this->applyRequestedCurrency($request, $mrf);
 
         // Check if PO number already exists (for uniqueness)
-        if (MRF::where('po_number', $poNumber)->where('id', '!=', $mrf->id)->exists()) {
-            return response()->json([
-                'success' => false,
-                'error' => 'PO number already exists. Please use a different PO number.',
-                'code' => 'DUPLICATE_PO_NUMBER'
-            ], 422);
+        // NEW: In Auto-Generation mode, discard stale/duplicate numbers so the backend auto-generates a fresh one!
+        if (!empty($poNumber) && MRF::where('po_number', $poNumber)->where('id', '!=', $mrf->id)->exists()) {
+            if ($isFileUpload) {
+                return response()->json([
+                    'success' => false,
+                    'error' => 'PO number already exists. Please use a different PO number.',
+                    'code' => 'DUPLICATE_PO_NUMBER'
+                ], 422);
+            } else {
+                // Discard the conflicting number so lines 280+ automatically generate a fresh, unique sequence!
+                $poNumber = null;
+            }
         }
 
         $termsMode = $this->normalisePOTermsMode($request);
