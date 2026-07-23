@@ -941,6 +941,7 @@ class MRFController extends Controller
                 'executiveApprover:id,name,email',
                 'chairmanApprover:id,name,email',
                 'selectedVendor:id,vendor_id,name,email,phone,rating',
+                'paymentSchedule.milestones',
                 'rfqs' => fn ($query) => $query->with([
                     'quotations' => fn ($q) => $q->with([
                         'vendor:id,vendor_id,name,email,phone,rating',

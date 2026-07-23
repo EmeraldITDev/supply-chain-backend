@@ -1862,7 +1862,7 @@ class MRFWorkflowController extends Controller
                         'accept' => (int) round((microtime(true) - $genStarted) * 1000),
                     ],
                 ],
-            ], 200);
+            ], 202);
         }
 
         // Calculate tax if tax_rate is provided (file upload path only)
@@ -2012,7 +2012,7 @@ class MRFWorkflowController extends Controller
                 'resolved_vendors' => [],
                 'notifications_queued' => true,
             ]
-        ]);
+        ], 202);
     }
 
     /**
@@ -3119,6 +3119,47 @@ class MRFWorkflowController extends Controller
             ? \Illuminate\Support\Carbon::parse($draftUpdate['po_draft_saved_at'])->toIso8601String()
             : now()->toIso8601String();
 
+        // Queue background generation for draft so heavy rendering and notifications
+        // do not block the requester. Best-effort: attempt to build po_data payload
+        // and dispatch ProcessPurchaseOrderGenerationJob. If payload building fails
+        // we still return a 202 to indicate processing.
+        try {
+            $rfq = \App\Models\RFQ::where('mrf_id', $mrf->id)->with('items')->first();
+            $poPayload = $this->resolvePoGenerationPayload($mrf, $rfq, $request, $fastTrack, false);
+            if (!empty($poPayload['success']) && is_array($poPayload['data'])) {
+                $poDataForJob = $poPayload['data'];
+                $subtotalForJob = 0;
+                if (isset($poDataForJob['items']) && is_array($poDataForJob['items'])) {
+                    foreach ($poDataForJob['items'] as $it) {
+                        $unit = $it['unit_price'] ?? (($it['total_price'] ?? 0) / max(1, $it['quantity'] ?? 1));
+                        $subtotalForJob += ($unit * ($it['quantity'] ?? 1));
+                    }
+                }
+
+                ProcessPurchaseOrderGenerationJob::dispatch(
+                    $mrf->id,
+                    $user->id,
+                    [
+                        'po_number' => $draftUpdate['po_number'] ?? $mrf->po_number,
+                        'po_data' => $poDataForJob,
+                        'tax_rate' => (float) ($draftUpdate['tax_rate'] ?? 0),
+                        'tax_amount' => (float) ($draftUpdate['tax_amount'] ?? 0),
+                        'subtotal' => $subtotalForJob,
+                        'fast_track' => $fastTrack,
+                        'is_regeneration' => false,
+                        'has_rfq' => (bool) $rfq,
+                    ],
+                )
+                    ->onConnection('database')
+                    ->onQueue(config('queue.connections.database.queue', 'default'))
+                    ->afterResponse();
+
+                Log::info('PO draft generation queued', ['mrf_id' => $mrf->mrf_id, 'po_number' => $draftUpdate['po_number'] ?? $mrf->po_number]);
+            }
+        } catch (\Throwable $e) {
+            Log::warning('Failed to queue PO draft generation', ['mrf_id' => $mrf->mrf_id, 'error' => $e->getMessage()]);
+        }
+
         return response()->json([
             'success' => true,
             'message' => 'PO draft saved',
@@ -3148,7 +3189,7 @@ class MRFWorkflowController extends Controller
                     'db_write' => $dbMs,
                 ],
             ],
-        ]);
+        ], 202);
     }
 
     /**
