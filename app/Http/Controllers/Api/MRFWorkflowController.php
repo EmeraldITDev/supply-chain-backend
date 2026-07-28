@@ -216,6 +216,12 @@ class MRFWorkflowController extends Controller
                     ? ($locked->first_approval_by_role ?: MrfParallelFirstApprovalService::ROLE_SUPPLY_CHAIN_DIRECTOR)
                     : $locked->first_approval_by_role,
             ];
+
+            // 1. FORCE THE DATABASE UPDATE RIGHT HERE IN THE CONTROLLER
+            $locked->fill($approvalAttributes);
+            $locked->save(); // <--- This guarantees PostgreSQL writes the first_approval_by_role!
+
+            // 2. Let the service do any secondary parallel tasks (notifications, routing flags, etc.)
             $parallelService->persistPartialApproval(
                 $locked,
                 MrfParallelFirstApprovalService::ROLE_SUPPLY_CHAIN_DIRECTOR,
@@ -239,16 +245,15 @@ class MRFWorkflowController extends Controller
                 ]);
             }
 
-            // Parallel approvals persist their own history row explicitly via the service.
-            $approvalRecord = $isParallel
-                ? null
-                : MRFApprovalHistory::record(
-                    $locked,
-                    $isApproved ? 'approved' : 'rejected',
-                    'supply_chain_director',
-                    $user,
-                    $request->remarks,
-                );
+            // 3. UNCONDITIONALLY RECORD THE HISTORY ROW FOR BOTH STANDARD AND PARALLEL WORKFLOWS
+            // (If persistPartialApproval also attempts to write a row, remove it from the service so this single, clean recorder handles all history!)
+            $approvalRecord = MRFApprovalHistory::record(
+                $locked,
+                $isApproved ? 'approved' : 'rejected',
+                'supply_chain_director',
+                $user,
+                $request->remarks,
+            );
 
             Activity::create([
                 'type' => 'mrf_approved',

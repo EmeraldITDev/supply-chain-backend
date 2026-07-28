@@ -281,20 +281,36 @@ class MRF extends Model
                     });
             }),
             'scd', 'supply_chain_director', 'supply_chain' => $query->where(function ($q) {
-                $q->whereIn('workflow_state', [
-                    'parallel_first_approval',
+                $q->where(function ($inner) use ($role) {
+                // 1. Standard sequential states (removed parallel_first_approval from this list)
+                $inner->whereIn('workflow_state', [
                     'supply_chain_director_review',
                     'vendor_selected',
                     'invoice_received',
-                ])->orWhere(function ($inner) {
-                    // Only show PO signature items where unsigned PO exists and not yet signed
-                    $inner->where('workflow_state', 'po_generated')
-                        ->whereNotNull('unsigned_po_url')
-                        ->where('unsigned_po_url', '!=', '')
-                        ->where(function ($signed) {
-                            $signed->whereNull('signed_po_url')->orWhere('signed_po_url', '=', '');
-                        });
+                ])
+                // 2. PARALLEL FIX: Only include if THIS role has NOT approved it yet!
+                ->orWhere(function ($parallel) use ($role) {
+                    $parallel->where('workflow_state', 'parallel_first_approval')
+                            ->whereNotExists(function ($history) use ($role) {
+                                $history->select(DB::raw(1))
+                                        ->from('mrf_approval_history')
+                                        ->whereColumn('mrf_approval_history.mrf_id', 'm_r_f_s.id')
+                                        ->where('mrf_approval_history.stage', 'parallel_first_approval')
+                                        ->where('mrf_approval_history.performer_role', $role)
+                                        ->where('mrf_approval_history.action', 'approved');
+                            });
+                })
+                // 3. Your clean PO signature logic (kept exactly as you wrote it)
+                ->orWhere(function ($po) {
+                    $po->where('workflow_state', 'po_generated')
+                    ->whereNotNull('unsigned_po_url')
+                    ->where('unsigned_po_url', '!=', '')
+                    ->where(function ($signed) {
+                        $signed->whereNull('signed_po_url')->orWhere('signed_po_url', '=', '');
+                    });
                 });
+            });
+            
             })->where(function ($pendingQuery) use ($excludeApproverApproval): void {
                 $pendingQuery->where('workflow_state', '!=', MrfParallelFirstApprovalService::STATE)
                     ->orWhere(function ($parallelQuery) use ($excludeApproverApproval): void {
