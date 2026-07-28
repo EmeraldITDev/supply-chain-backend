@@ -282,26 +282,43 @@ class MRF extends Model
             }),
             'scd', 'supply_chain_director', 'supply_chain' => $query->where(function ($q) {
                 $q->where(function ($inner) use ($role) {
-                // 1. Standard sequential states (removed parallel_first_approval from this list)
+                // 1. Standard sequential states & stages (REMOVED 'parallel_first_approval' from both lists!)
                 $inner->whereIn('workflow_state', [
                     'supply_chain_director_review',
                     'vendor_selected',
                     'invoice_received',
                 ])
-                // 2. PARALLEL FIX: Only include if THIS role has NOT approved it yet!
-                ->orWhere(function ($parallel) use ($role) {
-                    $parallel->where('workflow_state', 'parallel_first_approval')
-                            ->whereNotExists(function ($history) use ($role) {
-                                $history->select(DB::raw(1))
-                                        ->from('mrf_approval_history')
-                                        ->whereColumn('mrf_approval_history.mrf_id', 'm_r_f_s.id')
-                                        ->where('mrf_approval_history.stage', 'parallel_first_approval')
-                                        ->where('mrf_approval_history.performer_role', $role)
-                                        ->where('mrf_approval_history.action', 'approved');
-                            });
-                })
-                // 3. Your clean PO signature logic (kept exactly as you wrote it)
-                ->orWhere(function ($po) {
+                ->orWhereIn('current_stage', [
+                    'supply_chain_director_review',
+                    'director_review',
+                    'final_approval',
+                ]);
+
+                // 2. PARALLEL WORKFLOW ISOLATION:
+                // Check both workflow_state and current_stage, but STRICTLY require that this role has not approved it yet!
+                $inner->orWhere(function ($parallel) use ($role) {
+                    $parallel->where(function ($stateOrStage) {
+                        $stateOrStage->where('workflow_state', 'parallel_first_approval')
+                                    ->orWhere('current_stage', 'parallel_first_approval');
+                    })
+                    // Must NOT exist in the approval history table for this role
+                    ->whereNotExists(function ($history) use ($role) {
+                        $history->select(DB::raw(1))
+                                ->from('mrf_approval_history')
+                                ->whereColumn('mrf_approval_history.mrf_id', 'm_r_f_s.id')
+                                ->where('mrf_approval_history.stage', 'parallel_first_approval')
+                                ->where('mrf_approval_history.performer_role', $role)
+                                ->where('mrf_approval_history.action', 'approved');
+                    })
+                    // AND must NOT have this role already stamped on the parent model flag
+                    ->where(function ($flag) use ($role) {
+                        $flag->whereNull('first_approval_by_role')
+                            ->orWhere('first_approval_by_role', '!=', $role);
+                    });
+                });
+
+                // 3. Your clean PO signature logic
+                $inner->orWhere(function ($po) {
                     $po->where('workflow_state', 'po_generated')
                     ->whereNotNull('unsigned_po_url')
                     ->where('unsigned_po_url', '!=', '')
@@ -310,7 +327,7 @@ class MRF extends Model
                     });
                 });
             });
-            
+
             })->where(function ($pendingQuery) use ($excludeApproverApproval): void {
                 $pendingQuery->where('workflow_state', '!=', MrfParallelFirstApprovalService::STATE)
                     ->orWhere(function ($parallelQuery) use ($excludeApproverApproval): void {
