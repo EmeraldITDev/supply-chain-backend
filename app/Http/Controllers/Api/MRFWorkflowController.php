@@ -217,11 +217,9 @@ class MRFWorkflowController extends Controller
                     : $locked->first_approval_by_role,
             ];
 
-            // 1. FORCE THE DATABASE UPDATE RIGHT HERE IN THE CONTROLLER
             $locked->fill($approvalAttributes);
-            $locked->save(); // <--- This guarantees PostgreSQL writes the first_approval_by_role!
+            $locked->save();
 
-            // 2. Let the service do any secondary parallel tasks (notifications, routing flags, etc.)
             $parallelService->persistPartialApproval(
                 $locked,
                 MrfParallelFirstApprovalService::ROLE_SUPPLY_CHAIN_DIRECTOR,
@@ -230,27 +228,11 @@ class MRFWorkflowController extends Controller
                 $request->remarks,
             );
 
-            try {
-                $locked->load('requester');
-
-                if ($isApproved && $isHighValueCustomType) {
-                    $this->notificationService->notifyLazarusDirectorApprovalPending($locked, $user, $request->remarks);
-                } elseif ($isApproved) {
-                    $this->notificationService->notifyMRFApproved($locked, $user, $request->remarks);
-                }
-            } catch (\Exception $e) {
-                \Log::error('Failed to send MRF approved notification', [
-                    'mrf_id' => $locked->mrf_id,
-                    'error' => $e->getMessage(),
-                ]);
-            }
-
-            // 3. UNCONDITIONALLY RECORD THE HISTORY ROW FOR BOTH STANDARD AND PARALLEL WORKFLOWS
-            // (If persistPartialApproval also attempts to write a row, remove it from the service so this single, clean recorder handles all history!)
+            // FIX: Pass the actual stage string, not the hardcoded role!
             $approvalRecord = MRFApprovalHistory::record(
                 $locked,
                 $isApproved ? 'approved' : 'rejected',
-                'supply_chain_director',
+                $isParallel ? 'parallel_first_approval' : $locked->current_stage,
                 $user,
                 $request->remarks,
             );
@@ -267,27 +249,55 @@ class MRFWorkflowController extends Controller
                 'entity_id' => $locked->mrf_id,
             ]);
 
-            $approvalMessage = $isApproved
-                ? ($isHighValueCustomType
-                    ? 'MRF approved by Supply Chain Director and forwarded to Director (Lazarus Angbazo) for high-value authorization'
-                    : 'Approved by Supply Chain Director')
-                : 'MRF rejected';
-
-            return response()->json([
-                'success' => true,
-                'message' => $approvalMessage,
-                'data' => [
-                    'mrfId' => $locked->mrf_id,
-                    'status' => $locked->status,
-                    'workflowState' => $locked->workflow_state,
-                    'currentStage' => $locked->current_stage,
-                    'firstApprovalByRole' => $locked->first_approval_by_role,
-                    'firstApprovalStatusLabel' => MrfParallelFirstApprovalService::statusLabelForRole($locked->first_approval_by_role),
-                    'approvalRecord' => $approvalRecord,
-                    'isHighValueCustomType' => $isHighValueCustomType,
-                ],
-            ]);
+            return [
+                'locked' => $locked,
+                'approvalRecord' => $approvalRecord,
+                'isApproved' => $isApproved,
+                'isHighValueCustomType' => $isHighValueCustomType,
+            ];
         });
+
+        if (! $approvalData) {
+            return response()->json(['success' => false, 'error' => 'MRF not found', 'code' => 'NOT_FOUND'], 404);
+        }
+
+        // 2. Send emails OUTSIDE the database transaction so HTTP requests never hang or time out!
+        try {
+            $mrfModel = $approvalData['locked'];
+            $mrfModel->load('requester');
+
+            if ($approvalData['isApproved'] && $approvalData['isHighValueCustomType']) {
+                $this->notificationService->notifyLazarusDirectorApprovalPending($mrfModel, $user, $request->remarks);
+            } elseif ($approvalData['isApproved']) {
+                $this->notificationService->notifyMRFApproved($mrfModel, $user, $request->remarks);
+            }
+        } catch (\Exception $e) {
+            \Log::error('Failed to send MRF approved notification', [
+                'mrf_id' => $approvalData['locked']->mrf_id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        $approvalMessage = $approvalData['isApproved']
+            ? ($approvalData['isHighValueCustomType']
+                ? 'MRF approved by Supply Chain Director and forwarded to Director (Lazarus Angbazo) for high-value authorization'
+                : 'Approved by Supply Chain Director')
+            : 'MRF rejected';
+
+        return response()->json([
+            'success' => true,
+            'message' => $approvalMessage,
+            'data' => [
+                'mrfId' => $approvalData['locked']->mrf_id,
+                'status' => $approvalData['locked']->status,
+                'workflowState' => $approvalData['locked']->workflow_state,
+                'currentStage' => $approvalData['locked']->current_stage,
+                'firstApprovalByRole' => $approvalData['locked']->first_approval_by_role,
+                'firstApprovalStatusLabel' => MrfParallelFirstApprovalService::statusLabelForRole($approvalData['locked']->first_approval_by_role),
+                'approvalRecord' => $approvalData['approvalRecord'],
+                'isHighValueCustomType' => $approvalData['isHighValueCustomType'],
+            ],
+        ]);
     }
     /**
      * Procurement Manager approves MRF after Supply Chain Director approval
