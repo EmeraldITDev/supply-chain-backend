@@ -205,6 +205,10 @@ class MRFWorkflowController extends Controller
                 'remarks' => $request->remarks,
                 'director_approved_at' => $isApproved ? now() : null,
                 'director_approved_by' => $isApproved ? $user->name : null,
+                // Also set SCD-specific legacy fields so progress trackers and
+                // reports that read `scd_approved_at` / `scd_approved_by` see the update.
+                'scd_approved_at' => $isApproved ? now() : null,
+                'scd_approved_by' => $isApproved ? $user->id : null,
                 'director_remarks' => $isApproved ? $request->remarks : null,
                 'procurement_review_started_at' => $isApproved && ! $isHighValueCustomType ? now() : null,
                 'last_action_by_role' => in_array($user->scmRole(), ['admin']) ? 'admin' : 'supply_chain_director',
@@ -228,17 +232,15 @@ class MRFWorkflowController extends Controller
                 ]);
             }
 
+            // Record approval history using the model's canonical field names.
             $approvalRecord = MRFApprovalHistory::create([
                 'mrf_id' => $locked->id,
                 'stage' => 'supply_chain_director',
                 'action' => $isApproved ? 'approved' : 'rejected',
-                'approver_id' => $user->id,
-                'approver_name' => $user->name,
-                'approver_email' => $user->email,
                 'remarks' => $request->remarks,
+                'performed_by' => $user->id,
                 'performer_name' => $user->name,
                 'performer_role' => $user->scmRole(),
-                'performed_by' => $user->id,
             ]);
 
             try {
@@ -366,13 +368,10 @@ class MRFWorkflowController extends Controller
             'mrf_id' => $mrf->id,
             'stage' => 'lazarus_director',
             'action' => $isApproved ? 'approved' : 'rejected',
-            'approver_id' => $user->id,
-            'approver_name' => $user->name,
-            'approver_email' => $user->email,
             'remarks' => $request->remarks,
+            'performed_by' => $user->id,
             'performer_name' => $user->name,
             'performer_role' => $user->scmRole(),
-            'performed_by' => $user->id
         ]);
 
         // Log activity
@@ -503,11 +502,10 @@ class MRFWorkflowController extends Controller
             'mrf_id' => $mrf->id,
             'stage' => 'procurement',
             'action' => $isApproved ? 'approved' : 'rejected',
-            'approver_id' => $user->id,
-            'approver_name' => $user->name,
-            'approver_email' => $user->email,
             'remarks' => $request->remarks,
-            'performed_by' => $user->id
+            'performed_by' => $user->id,
+            'performer_name' => $user->name,
+            'performer_role' => $user->scmRole(),
         ]);
 
         // Log activity
