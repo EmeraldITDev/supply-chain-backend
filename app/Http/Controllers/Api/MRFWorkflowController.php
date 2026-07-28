@@ -209,10 +209,6 @@ class MRFWorkflowController extends Controller
                 'remarks' => $request->remarks,
                 'director_approved_at' => $isApproved ? now() : null,
                 'director_approved_by' => $isApproved ? $user->name : null,
-                // Also set SCD-specific legacy fields so progress trackers and
-                // reports that read `scd_approved_at` / `scd_approved_by` see the update.
-                'scd_approved_at' => $isApproved ? now() : null,
-                'scd_approved_by' => $isApproved ? $user->id : null,
                 'director_remarks' => $isApproved ? $request->remarks : null,
                 'procurement_review_started_at' => $isApproved && ! $isHighValueCustomType && $nextWorkflowState === WorkflowStateService::STATE_PROCUREMENT_REVIEW ? now() : null,
                 'last_action_by_role' => in_array($user->scmRole(), ['admin']) ? 'admin' : 'supply_chain_director',
