@@ -202,7 +202,7 @@ class MRFWorkflowController extends Controller
                 $nextStatus = 'rejected';
             }
 
-            $locked->update([
+            $locked->forceFill([
                 'status' => $isApproved ? $nextStatus : 'rejected',
                 'current_stage' => $nextStage,
                 'workflow_state' => $nextWorkflowState,
@@ -220,6 +220,7 @@ class MRFWorkflowController extends Controller
                     ? ($locked->first_approval_by_role ?: MrfParallelFirstApprovalService::ROLE_SUPPLY_CHAIN_DIRECTOR)
                     : $locked->first_approval_by_role,
             ]);
+            $locked->save();
 
             try {
                 $locked->load('requester');
@@ -1224,7 +1225,7 @@ class MRFWorkflowController extends Controller
                     'first_approval_by_role' => $locked->first_approval_by_role,
                 ];
 
-            $locked->update([
+            $locked->forceFill([
                 'executive_approved' => true,
                 'executive_approved_by' => $user->id,
                 'executive_approved_at' => now(),
@@ -1238,6 +1239,7 @@ class MRFWorkflowController extends Controller
                     ? ($locked->first_approval_by_role ?: MrfParallelFirstApprovalService::ROLE_EXECUTIVE)
                     : $locked->first_approval_by_role,
             ]);
+            $locked->save();
 
             try {
                 $locked->load('requester');
