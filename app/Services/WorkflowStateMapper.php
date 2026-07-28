@@ -24,9 +24,9 @@ class WorkflowStateMapper
                 'status' => 'pending',
                 'current_stage' => 'parallel_first_approval',
             ],
-            WorkflowStateService::STATE_SUPPLY_CHAIN_DIRECTOR_REVIEW => [
+           WorkflowStateService::STATE_SUPPLY_CHAIN_DIRECTOR_REVIEW => [
                 'status' => 'supply_chain',
-                'current_stage' => 'supply_chain',
+                'current_stage' => 'supply_chain_director_review',
             ],
             WorkflowStateService::STATE_EXECUTIVE_REVIEW => [
                 'status' => 'executive_review',
@@ -46,7 +46,7 @@ class WorkflowStateMapper
             ],
             WorkflowStateService::STATE_PO_GENERATED => [
                 'status' => 'awaiting_scd_signature',
-                'current_stage' => 'supply_chain',
+                'current_stage' => 'procurement_review',
             ],
             WorkflowStateService::STATE_PO_SIGNED => [
                 'status' => 'signed',

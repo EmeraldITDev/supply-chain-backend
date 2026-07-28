@@ -286,15 +286,9 @@ class MRF extends Model
                     'supply_chain_director_review',
                     'vendor_selected',
                     'invoice_received',
-                    'po_generated',
-                ])->orWhereIn('current_stage', [
-                    'parallel_first_approval',
-                    'supply_chain_director_review',
-                    'director_review',
-                    'supply_chain',
-                    'final_approval',
                 ])->orWhere(function ($inner) {
-                    $inner->whereIn('current_stage', ['supply_chain'])
+                    // Only show PO signature items where unsigned PO exists and not yet signed
+                    $inner->where('workflow_state', 'po_generated')
                         ->whereNotNull('unsigned_po_url')
                         ->where('unsigned_po_url', '!=', '')
                         ->where(function ($signed) {
