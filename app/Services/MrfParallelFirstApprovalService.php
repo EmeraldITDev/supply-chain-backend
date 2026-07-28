@@ -3,6 +3,8 @@
 namespace App\Services;
 
 use App\Models\MRF;
+use App\Models\User;
+use Illuminate\Support\Facades\DB;
 
 class MrfParallelFirstApprovalService
 {
@@ -132,6 +134,26 @@ class MrfParallelFirstApprovalService
                 : WorkflowStateService::STATE_SUPPLY_CHAIN_DIRECTOR_APPROVED,
             'first_approval_by_role' => $role,
         ];
+    }
+
+    public function persistPartialApproval(MRF $mrf, string $role, array $attributes, ?User $user = null, ?string $remarks = null): MRF
+    {
+        $mrf->forceFill($attributes);
+        $mrf->save();
+
+        DB::table('mrf_approval_history')->insert([
+            'mrf_id' => $mrf->id,
+            'action' => 'approved',
+            'stage' => 'parallel_first_approval',
+            'performed_by' => $user?->id ?? 0,
+            'performer_name' => $user?->name ?? 'System',
+            'performer_role' => $role,
+            'remarks' => $remarks ?? 'Parallel approval recorded',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        return $mrf;
     }
 
     public static function statusLabelForRole(?string $role): ?string

@@ -273,10 +273,13 @@ class MRF extends Model
             'executive' => $query->where(function ($q) {
                 $q->whereIn('workflow_state', ['parallel_first_approval', 'executive_review'])
                     ->orWhereIn('current_stage', ['parallel_first_approval', 'executive_review', 'executive']);
-            })->when(true, fn ($q) => $q->where(function ($inner) use ($excludeApproverApproval): void {
-                $inner->where('workflow_state', '!=', MrfParallelFirstApprovalService::STATE)
-                    ->orWhere($excludeApproverApproval);
-            })),
+            })->where(function ($pendingQuery) use ($excludeApproverApproval): void {
+                $pendingQuery->where('workflow_state', '!=', MrfParallelFirstApprovalService::STATE)
+                    ->orWhere(function ($parallelQuery) use ($excludeApproverApproval): void {
+                        $parallelQuery->where('workflow_state', MrfParallelFirstApprovalService::STATE)
+                            ->where($excludeApproverApproval);
+                    });
+            }),
             'scd', 'supply_chain_director', 'supply_chain' => $query->where(function ($q) {
                 $q->whereIn('workflow_state', [
                     'parallel_first_approval',
@@ -300,7 +303,10 @@ class MRF extends Model
                 });
             })->where(function ($pendingQuery) use ($excludeApproverApproval): void {
                 $pendingQuery->where('workflow_state', '!=', MrfParallelFirstApprovalService::STATE)
-                    ->orWhere($excludeApproverApproval);
+                    ->orWhere(function ($parallelQuery) use ($excludeApproverApproval): void {
+                        $parallelQuery->where('workflow_state', MrfParallelFirstApprovalService::STATE)
+                            ->where($excludeApproverApproval);
+                    });
             }),
             'chairman' => $query->where(function ($q) {
                 $q->whereIn('current_stage', ['chairman_review', 'chairman', 'chairman_payment'])

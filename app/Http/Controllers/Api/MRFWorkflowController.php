@@ -202,7 +202,7 @@ class MRFWorkflowController extends Controller
                 $nextStatus = 'rejected';
             }
 
-            $locked->forceFill([
+            $approvalAttributes = [
                 'status' => $isApproved ? $nextStatus : 'rejected',
                 'current_stage' => $nextStage,
                 'workflow_state' => $nextWorkflowState,
@@ -219,8 +219,14 @@ class MRFWorkflowController extends Controller
                 'first_approval_by_role' => $isApproved && $isParallel
                     ? ($locked->first_approval_by_role ?: MrfParallelFirstApprovalService::ROLE_SUPPLY_CHAIN_DIRECTOR)
                     : $locked->first_approval_by_role,
-            ]);
-            $locked->save();
+            ];
+            $parallelService->persistPartialApproval(
+                $locked,
+                MrfParallelFirstApprovalService::ROLE_SUPPLY_CHAIN_DIRECTOR,
+                $approvalAttributes,
+                $user,
+                $request->remarks,
+            );
 
             try {
                 $locked->load('requester');
@@ -237,14 +243,16 @@ class MRFWorkflowController extends Controller
                 ]);
             }
 
-            // Record approval history using the model's canonical field names.
-            $approvalRecord = MRFApprovalHistory::record(
-                $locked,
-                $isApproved ? 'approved' : 'rejected',
-                $isParallel ? 'parallel_first_approval' : 'supply_chain_director',
-                $user,
-                $request->remarks,
-            );
+            // Parallel approvals persist their own history row explicitly via the service.
+            $approvalRecord = $isParallel
+                ? null
+                : MRFApprovalHistory::record(
+                    $locked,
+                    $isApproved ? 'approved' : 'rejected',
+                    'supply_chain_director',
+                    $user,
+                    $request->remarks,
+                );
 
             try {
                 Activity::create([
@@ -1225,7 +1233,7 @@ class MRFWorkflowController extends Controller
                     'first_approval_by_role' => $locked->first_approval_by_role,
                 ];
 
-            $locked->forceFill([
+            $approvalAttributes = [
                 'executive_approved' => true,
                 'executive_approved_by' => $user->id,
                 'executive_approved_at' => now(),
@@ -1238,8 +1246,14 @@ class MRFWorkflowController extends Controller
                 'first_approval_by_role' => $isParallel
                     ? ($locked->first_approval_by_role ?: MrfParallelFirstApprovalService::ROLE_EXECUTIVE)
                     : $locked->first_approval_by_role,
-            ]);
-            $locked->save();
+            ];
+            $parallelService->persistPartialApproval(
+                $locked,
+                MrfParallelFirstApprovalService::ROLE_EXECUTIVE,
+                $approvalAttributes,
+                $user,
+                $request->remarks,
+            );
 
             try {
                 $locked->load('requester');
@@ -1296,7 +1310,9 @@ class MRFWorkflowController extends Controller
                 ]);
             }
 
-            MRFApprovalHistory::record($locked, 'approved', 'executive_review', $user, $request->remarks ?? '');
+            if (! $isParallel) {
+                MRFApprovalHistory::record($locked, 'approved', 'executive_review', $user, $request->remarks ?? '');
+            }
 
             try {
                 Activity::create([
