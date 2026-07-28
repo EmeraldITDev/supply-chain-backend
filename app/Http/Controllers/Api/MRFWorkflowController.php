@@ -176,6 +176,7 @@ class MRFWorkflowController extends Controller
 
             $nextStage = 'procurement_review';
             $nextWorkflowState = WorkflowStateService::STATE_SUPPLY_CHAIN_DIRECTOR_APPROVED;
+            $nextStatus = 'procurement_review';
             $isHighValueCustomType = false;
 
             if ($isApproved) {
@@ -187,19 +188,22 @@ class MRFWorkflowController extends Controller
                 if ($isCustomType && $isHighValue) {
                     $nextStage = 'lazarus_director_approval';
                     $nextWorkflowState = 'lazarus_director_approval';
+                    $nextStatus = 'lazarus_director_approval';
                     $isHighValueCustomType = true;
                 } elseif ($isParallel) {
                     $transition = $parallelService->resolveApprovalTransition($locked, MrfParallelFirstApprovalService::ROLE_SUPPLY_CHAIN_DIRECTOR, true);
                     $nextStage = $transition['current_stage'];
                     $nextWorkflowState = $transition['workflow_state'];
+                    $nextStatus = $transition['status'];
                 }
             } else {
                 $nextStage = 'rejected';
                 $nextWorkflowState = WorkflowStateService::STATE_SUPPLY_CHAIN_DIRECTOR_REJECTED;
+                $nextStatus = 'rejected';
             }
 
             $locked->update([
-                'status' => $isApproved ? ($isHighValueCustomType ? 'lazarus_director_approval' : ($isParallel ? 'procurement_review' : 'procurement_review')) : 'rejected',
+                'status' => $isApproved ? $nextStatus : 'rejected',
                 'current_stage' => $nextStage,
                 'workflow_state' => $nextWorkflowState,
                 'remarks' => $request->remarks,
@@ -210,10 +214,10 @@ class MRFWorkflowController extends Controller
                 'scd_approved_at' => $isApproved ? now() : null,
                 'scd_approved_by' => $isApproved ? $user->id : null,
                 'director_remarks' => $isApproved ? $request->remarks : null,
-                'procurement_review_started_at' => $isApproved && ! $isHighValueCustomType ? now() : null,
+                'procurement_review_started_at' => $isApproved && ! $isHighValueCustomType && $nextWorkflowState === WorkflowStateService::STATE_PROCUREMENT_REVIEW ? now() : null,
                 'last_action_by_role' => in_array($user->scmRole(), ['admin']) ? 'admin' : 'supply_chain_director',
                 'first_approval_by_role' => $isApproved && $isParallel
-                    ? MrfParallelFirstApprovalService::ROLE_SUPPLY_CHAIN_DIRECTOR
+                    ? ($locked->first_approval_by_role ?: MrfParallelFirstApprovalService::ROLE_SUPPLY_CHAIN_DIRECTOR)
                     : $locked->first_approval_by_role,
             ]);
 
@@ -233,15 +237,13 @@ class MRFWorkflowController extends Controller
             }
 
             // Record approval history using the model's canonical field names.
-            $approvalRecord = MRFApprovalHistory::create([
-                'mrf_id' => $locked->id,
-                'stage' => 'supply_chain_director',
-                'action' => $isApproved ? 'approved' : 'rejected',
-                'remarks' => $request->remarks,
-                'performed_by' => $user->id,
-                'performer_name' => $user->name,
-                'performer_role' => $user->scmRole(),
-            ]);
+            $approvalRecord = MRFApprovalHistory::record(
+                $locked,
+                $isApproved ? 'approved' : 'rejected',
+                $isParallel ? 'parallel_first_approval' : 'supply_chain_director',
+                $user,
+                $request->remarks,
+            );
 
             try {
                 Activity::create([
@@ -1230,10 +1232,10 @@ class MRFWorkflowController extends Controller
                 'status' => $transitionData['status'],
                 'current_stage' => $transitionData['current_stage'],
                 'workflow_state' => $transitionData['workflow_state'],
-                'procurement_review_started_at' => $isParallel ? now() : null,
+                'procurement_review_started_at' => $isParallel && $transitionData['workflow_state'] === WorkflowStateService::STATE_PROCUREMENT_REVIEW ? now() : null,
                 'last_action_by_role' => in_array($user->scmRole(), ['admin']) ? 'admin' : 'executive',
                 'first_approval_by_role' => $isParallel
-                    ? MrfParallelFirstApprovalService::ROLE_EXECUTIVE
+                    ? ($locked->first_approval_by_role ?: MrfParallelFirstApprovalService::ROLE_EXECUTIVE)
                     : $locked->first_approval_by_role,
             ]);
 

@@ -47,8 +47,20 @@ class MrfParallelFirstApprovalService
         return ($mrf->workflow_state ?? '') === self::STATE;
     }
 
+    public function hasBothParallelApprovals(MRF $mrf): bool
+    {
+        $executiveApproved = (bool) ($mrf->executive_approved ?? false);
+        $directorApproved = filled($mrf->director_approved_at ?? $mrf->scd_approved_at ?? $mrf->supply_chain_approved_at);
+
+        return $executiveApproved && $directorApproved;
+    }
+
     public function isAlreadyApproved(MRF $mrf): bool
     {
+        if ($this->isParallelPending($mrf)) {
+            return false;
+        }
+
         if (filled($mrf->first_approval_by_role)) {
             return true;
         }
@@ -63,7 +75,15 @@ class MrfParallelFirstApprovalService
         }
 
         if ($this->isParallelPending($mrf)) {
-            return in_array($role, [self::ROLE_EXECUTIVE, self::ROLE_SUPPLY_CHAIN_DIRECTOR], true);
+            if ($this->hasBothParallelApprovals($mrf)) {
+                return false;
+            }
+
+            return match ($role) {
+                self::ROLE_EXECUTIVE => ! (bool) ($mrf->executive_approved ?? false),
+                self::ROLE_SUPPLY_CHAIN_DIRECTOR => ! filled($mrf->director_approved_at ?? $mrf->scd_approved_at ?? $mrf->supply_chain_approved_at),
+                default => false,
+            };
         }
 
         return in_array($mrf->workflow_state, ['supply_chain_director_review', 'executive_review'], true)
@@ -87,11 +107,20 @@ class MrfParallelFirstApprovalService
         }
 
         if ($this->isParallelPending($mrf)) {
+            if ($this->hasBothParallelApprovals($mrf)) {
+                return [
+                    'status' => 'procurement_review',
+                    'current_stage' => 'procurement',
+                    'workflow_state' => WorkflowStateService::STATE_PROCUREMENT_REVIEW,
+                    'first_approval_by_role' => filled($mrf->first_approval_by_role) ? $mrf->first_approval_by_role : $role,
+                ];
+            }
+
             return [
-                'status' => 'procurement_review',
-                'current_stage' => 'procurement',
-                'workflow_state' => WorkflowStateService::STATE_PROCUREMENT_REVIEW,
-                'first_approval_by_role' => $role,
+                'status' => 'pending',
+                'current_stage' => self::STATE,
+                'workflow_state' => self::STATE,
+                'first_approval_by_role' => filled($mrf->first_approval_by_role) ? $mrf->first_approval_by_role : $role,
             ];
         }
 
