@@ -250,21 +250,17 @@ class MRFWorkflowController extends Controller
                     $request->remarks,
                 );
 
-            try {
-                Activity::create([
-                    'type' => 'mrf_approved',
-                    'title' => $isApproved ? 'MRF Approved by Supply Chain Director' : 'MRF Rejected by Supply Chain Director',
-                    'description' => $isApproved ?
-                        "MRF {$locked->mrf_id} was approved by Supply Chain Director {$user->name} and forwarded to Procurement Manager review" :
-                        "MRF {$locked->mrf_id} was rejected by Supply Chain Director {$user->name}",
-                    'user_id' => $user->id,
-                    'user_name' => $user->name,
-                    'reference_type' => 'mrf',
-                    'reference_id' => $locked->mrf_id,
-                ]);
-            } catch (\Exception $e) {
-                Log::warning('Failed to log activity', ['error' => $e->getMessage()]);
-            }
+            Activity::create([
+                'type' => 'mrf_approved',
+                'title' => $isApproved ? 'MRF Approved by Supply Chain Director' : 'MRF Rejected by Supply Chain Director',
+                'description' => $isApproved ?
+                    "MRF {$locked->mrf_id} was approved by Supply Chain Director {$user->name} and forwarded to Procurement Manager review" :
+                    "MRF {$locked->mrf_id} was rejected by Supply Chain Director {$user->name}",
+                'user_id' => $user->id,
+                'user_name' => $user->name,
+                'entity_type' => 'mrf',
+                'entity_id' => $locked->mrf_id,
+            ]);
 
             $approvalMessage = $isApproved
                 ? ($isHighValueCustomType
@@ -391,8 +387,8 @@ class MRFWorkflowController extends Controller
                     "High-value custom contract MRF {$mrf->mrf_id} was rejected by Lazarus Director {$user->name}",
                 'user_id' => $user->id,
                 'user_name' => $user->name,
-                'reference_type' => 'mrf',
-                'reference_id' => $mrf->mrf_id,
+                'entity_type' => 'mrf',
+                'entity_id' => $mrf->mrf_id,
             ]);
         } catch (\Exception $e) {
             Log::warning('Failed to log activity', ['error' => $e->getMessage()]);
@@ -525,8 +521,8 @@ class MRFWorkflowController extends Controller
                     "MRF {$mrf->mrf_id} rejected by Procurement Manager {$user->name}",
                 'user_id' => $user->id,
                 'user_name' => $user->name,
-                'reference_type' => 'mrf',
-                'reference_id' => $mrf->mrf_id,
+                'entity_type' => 'mrf',
+                'entity_id' => $mrf->mrf_id,
             ]);
         } catch (\Exception $e) {
             Log::warning('Failed to log activity', ['error' => $e->getMessage()]);
