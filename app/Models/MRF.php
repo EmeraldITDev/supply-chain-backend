@@ -250,11 +250,33 @@ class MRF extends Model
     {
         $role = strtolower(trim($role));
 
+        $excludeApproverApproval = function ($q) use ($role): void {
+            $q->whereNotExists(function ($subquery) use ($role): void {
+                $subquery->select(
+                    \DB::raw(1)
+                )
+                    ->from('mrf_approval_history')
+                    ->whereColumn('mrf_approval_history.mrf_id', 'm_r_f_s.id')
+                    ->where('mrf_approval_history.action', 'approved')
+                    ->where('mrf_approval_history.stage', 'parallel_first_approval')
+                    ->where(function ($roleQuery) use ($role): void {
+                        $roleQuery->where('mrf_approval_history.performer_role', $role)
+                            ->orWhere('mrf_approval_history.performer_role', match ($role) {
+                                'scd', 'supply_chain_director', 'supply_chain' => 'supply_chain_director',
+                                default => $role,
+                            });
+                    });
+            });
+        };
+
         return match ($role) {
             'executive' => $query->where(function ($q) {
                 $q->whereIn('workflow_state', ['parallel_first_approval', 'executive_review'])
                     ->orWhereIn('current_stage', ['parallel_first_approval', 'executive_review', 'executive']);
-            }),
+            })->when(true, fn ($q) => $q->where(function ($inner) use ($excludeApproverApproval): void {
+                $inner->where('workflow_state', '!=', MrfParallelFirstApprovalService::STATE)
+                    ->orWhere($excludeApproverApproval);
+            })),
             'scd', 'supply_chain_director', 'supply_chain' => $query->where(function ($q) {
                 $q->whereIn('workflow_state', [
                     'parallel_first_approval',
@@ -276,6 +298,9 @@ class MRF extends Model
                             $signed->whereNull('signed_po_url')->orWhere('signed_po_url', '=', '');
                         });
                 });
+            })->where(function ($pendingQuery) use ($excludeApproverApproval): void {
+                $pendingQuery->where('workflow_state', '!=', MrfParallelFirstApprovalService::STATE)
+                    ->orWhere($excludeApproverApproval);
             }),
             'chairman' => $query->where(function ($q) {
                 $q->whereIn('current_stage', ['chairman_review', 'chairman', 'chairman_payment'])
