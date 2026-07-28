@@ -109,7 +109,11 @@ class MrfParallelFirstApprovalService
         }
 
         if ($this->isParallelPending($mrf)) {
-            if ($this->hasBothParallelApprovals($mrf)) {
+            $executiveApproved = (bool) ($mrf->executive_approved ?? false) || $role === self::ROLE_EXECUTIVE;
+            $directorApproved = filled($mrf->director_approved_at ?? $mrf->scd_approved_at ?? $mrf->supply_chain_approved_at)
+                || $role === self::ROLE_SUPPLY_CHAIN_DIRECTOR;
+
+            if ($executiveApproved && $directorApproved) {
                 return [
                     'status' => 'procurement_review',
                     'current_stage' => 'procurement',

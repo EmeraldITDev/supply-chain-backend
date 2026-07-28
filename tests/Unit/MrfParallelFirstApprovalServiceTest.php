@@ -96,6 +96,25 @@ class MrfParallelFirstApprovalServiceTest extends TestCase
     }
 
     #[Test]
+    public function it_transitions_to_procurement_when_the_second_parallel_approval_arrives(): void
+    {
+        $mrf = new MRF([
+            'workflow_state' => MrfParallelFirstApprovalService::STATE,
+            'first_approval_by_role' => MrfParallelFirstApprovalService::ROLE_EXECUTIVE,
+            'executive_approved' => true,
+            'director_approved_at' => null,
+        ]);
+
+        $service = new MrfParallelFirstApprovalService();
+
+        $result = $service->resolveApprovalTransition($mrf, MrfParallelFirstApprovalService::ROLE_SUPPLY_CHAIN_DIRECTOR, true);
+
+        $this->assertSame('procurement_review', $result['status']);
+        $this->assertSame('procurement', $result['current_stage']);
+        $this->assertSame('procurement_review', $result['workflow_state']);
+    }
+
+    #[Test]
     public function it_persists_a_partial_parallel_approval_to_the_parent_mrf_and_history_table(): void
     {
         Schema::dropIfExists('mrf_approval_history');
