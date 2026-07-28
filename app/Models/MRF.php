@@ -224,7 +224,23 @@ class MRF extends Model
     {
         return $query
             ->where('workflow_state', MrfParallelFirstApprovalService::STATE)
-            ->whereNull('first_approval_by_role');
+            ->whereNull('first_approval_by_role')
+            // Defensive: exclude items where a Supply Chain Director approval was
+            // already recorded in the approval history table. This handles cases
+            // where the approval log was written but the `first_approval_by_role`
+            // column was not updated due to a bug or race.
+            ->whereNotExists(function ($q) {
+                $q->select(\DB::raw(1))
+                    ->from('mrf_approval_history')
+                    ->whereColumn('mrf_approval_history.mrf_id', 'm_r_f_s.id')
+                    ->where('mrf_approval_history.action', 'approved')
+                    ->where(function ($sq) {
+                        $sq->where('mrf_approval_history.stage', 'like', '%supply_chain%')
+                           ->orWhere('mrf_approval_history.performer_role', 'supply_chain_director')
+                           ->orWhere('mrf_approval_history.performer_role', 'supply_chain')
+                           ->orWhere('mrf_approval_history.performer_role', 'director');
+                    });
+            });
     }
 
     /**
