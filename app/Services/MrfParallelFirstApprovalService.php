@@ -56,6 +56,55 @@ class MrfParallelFirstApprovalService
         return in_array($mrf->workflow_state, self::POST_FIRST_APPROVAL_STATES, true);
     }
 
+    public function canConsumeFirstApproval(MRF $mrf, string $role): bool
+    {
+        if ($this->isAlreadyApproved($mrf)) {
+            return false;
+        }
+
+        if ($this->isParallelPending($mrf)) {
+            return in_array($role, [self::ROLE_EXECUTIVE, self::ROLE_SUPPLY_CHAIN_DIRECTOR], true);
+        }
+
+        return in_array($mrf->workflow_state, ['supply_chain_director_review', 'executive_review'], true)
+            && in_array($role, [self::ROLE_EXECUTIVE, self::ROLE_SUPPLY_CHAIN_DIRECTOR], true);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function resolveApprovalTransition(MRF $mrf, string $role, bool $approved): array
+    {
+        if (! $approved) {
+            return [
+                'status' => 'rejected',
+                'current_stage' => 'rejected',
+                'workflow_state' => $role === self::ROLE_EXECUTIVE
+                    ? WorkflowStateService::STATE_EXECUTIVE_REJECTED
+                    : WorkflowStateService::STATE_SUPPLY_CHAIN_DIRECTOR_REJECTED,
+                'first_approval_by_role' => null,
+            ];
+        }
+
+        if ($this->isParallelPending($mrf)) {
+            return [
+                'status' => 'procurement_review',
+                'current_stage' => 'procurement',
+                'workflow_state' => WorkflowStateService::STATE_PROCUREMENT_REVIEW,
+                'first_approval_by_role' => $role,
+            ];
+        }
+
+        return [
+            'status' => 'procurement_review',
+            'current_stage' => 'procurement',
+            'workflow_state' => $role === self::ROLE_EXECUTIVE
+                ? WorkflowStateService::STATE_EXECUTIVE_APPROVED
+                : WorkflowStateService::STATE_SUPPLY_CHAIN_DIRECTOR_APPROVED,
+            'first_approval_by_role' => $role,
+        ];
+    }
+
     public static function statusLabelForRole(?string $role): ?string
     {
         return match ($role) {

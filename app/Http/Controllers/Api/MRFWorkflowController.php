@@ -174,9 +174,8 @@ class MRFWorkflowController extends Controller
             $isApproved = $request->action === 'approve';
             $isParallel = $parallelService->isParallelPending($locked);
 
-            // Determine next stage based on contract type and value
             $nextStage = 'procurement_review';
-            $nextWorkflowState = 'supply_chain_director_approved';
+            $nextWorkflowState = WorkflowStateService::STATE_SUPPLY_CHAIN_DIRECTOR_APPROVED;
             $isHighValueCustomType = false;
 
             if ($isApproved) {
@@ -189,14 +188,18 @@ class MRFWorkflowController extends Controller
                     $nextStage = 'lazarus_director_approval';
                     $nextWorkflowState = 'lazarus_director_approval';
                     $isHighValueCustomType = true;
+                } elseif ($isParallel) {
+                    $transition = $parallelService->resolveApprovalTransition($locked, MrfParallelFirstApprovalService::ROLE_SUPPLY_CHAIN_DIRECTOR, true);
+                    $nextStage = $transition['current_stage'];
+                    $nextWorkflowState = $transition['workflow_state'];
                 }
             } else {
                 $nextStage = 'rejected';
-                $nextWorkflowState = 'supply_chain_director_rejected';
+                $nextWorkflowState = WorkflowStateService::STATE_SUPPLY_CHAIN_DIRECTOR_REJECTED;
             }
 
             $locked->update([
-                'status' => $isApproved ? ($isHighValueCustomType ? 'lazarus_director_approval' : 'procurement_review') : 'rejected',
+                'status' => $isApproved ? ($isHighValueCustomType ? 'lazarus_director_approval' : ($isParallel ? 'procurement_review' : 'procurement_review')) : 'rejected',
                 'current_stage' => $nextStage,
                 'workflow_state' => $nextWorkflowState,
                 'remarks' => $request->remarks,
@@ -1167,7 +1170,16 @@ class MRFWorkflowController extends Controller
             $currentState = $locked->workflow_state ?? WorkflowStateService::STATE_MRF_CREATED;
             $isParallel = $parallelService->isParallelPending($locked);
 
-            if (! $isParallel) {
+            if ($isParallel) {
+                if (! $parallelService->canConsumeFirstApproval($locked, MrfParallelFirstApprovalService::ROLE_EXECUTIVE)) {
+                    return response()->json([
+                        'success' => false,
+                        'error' => 'This MRF has already been approved.',
+                        'code' => 'ALREADY_APPROVED',
+                        'current_state' => $currentState,
+                    ], 422);
+                }
+            } elseif (! $isParallel) {
                 if (strtolower(trim((string) $locked->contract_type)) !== 'emerald') {
                     return response()->json([
                         'success' => false,
@@ -1203,11 +1215,24 @@ class MRFWorkflowController extends Controller
                 ], 422);
             }
 
+            $transitionData = $isParallel
+                ? $parallelService->resolveApprovalTransition($locked, MrfParallelFirstApprovalService::ROLE_EXECUTIVE, true)
+                : [
+                    'status' => 'procurement_review',
+                    'current_stage' => 'procurement',
+                    'workflow_state' => WorkflowStateService::STATE_PROCUREMENT_REVIEW,
+                    'first_approval_by_role' => $locked->first_approval_by_role,
+                ];
+
             $locked->update([
                 'executive_approved' => true,
                 'executive_approved_by' => $user->id,
                 'executive_approved_at' => now(),
                 'executive_remarks' => $request->remarks,
+                'status' => $transitionData['status'],
+                'current_stage' => $transitionData['current_stage'],
+                'workflow_state' => $transitionData['workflow_state'],
+                'procurement_review_started_at' => $isParallel ? now() : null,
                 'last_action_by_role' => in_array($user->scmRole(), ['admin']) ? 'admin' : 'executive',
                 'first_approval_by_role' => $isParallel
                     ? MrfParallelFirstApprovalService::ROLE_EXECUTIVE
@@ -1224,48 +1249,50 @@ class MRFWorkflowController extends Controller
                 ]);
             }
 
-            $transitionSuccess1 = $this->workflowService->transition($locked, WorkflowStateService::STATE_EXECUTIVE_APPROVED, $user);
+            if (! $isParallel) {
+                $transitionSuccess1 = $this->workflowService->transition($locked, WorkflowStateService::STATE_EXECUTIVE_APPROVED, $user);
 
-            if (! $transitionSuccess1) {
-                Log::error('Failed to transition MRF to executive_approved', [
-                    'mrf_id' => $locked->mrf_id,
-                    'current_state' => $locked->workflow_state,
-                    'user_id' => $user->id,
+                if (! $transitionSuccess1) {
+                    Log::error('Failed to transition MRF to executive_approved', [
+                        'mrf_id' => $locked->mrf_id,
+                        'current_state' => $locked->workflow_state,
+                        'user_id' => $user->id,
+                    ]);
+
+                    return response()->json([
+                        'success' => false,
+                        'error' => 'Failed to transition MRF state',
+                        'code' => 'TRANSITION_FAILED',
+                    ], 500);
+                }
+
+                $locked->refresh();
+
+                $transitionSuccess2 = $this->workflowService->transition($locked, WorkflowStateService::STATE_PROCUREMENT_REVIEW, $user);
+
+                if (! $transitionSuccess2) {
+                    Log::error('Failed to transition MRF to procurement_review', [
+                        'mrf_id' => $locked->mrf_id,
+                        'current_state' => $locked->workflow_state,
+                        'user_id' => $user->id,
+                    ]);
+
+                    return response()->json([
+                        'success' => false,
+                        'error' => 'Failed to transition MRF to procurement review',
+                        'code' => 'TRANSITION_FAILED',
+                    ], 500);
+                }
+
+                $locked->refresh();
+
+                $locked->update([
+                    'status' => 'procurement_review',
+                    'current_stage' => 'procurement',
+                    'procurement_review_started_at' => now(),
+                    'last_action_by_role' => in_array($user->scmRole(), ['admin']) ? 'admin' : 'executive',
                 ]);
-
-                return response()->json([
-                    'success' => false,
-                    'error' => 'Failed to transition MRF state',
-                    'code' => 'TRANSITION_FAILED',
-                ], 500);
             }
-
-            $locked->refresh();
-
-            $transitionSuccess2 = $this->workflowService->transition($locked, WorkflowStateService::STATE_PROCUREMENT_REVIEW, $user);
-
-            if (! $transitionSuccess2) {
-                Log::error('Failed to transition MRF to procurement_review', [
-                    'mrf_id' => $locked->mrf_id,
-                    'current_state' => $locked->workflow_state,
-                    'user_id' => $user->id,
-                ]);
-
-                return response()->json([
-                    'success' => false,
-                    'error' => 'Failed to transition MRF to procurement review',
-                    'code' => 'TRANSITION_FAILED',
-                ], 500);
-            }
-
-            $locked->refresh();
-
-            $locked->update([
-                'status' => 'procurement_review',
-                'current_stage' => 'procurement',
-                'procurement_review_started_at' => now(),
-                'last_action_by_role' => in_array($user->scmRole(), ['admin']) ? 'admin' : 'executive',
-            ]);
 
             MRFApprovalHistory::record($locked, 'approved', 'executive_review', $user, $request->remarks ?? '');
 
@@ -2063,27 +2090,44 @@ class MRFWorkflowController extends Controller
             ], 404);
         }
 
-        // Check if MRF is pending SCD signature (case-insensitive)
-        $statusLower = strtolower(trim($mrf->status ?? ''));
-        if (!in_array($statusLower, ['supply_chain', 'awaiting_scd_signature'])) {
+        $startTime = microtime(true);
+        Log::info('PO signing upload started', [
+            'mrf_id' => $mrf->mrf_id,
+            'status' => $mrf->status,
+            'workflow_state' => $mrf->workflow_state,
+            'user_id' => $user->id,
+        ]);
+
+        $statusLower = strtolower(trim((string) ($mrf->status ?? '')));
+        $workflowStateLower = strtolower(trim((string) ($mrf->workflow_state ?? '')));
+        $allowedStatuses = ['supply_chain', 'awaiting_scd_signature'];
+        $allowedStates = ['po_generated', 'awaiting_scd_signature'];
+        if (!in_array($statusLower, $allowedStatuses, true) && !in_array($workflowStateLower, $allowedStates, true)) {
             return response()->json([
                 'success' => false,
                 'error' => 'MRF is not pending PO signature. Current status: ' . $mrf->status,
                 'code' => 'INVALID_STATUS',
-                'current_status' => $mrf->status
+                'current_status' => $mrf->status,
+                'current_workflow_state' => $mrf->workflow_state,
             ], 422);
         }
 
-        // Verify that an unsigned PO exists (procurement must generate PO first)
-        // Supply Chain needs to review/download the unsigned PO before uploading signed version
-        if (empty($mrf->unsigned_po_url) || empty($mrf->po_number)) {
+        $poDocument = app(ProcurementDocumentService::class)->findActiveDocument($mrf, ProcurementDocument::TYPE_PO_PDF);
+        $hasRegistryPo = $poDocument !== null
+            && trim((string) ($poDocument->file_path ?? '')) !== ''
+            || trim((string) ($poDocument->file_url ?? '')) !== '';
+
+        if (empty($mrf->unsigned_po_url) && ! $hasRegistryPo) {
             return response()->json([
                 'success' => false,
                 'error' => 'No unsigned PO found. Procurement must generate a PO before Supply Chain can upload a signed version.',
                 'code' => 'NO_UNSIGNED_PO',
                 'details' => [
                     'has_po_number' => !empty($mrf->po_number),
-                    'has_unsigned_po_url' => !empty($mrf->unsigned_po_url)
+                    'has_unsigned_po_url' => !empty($mrf->unsigned_po_url),
+                    'has_registry_po' => $hasRegistryPo,
+                    'workflow_state' => $mrf->workflow_state,
+                    'status' => $mrf->status,
                 ]
             ], 422);
         }
@@ -2101,7 +2145,14 @@ class MRFWorkflowController extends Controller
             ], 422);
         }
 
-        // Upload signed PO to S3 storage
+        $poLookupMs = (int) round((microtime(true) - $startTime) * 1000);
+        Log::info('PO signing upload lookup complete', [
+            'mrf_id' => $mrf->mrf_id,
+            'lookup_ms' => $poLookupMs,
+            'has_registry_po' => $hasRegistryPo,
+            'has_unsigned_po_url' => !empty($mrf->unsigned_po_url),
+        ]);
+
         $signedPOFile = $request->file('signed_po');
         $signedPOUrl = null;
         $signedPOShareUrl = null;
@@ -2116,9 +2167,10 @@ class MRFWorkflowController extends Controller
             Storage::disk($disk)->makeDirectory($directory, 0755, true);
         }
 
+        $storageStarted = microtime(true);
         Storage::disk($disk)->putFileAs($directory, $signedPOFile, basename($signedPOPath));
+        $storageMs = (int) round((microtime(true) - $storageStarted) * 1000);
 
-        // Get URL (temporary signed URL for S3, public URL for local)
         $signedPOUrl = $this->getFileUrl($signedPOPath, $disk);
         $signedPOShareUrl = $signedPOUrl;
 
@@ -2154,6 +2206,13 @@ class MRFWorkflowController extends Controller
 
         // Notify Finance team
         $this->notificationService->notifyPOSignedToFinance($mrf);
+
+        Log::info('PO signing upload completed', [
+            'mrf_id' => $mrf->mrf_id,
+            'elapsed_ms' => (int) round((microtime(true) - $startTime) * 1000),
+            'storage_ms' => $storageMs,
+            'lookup_ms' => $poLookupMs,
+        ]);
 
         return response()->json([
             'success' => true,
