@@ -393,7 +393,7 @@ class PurchaseOrderPdfService
             'company' => $company,
             'supplier_name' => (string) ($vendor['name'] ?? ''),
             'supplier_code_display' => $this->supplierCodeDisplay($vendor),
-            'ship_to_company' => (string) ($company['name'] ?? ''),
+            'ship_to_company' => filled($shipTo) ? (string) $shipTo : (string) ($company['name'] ?? ''),
             'po_number' => $poNumber,
             'po_date_short' => $poDate->format('d/m/Y'),
             'document_title' => 'Purchase Order',
