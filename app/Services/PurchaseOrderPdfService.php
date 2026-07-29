@@ -181,6 +181,7 @@ class PurchaseOrderPdfService
         $total = (float) $data['total'];
         $currency = $data['currency'] ?? 'NGN';
         $paymentMilestones = $data['payment_milestones'] ?? [];
+        $po_terms_mode = $data['po_terms_mode'] ?? [];
         $categoryLine = $this->resolveCategoryLine(
             (string) ($data['mrf_category'] ?? ''),
             (string) ($data['mrf_department'] ?? ''),
