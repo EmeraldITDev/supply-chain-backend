@@ -140,36 +140,20 @@ class MRFWorkflowController extends Controller
 
         $parallelService = app(MrfParallelFirstApprovalService::class);
 
-        return DB::transaction(function () use ($request, $user, $mrf, $parallelService) {
+        $approvalData = DB::transaction(function () use ($request, $user, $mrf, $parallelService) {
             $locked = MRF::where('id', $mrf->id)->lockForUpdate()->first();
 
             if (! $locked) {
-                return response()->json([
-                    'success' => false,
-                    'error' => 'MRF not found',
-                    'code' => 'NOT_FOUND',
-                ], 404);
+                return null;
             }
 
             $validStates = ['supply_chain_director_review', MrfParallelFirstApprovalService::STATE];
             if (! in_array($locked->workflow_state, $validStates, true)) {
                 if ($parallelService->isAlreadyApproved($locked)) {
-                    return response()->json([
-                        'success' => false,
-                        'error' => 'This MRF has already been approved.',
-                        'code' => 'ALREADY_APPROVED',
-                        'currentWorkflowState' => $locked->workflow_state,
-                    ], 422);
+                    return ['error' => 'ALREADY_APPROVED', 'message' => 'This MRF has already been approved.', 'workflow_state' => $locked->workflow_state];
                 }
-
-                return response()->json([
-                    'success' => false,
-                    'error' => 'MRF is not awaiting Supply Chain Director review',
-                    'code' => 'INVALID_WORKFLOW_STATE',
-                    'currentWorkflowState' => $locked->workflow_state,
-                    'expectedState' => 'supply_chain_director_review',
-                ], 422);
-            }
+                return ['error' => 'INVALID_WORKFLOW_STATE', 'message' => 'MRF is not awaiting Supply Chain Director review', 'workflow_state' => $locked->workflow_state];
+                }
 
             $isApproved = $request->action === 'approve';
             $isParallel = $parallelService->isParallelPending($locked);
@@ -217,8 +201,7 @@ class MRFWorkflowController extends Controller
                     : $locked->first_approval_by_role,
             ];
 
-            $locked->fill($approvalAttributes);
-            $locked->save();
+
 
             $parallelService->persistPartialApproval(
                 $locked,
@@ -227,6 +210,9 @@ class MRFWorkflowController extends Controller
                 $user,
                 $request->remarks,
             );
+
+            $locked->fill($approvalAttributes);
+            $locked->save();
 
             // FIX: Pass the actual stage string, not the hardcoded role!
             $approvalRecord = MRFApprovalHistory::record(
@@ -259,6 +245,20 @@ class MRFWorkflowController extends Controller
 
         if (! $approvalData) {
             return response()->json(['success' => false, 'error' => 'MRF not found', 'code' => 'NOT_FOUND'], 404);
+        }
+
+         // Handle error returns from inside the transaction
+        if (isset($approvalData['error'])) {
+            $httpCode = match($approvalData['error']) {
+                'ALREADY_APPROVED', 'INVALID_WORKFLOW_STATE' => 422,
+                default => 404,
+            };
+            return response()->json([
+                'success' => false,
+                'error' => $approvalData['message'],
+                'code' => $approvalData['error'],
+                'currentWorkflowState' => $approvalData['workflow_state'] ?? null,
+            ], $httpCode);
         }
 
         // 2. Send emails OUTSIDE the database transaction so HTTP requests never hang or time out!
@@ -1176,11 +1176,7 @@ class MRFWorkflowController extends Controller
             $locked = MRF::where('id', $mrf->id)->lockForUpdate()->first();
 
             if (! $locked) {
-                return response()->json([
-                    'success' => false,
-                    'error' => 'MRF not found',
-                    'code' => 'NOT_FOUND',
-                ], 404);
+                return null;
             }
 
             $currentState = $locked->workflow_state ?? WorkflowStateService::STATE_MRF_CREATED;
