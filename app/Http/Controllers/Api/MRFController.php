@@ -2158,6 +2158,8 @@ class MRFController extends Controller
         $validator = Validator::make($request->all(), [
             'po_number' => 'required|string|max:255',
             'unsigned_po' => 'required|file|mimes:pdf,doc,docx|max:10240', // Max 10MB
+            'po_terms_mode' => 'nullable|string',
+            'payment_milestones' => 'nullable', // Can be a JSON string or array
         ]);
 
         if ($validator->fails()) {
@@ -2189,13 +2191,32 @@ class MRFController extends Controller
         }
 
         // Update MRF with PO details
-        $mrf->update([
+        // Build the base update array
+        $updateData = [
             'po_number' => $request->po_number,
             'unsigned_po_url' => $unsignedPoPath,
             'status' => 'PO Generated',
             'current_stage' => 'supply_chain',
-        ]);
+        ];
 
+        // Capture the terms mode (custom vs standard)
+        if ($request->has('po_terms_mode')) {
+            $updateData['po_terms_mode'] = $request->input('po_terms_mode');
+        }
+
+        // Capture the milestones and handle FormData stringification
+        if ($request->has('payment_milestones')) {
+            $milestones = $request->input('payment_milestones');
+
+            // If React sent it as a FormData string, decode it into a PHP array
+            $updateData['payment_milestones'] = is_string($milestones)
+                ? json_decode($milestones, true)
+                : $milestones;
+        }
+
+        // Update MRF with all PO details
+        $mrf->update($updateData);
+        
         // Add to approval history
         $approvalHistory = $mrf->approval_history ?? [];
         $approvalHistory[] = [

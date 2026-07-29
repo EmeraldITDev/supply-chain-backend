@@ -575,6 +575,8 @@ class MRF extends Model
         'chairman_remarks',
         // PO information
         'po_number',
+        'po_terms_mode',
+        'payment_milestones',
         'unsigned_po_url',
         'unsigned_po_share_url',
         'signed_po_url',
@@ -632,6 +634,7 @@ class MRF extends Model
         'date' => 'date',
         'is_resubmission' => 'boolean',
         'is_po_linked' => 'boolean',
+        'payment_milestones' => 'array',
         'approval_history' => 'array',
         'executive_approved' => 'boolean',
         'executive_approved_at' => 'datetime',
