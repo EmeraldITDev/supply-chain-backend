@@ -61,8 +61,20 @@
         .approval-block { margin-top: 20px; font-size: 9px; width: 45%; }
         .approval-block .label { font-weight: bold; margin-bottom: 4px; }
         .approval-block .name { margin-bottom: 4px; }
-        .signature-img { max-width: 160px; max-height: 60px; display: block; margin: 0 0 2px; }
-        .signature-rule { border: none; border-top: 1px solid #000; margin: 4px 0 10px; }
+        .signature-img {
+            width: 180px;
+            height: auto;
+            max-height: 90px;
+            display: block;
+            margin-bottom: 0px;
+            position: relative;
+            bottom: -8px;
+        }
+        .signature-rule {
+            border: none;
+            border-top: 1px solid #94a3b8;
+            margin: 4px 0 10px;
+        }
     </style>
 </head>
 <body>
@@ -218,11 +230,14 @@
     <div class="approval-block">
         <div class="label">Approved By</div>
         <div class="name">{{ $approved_by_name }}</div>
-        {!! $signature_html !!}
-        <hr class="signature-rule" />
-        <div class="label">Date</div>
-        <div>{{ $approved_by_date }}</div>
+        <div style="margin-top: 24px; position: relative;">
+            {!! $signature_html !!}
+            <hr class="signature-rule" />
+        </div>
+        <div class="label" style="margin-top: 24px;">Date</div>
+        <div style="margin-top: 4px;">{{ $approved_by_date }}</div>
         <hr class="signature-rule" />
     </div>
+
 </body>
 </html>
