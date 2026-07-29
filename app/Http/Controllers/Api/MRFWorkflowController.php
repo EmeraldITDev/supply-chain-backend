@@ -2301,80 +2301,42 @@ class MRFWorkflowController extends Controller
         } else {
             $poData['data']['signature_image_url'] = $sigDisk->path($sigPath);
         }
-        // Mark MRF as signing in progress immediately so the UI updates
-        // without waiting for PDF generation to complete.
-        $mrf->update(['status' => 'signing_in_progress']);
+        
+        $pdfBinary = $this->generatePOPDF($poData['data'], (string) ($mrf->po_number ?: $mrf->mrf_id), $user);
 
-        // Capture everything needed for the closure before the response is sent.
-        $poDataForClosure = $poData['data'];
-        $poNumber = (string) ($mrf->po_number ?: $mrf->mrf_id);
-        $mrfId = $mrf->id;
-        $mrfMrfId = $mrf->mrf_id;
-        $workflowService = $this->workflowService;
-        $controller = $this;
+        $disk = $this->getStorageDisk();
+        $signedPath = 'purchase-orders/signed/' . date('Y/m') . '/po_signed_' . ($mrf->po_number ?? $mrf->mrf_id) . '_' . time() . '.pdf';
+        Storage::disk($disk)->put($signedPath, $pdfBinary);
+        $signedUrl = $this->getFileUrl($signedPath, $disk);
 
-        // Return the response immediately, then generate the PDF after.
-        app()->terminating(function () use (
-            $poDataForClosure,
-            $poNumber,
-            $mrfId,
-            $mrfMrfId,
+        $this->workflowService->applyPoSigned($mrf, $user, [
+            'signed_po_url' => $signedUrl,
+            'signed_po_share_url' => $signedUrl,
+            'po_signed_at' => now(),
+        ], force: true);
+
+        $mrf->refresh();
+
+        $this->registerSignedPoInRegistry(
+            $mrf,
             $user,
-            $workflowService,
-            $controller,
-        ) {
-            try {
-                $mrf = MRF::find($mrfId);
-                if (! $mrf) {
-                    return;
-                }
+            $signedPath,
+            $signedUrl,
+            basename($signedPath),
+        );
 
-                $pdfBinary = app(\App\Services\PurchaseOrderPdfService::class)
-                    ->renderWorkflowPdf($poDataForClosure, $poNumber, $user);
-
-                $disk = $controller->getStorageDisk();
-                $signedPath = 'purchase-orders/signed/' . date('Y/m') . '/po_signed_' . $poNumber . '_' . time() . '.pdf';
-                Storage::disk($disk)->put($signedPath, $pdfBinary);
-                $signedUrl = $controller->getFileUrl($signedPath, $disk);
-
-                $workflowService->applyPoSigned($mrf, $user, [
-                    'signed_po_url'       => $signedUrl,
-                    'signed_po_share_url' => $signedUrl,
-                    'po_signed_at'        => now(),
-                ], force: true);
-
-                $mrf->refresh();
-
-                $controller->registerSignedPoInRegistry(
-                    $mrf,
-                    $user,
-                    $signedPath,
-                    $signedUrl,
-                    basename($signedPath),
-                );
-
-                app(\App\Services\FinanceAp\FinanceApWorkflowOrchestrator::class)->afterPoSigned($mrf, $user);
-
-            } catch (\Throwable $e) {
-                \Illuminate\Support\Facades\Log::error('PO signing failed after response', [
-                    'mrf_id' => $mrfMrfId,
-                    'error'  => $e->getMessage(),
-                ]);
-                // Reset status so SCD can retry
-                MRF::where('id', $mrfId)->update(['status' => 'awaiting_scd_signature']);
-            }
-        });
+        app(FinanceApWorkflowOrchestrator::class)->afterPoSigned($mrf, $user);
 
         return response()->json([
-            'success'    => true,
-            'message'    => 'PO signing in progress. The signed document will be ready shortly.',
-            'processing' => true,
-            'data'       => [
-                'mrf_id'    => $mrf->mrf_id,
+            'success' => true,
+            'message' => 'PO signed successfully.',
+            'data' => [
+                'mrf_id' => $mrf->mrf_id,
                 'po_number' => $mrf->po_number,
-                'status'    => $mrf->status,
+                'status' => $mrf->status,
+                'signed_po_url' => $mrf->signed_po_url,
             ],
-        ], 202);
+        ]);
     }
 
     /**
