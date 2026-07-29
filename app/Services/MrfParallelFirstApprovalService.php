@@ -109,24 +109,16 @@ class MrfParallelFirstApprovalService
         }
 
         if ($this->isParallelPending($mrf)) {
-            $executiveApproved = (bool) ($mrf->executive_approved ?? false) || $role === self::ROLE_EXECUTIVE;
-            $directorApproved = filled($mrf->director_approved_at ?? $mrf->scd_approved_at ?? $mrf->supply_chain_approved_at)
-                || $role === self::ROLE_SUPPLY_CHAIN_DIRECTOR;
-
-            if ($executiveApproved && $directorApproved) {
-                return [
-                    'status' => 'procurement_review',
-                    'current_stage' => 'procurement',
-                    'workflow_state' => WorkflowStateService::STATE_PROCUREMENT_REVIEW,
-                    'first_approval_by_role' => filled($mrf->first_approval_by_role) ? $mrf->first_approval_by_role : $role,
-                ];
-            }
-
+            // First-one-wins: whichever of SCD or Executive approves first
+            // immediately moves the MRF to procurement review.
+            // The other approver's action is no longer required.
             return [
-                'status' => 'pending',
-                'current_stage' => self::STATE,
-                'workflow_state' => self::STATE,
-                'first_approval_by_role' => filled($mrf->first_approval_by_role) ? $mrf->first_approval_by_role : $role,
+                'status' => 'procurement_review',
+                'current_stage' => 'procurement_review',
+                'workflow_state' => WorkflowStateService::STATE_SUPPLY_CHAIN_DIRECTOR_APPROVED,
+                'first_approval_by_role' => filled($mrf->first_approval_by_role)
+                    ? $mrf->first_approval_by_role
+                    : $role,
             ];
         }
 
