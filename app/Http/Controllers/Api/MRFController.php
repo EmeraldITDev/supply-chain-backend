@@ -503,7 +503,7 @@ class MRFController extends Controller
             ]);
         }
 
-        if ($user && in_array($user->scmRole(), ['employee', 'general_employee'])) {
+        if ($user && in_array($user->scmRole(), ['employee', 'general_employee']) && ! $user->is_admin) {
             $query->where('requester_id', $user->id);
         }
 
@@ -2216,7 +2216,7 @@ class MRFController extends Controller
 
         // Update MRF with all PO details
         $mrf->update($updateData);
-        
+
         // Add to approval history
         $approvalHistory = $mrf->approval_history ?? [];
         $approvalHistory[] = [
