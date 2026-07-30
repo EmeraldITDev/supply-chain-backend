@@ -64,7 +64,7 @@ class AuthController extends Controller
         // Determine token expiration based on remember_me
         // Remember me: 30 days, Regular session: 1 day
         $rememberMe = $request->boolean('remember_me', true); // Default to true for persistent login
-        $expiresAt = $rememberMe 
+        $expiresAt = $rememberMe
             ? now()->addDays(30)  // 30 days for "remember me"
             : now()->addDay();    // 1 day for regular session
 
@@ -74,7 +74,7 @@ class AuthController extends Controller
 
         // SCM permissions use supply_chain_role exclusively
         $scmRole = $user->getRoleNames()->first() ?? $user->scmRole() ?? 'employee';
-        
+
         // Get department from employee or user
         $department = $user->employee->department ?? $user->department ?? null;
 
@@ -142,20 +142,20 @@ class AuthController extends Controller
     {
         $user = $request->user();
         $currentToken = $request->user()->currentAccessToken();
-        
+
         // Determine if this was a remember token or session token
         $isRememberToken = str_contains($currentToken->name, 'remember');
-        
+
         // Create new token with same expiration logic
-        $expiresAt = $isRememberToken 
+        $expiresAt = $isRememberToken
             ? now()->addDays(30)  // 30 days for "remember me"
             : now()->addDay();    // 1 day for regular session
-        
+
         $tokenName = $isRememberToken ? 'remember-token' : 'session-token';
-        
+
         // Delete old token
         $currentToken->delete();
-        
+
         // Create new token
         $newToken = $user->createToken($tokenName, ['*'], $expiresAt)->plainTextToken;
 
@@ -481,6 +481,8 @@ class AuthController extends Controller
             'signatureUrl' => $signatureUrl,
             'has_signature' => ! empty($user->signature_image_path),
             'hasSignature' => ! empty($user->signature_image_path),
+            'is_admin' => (bool) ($user->is_admin ?? false),
+            'isAdmin' => (bool) ($user->is_admin ?? false),
         ];
     }
 }
