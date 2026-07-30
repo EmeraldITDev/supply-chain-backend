@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Jobs\ProcessPurchaseOrderGenerationJob;
 use App\Jobs\ProcessPurchaseOrderNotificationsJob;
 use App\Http\Controllers\Controller;
+use App\Jobs\ProcessPoSignatureJob;
 use App\Models\Activity;
 use App\Models\MRF;
 use App\Models\MRFApprovalHistory;
@@ -2301,42 +2302,29 @@ class MRFWorkflowController extends Controller
         } else {
             $poData['data']['signature_image_url'] = $sigDisk->path($sigPath);
         }
-        
-        $pdfBinary = $this->generatePOPDF($poData['data'], (string) ($mrf->po_number ?: $mrf->mrf_id), $user);
 
-        $disk = $this->getStorageDisk();
-        $signedPath = 'purchase-orders/signed/' . date('Y/m') . '/po_signed_' . ($mrf->po_number ?? $mrf->mrf_id) . '_' . time() . '.pdf';
-        Storage::disk($disk)->put($signedPath, $pdfBinary);
-        $signedUrl = $this->getFileUrl($signedPath, $disk);
+        // Dispatch PDF generation to queue — return immediately
+        $mrf->update(['status' => 'awaiting_scd_signature']); // keep status while processing
 
-        $this->workflowService->applyPoSigned($mrf, $user, [
-            'signed_po_url' => $signedUrl,
-            'signed_po_share_url' => $signedUrl,
-            'po_signed_at' => now(),
-        ], force: true);
-
-        $mrf->refresh();
-
-        $this->registerSignedPoInRegistry(
-            $mrf,
-            $user,
-            $signedPath,
-            $signedUrl,
-            basename($signedPath),
-        );
-
-        app(FinanceApWorkflowOrchestrator::class)->afterPoSigned($mrf, $user);
+        ProcessPoSignatureJob::dispatch(
+            $mrf->id,
+            $user->id,
+            $poData['data'],
+            $sigPath,
+            $sigDiskName,
+            (string) ($mrf->po_number ?: $mrf->mrf_id),
+        )->onConnection('database')->onQueue('default');
 
         return response()->json([
-            'success' => true,
-            'message' => 'PO signed successfully.',
-            'data' => [
-                'mrf_id' => $mrf->mrf_id,
+            'success'    => true,
+            'message'    => 'PO signing in progress. Refresh in a few seconds to download the signed document.',
+            'processing' => true,
+            'data'       => [
+                'mrf_id'    => $mrf->mrf_id,
                 'po_number' => $mrf->po_number,
-                'status' => $mrf->status,
-                'signed_po_url' => $mrf->signed_po_url,
+                'status'    => $mrf->status,
             ],
-        ]);
+        ], 202);
     }
 
     /**
