@@ -492,8 +492,8 @@ class UserManagementController extends Controller
                 ],
             ], 422);
         }
-
-        if (! in_array($targetUser->scmRole(), ['employee', 'staff', 'regular_staff'], true)) {
+        
+        if (in_array($targetUser->scmRole(), ['vendor', 'power_user'], true)) {
             return response()->json([
                 'success' => false,
                 'error' => 'Only staff in the employee role group can be designated requisition creators.',
