@@ -37,7 +37,19 @@ class POTermsTemplateController extends Controller
             'executive',
             'admin',
         ];
-        if (! $user || ! in_array($user->scmRole(), $allowedRoles, true)) {
+
+        // Safely extract, cast to string, trim whitespace, and make lowercase
+        $currentRole = $user ? strtolower(trim((string) $user->scmRole())) : null;
+
+        // Remove the strict 'true' flag to prevent type-mismatch bugs
+        if (! $user || ! in_array($currentRole, $allowedRoles)) {
+
+            // Log the failure so you can see EXACTLY what role the system thinks they have
+            \Log::warning('PO Terms Permission Denied', [
+                'user_id' => $user ? $user->id : 'Guest',
+                'detected_role' => $currentRole ?? 'Null/None'
+            ]);
+
             return response()->json([
                 'success' => false,
                 'error' => 'Insufficient permissions',
