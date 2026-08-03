@@ -179,7 +179,6 @@ class Trip extends Model
     public const WORKFLOW_SCD_APPROVAL = 'scd_approval';
     public const WORKFLOW_PO_PENDING_SIGN = 'po_pending_sign';
     public const WORKFLOW_PO_SIGNED = 'po_signed';
-    public const WORKFLOW_COMPLETED = 'completed';
 
     public function availableScdActions(): array
     {
