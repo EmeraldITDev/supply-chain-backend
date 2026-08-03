@@ -1470,11 +1470,6 @@ class TripRequestWorkflowController extends ApiController
             return $this->error('Trip request is cancelled', 'INVALID_STATE', 422);
         }
 
-        $metadata = is_array($trip->metadata) ? $trip->metadata : [];
-        if (! empty($metadata['logistics_trip_id'])) {
-            return $this->error('Trip request has already been converted', 'INVALID_STATE', 422);
-        }
-
         return $trip;
     }
 
