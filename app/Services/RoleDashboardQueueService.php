@@ -217,6 +217,16 @@ class RoleDashboardQueueService
   {
     $requester = $trip->relationLoaded('creator') ? $trip->creator : null;
     $displayStatus = TripDisplayStatus::resolve($trip);
+    $availableActions = $trip->availableScdActions();
+
+    $workflowLabel = match ($trip->workflow_stage) {
+        Trip::WORKFLOW_DIRECTOR_REVIEW => 'Pending Director Approval',
+        Trip::WORKFLOW_DIRECTOR_APPROVED => 'Director Approved',
+        Trip::WORKFLOW_SCD_REVIEW => 'Pending SCD Approval',
+        Trip::WORKFLOW_SCD_APPROVAL => 'Pending SCD Approval',
+        Trip::WORKFLOW_SCD_APPROVED => 'SCD Approved',
+        default => TripDisplayStatus::label($displayStatus),
+    };
 
     return [
       'id' => $trip->id,
@@ -238,8 +248,8 @@ class RoleDashboardQueueService
       ] : null,
       'workflowStage' => $trip->workflow_stage,
       'workflow_stage' => $trip->workflow_stage,
-      'workflowStageLabel' => 'Pending Director Approval',
-      'workflow_stage_label' => 'Pending Director Approval',
+      'workflowStageLabel' => $workflowLabel,
+      'workflow_stage_label' => $workflowLabel,
       'status' => $trip->status,
       'approvalStatus' => $trip->approval_status,
       'approval_status' => $trip->approval_status,
@@ -247,8 +257,8 @@ class RoleDashboardQueueService
       'display_status' => $displayStatus,
       'displayStatusLabel' => TripDisplayStatus::label($displayStatus),
       'display_status_label' => TripDisplayStatus::label($displayStatus),
-      'availableActions' => $trip->availableScdActions(),
-      'available_actions' => $trip->availableScdActions(),
+      'availableActions' => $availableActions,
+      'available_actions' => $availableActions,
       'requiresScdApproval' => $trip->requiresScdApproval(),
       'requires_scd_approval' => $trip->requiresScdApproval(),
       'scheduledDepartureAt' => $trip->scheduled_departure_at?->toIso8601String(),
@@ -260,7 +270,6 @@ class RoleDashboardQueueService
       'createdAt' => $trip->created_at?->toIso8601String(),
       'created_at' => $trip->created_at?->toIso8601String(),
       'detailPath' => '/api/trip-requests/'.$trip->id,
-      'availableActions' => ['director_approve', 'director_reject', 'director_return'],
     ];
   }
 
@@ -323,8 +332,17 @@ class RoleDashboardQueueService
     return Trip::query()
       ->select(self::TRIP_QUEUE_LIST_COLUMNS)
       ->tripRequests()
-      ->whereIn('workflow_stage', [Trip::WORKFLOW_SCD_REVIEW, Trip::WORKFLOW_SCD_APPROVAL])
-      ->where('status', Trip::STATUS_SUBMITTED);
+      ->whereIn('workflow_stage', [
+        Trip::WORKFLOW_DIRECTOR_REVIEW,
+        Trip::WORKFLOW_DIRECTOR_APPROVED,
+        Trip::WORKFLOW_SCD_REVIEW,
+        Trip::WORKFLOW_SCD_APPROVAL,
+      ])
+      ->where('status', Trip::STATUS_SUBMITTED)
+      ->where(function ($query): void {
+        $query->where('approval_status', '!=', 'director_approved')
+          ->where('approval_status', '!=', 'approved');
+      });
   }
 
   private function pendingTripPoSignatureQuery()
