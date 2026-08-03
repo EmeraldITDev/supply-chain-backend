@@ -9,11 +9,13 @@ use App\Mail\POGeneratedMail;
 use App\Mail\QuotationSubmittedMail;
 use App\Mail\RFQSentMail;
 use App\Mail\SRFCreatedMail;
+use App\Mail\TripApprovedMail;
 use App\Mail\TripRequestDirectorApprovedMail;
 use App\Mail\TripRequestForwardedMail;
 use App\Mail\TripRequestSubmittedMail;
 use App\Mail\VendorQuoteApprovedMail;
 use App\Mail\VendorSelectedMail;
+use App\Notifications\SystemAnnouncementNotification;
 use App\Models\Logistics\Trip;
 use App\Models\MRF;
 use App\Models\Quotation;
@@ -76,6 +78,95 @@ class WorkflowNotificationService
             modelId: $trip->trip_code,
             mailableFactory: static fn () => new TripRequestDirectorApprovedMail($trip, $director)
         );
+    }
+
+    public function notifyLogisticsManagerTripApproved(Trip $trip, User $approver): void
+    {
+        $managers = User::query()
+            ->where('supply_chain_role', 'logistics_manager')
+            ->whereNotNull('email')
+            ->get();
+
+        foreach ($managers as $manager) {
+            DatabaseNotifications::send($manager, new SystemAnnouncementNotification(
+                'Trip Request Approved',
+                "Trip {$trip->trip_code} to {$trip->destination} has been approved by {$approver->name} and is ready for logistics processing.",
+                [
+                    'action_url' => "/logistics/trips/{$trip->id}",
+                    'trip_code' => $trip->trip_code,
+                    'destination' => $trip->destination,
+                    'requester' => $trip->creator?->name,
+                    'approved_at' => now()->toIso8601String(),
+                ]
+            ));
+
+            Mail::to($manager->email)->queue(new TripRequestDirectorApprovedMail($trip, $approver));
+        }
+    }
+
+    public function notifyScdTripPendingApproval(Trip $trip, User $forwardedBy): void
+    {
+        $directors = User::query()
+            ->whereIn('supply_chain_role', ['supply_chain_director', 'supply_chain'])
+            ->get();
+
+        foreach ($directors as $director) {
+            DatabaseNotifications::send($director, new SystemAnnouncementNotification(
+                'Trip Request Pending Your Approval',
+                "Trip {$trip->trip_code} to {$trip->destination} has been forwarded for your approval by {$forwardedBy->name}.",
+                [
+                    'action_url' => "/supply-chain/trips/{$trip->id}",
+                    'trip_code' => $trip->trip_code,
+                    'destination' => $trip->destination,
+                ]
+            ));
+        }
+    }
+
+    public function notifyRequesterChangesRequired(Trip $trip, User $reviewer, ?string $comments): void
+    {
+        if (! $trip->creator) {
+            return;
+        }
+
+        DatabaseNotifications::send($trip->creator, new SystemAnnouncementNotification(
+            'Changes Requested on Your Trip',
+            "Your trip request {$trip->trip_code} has been returned for changes. Reason: " . ($comments ?? 'Please review and resubmit.'),
+            [
+                'action_url' => "/trip-requests/{$trip->id}",
+                'trip_code' => $trip->trip_code,
+            ]
+        ));
+    }
+
+    public function notifyRequesterTripRejected(Trip $trip, User $reviewer, ?string $remarks = null): void
+    {
+        if (! $trip->creator) {
+            return;
+        }
+
+        DatabaseNotifications::send($trip->creator, new SystemAnnouncementNotification(
+            'Trip Request Rejected',
+            "Your trip request {$trip->trip_code} has been rejected. Reason: " . ($remarks ?? 'No additional reason provided.'),
+            [
+                'action_url' => "/trip-requests/{$trip->id}",
+                'trip_code' => $trip->trip_code,
+            ]
+        ));
+    }
+
+    public function evaluatePostApprovalRouting(Trip $trip, User $approver): void
+    {
+        $needsExternalProcurement = ! empty($trip->vendor_id)
+            || ! empty($trip->accommodation_vendor_id)
+            || ! empty($trip->escort_vendor_id);
+
+        if ($needsExternalProcurement && class_exists(\App\Services\TripProcurementBridgeService::class)) {
+            app(\App\Services\TripProcurementBridgeService::class)
+                ->initiateForTrip($trip, $approver);
+
+            $trip->update(['workflow_stage' => Trip::WORKFLOW_PROCUREMENT_PENDING]);
+        }
     }
 
     public function notifySRFSubmitted(SRF $srf): void

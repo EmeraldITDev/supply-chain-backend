@@ -61,8 +61,26 @@ return new class extends Migration
             if (! Schema::hasColumn('logistics_journeys', 'trip_request_id')) {
                 $table->unsignedBigInteger('trip_request_id')->nullable()->after('trip_id')->index();
             }
+            if (! Schema::hasColumn('logistics_journeys', 'trip_code')) {
+                $table->string('trip_code')->nullable()->after('trip_request_id');
+            }
+            if (! Schema::hasColumn('logistics_journeys', 'title')) {
+                $table->string('title')->nullable()->after('trip_code');
+            }
+            if (! Schema::hasColumn('logistics_journeys', 'origin')) {
+                $table->string('origin')->nullable()->after('title');
+            }
+            if (! Schema::hasColumn('logistics_journeys', 'destination')) {
+                $table->string('destination')->nullable()->after('origin');
+            }
+            if (! Schema::hasColumn('logistics_journeys', 'scheduled_departure_at')) {
+                $table->timestamp('scheduled_departure_at')->nullable()->after('destination');
+            }
+            if (! Schema::hasColumn('logistics_journeys', 'scheduled_arrival_at')) {
+                $table->timestamp('scheduled_arrival_at')->nullable()->after('scheduled_departure_at');
+            }
             if (! Schema::hasColumn('logistics_journeys', 'driver_name')) {
-                $table->string('driver_name')->nullable()->after('trip_request_id');
+                $table->string('driver_name')->nullable()->after('scheduled_arrival_at');
             }
             if (! Schema::hasColumn('logistics_journeys', 'driver_phone')) {
                 $table->string('driver_phone')->nullable()->after('driver_name');
@@ -70,8 +88,17 @@ return new class extends Migration
             if (! Schema::hasColumn('logistics_journeys', 'driver_email')) {
                 $table->string('driver_email')->nullable()->after('driver_phone');
             }
+            if (! Schema::hasColumn('logistics_journeys', 'driver_id')) {
+                $table->unsignedBigInteger('driver_id')->nullable()->after('driver_email')->index();
+            }
+            if (! Schema::hasColumn('logistics_journeys', 'driver_source')) {
+                $table->string('driver_source')->nullable()->after('driver_id');
+            }
+            if (! Schema::hasColumn('logistics_journeys', 'vendor_id')) {
+                $table->unsignedBigInteger('vendor_id')->nullable()->after('driver_source')->index();
+            }
             if (! Schema::hasColumn('logistics_journeys', 'vehicle_id')) {
-                $table->unsignedBigInteger('vehicle_id')->nullable()->after('driver_email')->index();
+                $table->unsignedBigInteger('vehicle_id')->nullable()->after('vendor_id')->index();
             }
             if (! Schema::hasColumn('logistics_journeys', 'vehicle_plate_number')) {
                 $table->string('vehicle_plate_number')->nullable()->after('vehicle_id');
@@ -97,8 +124,11 @@ return new class extends Migration
             if (! Schema::hasColumn('logistics_journeys', 'accommodation_name')) {
                 $table->string('accommodation_name')->nullable()->after('actual_arrival_time');
             }
+            if (! Schema::hasColumn('logistics_journeys', 'accommodation_hotel_name')) {
+                $table->string('accommodation_hotel_name')->nullable()->after('accommodation_name');
+            }
             if (! Schema::hasColumn('logistics_journeys', 'accommodation_address')) {
-                $table->string('accommodation_address')->nullable()->after('accommodation_name');
+                $table->string('accommodation_address')->nullable()->after('accommodation_hotel_name');
             }
             if (! Schema::hasColumn('logistics_journeys', 'accommodation_contact')) {
                 $table->string('accommodation_contact')->nullable()->after('accommodation_address');
@@ -109,8 +139,14 @@ return new class extends Migration
             if (! Schema::hasColumn('logistics_journeys', 'accommodation_estimated_cost')) {
                 $table->decimal('accommodation_estimated_cost', 12, 2)->nullable()->after('accommodation_details');
             }
+            if (! Schema::hasColumn('logistics_journeys', 'escort_required')) {
+                $table->boolean('escort_required')->default(false)->after('accommodation_estimated_cost');
+            }
+            if (! Schema::hasColumn('logistics_journeys', 'escort_type')) {
+                $table->string('escort_type')->nullable()->after('escort_required');
+            }
             if (! Schema::hasColumn('logistics_journeys', 'escort_description')) {
-                $table->text('escort_description')->nullable()->after('accommodation_estimated_cost');
+                $table->text('escort_description')->nullable()->after('escort_type');
             }
             if (! Schema::hasColumn('logistics_journeys', 'passengers')) {
                 $table->json('passengers')->nullable()->after('escort_description');
@@ -127,8 +163,11 @@ return new class extends Migration
             if (! Schema::hasColumn('logistics_journeys', 'feedback')) {
                 $table->text('feedback')->nullable()->after('destination');
             }
+            if (! Schema::hasColumn('logistics_journeys', 'feedback_triggered')) {
+                $table->boolean('feedback_triggered')->default(false)->after('feedback');
+            }
             if (! Schema::hasColumn('logistics_journeys', 'jcc_generated')) {
-                $table->boolean('jcc_generated')->default(false)->after('feedback');
+                $table->boolean('jcc_generated')->default(false)->after('feedback_triggered');
             }
             if (! Schema::hasColumn('logistics_journeys', 'jcc_document_id')) {
                 $table->unsignedBigInteger('jcc_document_id')->nullable()->after('jcc_generated')->index();
@@ -157,9 +196,18 @@ return new class extends Migration
             $table->dropForeign(['jcc_document_id']);
             $table->dropColumn([
                 'trip_request_id',
+                'trip_code',
+                'title',
+                'origin',
+                'destination',
+                'scheduled_departure_at',
+                'scheduled_arrival_at',
                 'driver_name',
                 'driver_phone',
                 'driver_email',
+                'driver_id',
+                'driver_source',
+                'vendor_id',
                 'vehicle_id',
                 'vehicle_plate_number',
                 'vehicle_make',
@@ -169,16 +217,20 @@ return new class extends Migration
                 'actual_departure_time',
                 'actual_arrival_time',
                 'accommodation_name',
+                'accommodation_hotel_name',
                 'accommodation_address',
                 'accommodation_contact',
                 'accommodation_details',
                 'accommodation_estimated_cost',
+                'escort_required',
+                'escort_type',
                 'escort_description',
                 'passengers',
                 'purpose',
                 'departure_location',
                 'destination',
                 'feedback',
+                'feedback_triggered',
                 'jcc_generated',
                 'jcc_document_id',
             ]);

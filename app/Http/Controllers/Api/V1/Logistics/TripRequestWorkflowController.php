@@ -480,113 +480,111 @@ class TripRequestWorkflowController extends ApiController
     }
 
     /**
-     * Logistics manager forwards a trip request to the Supervising Director.
+     * Logistics manager forwards, requests changes, or rejects a trip request.
      */
     public function logisticsReview(Request $request, int $id)
     {
         $user = $request->user();
-        if (! $user || ! $this->isLogisticsInternal($user)) {
-            return $this->error('Only logistics managers can review trip requests', 'FORBIDDEN', 403);
+
+        if (! $user || ! in_array($user->scmRole(), ['logistics_manager', 'logistics_officer', 'admin'], true)) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Only Logistics staff can perform this action.',
+                'code' => 'FORBIDDEN',
+            ], 403);
         }
 
-        $trip = $this->findActionableTripRequest($id);
-        if ($trip instanceof \Illuminate\Http\JsonResponse) {
-            return $trip;
+        $trip = Trip::query()
+            ->where('id', $id)
+            ->orWhere('trip_code', $id)
+            ->first();
+
+        if (! $trip) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Trip request not found.',
+                'code' => 'NOT_FOUND',
+            ], 404);
         }
 
         $validator = Validator::make($request->all(), [
             'action' => 'required|in:forward,request_changes,reject',
             'reason' => 'nullable|string|max:1000',
-            'comments' => 'nullable|string|max:1000',
-            'accommodation_name' => 'nullable|string|max:255',
-            'accommodation_address' => 'nullable|string|max:255',
-            'accommodation_contact' => 'nullable|string|max:50',
-            'accommodation_details' => 'nullable|string|max:2000',
-            'accommodation_estimated_cost' => 'nullable|numeric|min:0',
-            'escort_description' => 'nullable|string|max:2000',
+            'comments' => 'nullable|string|max:2000',
             'estimated_cost' => 'nullable|numeric|min:0',
+            'accommodation_name' => 'nullable|string|max:500',
+            'accommodation_address' => 'nullable|string|max:1000',
+            'accommodation_contact' => 'nullable|string|max:255',
+            'accommodation_estimated_cost' => 'nullable|numeric|min:0',
+            'escort_description' => 'nullable|string|max:1000',
         ]);
 
         if ($validator->fails()) {
-            return $this->error('Validation failed', 'VALIDATION_ERROR', 422, $validator->errors()->toArray());
+            return response()->json([
+                'success' => false,
+                'error' => 'Validation failed.',
+                'errors' => $validator->errors(),
+                'code' => 'VALIDATION_ERROR',
+            ], 422);
         }
 
-        $action = (string) $request->input('action');
-        if (in_array($action, ['request_changes', 'reject'], true) && blank((string) $request->input('reason'))) {
-            return $this->error('Validation failed', 'VALIDATION_ERROR', 422, [
-                'reason' => ['A reason is required for this action.'],
-            ]);
+        $nextStage = match ($request->action) {
+            'forward' => Trip::WORKFLOW_SCD_REVIEW,
+            'request_changes' => Trip::WORKFLOW_SUBMITTED,
+            'reject' => Trip::WORKFLOW_CANCELLED,
+        };
+
+        $updates = ['workflow_stage' => $nextStage];
+
+        if ($request->has('estimated_cost')) {
+            $updates['estimated_cost'] = $request->input('estimated_cost');
+        }
+        if ($request->has('accommodation_name')) {
+            $updates['accommodation_hotel_name'] = $request->input('accommodation_name');
+        }
+        if ($request->has('accommodation_address')) {
+            $updates['accommodation_address'] = $request->input('accommodation_address');
+        }
+        if ($request->has('accommodation_contact')) {
+            $updates['accommodation_contact'] = $request->input('accommodation_contact');
+        }
+        if ($request->has('accommodation_estimated_cost')) {
+            $updates['accommodation_estimated_cost'] = $request->input('accommodation_estimated_cost');
+        }
+        if ($request->has('escort_description')) {
+            $updates['escort_description'] = $request->input('escort_description');
+        }
+        if ($request->action === 'reject' || $request->action === 'request_changes') {
+            $updates['rejection_reason'] = $request->input('reason') ?? $request->input('comments');
         }
 
-        $before = $trip->only([
-            'accommodation_name',
-            'accommodation_address',
-            'accommodation_contact',
-            'accommodation_details',
-            'accommodation_estimated_cost',
-            'escort_description',
-            'estimated_cost',
-            'comments',
-        ]);
+        $trip->update($updates);
+        $trip->refresh();
 
-        $fill = array_filter([
-            'accommodation_name' => $request->input('accommodation_name'),
-            'accommodation_address' => $request->input('accommodation_address'),
-            'accommodation_contact' => $request->input('accommodation_contact'),
-            'accommodation_details' => $request->input('accommodation_details'),
-            'accommodation_estimated_cost' => $request->filled('accommodation_estimated_cost') ? (float) $request->input('accommodation_estimated_cost') : null,
-            'escort_description' => $request->input('escort_description'),
-            'estimated_cost' => $request->filled('estimated_cost') ? (float) $request->input('estimated_cost') : null,
-            'comments' => $request->input('comments'),
-        ], fn ($value) => $value !== null);
-
-        $trip->fill($fill);
-        $trip->save();
-
-        $after = $trip->only(array_keys($before));
-        $reason = $request->input('reason');
-        $this->tripRequestEditAuditService->logChanges($trip, $user, $before, $after, $reason);
-
-        if ($action === 'request_changes') {
-            $trip->workflow_stage = Trip::WORKFLOW_CHANGES_REQUESTED;
-            $trip->approval_status = 'changes_requested';
-            $trip->metadata = array_merge(is_array($trip->metadata) ? $trip->metadata : [], [
-                'changes_requested_at' => now()->toIso8601String(),
-                'changes_requested_by' => $user->id,
-                'changes_requested_reason' => $reason,
-            ]);
-            $trip->updated_by = $user->id;
-            $trip->save();
-            $this->tripRequestNotifications->notifyChangesRequested($trip->fresh(['creator']), $user, $reason);
-        } elseif ($action === 'reject') {
-            $trip->status = Trip::STATUS_CANCELLED;
-            $trip->approval_status = 'rejected';
-            $trip->metadata = array_merge(is_array($trip->metadata) ? $trip->metadata : [], [
-                'rejected_at' => now()->toIso8601String(),
-                'rejected_by' => $user->id,
-                'rejection_reason' => $reason,
-            ]);
-            $trip->updated_by = $user->id;
-            $trip->save();
-            $this->tripRequestNotifications->notifyRejected($trip, $trip->creator ?? User::find($trip->created_by), $reason);
-        } else {
-            $trip->workflow_stage = Trip::WORKFLOW_DIRECTOR_REVIEW;
-            $trip->approval_status = 'forwarded';
-            $trip->metadata = array_merge(is_array($trip->metadata) ? $trip->metadata : [], [
-                'forwarded_at' => now()->toIso8601String(),
-                'forwarded_by' => $user->id,
-                'forward_notes' => $request->input('comments'),
-            ]);
-            $trip->updated_by = $user->id;
-            $trip->save();
-            $this->tripRequestNotifications->notifyForwardedToDirector($trip->fresh(['creator']), $user);
-            $this->tripRequestNotifications->notifyLogisticsReviewAction($trip->fresh(['creator']), $user, 'forward', $reason);
+        if ($request->action === 'forward') {
+            app(\App\Services\WorkflowNotificationService::class)
+                ->notifyScdTripPendingApproval($trip, $user);
+        } elseif ($request->action === 'request_changes') {
+            app(\App\Services\WorkflowNotificationService::class)
+                ->notifyRequesterChangesRequired($trip, $user, $request->input('comments'));
+        } elseif ($request->action === 'reject') {
+            app(\App\Services\WorkflowNotificationService::class)
+                ->notifyRequesterTripRejected($trip, $user, $request->input('reason'));
         }
 
-        return $this->success([
-            'trip' => $this->presentTripRequest($trip->fresh(['creator']), includeProgressSummary: true, viewer: $user),
-            'auditTrail' => $this->tripRequestEditAuditService->getAuditTrail($trip),
-            'message' => 'Trip request review saved',
+        return response()->json([
+            'success' => true,
+            'message' => match ($request->action) {
+                'forward' => 'Trip forwarded to Supply Chain Director for approval.',
+                'request_changes' => 'Changes requested. Requester has been notified.',
+                'reject' => 'Trip request rejected.',
+            },
+            'data' => [
+                'trip_id' => $trip->id,
+                'trip_code' => $trip->trip_code,
+                'workflow_stage' => $trip->workflow_stage,
+                'available_actions' => $trip->availableActions($user->scmRole()),
+            ],
         ]);
     }
 
@@ -954,16 +952,28 @@ class TripRequestWorkflowController extends ApiController
             Journey::create([
                 'trip_id' => $logisticsTrip->id,
                 'trip_request_id' => $tripRequest->id,
-                'status' => Journey::STATUS_NOT_STARTED,
-                'accommodation_name' => $tripRequest->accommodation_name,
+                'trip_code' => $logisticsTrip->trip_code,
+                'title' => $logisticsTrip->title,
+                'origin' => $logisticsTrip->origin,
+                'destination' => $logisticsTrip->destination,
+                'purpose' => $tripRequest->purpose,
+                'scheduled_departure_at' => $tripRequest->scheduled_departure_at,
+                'scheduled_arrival_at' => $tripRequest->scheduled_arrival_at,
+                'vehicle_id' => $logisticsTrip->vehicle_id,
+                'driver_id' => $logisticsTrip->driver_user_id,
+                'driver_name' => $logisticsTrip->driver_name,
+                'driver_phone' => $logisticsTrip->driver_phone,
+                'driver_source' => $logisticsTrip->driver_source,
+                'vendor_id' => $logisticsTrip->vendor_id,
+                'accommodation_required' => $tripRequest->accommodation_required,
+                'accommodation_hotel_name' => $tripRequest->accommodation_hotel_name ?? $tripRequest->accommodation_name,
                 'accommodation_address' => $tripRequest->accommodation_address,
                 'accommodation_contact' => $tripRequest->accommodation_contact,
-                'accommodation_details' => $tripRequest->accommodation_details,
                 'accommodation_estimated_cost' => $tripRequest->accommodation_estimated_cost,
+                'escort_required' => $tripRequest->escort_required,
+                'escort_type' => $tripRequest->escort_type,
                 'escort_description' => $tripRequest->escort_description,
-                'purpose' => $tripRequest->purpose,
-                'departure_location' => $tripRequest->origin,
-                'destination' => $tripRequest->destination,
+                'status' => Journey::STATUS_NOT_STARTED,
                 'created_by' => $user->id,
             ]);
 
@@ -1611,10 +1621,14 @@ class TripRequestWorkflowController extends ApiController
             'display_status' => $displayStatus,
             'displayStatusLabel' => $this->displayStatusLabel($displayStatus),
             'display_status_label' => $this->displayStatusLabel($displayStatus),
+            'available_actions' => $trip->availableActions($viewer?->scmRole() ?? 'admin'),
+            'availableActions' => $trip->availableActions($viewer?->scmRole() ?? 'admin'),
             'accommodationRequired' => (bool) $trip->accommodation_required,
             'accommodation_required' => (bool) $trip->accommodation_required,
-            'accommodationName' => $trip->accommodation_name,
-            'accommodation_name' => $trip->accommodation_name,
+            'accommodationName' => $trip->accommodation_hotel_name ?? $trip->accommodation_name,
+            'accommodation_name' => $trip->accommodation_hotel_name ?? $trip->accommodation_name,
+            'accommodationHotelName' => $trip->accommodation_hotel_name ?? $trip->accommodation_name,
+            'accommodation_hotel_name' => $trip->accommodation_hotel_name ?? $trip->accommodation_name,
             'accommodationAddress' => $trip->accommodation_address,
             'accommodation_address' => $trip->accommodation_address,
             'accommodationContact' => $trip->accommodation_contact,

@@ -238,7 +238,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/trip-requests/{id}/director-approve', [TripRequestWorkflowController::class, 'directorApprove']);
     Route::post('/trip-requests/{id}/director-reject', [TripRequestWorkflowController::class, 'directorReject']);
     Route::post('/trip-requests/{id}/director-return', [TripRequestWorkflowController::class, 'directorReturn']);
-    Route::post('/trip-requests/{id}/convert', [TripRequestWorkflowController::class, 'convert']);
+    Route::post('/trip-requests/{id}/scd-approve', [TripRequestWorkflowController::class, 'scdApprove'])->middleware('role:supply_chain_director,supply_chain,admin');
+    Route::post('/trip-requests/{id}/convert', [TripRequestWorkflowController::class, 'convert'])->middleware($logisticsInternalRoles);
     Route::post('/trip-requests/{id}/reject', [TripRequestWorkflowController::class, 'reject']);
     Route::get('/trip-requests/{id}/comments', [TripRequestWorkflowController::class, 'getComments']);
     Route::post('/trip-requests/{id}/comments', [TripRequestWorkflowController::class, 'addComment']);

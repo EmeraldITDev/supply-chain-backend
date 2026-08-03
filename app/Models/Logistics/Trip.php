@@ -63,6 +63,8 @@ class Trip extends Model
     public const WORKFLOW_LOGISTICS_PROCESSING = 'logistics_processing';
     public const WORKFLOW_CONVERTED = 'converted';
     public const WORKFLOW_VENDOR_SOURCING = 'vendor_sourcing';
+    public const WORKFLOW_PROCUREMENT_PENDING = 'procurement_pending';
+    public const WORKFLOW_JOURNEY_ACTIVE = 'journey_active';
     public const WORKFLOW_COMPLETED = 'completed';
     public const WORKFLOW_CANCELLED = 'cancelled';
 
@@ -106,14 +108,22 @@ class Trip extends Model
         'notes',
         'accommodation_required',
         'accommodation_name',
+        'accommodation_hotel_name',
         'accommodation_address',
         'accommodation_contact',
         'accommodation_details',
         'accommodation_estimated_cost',
+        'accommodation_vendor_id',
         'escort_required',
+        'escort_type',
         'escort_description',
+        'escort_vendor_id',
         'estimated_cost',
         'comments',
+        'logistics_notes',
+        'scd_remarks',
+        'converted_at',
+        'converted_by',
         'metadata',
     ];
 
@@ -123,6 +133,8 @@ class Trip extends Model
         'actual_departure_at' => 'datetime',
         'actual_arrival_at' => 'datetime',
         'cancelled_at' => 'datetime',
+        'converted_at' => 'datetime',
+        'approved_at' => 'datetime',
         'metadata' => 'array',
         'passenger_user_ids' => 'array',
         'external_passengers' => 'array',
@@ -185,6 +197,35 @@ class Trip extends Model
         return match ($this->workflow_stage) {
             self::WORKFLOW_SCD_REVIEW => ['scd_approve', 'scd_reject'],
             self::WORKFLOW_SCD_APPROVAL => ['scd_approve', 'scd_reject'],
+            default => [],
+        };
+    }
+
+    public function availableActions(string $viewerRole): array
+    {
+        return match ($this->workflow_stage) {
+            self::WORKFLOW_SUBMITTED => in_array($viewerRole, [
+                'supply_chain_director', 'supply_chain', 'admin'
+            ], true) ? ['send_to_scd'] : [],
+
+            self::WORKFLOW_SCD_REVIEW => in_array($viewerRole, [
+                'supply_chain_director', 'supply_chain', 'admin'
+            ], true) ? ['scd_approve', 'scd_reject'] : [],
+
+            self::WORKFLOW_SCD_APPROVED => in_array($viewerRole, [
+                'logistics_manager', 'admin'
+            ], true) ? ['convert_to_logistics'] : [],
+
+            self::WORKFLOW_LOGISTICS_PROCESSING => in_array($viewerRole, [
+                'logistics_manager', 'admin'
+            ], true) ? ['submit_for_scd_approval', 'edit'] : [],
+
+            self::WORKFLOW_CONVERTED => in_array($viewerRole, [
+                'logistics_manager', 'admin'
+            ], true) ? ['edit', 'generate_jcc'] : [],
+
+            self::WORKFLOW_JOURNEY_ACTIVE => ['view'],
+
             default => [],
         };
     }
