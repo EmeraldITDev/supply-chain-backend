@@ -218,13 +218,16 @@ class RoleDashboardQueueService
     $requester = $trip->relationLoaded('creator') ? $trip->creator : null;
     $displayStatus = TripDisplayStatus::resolve($trip);
     $availableActions = $trip->availableScdActions();
+    $approvalStatus = strtolower((string) ($trip->approval_status ?? ''));
 
-    $workflowLabel = match ($trip->workflow_stage) {
-        Trip::WORKFLOW_DIRECTOR_REVIEW => 'Pending Director Approval',
-        Trip::WORKFLOW_DIRECTOR_APPROVED => 'Director Approved',
-        Trip::WORKFLOW_SCD_REVIEW => 'Pending SCD Approval',
-        Trip::WORKFLOW_SCD_APPROVAL => 'Pending SCD Approval',
-        Trip::WORKFLOW_SCD_APPROVED => 'SCD Approved',
+    $workflowLabel = match (true) {
+        $approvalStatus === 'director_approved' => 'Director Approved',
+        $approvalStatus === 'approved' => 'SCD Approved',
+        $approvalStatus === 'rejected' => 'Rejected',
+        $trip->workflow_stage === Trip::WORKFLOW_SCD_REVIEW => 'Pending SCD Approval',
+        $trip->workflow_stage === Trip::WORKFLOW_SCD_APPROVAL => 'Pending SCD Approval',
+        $trip->workflow_stage === Trip::WORKFLOW_DIRECTOR_APPROVED => 'Director Approved',
+        $trip->workflow_stage === Trip::WORKFLOW_DIRECTOR_REVIEW => 'Pending Director Approval',
         default => TripDisplayStatus::label($displayStatus),
     };
 
@@ -334,14 +337,13 @@ class RoleDashboardQueueService
       ->tripRequests()
       ->whereIn('workflow_stage', [
         Trip::WORKFLOW_DIRECTOR_REVIEW,
-        Trip::WORKFLOW_DIRECTOR_APPROVED,
         Trip::WORKFLOW_SCD_REVIEW,
         Trip::WORKFLOW_SCD_APPROVAL,
       ])
       ->where('status', Trip::STATUS_SUBMITTED)
       ->where(function ($query): void {
-        $query->where('approval_status', '!=', 'director_approved')
-          ->where('approval_status', '!=', 'approved');
+        $query->whereNull('approval_status')
+          ->orWhereNotIn('approval_status', ['director_approved', 'approved', 'rejected']);
       });
   }
 
