@@ -1,5 +1,70 @@
 # Frontend Changes — SCM Platform Feature Enhancements
 
+## Logistics Workflow Post-Approval Fixes
+
+### Backend change file set
+- [app/Services/RoleDashboardQueueService.php](app/Services/RoleDashboardQueueService.php)
+- [app/Http/Controllers/Api/V1/Logistics/TripRequestWorkflowController.php](app/Http/Controllers/Api/V1/Logistics/TripRequestWorkflowController.php)
+- [app/Services/Logistics/TripRequestNotificationService.php](app/Services/Logistics/TripRequestNotificationService.php)
+- [app/Services/WorkflowNotificationService.php](app/Services/WorkflowNotificationService.php)
+- [app/Mail/TripRequestDirectorApprovedMail.php](app/Mail/TripRequestDirectorApprovedMail.php)
+- [resources/views/emails/trip-request-director-approved.blade.php](resources/views/emails/trip-request-director-approved.blade.php)
+
+### 1) SCD dashboard pending queue synchronisation
+- HTTP method: `GET`
+- Path: `/api/dashboard/queues?role=supply_chain_director`
+- Request body: none
+- Response shape: the pending trip approvals payload is now produced from the same canonical trip row used by the detail endpoint. The dashboard list must no longer read a stale label from a separate string column; it must use the trip row’s current `workflow_stage`, `approval_status`, and `available_actions` payload.
+- Plain-English frontend behaviour: after SCD approval, remove the row immediately from the pending approvals queue, and if the row is still present in the UI due to client cache, re-fetch the dashboard payload so the list and the detail view are consistent.
+
+### 2) Logistics Manager handoff notification after SCD approval
+- HTTP method: `POST`
+- Path: `/api/trip-requests/{id}/scd-approve`
+- Request body:
+  ```json
+  {
+    "action": "approve",
+    "remarks": "optional approval notes"
+  }
+  ```
+- Response shape:
+  ```json
+  {
+    "success": true,
+    "message": "Trip request approved",
+    "data": {
+      "trip_id": 123,
+      "trip_code": "TRQ-20260721-EYWJD",
+      "workflow_stage": "scd_approved",
+      "status": "approved",
+      "next_actor": "logistics_manager",
+      "next_action": "convert_to_logistics"
+    }
+  }
+  ```
+- Plain-English frontend behaviour: on a successful SCD approval, refresh the trip detail (or refetch the list) and route the user to the logistics action queue. The payload already exposes the next actor and next stage; the frontend should not keep showing a stale “pending director approval” state.
+
+### 3) Logistics approval notification email and in-app event
+- HTTP method: `POST`
+- Path: `/api/trip-requests/{id}/scd-approve`
+- Request body: same as above
+- Response shape: the action response above; additionally the existing in-app notification channel and the new email channel are dispatched to each user with the Logistics Manager / Logistics Officer role.
+- Plain-English frontend behaviour: after approval, the frontend should listen for the notification payload and surface a toast/banner that links directly to the trip detail page. The deep-link target is `/trip-requests/{id}`.
+
+### 4) Post-approval action contract
+- HTTP method: `GET`
+- Path: `/api/trip-requests/{id}`
+- Request body: none
+- Response shape: `available_actions` / `availableActions` now reflects the post-approval stage. Once the trip has moved beyond SCD approval and conversion, the old `convert` action is removed from the view and the returned action list is scoped to the current-stage operations such as `assign_vehicle`, `assign_driver`, and `confirm_trip`.
+- Plain-English frontend behaviour: hide any legacy conversion action once the trip is no longer at the conversion step. Only render actions present in the current stage’s response.
+
+### 5) Edit-trip preloading contract
+- HTTP method: `GET`
+- Path: `/api/trip-requests/{id}`
+- Request body: none
+- Response shape: the trip payload must include `destination`, `purpose`, `origin`, `scheduled_departure_at`, `scheduled_arrival_at`, `passenger_user_ids`, `external_passengers`, `booking_scope`, `trip_type`, `accommodation_required`, `accommodation_name`, `accommodation_address`, `accommodation_contact`, `accommodation_details`, `accommodation_estimated_cost`, `escort_required`, `escort_description`, and any assigned vehicle/driver fields already populated.
+- Plain-English frontend behaviour: pre-populate the Edit Trip form from the returned trip payload. Preserve any untouched fields and only submit overwritten values on `PUT /api/trip-requests/{id}`.
+
 **Backend repo:** `supply-chain-backend`  
 **Auth:** Bearer token (`Authorization: Bearer {token}`) on all routes below except public health checks.  
 **Base URL:** `/api`
@@ -136,6 +201,44 @@ The legacy `role` field is only used as a read fallback for rows not yet backfil
 | `role` | **Deprecated alias** of `supply_chain_role` for backward compatibility. Migrate UI to `supply_chain_role`. |
 
 **Frontend:** Replace every SCM check like `user.role === 'procurement_manager'` with `user.supply_chain_role === 'procurement_manager'`. Do not send or edit `hris_role` from the SCM app.
+
+### Warehouse/EWIMS backend handoff (NEW)
+
+The backend now exposes the new Sanctum-authenticated warehouse contract under `/api/warehouse/*` with a response envelope of:
+
+```json
+{
+  "success": true,
+  "data": { ... }
+}
+```
+
+**Routes and role gates**
+
+- `GET/POST /api/warehouse/locations` — `admin`, `warehouse_manager`
+- `PUT/DELETE /api/warehouse/locations/{id}` — `admin`, `warehouse_manager`
+- `GET/POST /api/warehouse/items` — `admin`, `warehouse_manager`
+- `PUT/DELETE /api/warehouse/items/{id}` — `admin`, `warehouse_manager`
+- `GET /api/warehouse/items/lookup?code=` — `admin`, `warehouse_manager`, `procurement_manager`, `executive`
+- `POST /api/warehouse/items/{id}/attachments` — `admin`, `warehouse_manager`
+- `GET /api/warehouse/inventory` — `admin`, `warehouse_manager`, `procurement_manager`, `finance`, `finance_officer`, `executive`
+- `GET /api/warehouse/inventory/low-stock` — `admin`, `warehouse_manager`, `procurement_manager`, `executive`
+- `POST /api/warehouse/inventory/{id}/quarantine` — `admin`, `warehouse_manager`
+- `GET /api/warehouse/movements` — `admin`, `warehouse_manager`, `procurement_manager`, `finance`, `finance_officer`, `executive`
+- `POST /api/warehouse/movements/transfer` — `admin`, `warehouse_manager`
+- `POST /api/warehouse/movements/adjustment` — `admin`, `warehouse_manager`
+- `POST /api/warehouse/movements/{id}/approve` — `admin`, `warehouse_manager`
+- `POST /api/warehouse/movements/vendor-return` — `admin`, `warehouse_manager`, `procurement_manager`
+- `POST /api/warehouse/goods-receipts` — `admin`, `warehouse_manager`, `procurement_manager`
+- `GET/POST /api/warehouse/stock-counts` — `admin`, `warehouse_manager`, `procurement_manager`, `executive`
+- `GET /api/warehouse/stock-counts/{id}` — `admin`, `warehouse_manager`, `procurement_manager`, `executive`
+- `POST /api/warehouse/stock-counts/{id}/lines` — `admin`, `warehouse_manager`
+- `POST /api/warehouse/stock-counts/{id}/approve` — `admin`, `warehouse_manager`
+- `POST /api/warehouse/stock-counts/{id}/post` — `admin`, `warehouse_manager`
+- `GET /api/warehouse/dashboard` — `admin`, `warehouse_manager`, `procurement_manager`, `executive`
+- `GET /api/warehouse/reports/{report}` and `GET /api/warehouse/export?format=pdf|xlsx|csv` — `admin`, `warehouse_manager`, `procurement_manager`, `finance`, `finance_officer`, `executive`
+
+**Workspace handoff note:** the frontend contract uses the shape declared in the frontend type file (`src/types/warehouse-inventory.ts`). The backend scaffolding here returns the same top-level envelope and route surface so the React UI can wire into the existing Sanctum session and route guard pattern without introducing a new auth layer.
 
 ### User management (SCM admin — MODIFIED)
 

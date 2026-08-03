@@ -74,6 +74,7 @@ class UserManagementController extends Controller
         'employee',
         'executive',
         'procurement_manager',
+        'warehouse_manager',
         'supply_chain_director',
         'finance',
         'chairman',

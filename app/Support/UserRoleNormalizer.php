@@ -17,6 +17,7 @@ class UserRoleNormalizer
     public const SCM_LOGIN_ROLES = [
         'procurement_manager',
         'procurement',
+        'warehouse_manager',
         'supply_chain_director',
         'supply_chain',
         'logistics_manager',
@@ -37,6 +38,7 @@ class UserRoleNormalizer
     public const SPATIE_SYNC_ROLES = [
         'admin',
         'procurement_manager',
+        'warehouse_manager',
         'supply_chain_director',
         'logistics_manager',
         'logistics_officer',

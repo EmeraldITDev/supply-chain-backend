@@ -9,6 +9,7 @@ use App\Mail\POGeneratedMail;
 use App\Mail\QuotationSubmittedMail;
 use App\Mail\RFQSentMail;
 use App\Mail\SRFCreatedMail;
+use App\Mail\TripRequestDirectorApprovedMail;
 use App\Mail\TripRequestForwardedMail;
 use App\Mail\TripRequestSubmittedMail;
 use App\Mail\VendorQuoteApprovedMail;
@@ -64,6 +65,16 @@ class WorkflowNotificationService
             recipient: $email,
             modelId: $trip->trip_code,
             mailableFactory: static fn () => new TripRequestForwardedMail($trip, $forwardedBy)
+        );
+    }
+
+    public function notifyTripRequestDirectorApprovedToEmail(Trip $trip, User $director, string $email): void
+    {
+        $this->deliverMailable(
+            event: 'trip_request_director_approved',
+            recipient: $email,
+            modelId: $trip->trip_code,
+            mailableFactory: static fn () => new TripRequestDirectorApprovedMail($trip, $director)
         );
     }
 

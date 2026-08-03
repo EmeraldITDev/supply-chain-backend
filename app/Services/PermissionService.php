@@ -625,7 +625,7 @@ class PermissionService
     {
         return $user->can_manage_users === true ||
                $user->is_admin === true ||
-               in_array($user->scmRole(), ['procurement', 'procurement_manager', 'executive', 'supply_chain_director', 'admin']);
+               in_array($user->scmRole(), ['procurement', 'procurement_manager', 'warehouse_manager', 'executive', 'supply_chain_director', 'admin']);
     }
 
     /**

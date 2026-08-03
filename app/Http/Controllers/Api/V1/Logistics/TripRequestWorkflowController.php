@@ -1326,6 +1326,10 @@ class TripRequestWorkflowController extends ApiController
             }
         });
 
+        if ($isApproved) {
+            $this->tripRequestNotifications->notifyScdApproved($trip->fresh(['creator']), $user);
+        }
+
         $trip->refresh();
 
         return response()->json([
@@ -1804,6 +1808,10 @@ class TripRequestWorkflowController extends ApiController
 
         if ($this->isLogisticsInternal($viewer) && $stage === Trip::WORKFLOW_DIRECTOR_APPROVED) {
             $actions[] = 'convert';
+        }
+
+        if ($this->isLogisticsInternal($viewer) && in_array($stage, [Trip::WORKFLOW_LOGISTICS_PROCESSING, Trip::WORKFLOW_CONVERTED], true)) {
+            $actions = array_merge($actions, ['assign_vehicle', 'assign_driver', 'confirm_trip']);
         }
 
         if ($this->isSupervisingDirector($viewer) && $stage === Trip::WORKFLOW_DIRECTOR_REVIEW) {

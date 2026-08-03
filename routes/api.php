@@ -47,6 +47,8 @@ use App\Http\Controllers\Api\V1\Logistics\ReportController as LogisticsReportCon
 use App\Http\Controllers\Api\V1\Logistics\UploadController as LogisticsUploadController;
 use App\Http\Controllers\Api\V1\Logistics\DocsController as LogisticsDocsController;
 
+require __DIR__ . '/api-warehouse.php';
+
 // API health check/test route
 Route::get('/', function () {
     return response()->json([

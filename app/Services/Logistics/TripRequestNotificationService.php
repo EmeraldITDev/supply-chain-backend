@@ -185,16 +185,17 @@ class TripRequestNotificationService
     public function notifyDirectorApproved(Trip $trip, User $director): void
     {
         $lmMessage = sprintf(
-            'Trip request %s was approved by %s. Convert it to a logistics request when ready.',
+            'Trip request %s was approved by %s and is awaiting logistics processing for %s.',
             $trip->trip_code,
-            $director->name
+            $director->name,
+            $trip->destination ?? 'its destination'
         );
 
         $this->notifyUsersByRoles(
             $trip,
             ['logistics_manager', 'logistics_officer'],
             'trip_request_director_approved',
-            'Ready for logistics conversion',
+            'Ready for logistics processing',
             $lmMessage,
             '/trip-requests/' . $trip->id,
             [
@@ -207,6 +208,22 @@ class TripRequestNotificationService
                 'priority' => 'high',
             ]
         );
+
+        $logisticsEmails = User::query()
+            ->whereIn('supply_chain_role', ['logistics_manager', 'logistics_officer'])
+            ->whereNotNull('email')
+            ->pluck('email')
+            ->filter()
+            ->unique(fn ($email) => strtolower((string) $email))
+            ->values();
+
+        foreach ($logisticsEmails as $email) {
+            $this->workflowNotifications->notifyTripRequestDirectorApprovedToEmail(
+                $trip,
+                $director,
+                (string) $email,
+            );
+        }
 
         $requester = $trip->creator ?? User::find($trip->created_by);
         if (! $requester) {
@@ -236,6 +253,50 @@ class TripRequestNotificationService
                 'priority' => 'normal',
             ]
         );
+    }
+
+    public function notifyScdApproved(Trip $trip, User $scdApprover): void
+    {
+        $message = sprintf(
+            'Trip request %s was approved by Supply Chain Director %s and is awaiting logistics processing for %s.',
+            $trip->trip_code,
+            $scdApprover->name,
+            $trip->destination ?? 'its destination'
+        );
+
+        $this->notifyUsersByRoles(
+            $trip,
+            ['logistics_manager', 'logistics_officer'],
+            'trip_request_scd_approved',
+            'Trip request approved by SCD',
+            $message,
+            '/trip-requests/' . $trip->id,
+            [
+                'scd_approver_id' => $scdApprover->id,
+                'scd_approver_name' => $scdApprover->name,
+                'workflow_stage' => Trip::WORKFLOW_SCD_APPROVED,
+                'approval_status' => 'approved',
+                'icon' => 'check-circle',
+                'color' => 'green',
+                'priority' => 'high',
+            ]
+        );
+
+        $logisticsEmails = User::query()
+            ->whereIn('supply_chain_role', ['logistics_manager', 'logistics_officer'])
+            ->whereNotNull('email')
+            ->pluck('email')
+            ->filter()
+            ->unique(fn ($email) => strtolower((string) $email))
+            ->values();
+
+        foreach ($logisticsEmails as $email) {
+            $this->workflowNotifications->notifyTripRequestDirectorApprovedToEmail(
+                $trip,
+                $scdApprover,
+                (string) $email,
+            );
+        }
     }
 
     public function notifyDirectorRejected(Trip $trip, User $director, User $requester, ?string $reason = null): void
@@ -431,7 +492,6 @@ class TripRequestNotificationService
     ): void {
         User::query()
             ->whereIn('supply_chain_role', $roles)
-            ->whereNotNull('email')
             ->get()
             ->each(fn (User $user) => $this->notifyUser($user, $trip, $type, $title, $message, $actionUrl, $extra));
     }
