@@ -17,6 +17,14 @@ final class TripDisplayStatus
             return 'revision_required';
         }
 
+        if ($approvalStatus === 'director_approved' || $approvalStatus === 'approved') {
+            return 'approved';
+        }
+
+        if ($approvalStatus === 'rejected') {
+            return 'rejected';
+        }
+
         if ($trip->workflow_stage === Trip::WORKFLOW_CHANGES_REQUESTED) {
             return 'changes_requested';
         }
@@ -27,6 +35,14 @@ final class TripDisplayStatus
 
         if ($trip->workflow_stage === Trip::WORKFLOW_DIRECTOR_APPROVED) {
             return 'approved';
+        }
+
+        if ($trip->workflow_stage === Trip::WORKFLOW_SCD_APPROVED) {
+            return 'approved';
+        }
+
+        if ($trip->workflow_stage === Trip::WORKFLOW_SCD_REJECTED) {
+            return 'rejected';
         }
 
         if ($linkedTrip) {

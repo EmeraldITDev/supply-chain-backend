@@ -336,7 +336,6 @@ class RoleDashboardQueueService
       ->select(self::TRIP_QUEUE_LIST_COLUMNS)
       ->tripRequests()
       ->whereIn('workflow_stage', [
-        Trip::WORKFLOW_DIRECTOR_REVIEW,
         Trip::WORKFLOW_SCD_REVIEW,
         Trip::WORKFLOW_SCD_APPROVAL,
       ])
