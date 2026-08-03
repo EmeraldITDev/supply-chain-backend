@@ -56,6 +56,16 @@ class Trip extends Model
     public const PRIORITY_HIGH = 'high';
     public const PRIORITY_URGENT = 'urgent';
 
+    public const WORKFLOW_SUBMITTED = 'submitted';
+    public const WORKFLOW_SCD_REVIEW = 'scd_review';
+    public const WORKFLOW_SCD_APPROVED = 'scd_approved';
+    public const WORKFLOW_SCD_REJECTED = 'scd_rejected';
+    public const WORKFLOW_LOGISTICS_PROCESSING = 'logistics_processing';
+    public const WORKFLOW_CONVERTED = 'converted';
+    public const WORKFLOW_VENDOR_SOURCING = 'vendor_sourcing';
+    public const WORKFLOW_COMPLETED = 'completed';
+    public const WORKFLOW_CANCELLED = 'cancelled';
+
     protected $fillable = [
         'trip_code',
         'title',
@@ -81,6 +91,10 @@ class Trip extends Model
         'passenger_user_ids',
         'external_passengers',
         'driver_user_id',
+        'driver_name',
+        'driver_phone',
+        'driver_licence',
+        'driver_source',
         'external_driver',
         'po_number',
         'unsigned_po_url',
@@ -166,6 +180,22 @@ class Trip extends Model
     public const WORKFLOW_PO_PENDING_SIGN = 'po_pending_sign';
     public const WORKFLOW_PO_SIGNED = 'po_signed';
     public const WORKFLOW_COMPLETED = 'completed';
+
+    public function availableScdActions(): array
+    {
+        return match ($this->workflow_stage) {
+            self::WORKFLOW_SCD_REVIEW => ['scd_approve', 'scd_reject'],
+            self::WORKFLOW_SCD_APPROVAL => ['scd_approve', 'scd_reject'],
+            default => [],
+        };
+    }
+
+    public function requiresScdApproval(): bool
+    {
+        return ($this->workflow_stage === self::WORKFLOW_SCD_REVIEW
+            || $this->workflow_stage === self::WORKFLOW_SCD_APPROVAL)
+            && $this->approval_status !== 'approved';
+    }
 
     public function vendor(): BelongsTo
     {

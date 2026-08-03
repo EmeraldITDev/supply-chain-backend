@@ -247,6 +247,10 @@ class RoleDashboardQueueService
       'display_status' => $displayStatus,
       'displayStatusLabel' => TripDisplayStatus::label($displayStatus),
       'display_status_label' => TripDisplayStatus::label($displayStatus),
+      'availableActions' => $trip->availableScdActions(),
+      'available_actions' => $trip->availableScdActions(),
+      'requiresScdApproval' => $trip->requiresScdApproval(),
+      'requires_scd_approval' => $trip->requiresScdApproval(),
       'scheduledDepartureAt' => $trip->scheduled_departure_at?->toIso8601String(),
       'scheduled_departure_at' => $trip->scheduled_departure_at?->toIso8601String(),
       'scheduledArrivalAt' => $trip->scheduled_arrival_at?->toIso8601String(),
@@ -319,7 +323,7 @@ class RoleDashboardQueueService
     return Trip::query()
       ->select(self::TRIP_QUEUE_LIST_COLUMNS)
       ->tripRequests()
-      ->where('workflow_stage', Trip::WORKFLOW_SCD_APPROVAL)
+      ->whereIn('workflow_stage', [Trip::WORKFLOW_SCD_REVIEW, Trip::WORKFLOW_SCD_APPROVAL])
       ->where('status', Trip::STATUS_SUBMITTED);
   }
 

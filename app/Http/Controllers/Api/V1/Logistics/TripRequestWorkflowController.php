@@ -1124,15 +1124,84 @@ class TripRequestWorkflowController extends ApiController
             'vehicle_id' => 'nullable|exists:logistics_vehicles,id',
             'passenger_user_ids' => 'nullable|array',
             'passenger_user_ids.*' => 'integer|exists:users,id',
-            'driver_user_id' => 'nullable|integer|exists:users,id',
+            'driver' => 'nullable|array',
+            'driver.driver_type' => 'nullable|in:existing,external',
+            'driver.driver_id' => 'nullable|integer|exists:users,id',
+            'driver.driver_name' => 'nullable|string|max:255',
+            'driver.driver_phone' => 'nullable|string|max:50',
+            'driver.driver_licence' => 'nullable|string|max:255',
+            'driver.driver_source' => 'nullable|in:system,manual',
         ]);
 
         if ($validator->fails()) {
             return $this->error('Validation failed', 'VALIDATION_ERROR', 422, $validator->errors()->toArray());
         }
 
-        $trip->fill($validator->validated());
-        $trip->workflow_stage = Trip::WORKFLOW_PROCUREMENT_REVIEW;
+        $driverPayload = $request->input('driver', []);
+        $driverType = $driverPayload['driver_type'] ?? 'existing';
+
+        $driverId = null;
+        $driverName = null;
+        $driverPhone = null;
+        $driverLicence = null;
+        $driverSource = 'system';
+
+        if ($driverType === 'existing') {
+            $driverId = (int) ($driverPayload['driver_id'] ?? $request->input('driver_user_id'));
+            $driverSource = 'system';
+
+            if (! $driverId) {
+                return $this->error('driver_id is required when driver_type is existing', 'VALIDATION_ERROR', 422);
+            }
+
+            $driver = User::find($driverId);
+            if (! $driver) {
+                return $this->error('Selected driver not found', 'NOT_FOUND', 404);
+            }
+
+            $driverName = $driver->name;
+            $driverPhone = $driver->phone;
+            $driverLicence = $driver->licence_number ?? null;
+        } elseif ($driverType === 'external') {
+            $driverName = trim((string) ($driverPayload['driver_name'] ?? ''));
+            $driverPhone = trim((string) ($driverPayload['driver_phone'] ?? ''));
+            $driverLicence = trim((string) ($driverPayload['driver_licence'] ?? ''));
+            $driverSource = 'manual';
+
+            if ($driverName === '') {
+                return $this->error('driver_name is required for external drivers', 'VALIDATION_ERROR', 422);
+            }
+        } else {
+            return $this->error('driver_type must be existing or external', 'VALIDATION_ERROR', 422);
+        }
+
+        $trip->fill([
+            'vendor_id' => $request->input('vendor_id'),
+            'vehicle_id' => $request->input('vehicle_id'),
+            'passenger_user_ids' => $request->input('passenger_user_ids'),
+            'notes' => $request->input('notes'),
+            'accommodation_required' => $request->boolean('accommodation_required'),
+            'accommodation_name' => $request->input('accommodation_details.hotel_name'),
+            'accommodation_address' => $request->input('accommodation_details.address'),
+            'accommodation_contact' => $request->input('accommodation_details.contact'),
+            'accommodation_estimated_cost' => $request->input('accommodation_details.estimated_cost'),
+            'escort_required' => $request->boolean('escort_required'),
+            'escort_description' => $request->input('escort_details.description'),
+        ]);
+
+        $trip->driver_user_id = $driverId;
+        $trip->driver_name = $driverName;
+        $trip->driver_phone = $driverPhone;
+        $trip->driver_licence = $driverLicence;
+        $trip->driver_source = $driverSource;
+        $trip->external_driver = $driverType === 'external'
+            ? [
+                'name' => $driverName,
+                'phone' => $driverPhone,
+                'license_number' => $driverLicence,
+            ]
+            : null;
+        $trip->workflow_stage = Trip::WORKFLOW_LOGISTICS_PROCESSING;
         $trip->status = Trip::STATUS_SCHEDULED;
         $trip->updated_by = $user->id;
         $trip->save();
@@ -1176,27 +1245,101 @@ class TripRequestWorkflowController extends ApiController
     public function scdApprove(Request $request, int $id)
     {
         $user = $request->user();
+
         if (! $user || ! in_array($user->scmRole(), ['supply_chain_director', 'supply_chain', 'admin'], true)) {
-            return $this->error('Supply Chain Director role required', 'FORBIDDEN', 403);
+            return response()->json([
+                'success' => false,
+                'error' => 'Only Supply Chain Director can approve trip requests',
+                'code' => 'FORBIDDEN',
+            ], 403);
         }
 
-        $trip = Trip::find($id);
+        $trip = Trip::query()->where('id', $id)->orWhere('trip_code', $id)->first();
         if (! $trip) {
-            return $this->error('Trip not found', 'NOT_FOUND', 404);
+            return response()->json([
+                'success' => false,
+                'error' => 'Trip not found',
+                'code' => 'NOT_FOUND',
+            ], 404);
         }
 
-        $trip->workflow_stage = Trip::WORKFLOW_PO_PENDING_SIGN;
-        $trip->updated_by = $user->id;
-        $trip->save();
+        if ($trip->workflow_stage === Trip::WORKFLOW_CONVERTED) {
+            return response()->json([
+                'success' => false,
+                'error' => 'This trip has already been converted to a logistics request.',
+                'code' => 'ALREADY_CONVERTED',
+                'current_stage' => $trip->workflow_stage,
+            ], 422);
+        }
 
-        $this->workflow->notifyStage(
-            $trip,
-            'trip_scd_approved',
-            "Trip {$trip->trip_code} approved by Supply Chain Director; procurement may generate PO",
-            ['procurement_manager', 'procurement']
-        );
+        if ($trip->workflow_stage === Trip::WORKFLOW_SCD_APPROVED) {
+            return response()->json([
+                'success' => false,
+                'error' => 'This trip has already been approved.',
+                'code' => 'ALREADY_APPROVED',
+                'current_stage' => $trip->workflow_stage,
+            ], 422);
+        }
 
-        return $this->success(['trip' => $trip]);
+        if (! in_array($trip->workflow_stage, [Trip::WORKFLOW_SCD_REVIEW, Trip::WORKFLOW_SCD_APPROVAL], true)) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Trip is not in a state that requires Supply Chain Director approval.',
+                'code' => 'INVALID_STATE',
+                'current_stage' => $trip->workflow_stage,
+            ], 422);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'action' => 'required|in:approve,reject',
+            'remarks' => 'nullable|string|max:1000',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Validation failed',
+                'errors' => $validator->errors(),
+                'code' => 'VALIDATION_ERROR',
+            ], 422);
+        }
+
+        $isApproved = $request->action === 'approve';
+
+        DB::transaction(function () use ($trip, $user, $request, $isApproved): void {
+            $trip->update([
+                'workflow_stage' => $isApproved ? Trip::WORKFLOW_SCD_APPROVED : Trip::WORKFLOW_SCD_REJECTED,
+                'approval_status' => $isApproved ? 'approved' : 'rejected',
+                'approved_by' => $isApproved ? $user->id : null,
+                'approved_at' => $isApproved ? now() : null,
+                'rejection_reason' => $isApproved ? null : $request->remarks,
+                'updated_by' => $user->id,
+            ]);
+
+            if ($isApproved) {
+                $this->workflow->notifyStage(
+                    $trip,
+                    'trip_scd_approved',
+                    "Trip {$trip->trip_code} approved by Supply Chain Director and awaiting logistics conversion",
+                    ['logistics_manager', 'logistics_officer', 'admin']
+                );
+            }
+        });
+
+        $trip->refresh();
+
+        return response()->json([
+            'success' => true,
+            'message' => $isApproved ? 'Trip request approved' : 'Trip request rejected',
+            'data' => [
+                'trip_id' => $trip->id,
+                'trip_code' => $trip->trip_code,
+                'workflow_stage' => $trip->workflow_stage,
+                'status' => $trip->approval_status,
+                'next_actor' => $isApproved ? 'logistics_manager' : null,
+                'next_action' => $isApproved ? 'convert_to_logistics' : null,
+            ],
+        ]);
     }
 
     public function generatePo(Request $request, int $id)
