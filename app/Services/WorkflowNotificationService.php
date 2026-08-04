@@ -303,6 +303,7 @@ class WorkflowNotificationService
             $mrf->selectedVendor?->email ?? null,
         ])
             ->merge(config('scm.po_generated_to_recipients', []))
+            ->merge($this->getEmailsByRoles(['supply_chain_director', 'supply_chain']))
             ->merge(config('scm.po_cc_recipients', []))
             ->push(\App\Support\PurchaseOrderInvoiceCc::PROCUREMENT_EMAIL)
             ->filter()
