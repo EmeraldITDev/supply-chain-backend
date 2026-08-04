@@ -185,6 +185,56 @@ class TripRequestReviewWorkflowTest extends TestCase
         $this->assertNotEmpty($response->json('trip.audit_trail'));
     }
 
+    public function test_logistics_conversion_requires_an_allowed_workflow_state(): void
+    {
+        $logisticsManager = User::factory()->create([
+            'name' => 'Logistics Manager',
+            'email' => 'logistics-convert@example.com',
+            'supply_chain_role' => 'logistics_manager',
+        ]);
+
+        $trip = Trip::create([
+            'trip_code' => 'TRQ-20260804-CONVERT',
+            'title' => 'Trip request: Abuja',
+            'purpose' => 'Planning visit',
+            'origin' => 'Lagos',
+            'destination' => 'Abuja',
+            'scheduled_departure_at' => now()->addDays(4),
+            'scheduled_arrival_at' => now()->addDays(4)->addHours(2),
+            'passenger_user_ids' => [$logisticsManager->id],
+            'status' => Trip::STATUS_DRAFT,
+            'workflow_stage' => Trip::WORKFLOW_TRIP_REQUEST,
+            'approval_status' => 'draft',
+            'trip_type' => Trip::TYPE_PERSONNEL,
+            'booking_scope' => Trip::BOOKING_SCOPE_WITHIN_STATE,
+            'created_by' => $logisticsManager->id,
+        ]);
+
+        Sanctum::actingAs($logisticsManager);
+
+        $invalidResponse = $this->postJson('/api/trips/' . $trip->id . '/convert-to-logistics-request', []);
+
+        $invalidResponse->assertStatus(422)
+            ->assertJsonPath('code', 'INVALID_STATE');
+
+        $trip->update([
+            'status' => Trip::STATUS_SUBMITTED,
+            'workflow_stage' => Trip::WORKFLOW_TRIP_REQUEST,
+            'approval_status' => 'submitted',
+        ]);
+
+        $validResponse = $this->postJson('/api/trips/' . $trip->id . '/convert-to-logistics-request', [
+            'driver' => [
+                'driver_type' => 'existing',
+                'driver_id' => $logisticsManager->id,
+            ],
+        ]);
+
+        $validResponse->assertOk();
+        $this->assertSame(Trip::WORKFLOW_LOGISTICS_PROCESSING, $trip->fresh()->workflow_stage);
+        $this->assertSame(Trip::STATUS_SCHEDULED, $trip->fresh()->status);
+    }
+
     public function test_forwarding_trip_request_sends_email_to_supply_chain_director(): void
     {
         Mail::fake();

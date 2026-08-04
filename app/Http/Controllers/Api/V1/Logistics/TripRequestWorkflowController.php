@@ -901,8 +901,36 @@ class TripRequestWorkflowController extends ApiController
             ]);
         }
 
-        if ($tripRequest->workflow_stage !== Trip::WORKFLOW_DIRECTOR_APPROVED) {
-            return $this->error('Trip request must be approved by the Supervising Director before conversion', 'INVALID_STATE', 422);
+        if (in_array($tripRequest->workflow_stage, [
+            Trip::WORKFLOW_CONVERTED,
+            Trip::WORKFLOW_LOGISTICS_PROCESSING,
+            Trip::WORKFLOW_JOURNEY_ACTIVE,
+            Trip::WORKFLOW_COMPLETED,
+            'converted',
+            'logistics_processing',
+            'journey_active',
+            'completed',
+        ], true)) {
+            return $this->error('This trip has already been converted.', 'ALREADY_CONVERTED', 422, [
+                'current_stage' => $tripRequest->workflow_stage,
+            ]);
+        }
+
+        $allowedStages = [
+            Trip::STATUS_SUBMITTED,
+            Trip::STATUS_LOGISTICS_REVIEW,
+            Trip::STATUS_SCD_APPROVED,
+            'submitted',
+            'logistics_review',
+            'scd_approved',
+        ];
+
+        if (! in_array($tripRequest->workflow_stage, $allowedStages, true)
+            && ! in_array($tripRequest->status, $allowedStages, true)) {
+            return $this->error('This trip cannot be converted at its current stage.', 'INVALID_STATE', 422, [
+                'current_stage' => $tripRequest->workflow_stage,
+                'current_status' => $tripRequest->status,
+            ]);
         }
 
         $typeValidator = Validator::make($request->all(), [
@@ -1195,6 +1223,38 @@ class TripRequestWorkflowController extends ApiController
         $trip = Trip::find($id);
         if (! $trip) {
             return $this->error('Trip not found', 'NOT_FOUND', 404);
+        }
+
+        if (in_array($trip->workflow_stage, [
+            Trip::WORKFLOW_CONVERTED,
+            Trip::WORKFLOW_LOGISTICS_PROCESSING,
+            Trip::WORKFLOW_JOURNEY_ACTIVE,
+            Trip::WORKFLOW_COMPLETED,
+            'converted',
+            'logistics_processing',
+            'journey_active',
+            'completed',
+        ], true)) {
+            return $this->error('This trip has already been converted.', 'ALREADY_CONVERTED', 422, [
+                'current_stage' => $trip->workflow_stage,
+            ]);
+        }
+
+        $allowedStages = [
+            Trip::STATUS_SUBMITTED,
+            Trip::STATUS_LOGISTICS_REVIEW,
+            Trip::STATUS_SCD_APPROVED,
+            'submitted',
+            'logistics_review',
+            'scd_approved',
+        ];
+
+        if (! in_array($trip->workflow_stage, $allowedStages, true)
+            && ! in_array($trip->status, $allowedStages, true)) {
+            return $this->error('This trip cannot be converted at its current stage.', 'INVALID_STATE', 422, [
+                'current_stage' => $trip->workflow_stage,
+                'current_status' => $trip->status,
+            ]);
         }
 
         $validator = Validator::make($request->all(), [

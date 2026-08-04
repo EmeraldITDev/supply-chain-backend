@@ -40,9 +40,26 @@ return new class extends Migration
             if (! Schema::hasColumn('logistics_trips', 'comments')) {
                 $table->text('comments')->nullable()->after('estimated_cost');
             }
+        });
+
+        if (DB::getDriverName() === 'pgsql') {
             DB::statement('ALTER TABLE logistics_trips ADD COLUMN IF NOT EXISTS submitted_at TIMESTAMP NULL');
             DB::statement('ALTER TABLE logistics_trips ADD COLUMN IF NOT EXISTS logistics_recommendation TEXT NULL');
             DB::statement('ALTER TABLE logistics_trips ADD COLUMN IF NOT EXISTS escort_personnel_count SMALLINT NULL');
+
+            return;
+        }
+
+        Schema::table('logistics_trips', function (Blueprint $table) {
+            if (! Schema::hasColumn('logistics_trips', 'submitted_at')) {
+                $table->timestamp('submitted_at')->nullable();
+            }
+            if (! Schema::hasColumn('logistics_trips', 'logistics_recommendation')) {
+                $table->text('logistics_recommendation')->nullable();
+            }
+            if (! Schema::hasColumn('logistics_trips', 'escort_personnel_count')) {
+                $table->unsignedSmallInteger('escort_personnel_count')->nullable();
+            }
         });
 
         if (! Schema::hasTable('trip_request_edits')) {
