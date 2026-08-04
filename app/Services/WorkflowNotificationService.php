@@ -528,6 +528,16 @@ class WorkflowNotificationService
 
     private function deliverMailable(string $event, string $recipient, string $modelId, callable $mailableFactory): void
     {
+        if (! filter_var($recipient, FILTER_VALIDATE_EMAIL)) {
+            Log::warning('Workflow email dispatch skipped due to invalid recipient', [
+                'event' => $event,
+                'recipient' => $recipient,
+                'model_id' => $modelId,
+            ]);
+
+            return;
+        }
+
         try {
             $mail = Mail::to($recipient);
 
