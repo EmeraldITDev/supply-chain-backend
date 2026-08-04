@@ -44,6 +44,7 @@ class Trip extends Model
     public const STATUS_COMPLETED = 'completed';
     public const STATUS_CLOSED = 'closed';
     public const STATUS_CANCELLED = 'cancelled';
+    public const STATUS_CONVERTED = 'converted';
     public const STATUS_CONVERTED_TO_JOURNEY = 'converted_to_journey';
 
     public const TYPE_PERSONNEL = 'personnel';
@@ -72,6 +73,7 @@ class Trip extends Model
     public const WORKFLOW_SCD_REJECTED = 'scd_rejected';
     public const WORKFLOW_LOGISTICS_PROCESSING = 'logistics_processing';
     public const WORKFLOW_CONVERTED = 'converted';
+    public const WORKFLOW_CONVERTED_TO_LOGISTICS_REQUEST = 'converted_to_logistics_request';
     public const WORKFLOW_VENDOR_SOURCING = 'vendor_sourcing';
     public const WORKFLOW_PROCUREMENT_PENDING = 'procurement_pending';
     public const WORKFLOW_JOURNEY_ACTIVE = 'journey_active';
@@ -98,6 +100,8 @@ class Trip extends Model
         'vehicle_id',
         'multi_vendor',
         'selected_vendor_id',
+        'quotation_required',
+        'logistics_request_id',
         'approval_status',
         'workflow_stage',
         'passenger_user_ids',
@@ -157,6 +161,7 @@ class Trip extends Model
         'escort_required' => 'boolean',
         'accommodation_estimated_cost' => 'float',
         'estimated_cost' => 'float',
+        'quotation_required' => 'boolean',
     ];
 
     /**

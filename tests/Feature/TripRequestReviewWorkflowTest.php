@@ -235,6 +235,39 @@ class TripRequestReviewWorkflowTest extends TestCase
         $this->assertSame(Trip::STATUS_SCHEDULED, $trip->fresh()->status);
     }
 
+    public function test_converted_trip_requests_are_hidden_from_active_directory_lists(): void
+    {
+        $logisticsManager = User::factory()->create([
+            'name' => 'Logistics Manager',
+            'email' => 'logistics-directory@example.com',
+            'supply_chain_role' => 'logistics_manager',
+        ]);
+
+        $trip = Trip::create([
+            'trip_code' => 'TRQ-20260804-DIR',
+            'title' => 'Trip request: Abuja',
+            'purpose' => 'Planning visit',
+            'origin' => 'Lagos',
+            'destination' => 'Abuja',
+            'scheduled_departure_at' => now()->addDays(4),
+            'scheduled_arrival_at' => now()->addDays(4)->addHours(2),
+            'passenger_user_ids' => [$logisticsManager->id],
+            'status' => Trip::STATUS_CONVERTED,
+            'workflow_stage' => Trip::WORKFLOW_CONVERTED_TO_LOGISTICS_REQUEST,
+            'approval_status' => 'converted',
+            'trip_type' => Trip::TYPE_PERSONNEL,
+            'booking_scope' => Trip::BOOKING_SCOPE_WITHIN_STATE,
+            'created_by' => $logisticsManager->id,
+        ]);
+
+        Sanctum::actingAs($logisticsManager);
+
+        $response = $this->getJson('/api/trips?scope=requests');
+
+        $response->assertOk();
+        $this->assertSame(0, collect($response->json('trips'))->filter(fn ($item) => ($item['id'] ?? null) === $trip->id)->count());
+    }
+
     public function test_forwarding_trip_request_sends_email_to_supply_chain_director(): void
     {
         Mail::fake();

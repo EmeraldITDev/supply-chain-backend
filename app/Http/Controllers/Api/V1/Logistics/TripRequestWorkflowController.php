@@ -54,6 +54,9 @@ class TripRequestWorkflowController extends ApiController
 
         $query = Trip::query()
             ->where('trip_code', 'like', 'TRQ-%')
+            ->where('status', '!=', Trip::STATUS_CONVERTED)
+            ->where('workflow_stage', '!=', Trip::WORKFLOW_CONVERTED_TO_LOGISTICS_REQUEST)
+            ->where('workflow_stage', '!=', Trip::WORKFLOW_CONVERTED)
             ->with('creator')
             ->orderByDesc('created_at');
 
@@ -114,6 +117,9 @@ class TripRequestWorkflowController extends ApiController
         $query = Trip::query()
             ->where('trip_code', 'like', 'TRQ-%')
             ->where('status', '!=', Trip::STATUS_DRAFT)
+            ->where('status', '!=', Trip::STATUS_CONVERTED)
+            ->where('workflow_stage', '!=', Trip::WORKFLOW_CONVERTED_TO_LOGISTICS_REQUEST)
+            ->where('workflow_stage', '!=', Trip::WORKFLOW_CONVERTED)
             ->with('creator')
             ->orderByDesc('created_at');
 
@@ -1031,6 +1037,8 @@ class TripRequestWorkflowController extends ApiController
                 'comments' => $tripRequest->comments,
                 'notes' => $request->input('notes'),
                 'metadata' => $tripMeta,
+                'quotation_required' => $request->boolean('quotation_required', false),
+                'logistics_request_id' => $tripRequest->id,
                 'created_by' => $user->id,
             ]);
 
@@ -1039,9 +1047,12 @@ class TripRequestWorkflowController extends ApiController
                 'converted_by' => $user->id,
                 'logistics_trip_id' => $logisticsTrip->id,
                 'fulfillment_type' => $fulfillmentType,
+                'quotation_required' => $request->boolean('quotation_required', false),
             ]);
-            $tripRequest->workflow_stage = Trip::WORKFLOW_LOGISTICS_REVIEW;
-            $tripRequest->status = Trip::STATUS_SUBMITTED;
+            $tripRequest->quotation_required = $request->boolean('quotation_required', false);
+            $tripRequest->workflow_stage = Trip::WORKFLOW_CONVERTED_TO_LOGISTICS_REQUEST;
+            $tripRequest->status = Trip::STATUS_CONVERTED;
+            $tripRequest->approval_status = 'converted';
             $tripRequest->updated_by = $user->id;
             $tripRequest->save();
 
@@ -1700,6 +1711,10 @@ class TripRequestWorkflowController extends ApiController
         $payload = array_merge(
             $this->requesterEditService->metaForTrip($viewer, $trip),
             [
+            'isConverted' => strtolower((string) $trip->status) === Trip::STATUS_CONVERTED
+                || in_array(strtolower((string) $trip->workflow_stage), [Trip::WORKFLOW_CONVERTED_TO_LOGISTICS_REQUEST, Trip::WORKFLOW_CONVERTED], true),
+            'is_converted' => strtolower((string) $trip->status) === Trip::STATUS_CONVERTED
+                || in_array(strtolower((string) $trip->workflow_stage), [Trip::WORKFLOW_CONVERTED_TO_LOGISTICS_REQUEST, Trip::WORKFLOW_CONVERTED], true),
             'id' => $trip->id,
             'tripId' => $logisticsTripId,
             'trip_id' => $logisticsTripId,

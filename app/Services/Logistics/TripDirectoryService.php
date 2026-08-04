@@ -33,6 +33,12 @@ class TripDirectoryService
             });
         }
 
+        $query->where(function ($q) {
+            $q->where('status', '!=', Trip::STATUS_CONVERTED)
+                ->where('workflow_stage', '!=', Trip::WORKFLOW_CONVERTED_TO_LOGISTICS_REQUEST)
+                ->where('workflow_stage', '!=', Trip::WORKFLOW_CONVERTED);
+        });
+
         if ($request->filled('status')) {
             $query->where('status', $request->status);
         }
