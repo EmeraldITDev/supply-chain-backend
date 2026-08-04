@@ -17,6 +17,6 @@
             <li><strong>Purpose:</strong> {{ $purpose }}</li>
         @endif
     </ul>
-    <p>Please log in to the supply chain portal and review pending requests under Logistics → Requests.</p>
+    <p>Please log in to the supply chain portal and review pending requests under Logistics → Trips.</p>
 </body>
 </html>
