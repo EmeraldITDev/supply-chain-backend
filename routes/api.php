@@ -705,6 +705,7 @@ Route::prefix('v1/logistics')->group(function () {
         Route::get('/trip-requests/all', [TripRequestWorkflowController::class, 'allTrips']);
         Route::get('/trip-requests', [TripRequestWorkflowController::class, 'index']);
         Route::post('/trip-requests', [TripRequestWorkflowController::class, 'store']);
+        Route::post('/trip-requests/{id}/submit', [TripRequestWorkflowController::class, 'submit']);
         Route::put('/trip-requests/{id}', [TripRequestWorkflowController::class, 'update']);
         Route::post('/trip-requests/{id}/confirm', [TripRequestWorkflowController::class, 'confirm']);
         Route::post('/trip-requests/{id}/forward', [TripRequestWorkflowController::class, 'forward']);
