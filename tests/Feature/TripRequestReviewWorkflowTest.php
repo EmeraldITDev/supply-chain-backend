@@ -96,6 +96,41 @@ class TripRequestReviewWorkflowTest extends TestCase
         ]);
     }
 
+    public function test_logistics_prefixed_submit_endpoint_promotes_draft_to_submitted(): void
+    {
+        $user = User::factory()->create([
+            'name' => 'Requester',
+            'email' => 'requester-logistics-submit@example.com',
+            'supply_chain_role' => 'employee',
+        ]);
+
+        $trip = Trip::create([
+            'trip_code' => 'TRQ-20260721-TEST2',
+            'title' => 'Trip request: Abuja',
+            'purpose' => 'Planning visit',
+            'origin' => 'Lagos',
+            'destination' => 'Abuja',
+            'scheduled_departure_at' => now()->addDays(5),
+            'scheduled_arrival_at' => now()->addDays(5)->addHours(2),
+            'passenger_user_ids' => [$user->id],
+            'status' => Trip::STATUS_DRAFT,
+            'workflow_stage' => Trip::WORKFLOW_TRIP_REQUEST,
+            'approval_status' => 'draft',
+            'trip_type' => Trip::TYPE_PERSONNEL,
+            'booking_scope' => Trip::BOOKING_SCOPE_WITHIN_STATE,
+            'created_by' => $user->id,
+        ]);
+
+        Sanctum::actingAs($user);
+
+        $response = $this->postJson('/api/logistics/trip-requests/' . $trip->id . '/submit');
+
+        $response->assertOk()
+            ->assertJsonPath('data.status', Trip::STATUS_SUBMITTED);
+
+        $this->assertSame(Trip::STATUS_SUBMITTED, $trip->fresh()->status);
+    }
+
     public function test_logistics_manager_can_update_accommodation_and_escort_details_with_audit_log(): void
     {
         $user = User::factory()->create([
