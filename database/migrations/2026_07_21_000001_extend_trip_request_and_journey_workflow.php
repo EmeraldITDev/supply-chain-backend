@@ -2,6 +2,7 @@
 
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration
@@ -39,15 +40,9 @@ return new class extends Migration
             if (! Schema::hasColumn('logistics_trips', 'comments')) {
                 $table->text('comments')->nullable()->after('estimated_cost');
             }
-            if (! Schema::hasColumn('logistics_trips', 'submitted_at')) {
-                $table->timestamp('submitted_at')->nullable()->after('comments');
-            }
-            if (! Schema::hasColumn('logistics_trips', 'logistics_recommendation')) {
-                $table->text('logistics_recommendation')->nullable()->after('submitted_at');
-            }
-            if (! Schema::hasColumn('logistics_trips', 'escort_personnel_count')) {
-                $table->integer('escort_personnel_count')->nullable()->after('logistics_recommendation');
-            }
+            DB::statement('ALTER TABLE logistics_trips ADD COLUMN IF NOT EXISTS submitted_at TIMESTAMP NULL');
+            DB::statement('ALTER TABLE logistics_trips ADD COLUMN IF NOT EXISTS logistics_recommendation TEXT NULL');
+            DB::statement('ALTER TABLE logistics_trips ADD COLUMN IF NOT EXISTS escort_personnel_count SMALLINT NULL');
         });
 
         if (! Schema::hasTable('trip_request_edits')) {
