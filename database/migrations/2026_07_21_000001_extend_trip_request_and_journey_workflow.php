@@ -39,6 +39,15 @@ return new class extends Migration
             if (! Schema::hasColumn('logistics_trips', 'comments')) {
                 $table->text('comments')->nullable()->after('estimated_cost');
             }
+            if (! Schema::hasColumn('logistics_trips', 'submitted_at')) {
+                $table->timestamp('submitted_at')->nullable()->after('comments');
+            }
+            if (! Schema::hasColumn('logistics_trips', 'logistics_recommendation')) {
+                $table->text('logistics_recommendation')->nullable()->after('submitted_at');
+            }
+            if (! Schema::hasColumn('logistics_trips', 'escort_personnel_count')) {
+                $table->integer('escort_personnel_count')->nullable()->after('logistics_recommendation');
+            }
         });
 
         if (! Schema::hasTable('trip_request_edits')) {
@@ -157,8 +166,8 @@ return new class extends Migration
             if (! Schema::hasColumn('logistics_journeys', 'departure_location')) {
                 $table->string('departure_location')->nullable()->after('purpose');
             }
-            if (! Schema::hasColumn('logistics_journeys', 'destination')) {
-                $table->string('destination')->nullable()->after('departure_location');
+            if (! Schema::hasColumn('logistics_journeys', 'destination_detail')) {
+                $table->string('destination_detail')->nullable()->after('departure_location');
             }
             if (! Schema::hasColumn('logistics_journeys', 'feedback')) {
                 $table->text('feedback')->nullable()->after('destination');

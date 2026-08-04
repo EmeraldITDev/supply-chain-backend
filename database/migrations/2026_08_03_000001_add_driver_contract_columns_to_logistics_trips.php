@@ -14,19 +14,27 @@ return new class extends Migration
         }
 
         if (! Schema::hasColumn('logistics_trips', 'driver_name')) {
-            DB::statement('ALTER TABLE logistics_trips ADD COLUMN IF NOT EXISTS driver_name VARCHAR(255) NULL');
+            Schema::table('logistics_trips', function (Blueprint $table) {
+                $table->string('driver_name')->nullable();
+            });
         }
 
         if (! Schema::hasColumn('logistics_trips', 'driver_phone')) {
-            DB::statement('ALTER TABLE logistics_trips ADD COLUMN IF NOT EXISTS driver_phone VARCHAR(255) NULL');
+            Schema::table('logistics_trips', function (Blueprint $table) {
+                $table->string('driver_phone')->nullable();
+            });
         }
 
         if (! Schema::hasColumn('logistics_trips', 'driver_licence')) {
-            DB::statement('ALTER TABLE logistics_trips ADD COLUMN IF NOT EXISTS driver_licence VARCHAR(255) NULL');
+            Schema::table('logistics_trips', function (Blueprint $table) {
+                $table->string('driver_licence')->nullable();
+            });
         }
 
         if (! Schema::hasColumn('logistics_trips', 'driver_source')) {
-            DB::statement('ALTER TABLE logistics_trips ADD COLUMN IF NOT EXISTS driver_source VARCHAR(255) NOT NULL DEFAULT \"system\"');
+            Schema::table('logistics_trips', function (Blueprint $table) {
+                $table->string('driver_source')->nullable()->default('system');
+            });
         }
     }
 

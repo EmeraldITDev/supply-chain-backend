@@ -17,6 +17,7 @@ use App\Mail\VendorQuoteApprovedMail;
 use App\Mail\VendorSelectedMail;
 use App\Notifications\SystemAnnouncementNotification;
 use App\Models\Logistics\Trip;
+use App\Models\Logistics\TripRfq;
 use App\Models\MRF;
 use App\Models\Quotation;
 use App\Models\RFQ;
@@ -120,6 +121,10 @@ class WorkflowNotificationService
                     'destination' => $trip->destination,
                 ]
             ));
+
+            if (! empty($director->email)) {
+                $this->notifyTripRequestForwardedToDirectorEmail($trip, $forwardedBy, (string) $director->email);
+            }
         }
     }
 
@@ -157,15 +162,106 @@ class WorkflowNotificationService
 
     public function evaluatePostApprovalRouting(Trip $trip, User $approver): void
     {
-        $needsExternalProcurement = ! empty($trip->vendor_id)
-            || ! empty($trip->accommodation_vendor_id)
-            || ! empty($trip->escort_vendor_id);
+        $hasExternalVendors = $trip->rfqs()->where('scd_approved', true)->exists();
 
-        if ($needsExternalProcurement && class_exists(\App\Services\TripProcurementBridgeService::class)) {
-            app(\App\Services\TripProcurementBridgeService::class)
-                ->initiateForTrip($trip, $approver);
+        if ($hasExternalVendors) {
+            $trip->update(['status' => Trip::STATUS_PROCUREMENT_PENDING]);
+            $this->notifyProcurementManagerTripApproved($trip, $approver);
+        } else {
+            $trip->update(['status' => Trip::STATUS_JOURNEY_ACTIVE]);
+            $this->notifyPassengersTripConfirmed($trip);
+        }
+    }
 
-            $trip->update(['workflow_stage' => Trip::WORKFLOW_PROCUREMENT_PENDING]);
+    public function notifyProcurementManagerTripApproved(Trip $trip, User $approver): void
+    {
+        $managers = User::query()
+            ->whereIn('supply_chain_role', ['procurement_manager', 'procurement'])
+            ->get();
+
+        foreach ($managers as $manager) {
+            DatabaseNotifications::send($manager, new SystemAnnouncementNotification(
+                'Logistics Request Approved — PO Required',
+                "Trip {$trip->trip_code} to {$trip->destination} has been approved by the Supply Chain Director. A Purchase Order is required.",
+                [
+                    'action_url' => "/procurement/logistics-trips/{$trip->id}",
+                    'trip_code' => $trip->trip_code,
+                    'destination' => $trip->destination,
+                    'approved_by' => $approver->name,
+                    'approved_at' => now()->toIso8601String(),
+                ]
+            ));
+
+            Mail::to($manager->email)->queue(new \App\Mail\LogisticsTripApprovedMail($trip, $approver, $manager));
+        }
+    }
+
+    public function notifyPassengersTripConfirmed(Trip $trip): void
+    {
+        $passengerIds = $trip->passenger_user_ids ?? [];
+        $passengers = User::query()->whereIn('id', $passengerIds)->get();
+
+        foreach ($passengers as $passenger) {
+            DatabaseNotifications::send($passenger, new SystemAnnouncementNotification(
+                'Trip confirmed',
+                "Your trip {$trip->trip_code} to {$trip->destination} has been confirmed and is now active.",
+                [
+                    'action_url' => "/trip-requests/{$trip->id}",
+                    'trip_code' => $trip->trip_code,
+                    'destination' => $trip->destination,
+                ]
+            ));
+        }
+    }
+
+    public function notifyVendorRfqSent(TripRfq $rfq, Trip $trip): void
+    {
+        $vendor = $rfq->vendor;
+        if (! $vendor) {
+            return;
+        }
+
+        DatabaseNotifications::send($vendor->email ? null : null, new SystemAnnouncementNotification(
+            'RFQ sent',
+            "A new RFQ for {$trip->trip_code} has been sent to {$vendor->name}.",
+            [
+                'action_url' => "/vendor/rfqs/{$rfq->id}",
+                'trip_code' => $trip->trip_code,
+                'vendor_name' => $vendor->name,
+            ]
+        ));
+    }
+
+    public function notifyLogisticsManagerAllQuotationsReceived(Trip $trip): void
+    {
+        $managers = User::query()->whereIn('supply_chain_role', ['logistics_manager', 'logistics_officer', 'admin'])->get();
+
+        foreach ($managers as $manager) {
+            DatabaseNotifications::send($manager, new SystemAnnouncementNotification(
+                'All quotations received',
+                "All vendor quotations for trip {$trip->trip_code} have been received.",
+                [
+                    'action_url' => "/logistics/trips/{$trip->id}",
+                    'trip_code' => $trip->trip_code,
+                ]
+            ));
+        }
+    }
+
+    public function notifyLogisticsManagerNewTrip(Trip $trip, User $user): void
+    {
+        $managers = User::query()->whereIn('supply_chain_role', ['logistics_manager', 'logistics_officer', 'admin'])->get();
+
+        foreach ($managers as $manager) {
+            DatabaseNotifications::send($manager, new SystemAnnouncementNotification(
+                'New trip request submitted',
+                "Trip {$trip->trip_code} has been submitted by {$user->name} and is awaiting review.",
+                [
+                    'action_url' => "/logistics/trips/{$trip->id}",
+                    'trip_code' => $trip->trip_code,
+                    'requester' => $user->name,
+                ]
+            ));
         }
     }
 

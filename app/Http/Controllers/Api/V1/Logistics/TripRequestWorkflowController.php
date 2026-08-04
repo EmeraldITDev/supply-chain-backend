@@ -18,6 +18,7 @@ use App\Support\TripBookingRules;
 use App\Support\TripDisplayStatus;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
 
@@ -72,10 +73,7 @@ class TripRequestWorkflowController extends ApiController
                     ]);
             }
         } else {
-            $query->where(function ($q) use ($user) {
-                $q->where('created_by', $user->id)
-                    ->orWhereJsonContains('passenger_user_ids', $user->id);
-            });
+            $query->visibleToUser($user);
 
             if ($request->filled('status')) {
                 $query->where('status', $request->status);
@@ -115,6 +113,7 @@ class TripRequestWorkflowController extends ApiController
 
         $query = Trip::query()
             ->where('trip_code', 'like', 'TRQ-%')
+            ->where('status', '!=', Trip::STATUS_DRAFT)
             ->with('creator')
             ->orderByDesc('created_at');
 
@@ -305,6 +304,7 @@ class TripRequestWorkflowController extends ApiController
             'accommodation_estimated_cost' => $request->filled('accommodation_estimated_cost') ? (float) $request->input('accommodation_estimated_cost') : null,
             'escort_required' => (bool) $request->input('escort_required', false),
             'escort_description' => $request->input('escort_description'),
+            'submitted_at' => $isDraft ? null : now(),
             'created_by' => $user->id,
         ]);
 
@@ -316,6 +316,47 @@ class TripRequestWorkflowController extends ApiController
             'trip' => $this->presentTripRequest($trip->load(['creator']), includeProgressSummary: true, viewer: $user),
             'bookingRules' => $this->bookingRulesPayload(),
         ], 201);
+    }
+
+    public function submit(Request $request, int $id)
+    {
+        $user = $request->user();
+        if (! $user || ! PassengerEligibility::canCreateTripRequest($user)) {
+            return $this->error('You are not allowed to submit trip requests', 'FORBIDDEN', 403);
+        }
+
+        $trip = Trip::find($id);
+        if (! $trip) {
+            return $this->error('Trip request not found', 'NOT_FOUND', 404);
+        }
+
+        if ((int) $trip->created_by !== (int) $user->id) {
+            return $this->error('Only the creator can submit this trip request', 'FORBIDDEN', 403);
+        }
+
+        if (strtolower((string) $trip->status) !== Trip::STATUS_DRAFT) {
+            return $this->error('Only draft trip requests can be submitted', 'INVALID_STATE', 422);
+        }
+
+        $trip->update([
+            'status' => Trip::STATUS_SUBMITTED,
+            'approval_status' => 'submitted',
+            'workflow_stage' => Trip::WORKFLOW_TRIP_REQUEST,
+            'submitted_at' => now(),
+            'updated_by' => $user->id,
+        ]);
+
+        $trip->refresh();
+        $this->tripRequestNotifications->notifySubmitted($trip, $user);
+
+        return $this->success([
+            'trip' => $this->presentTripRequest($trip->load(['creator']), includeProgressSummary: true, viewer: $user),
+            'data' => [
+                'id' => $trip->id,
+                'status' => $trip->status,
+                'submitted_at' => $trip->submitted_at?->toIso8601String(),
+            ],
+        ]);
     }
 
     /**
@@ -540,7 +581,10 @@ class TripRequestWorkflowController extends ApiController
             $updates['estimated_cost'] = $request->input('estimated_cost');
         }
         if ($request->has('accommodation_name')) {
-            $updates['accommodation_hotel_name'] = $request->input('accommodation_name');
+            $updates['accommodation_name'] = $request->input('accommodation_name');
+            if (Schema::hasColumn('logistics_trips', 'accommodation_hotel_name')) {
+                $updates['accommodation_hotel_name'] = $request->input('accommodation_name');
+            }
         }
         if ($request->has('accommodation_address')) {
             $updates['accommodation_address'] = $request->input('accommodation_address');
@@ -558,8 +602,26 @@ class TripRequestWorkflowController extends ApiController
             $updates['rejection_reason'] = $request->input('reason') ?? $request->input('comments');
         }
 
+        $beforeState = [];
+        foreach (['estimated_cost', 'accommodation_name', 'accommodation_address', 'accommodation_contact', 'accommodation_estimated_cost', 'escort_description', 'workflow_stage', 'rejection_reason'] as $field) {
+            $beforeState[$field] = $trip->getAttribute($field);
+        }
+
         $trip->update($updates);
         $trip->refresh();
+
+        $afterState = [];
+        foreach (['estimated_cost', 'accommodation_name', 'accommodation_address', 'accommodation_contact', 'accommodation_estimated_cost', 'escort_description', 'workflow_stage', 'rejection_reason'] as $field) {
+            $afterState[$field] = $trip->getAttribute($field);
+        }
+
+        $this->tripRequestEditAuditService->logChanges(
+            $trip,
+            $user,
+            $beforeState,
+            $afterState,
+            $request->input('comments') ?? $request->input('reason')
+        );
 
         if ($request->action === 'forward') {
             app(\App\Services\WorkflowNotificationService::class)
@@ -572,13 +634,19 @@ class TripRequestWorkflowController extends ApiController
                 ->notifyRequesterTripRejected($trip, $user, $request->input('reason'));
         }
 
+        $message = 'Trip request updated.';
+        if ($request->action === 'forward') {
+            $message = 'Trip forwarded to Supply Chain Director for approval.';
+        } elseif ($request->action === 'request_changes') {
+            $message = 'Changes requested. Requester has been notified.';
+        } elseif ($request->action === 'reject') {
+            $message = 'Trip request rejected.';
+        }
+
         return response()->json([
             'success' => true,
-            'message' => match ($request->action) {
-                'forward' => 'Trip forwarded to Supply Chain Director for approval.',
-                'request_changes' => 'Changes requested. Requester has been notified.',
-                'reject' => 'Trip request rejected.',
-            },
+            'message' => $message,
+            'trip' => $this->presentTripRequest($trip->fresh(['creator']), includeProgressSummary: true, viewer: $user),
             'data' => [
                 'trip_id' => $trip->id,
                 'trip_code' => $trip->trip_code,

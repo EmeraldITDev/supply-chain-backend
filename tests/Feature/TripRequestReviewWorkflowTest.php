@@ -57,6 +57,45 @@ class TripRequestReviewWorkflowTest extends TestCase
         ]);
     }
 
+    public function test_draft_trip_request_remains_private_until_explicit_submit(): void
+    {
+        $user = User::factory()->create([
+            'name' => 'Requester',
+            'email' => 'requester-draft@example.com',
+            'supply_chain_role' => 'employee',
+        ]);
+
+        Sanctum::actingAs($user);
+
+        $createResponse = $this->postJson('/api/trip-requests', [
+            'destination' => 'Abuja',
+            'purpose' => 'Planning visit',
+            'scheduled_departure_at' => now()->addDays(5)->toDateTimeString(),
+            'scheduled_arrival_at' => now()->addDays(5)->addHours(2)->toDateTimeString(),
+            'origin' => 'Lagos',
+            'passenger_user_ids' => [$user->id],
+            'booking_scope' => Trip::BOOKING_SCOPE_WITHIN_STATE,
+            'accommodation_required' => false,
+            'escort_required' => false,
+            'save_as_draft' => true,
+        ]);
+
+        $createResponse->assertCreated();
+        $tripId = $createResponse->json('trip.id');
+
+        $this->assertSame(Trip::STATUS_DRAFT, $createResponse->json('trip.status'));
+
+        $submitResponse = $this->postJson('/api/trip-requests/' . $tripId . '/submit');
+        $submitResponse->assertOk();
+        $this->assertSame(Trip::STATUS_SUBMITTED, $submitResponse->json('data.status'));
+
+        $this->assertDatabaseHas('logistics_trips', [
+            'id' => $tripId,
+            'status' => Trip::STATUS_SUBMITTED,
+            'created_by' => $user->id,
+        ]);
+    }
+
     public function test_logistics_manager_can_update_accommodation_and_escort_details_with_audit_log(): void
     {
         $user = User::factory()->create([

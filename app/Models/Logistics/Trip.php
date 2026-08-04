@@ -2,9 +2,10 @@
 
 namespace App\Models\Logistics;
 
-use App\Models\Vendor;
 use App\Models\User;
+use App\Models\Vendor;
 use App\Services\DashboardStatsCache;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -28,6 +29,15 @@ class Trip extends Model
 
     public const STATUS_DRAFT = 'draft';
     public const STATUS_SUBMITTED = 'submitted';
+    public const STATUS_LOGISTICS_REVIEW = 'logistics_review';
+    public const STATUS_RFQ_PENDING = 'rfq_pending';
+    public const STATUS_RFQ_RECEIVED = 'rfq_received';
+    public const STATUS_SCD_REVIEW = 'scd_review';
+    public const STATUS_SCD_APPROVED = 'scd_approved';
+    public const STATUS_SCD_REJECTED = 'scd_rejected';
+    public const STATUS_PROCUREMENT_PENDING = 'procurement_pending';
+    public const STATUS_PO_CREATED = 'po_created';
+    public const STATUS_JOURNEY_ACTIVE = 'journey_active';
     public const STATUS_SCHEDULED = 'scheduled';
     public const STATUS_VENDOR_ASSIGNED = 'vendor_assigned';
     public const STATUS_IN_PROGRESS = 'in_progress';
@@ -124,6 +134,9 @@ class Trip extends Model
         'scd_remarks',
         'converted_at',
         'converted_by',
+        'submitted_at',
+        'logistics_recommendation',
+        'escort_personnel_count',
         'metadata',
     ];
 
@@ -134,6 +147,7 @@ class Trip extends Model
         'actual_arrival_at' => 'datetime',
         'cancelled_at' => 'datetime',
         'converted_at' => 'datetime',
+        'submitted_at' => 'datetime',
         'approved_at' => 'datetime',
         'metadata' => 'array',
         'passenger_user_ids' => 'array',
@@ -206,28 +220,48 @@ class Trip extends Model
         return match ($this->workflow_stage) {
             self::WORKFLOW_SUBMITTED => in_array($viewerRole, [
                 'supply_chain_director', 'supply_chain', 'admin'
-            ], true) ? ['send_to_scd'] : [],
+            ], true) ? ['view', 'send_to_scd'] : ['view'],
 
             self::WORKFLOW_SCD_REVIEW => in_array($viewerRole, [
                 'supply_chain_director', 'supply_chain', 'admin'
-            ], true) ? ['scd_approve', 'scd_reject'] : [],
+            ], true) ? ['view', 'scd_approve'] : ['view'],
 
             self::WORKFLOW_SCD_APPROVED => in_array($viewerRole, [
-                'logistics_manager', 'admin'
-            ], true) ? ['convert_to_logistics'] : [],
+                'logistics_manager', 'logistics_officer', 'admin'
+            ], true) ? ['view', 'convert_to_logistics'] : ['view'],
 
             self::WORKFLOW_LOGISTICS_PROCESSING => in_array($viewerRole, [
                 'logistics_manager', 'admin'
-            ], true) ? ['submit_for_scd_approval', 'edit'] : [],
+            ], true) ? ['view', 'submit_for_scd_approval'] : ['view'],
 
             self::WORKFLOW_CONVERTED => in_array($viewerRole, [
                 'logistics_manager', 'admin'
-            ], true) ? ['edit', 'generate_jcc'] : [],
+            ], true) ? ['view', 'generate_jcc'] : ['view'],
 
             self::WORKFLOW_JOURNEY_ACTIVE => ['view'],
 
-            default => [],
+            default => ['view'],
         };
+    }
+
+    public function editDeadline(): ?\Carbon\Carbon
+    {
+        if ($this->status === self::STATUS_DRAFT) {
+            return null;
+        }
+
+        return $this->submitted_at?->addHours(48);
+    }
+
+    public function canBeEditedByRequester(): bool
+    {
+        if ($this->status === self::STATUS_DRAFT) {
+            return true;
+        }
+
+        $deadline = $this->editDeadline();
+
+        return $deadline !== null && now()->lessThan($deadline);
     }
 
     public function requiresScdApproval(): bool
@@ -282,6 +316,11 @@ class Trip extends Model
         return $this->hasMany(TripVendorSubmission::class, 'trip_id');
     }
 
+    public function rfqs(): HasMany
+    {
+        return $this->hasMany(TripRfq::class, 'trip_id');
+    }
+
     public function accommodations(): HasMany
     {
         return $this->hasMany(AccommodationBooking::class, 'trip_id');
@@ -311,5 +350,16 @@ class Trip extends Model
     public function scopeTripRequests($query)
     {
         return $query->where('trip_code', 'like', 'TRQ-%');
+    }
+
+    public function scopeVisibleToUser(Builder $query, User $user): Builder
+    {
+        return $query->where(function ($q) use ($user): void {
+            $q->where('status', '!=', self::STATUS_DRAFT)
+                ->orWhere(function ($draftQ) use ($user): void {
+                    $draftQ->where('status', self::STATUS_DRAFT)
+                        ->where('created_by', $user->id);
+                });
+        });
     }
 }
