@@ -117,11 +117,31 @@ class TripRequestWorkflowController extends ApiController
         $query = Trip::query()
             ->where('trip_code', 'like', 'TRQ-%')
             ->where('status', '!=', Trip::STATUS_DRAFT)
-            ->where('status', '!=', Trip::STATUS_CONVERTED)
-            ->where('workflow_stage', '!=', Trip::WORKFLOW_CONVERTED_TO_LOGISTICS_REQUEST)
-            ->where('workflow_stage', '!=', Trip::WORKFLOW_CONVERTED)
             ->with('creator')
             ->orderByDesc('created_at');
+
+        $query->where(function ($q): void {
+            $q->where('status', '!=', Trip::STATUS_CONVERTED)
+                ->orWhere(function ($convertedQuery): void {
+                    $convertedQuery->where('status', Trip::STATUS_CONVERTED)
+                        ->where(function ($pendingQuery): void {
+                            $pendingQuery->whereNull('approval_status')
+                                ->orWhereNotIn('approval_status', ['approved', 'rejected', 'director_approved', 'converted']);
+                        });
+                });
+        });
+
+        $query->where(function ($q): void {
+            $q->where('workflow_stage', '!=', Trip::WORKFLOW_CONVERTED_TO_LOGISTICS_REQUEST)
+                ->where('workflow_stage', '!=', Trip::WORKFLOW_CONVERTED)
+                ->orWhere(function ($convertedQuery): void {
+                    $convertedQuery->whereIn('workflow_stage', [Trip::WORKFLOW_CONVERTED_TO_LOGISTICS_REQUEST, Trip::WORKFLOW_CONVERTED])
+                        ->where(function ($pendingQuery): void {
+                            $pendingQuery->whereNull('approval_status')
+                                ->orWhereNotIn('approval_status', ['approved', 'rejected', 'director_approved', 'converted']);
+                        });
+                });
+        });
 
         if ($request->filled('status')) {
             $query->where('status', $request->status);

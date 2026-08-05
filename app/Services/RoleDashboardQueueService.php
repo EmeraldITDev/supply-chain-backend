@@ -219,6 +219,7 @@ class RoleDashboardQueueService
     $displayStatus = TripDisplayStatus::resolve($trip);
     $availableActions = $trip->availableScdActions();
     $approvalStatus = strtolower((string) ($trip->approval_status ?? ''));
+    $normalizedApprovalStatus = $approvalStatus !== '' ? $approvalStatus : 'pending';
 
     $workflowLabel = match (true) {
         $approvalStatus === 'director_approved' => 'Director Approved',
@@ -254,8 +255,8 @@ class RoleDashboardQueueService
       'workflowStageLabel' => $workflowLabel,
       'workflow_stage_label' => $workflowLabel,
       'status' => $trip->status,
-      'approvalStatus' => $trip->approval_status,
-      'approval_status' => $trip->approval_status,
+      'approvalStatus' => $normalizedApprovalStatus,
+      'approval_status' => $normalizedApprovalStatus,
       'displayStatus' => $displayStatus,
       'display_status' => $displayStatus,
       'displayStatusLabel' => TripDisplayStatus::label($displayStatus),
@@ -335,14 +336,25 @@ class RoleDashboardQueueService
     return Trip::query()
       ->select(self::TRIP_QUEUE_LIST_COLUMNS)
       ->tripRequests()
-      ->whereIn('workflow_stage', [
-        Trip::WORKFLOW_SCD_REVIEW,
-        Trip::WORKFLOW_SCD_APPROVAL,
-      ])
-      ->where('status', Trip::STATUS_SUBMITTED)
+      ->where(function ($query): void {
+        $query->whereIn('workflow_stage', [
+          Trip::WORKFLOW_SCD_REVIEW,
+          Trip::WORKFLOW_SCD_APPROVAL,
+          Trip::WORKFLOW_CONVERTED_TO_LOGISTICS_REQUEST,
+          Trip::WORKFLOW_CONVERTED,
+        ])
+          ->orWhere(function ($convertedQuery): void {
+            $convertedQuery->where('status', Trip::STATUS_CONVERTED)
+              ->whereIn('workflow_stage', [Trip::WORKFLOW_CONVERTED_TO_LOGISTICS_REQUEST, Trip::WORKFLOW_CONVERTED]);
+          });
+      })
+      ->where(function ($query): void {
+        $query->where('status', Trip::STATUS_SUBMITTED)
+          ->orWhere('status', Trip::STATUS_CONVERTED);
+      })
       ->where(function ($query): void {
         $query->whereNull('approval_status')
-          ->orWhereNotIn('approval_status', ['director_approved', 'approved', 'rejected']);
+          ->orWhereNotIn('approval_status', ['director_approved', 'approved', 'rejected', 'converted']);
       });
   }
 

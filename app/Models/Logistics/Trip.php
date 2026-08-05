@@ -213,9 +213,21 @@ class Trip extends Model
 
     public function availableScdActions(): array
     {
+        $approvalStatus = strtolower((string) ($this->approval_status ?? ''));
+        $status = strtolower((string) ($this->status ?? ''));
+
+        if ($approvalStatus === 'approved' || $approvalStatus === 'rejected' || $approvalStatus === 'director_approved' || $approvalStatus === 'converted') {
+            return [];
+        }
+
+        if ($status === self::STATUS_CONVERTED) {
+            return ['scd_approve', 'scd_reject'];
+        }
+
         return match ($this->workflow_stage) {
             self::WORKFLOW_SCD_REVIEW => ['scd_approve', 'scd_reject'],
             self::WORKFLOW_SCD_APPROVAL => ['scd_approve', 'scd_reject'],
+            self::WORKFLOW_CONVERTED_TO_LOGISTICS_REQUEST, self::WORKFLOW_CONVERTED => ['scd_approve', 'scd_reject'],
             default => [],
         };
     }

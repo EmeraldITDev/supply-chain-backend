@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Mail\TripRequestForwardedMail;
 use App\Models\Logistics\Trip;
 use App\Models\User;
+use App\Services\RoleDashboardQueueService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Mail;
 use Laravel\Sanctum\Sanctum;
@@ -266,6 +267,41 @@ class TripRequestReviewWorkflowTest extends TestCase
 
         $response->assertOk();
         $this->assertSame(0, collect($response->json('trips'))->filter(fn ($item) => ($item['id'] ?? null) === $trip->id)->count());
+    }
+
+    public function test_converted_trip_requests_with_pending_scd_decision_are_included_in_dashboard_queue(): void
+    {
+        $director = User::factory()->create([
+            'name' => 'SCD',
+            'email' => 'director-queue@example.com',
+            'supply_chain_role' => 'supply_chain_director',
+        ]);
+
+        $trip = Trip::create([
+            'trip_code' => 'TRQ-20260805-GS9ZFU',
+            'title' => 'Trip request: Port Harcourt',
+            'purpose' => 'Site visit',
+            'origin' => 'Abuja',
+            'destination' => 'Port Harcourt',
+            'scheduled_departure_at' => now()->addDays(5),
+            'scheduled_arrival_at' => now()->addDays(5)->addHours(2),
+            'passenger_user_ids' => [$director->id],
+            'status' => Trip::STATUS_CONVERTED,
+            'workflow_stage' => Trip::WORKFLOW_CONVERTED,
+            'approval_status' => 'pending',
+            'trip_type' => Trip::TYPE_PERSONNEL,
+            'booking_scope' => Trip::BOOKING_SCOPE_WITHIN_STATE,
+            'created_by' => $director->id,
+        ]);
+
+        $service = app(RoleDashboardQueueService::class);
+        $items = $service->pendingTripScdApprovalItems(20);
+
+        $this->assertTrue($items->contains(fn ($item) => ($item['id'] ?? null) === $trip->id));
+        $match = $items->first(fn ($item) => ($item['id'] ?? null) === $trip->id);
+        $this->assertSame('pending', strtolower((string) ($match['approval_status'] ?? '')));
+        $this->assertContains('scd_approve', $match['available_actions']);
+        $this->assertContains('scd_reject', $match['available_actions']);
     }
 
     public function test_forwarding_trip_request_sends_email_to_supply_chain_director(): void
