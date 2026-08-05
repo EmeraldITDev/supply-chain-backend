@@ -1076,7 +1076,7 @@ class TripRequestWorkflowController extends ApiController
                 'quotation_required' => $request->boolean('quotation_required', false),
             ]);
             $tripRequest->quotation_required = $request->boolean('quotation_required', false);
-            $tripRequest->workflow_stage = Trip::WORKFLOW_CONVERTED_TO_LOGISTICS_REQUEST;
+            $tripRequest->workflow_stage = Trip::WORKFLOW_SCD_REVIEW;
             $tripRequest->status = Trip::STATUS_CONVERTED;
             $tripRequest->approval_status = 'converted';
             $tripRequest->updated_by = $user->id;
@@ -1492,6 +1492,33 @@ class TripRequestWorkflowController extends ApiController
             ]);
 
             if ($isApproved) {
+                Journey::create([
+                    'trip_id' => $trip->id,
+                    'trip_request_id' => $trip->id,
+                    'trip_code' => $trip->trip_code,
+                    'title' => $trip->title ?? $trip->purpose,
+                    'origin' => $trip->origin,
+                    'destination' => $trip->destination,
+                    'purpose' => $trip->purpose,
+                    'scheduled_departure_at' => $trip->scheduled_departure_at,
+                    'scheduled_arrival_at' => $trip->scheduled_arrival_at,
+                    'vehicle_id' => $trip->vehicle_id,
+                    'driver_id' => $trip->driver_user_id,
+                    'driver_name' => $trip->driver_name,
+                    'driver_phone' => $trip->driver_phone,
+                    'driver_source' => $trip->driver_source,
+                    'vendor_id' => $trip->vendor_id,
+                    'accommodation_required' => $trip->accommodation_required,
+                    'accommodation_hotel_name' => $trip->accommodation_name,
+                    'accommodation_address' => $trip->accommodation_address,
+                    'accommodation_contact' => $trip->accommodation_contact,
+                    'accommodation_estimated_cost' => $trip->accommodation_estimated_cost,
+                    'escort_required' => $trip->escort_required,
+                    'escort_description' => $trip->escort_description,
+                    'status' => Journey::STATUS_NOT_STARTED,
+                    'created_by' => $user->id,
+                ]);
+
                 $this->workflow->notifyStage(
                     $trip,
                     'trip_scd_approved',
