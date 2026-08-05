@@ -354,7 +354,7 @@ class RoleDashboardQueueService
       })
       ->where(function ($query): void {
         $query->whereNull('approval_status')
-          ->orWhereNotIn('approval_status', ['director_approved', 'approved', 'rejected', 'converted']);
+          ->orWhereNotIn('approval_status', ['director_approved', 'approved', 'rejected']);
       });
   }
 

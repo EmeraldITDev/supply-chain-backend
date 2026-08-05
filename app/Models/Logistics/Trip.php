@@ -251,6 +251,10 @@ class Trip extends Model
                 'logistics_manager', 'admin'
             ], true) ? ['view', 'submit_for_scd_approval'] : ['view'],
 
+            self::WORKFLOW_CONVERTED_TO_LOGISTICS_REQUEST => in_array($viewerRole, [
+                'supply_chain_director', 'supply_chain', 'admin'
+            ], true) ? ['view', 'scd_approve', 'scd_reject'] : ['view'],
+
             self::WORKFLOW_CONVERTED => in_array($viewerRole, [
                 'logistics_manager', 'admin'
             ], true) ? ['view', 'generate_jcc'] : ['view'],
@@ -283,9 +287,13 @@ class Trip extends Model
 
     public function requiresScdApproval(): bool
     {
-        return ($this->workflow_stage === self::WORKFLOW_SCD_REVIEW
-            || $this->workflow_stage === self::WORKFLOW_SCD_APPROVAL)
-            && $this->approval_status !== 'approved';
+        return in_array($this->workflow_stage, [
+            self::WORKFLOW_SCD_REVIEW,
+            self::WORKFLOW_SCD_APPROVAL,
+            self::WORKFLOW_CONVERTED_TO_LOGISTICS_REQUEST,
+            self::WORKFLOW_CONVERTED,
+        ], true)
+            && !in_array($this->approval_status, ['approved', 'director_approved', 'rejected'], true);
     }
 
     public function vendor(): BelongsTo
