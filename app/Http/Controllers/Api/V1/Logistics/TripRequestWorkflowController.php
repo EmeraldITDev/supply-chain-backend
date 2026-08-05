@@ -54,9 +54,17 @@ class TripRequestWorkflowController extends ApiController
 
         $query = Trip::query()
             ->where('trip_code', 'like', 'TRQ-%')
-            ->where('status', '!=', Trip::STATUS_CONVERTED)
-            ->where('workflow_stage', '!=', Trip::WORKFLOW_CONVERTED_TO_LOGISTICS_REQUEST)
-            ->where('workflow_stage', '!=', Trip::WORKFLOW_CONVERTED)
+            ->where(function ($q) use ($user, $isLogisticsInbox): void {
+                if ($isLogisticsInbox) {
+                    // Logistics inbox excludes converted trips — they move to logistics processing
+                    $q->where('status', '!=', Trip::STATUS_CONVERTED)
+                      ->where('workflow_stage', '!=', Trip::WORKFLOW_CONVERTED_TO_LOGISTICS_REQUEST)
+                      ->where('workflow_stage', '!=', Trip::WORKFLOW_CONVERTED);
+                } else {
+                    // Requesters always see their own trips regardless of conversion status
+                    $q->where('created_by', $user->id);
+                }
+            })
             ->with('creator')
             ->orderByDesc('created_at');
 
@@ -76,8 +84,6 @@ class TripRequestWorkflowController extends ApiController
                     ]);
             }
         } else {
-            $query->visibleToUser($user);
-
             if ($request->filled('status')) {
                 $query->where('status', $request->status);
             }
