@@ -14,7 +14,7 @@ class UpdateJourneyStatusRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'status' => 'required|in:not_started,departed,en_route,arrived,closed',
+            'status' => 'required|in:not_started,departed,at_checkpoint,en_route,arrived,closed',
             'timestamp' => 'nullable|date',
             'location' => 'nullable|string|max:255',
         ];

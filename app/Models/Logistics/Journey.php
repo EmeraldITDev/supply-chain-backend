@@ -18,6 +18,7 @@ class Journey extends Model
     public const STATUS_IN_PROGRESS = 'in_progress';
     public const STATUS_COMPLETED = 'completed';
     public const STATUS_DEPARTED = 'departed';
+    public const STATUS_AT_CHECKPOINT = 'at_checkpoint';
     public const STATUS_EN_ROUTE = 'en_route';
     public const STATUS_ARRIVED = 'arrived';
     public const STATUS_CLOSED = 'closed';

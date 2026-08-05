@@ -8,7 +8,8 @@ class JourneyService
 {
     private array $allowedTransitions = [
         Journey::STATUS_NOT_STARTED => [Journey::STATUS_DEPARTED],
-        Journey::STATUS_DEPARTED => [Journey::STATUS_EN_ROUTE, Journey::STATUS_ARRIVED],
+        Journey::STATUS_DEPARTED => [Journey::STATUS_AT_CHECKPOINT, Journey::STATUS_EN_ROUTE, Journey::STATUS_ARRIVED],
+        Journey::STATUS_AT_CHECKPOINT => [Journey::STATUS_EN_ROUTE, Journey::STATUS_ARRIVED],
         Journey::STATUS_EN_ROUTE => [Journey::STATUS_ARRIVED],
         Journey::STATUS_ARRIVED => [Journey::STATUS_CLOSED],
         Journey::STATUS_CLOSED => [],
