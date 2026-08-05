@@ -65,6 +65,36 @@ class UserManagementController extends Controller
     }
 
     /**
+     * Show a single user.
+     */
+    public function show(Request $request, $id)
+    {
+        $user = $request->user();
+
+        if (!$this->permissionService->canListUsersDirectory($user)) {
+            return response()->json([
+                'success' => false,
+                'error' => 'You do not have permission to view the user directory',
+                'code' => 'FORBIDDEN'
+            ], 403);
+        }
+
+        $targetUser = User::find($id);
+        if (!$targetUser) {
+            return response()->json([
+                'success' => false,
+                'error' => 'User not found',
+                'code' => 'NOT_FOUND'
+            ], 404);
+        }
+
+        return response()->json([
+            'success' => true,
+            'data' => $this->serializeUser($targetUser),
+        ]);
+    }
+
+    /**
      * Canonical role keys allowed for create/update.
      * The frontend may send either canonical keys (`logistics_manager`) or
      * human labels (`Logistics Manager`); we normalise before validation.
@@ -493,7 +523,7 @@ class UserManagementController extends Controller
                 ],
             ], 422);
         }
-        
+
         if (in_array($targetUser->scmRole(), ['vendor', 'power_user'], true)) {
             return response()->json([
                 'success' => false,
