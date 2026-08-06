@@ -679,6 +679,7 @@ Route::prefix('v1/logistics')->group(function () {
         Route::post('/trips/{tripId}/jcc/approve', [LogisticsJobCompletionCertificateController::class, 'approve'])->middleware($logisticsInternalRoles);
         Route::get('/trips/{tripId}/jcc/pdf', [LogisticsJobCompletionCertificateController::class, 'generatePdf'])->middleware($logisticsInternalRoles);
         Route::get('/trips/{tripId}/jcc/pdf/layout', [LogisticsJobCompletionCertificateController::class, 'getPdfLayout'])->middleware($logisticsInternalRoles);
+        Route::get('/logistics-trips/{id}/po-payload', [\App\Http\Controllers\Api\V1\Logistics\PoPayloadController::class, 'show'])->middleware($logisticsInternalRoles);
         Route::post('/trips/{tripId}/jcc/attachments', [LogisticsJobCompletionCertificateController::class, 'uploadAttachment'])->middleware($logisticsInternalRoles);
         Route::get('/jcc', [LogisticsJobCompletionCertificateController::class, 'index'])->middleware($logisticsInternalRoles);
 

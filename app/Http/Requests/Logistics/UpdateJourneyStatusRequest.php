@@ -19,4 +19,14 @@ class UpdateJourneyStatusRequest extends FormRequest
             'location' => 'nullable|string|max:255',
         ];
     }
+
+    protected function prepareForValidation(): void
+    {
+        // Accept a few alternative frontend parameter names and normalise to `status`.
+        $status = $this->input('status') ?? $this->input('new_status') ?? $this->input('journey_status') ?? $this->input('updateStatus') ?? $this->input('status_value');
+
+        if ($status !== null && ! $this->has('status')) {
+            $this->merge(['status' => $status]);
+        }
+    }
 }

@@ -476,11 +476,11 @@ class TripController extends ApiController
     public function cancel(int $id, Request $request)
     {
         $trip = Trip::find($id);
-    
+
         if (!$trip) {
             return $this->error('Trip not found', 'NOT_FOUND', 404);
         }
-    
+
         // Check if trip can be cancelled/deleted (not already completed, closed, or cancelled)
         if (in_array($trip->status, [Trip::STATUS_COMPLETED, Trip::STATUS_CLOSED])) {
             return $this->error(
@@ -489,13 +489,13 @@ class TripController extends ApiController
                 422
             );
         }
-    
+
         // Capture data for audit before deletion
         $tripData = $trip->toArray();
-    
+
         // Delete the trip
         $trip->delete();
-    
+
         $this->auditLogger->log(
             'trip_deleted',
             $request->user(),
@@ -509,7 +509,7 @@ class TripController extends ApiController
             ],
             $request
         );
-    
+
         return $this->success([
             'message' => 'Trip deleted successfully',
         ]);
@@ -522,7 +522,18 @@ class TripController extends ApiController
     {
         $trip->loadMissing(['vendor', 'vehicle', 'driver']);
 
-        return array_merge($trip->toArray(), $trip->driverApiFields());
+        $base = array_merge($trip->toArray(), $trip->driverApiFields());
+
+        // Provide camelCase aliases and ensure vehicle/driver flat fields exist
+        $base['tripCode'] = $base['trip_code'] ?? $base['tripCode'] ?? null;
+        $base['vehiclePlateNumber'] = $base['vehicle_plate_number'] ?? $trip->vehicle?->plate_number ?? null;
+        $base['vehicleMake'] = $base['vehicle_make'] ?? $trip->vehicle?->make ?? null;
+        $base['vehicleModel'] = $base['vehicle_model'] ?? $trip->vehicle?->model ?? null;
+        $base['driverName'] = $base['driverName'] ?? $trip->driver?->name ?? $base['driver_name'] ?? null;
+        $base['scheduledDepartureAt'] = $base['scheduled_departure_at'] ?? null;
+        $base['scheduledArrivalAt'] = $base['scheduled_arrival_at'] ?? null;
+
+        return $base;
     }
 
     private function canManageTrip(?User $user): bool
@@ -559,5 +570,5 @@ class TripController extends ApiController
         return in_array($user->id, $passengers, true)
             || (int) $trip->driver_user_id === (int) $user->id;
     }
-    
+
 }
