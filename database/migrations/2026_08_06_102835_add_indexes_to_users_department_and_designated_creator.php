@@ -11,19 +11,19 @@ return new class extends Migration
      */
     public function up(): void
 {
-    Schema::table('users', function (Blueprint $table) {
-        $table->index('department', 'idx_users_department');
-        $table->index('designated_requisition_creator', 'idx_users_designated');
-        $table->index(['department', 'designated_requisition_creator'], 'idx_users_dept_designated');
-    });
+    {
+    DB::statement('CREATE INDEX IF NOT EXISTS idx_users_department ON users(department)');
+    DB::statement('CREATE INDEX IF NOT EXISTS idx_users_designated ON users(designated_requisition_creator)');
+    DB::statement('CREATE INDEX IF NOT EXISTS idx_users_dept_designated ON users(department, designated_requisition_creator)');
+    }
 }
 
 public function down(): void
 {
-    Schema::table('users', function (Blueprint $table) {
-        $table->dropIndex('idx_users_department');
-        $table->dropIndex('idx_users_designated');
-        $table->dropIndex('idx_users_dept_designated');
-    });
+    {
+    DB::statement('DROP INDEX IF EXISTS idx_users_department');
+    DB::statement('DROP INDEX IF EXISTS idx_users_designated');
+    DB::statement('DROP INDEX IF EXISTS idx_users_dept_designated');
+    }
 }
 };
