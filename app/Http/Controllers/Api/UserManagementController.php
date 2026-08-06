@@ -534,27 +534,7 @@ class UserManagementController extends Controller
             ], 422);
         }
 
-        DB::transaction(function () use ($departmentLabel, $targetUser): void {
-        // Use raw DB query to bypass Eloquent model overhead on bulk reset
-        DB::table('users')
-            ->whereIn('id', DepartmentMatcher::matchingUserIds($departmentLabel))
-            ->where('id', '!=', $targetUser->id)
-            ->where('designated_requisition_creator', true) // only update rows that need changing
-            ->update([
-                'designated_requisition_creator' => false,
-                'updated_at' => now(),
-            ]);
-
-        // Set the target user directly by primary key — fastest possible update
-        DB::table('users')
-            ->where('id', $targetUser->id)
-            ->update([
-                'designated_requisition_creator' => true,
-                'updated_at' => now(),
-            ]);
-    });
-
-    $targetUser->refresh();
+        SetDesignatedRequisitionCreator::dispatch($targetUser->id, $departmentLabel);
 
         return response()->json([
             'success' => true,
