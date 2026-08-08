@@ -14,7 +14,7 @@ class UpdateJourneyStatusRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'status' => 'required|in:not_started,departed,at_checkpoint,en_route,arrived,closed',
+            'status' => 'required|in:not_started,scheduled,in_progress,departed,at_checkpoint,en_route,arrived,completed,closed,cancelled',
             'timestamp' => 'nullable|date',
             'location' => 'nullable|string|max:255',
         ];
@@ -27,6 +27,17 @@ class UpdateJourneyStatusRequest extends FormRequest
 
         if ($status !== null && ! $this->has('status')) {
             $this->merge(['status' => $status]);
+        }
+
+        if (! $this->has('location')) {
+            $location = $this->input('location')
+                ?? $this->input('checkpoint_location')
+                ?? $this->input('checkpoint_name')
+                ?? $this->input('checkpointLocation');
+
+            if ($location !== null) {
+                $this->merge(['location' => $location]);
+            }
         }
     }
 }

@@ -32,8 +32,58 @@ class FleetDriverController extends ApiController
             });
         }
 
+        $fleetDrivers = $query->get()->map(fn (FleetDriver $d) => [
+            'id' => 'fleet_' . $d->id,
+            'source' => 'fleet',
+            'name' => $d->name,
+            'email' => $d->email,
+            'phone_number' => $d->phone_number,
+            'license_number' => $d->license_number,
+            'department' => $d->department,
+            'role' => $d->role,
+        ]);
+
+        $staffQuery = User::query()
+            ->whereIn('supply_chain_role', [
+                'logistics_manager',
+                'logistics_officer',
+                'logistics',
+                'employee',
+                'regular_staff',
+                'general_employee',
+            ])
+            ->whereNull('vendor_id');
+
+        if ($request->filled('q')) {
+            $q = '%' . $request->get('q') . '%';
+            $staffQuery->where(function ($b) use ($q): void {
+                $b->where('name', 'like', $q)
+                    ->orWhere('email', 'like', $q)
+                    ->orWhere('phone', 'like', $q);
+            });
+        }
+
+        $staffDrivers = $staffQuery->get(['id', 'name', 'email', 'phone', 'department', 'supply_chain_role'])
+            ->map(fn (User $u) => [
+                'id' => 'user_' . $u->id,
+                'user_id' => $u->id,
+                'source' => 'staff',
+                'name' => $u->name,
+                'email' => $u->email,
+                'phone_number' => $u->phone,
+                'license_number' => null,
+                'department' => $u->department,
+                'role' => $u->supply_chain_role,
+            ]);
+
+        $drivers = $fleetDrivers->merge($staffDrivers)
+            ->sortBy('name')
+            ->values();
+
         return $this->success([
-            'drivers' => $query->paginate(30),
+            'drivers' => [
+                'data' => $drivers,
+            ],
         ]);
     }
 

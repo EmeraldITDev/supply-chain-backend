@@ -19,4 +19,18 @@ class StoreJourneyCheckpointRequest extends FormRequest
             'timestamp' => 'nullable|date',
         ];
     }
+
+    protected function prepareForValidation(): void
+    {
+        if (! $this->has('location')) {
+            $location = $this->input('location')
+                ?? $this->input('checkpoint_location')
+                ?? $this->input('checkpoint_name')
+                ?? $this->input('checkpointLocation');
+
+            if ($location !== null) {
+                $this->merge(['location' => $location]);
+            }
+        }
+    }
 }

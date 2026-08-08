@@ -21,6 +21,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
+use Illuminate\Validation\Rule;
 
 class TripRequestWorkflowController extends ApiController
 {
@@ -263,24 +264,60 @@ class TripRequestWorkflowController extends ApiController
         InternationalTransportModeRequest::mergeIntoRequest($request);
 
         $validator = Validator::make($request->all(), array_merge([
-            'destination' => 'required|string|max:255',
-            'purpose' => 'required|string|max:500',
-            'scheduled_departure_at' => 'required|date',
+            'destination' => [
+                Rule::when(
+                    ! $request->boolean('save_as_draft'),
+                    ['required', 'string', 'max:255'],
+                    ['nullable', 'string', 'max:255']
+                ),
+            ],
+            'purpose' => [
+                Rule::when(
+                    ! $request->boolean('save_as_draft'),
+                    ['required', 'string', 'max:500'],
+                    ['nullable', 'string', 'max:500']
+                ),
+            ],
+            'scheduled_departure_at' => [
+                Rule::when(
+                    ! $request->boolean('save_as_draft'),
+                    ['required', 'date'],
+                    ['nullable', 'date']
+                ),
+            ],
             'scheduled_arrival_at' => 'nullable|date|after_or_equal:scheduled_departure_at',
             'origin' => 'nullable|string|max:255',
-            'passenger_user_ids' => 'required|array|min:1',
+            'passenger_user_ids' => [
+                Rule::when(
+                    ! $request->boolean('save_as_draft'),
+                    ['required', 'array', 'min:1'],
+                    ['nullable', 'array']
+                ),
+            ],
             'passenger_user_ids.*' => 'integer|exists:users,id',
             'bookingScope' => 'nullable|string',
             'booking_scope' => 'nullable|string',
             'tripType' => 'nullable|string',
             'trip_type' => 'nullable|string',
-            'accommodation_required' => 'required|boolean',
+            'accommodation_required' => [
+                Rule::when(
+                    ! $request->boolean('save_as_draft'),
+                    ['required', 'boolean'],
+                    ['nullable', 'boolean']
+                ),
+            ],
             'accommodation_name' => 'nullable|string|max:255',
             'accommodation_address' => 'nullable|string|max:255',
             'accommodation_contact' => 'nullable|string|max:50',
             'accommodation_details' => 'nullable|string|max:2000',
             'accommodation_estimated_cost' => 'nullable|numeric|min:0',
-            'escort_required' => 'required|boolean',
+            'escort_required' => [
+                Rule::when(
+                    ! $request->boolean('save_as_draft'),
+                    ['required', 'boolean'],
+                    ['nullable', 'boolean']
+                ),
+            ],
             'escort_description' => 'nullable|string|max:2000',
         ], ExternalPassengerRequest::validationRules(), InternationalTransportModeRequest::validationRules()));
 
