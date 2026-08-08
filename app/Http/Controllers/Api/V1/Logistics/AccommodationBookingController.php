@@ -6,6 +6,7 @@ use App\Http\Requests\Logistics\StoreAccommodationBookingRequest;
 use App\Http\Requests\Logistics\UpdateAccommodationBookingRequest;
 use App\Models\Logistics\AccommodationBooking;
 use App\Models\Logistics\Trip;
+use App\Services\AttachmentService;
 use App\Services\Logistics\AccommodationBookingService;
 use Illuminate\Http\Request;
 
@@ -24,6 +25,12 @@ class AccommodationBookingController extends ApiController
         try {
             $data = $request->validated();
             $booking = $this->bookingService->createBooking($data, $request->user()->id);
+
+            $attachmentService = app(AttachmentService::class);
+            $attachmentFiles = $attachmentService->filesFromRequest($request, ['attachment', 'attachments', 'documents']);
+            if ($attachmentFiles !== []) {
+                $this->bookingService->storeAttachments($booking, $attachmentFiles, $request->user());
+            }
 
             return $this->success([
                 'message' => 'Accommodation booking created successfully',
@@ -92,6 +99,12 @@ class AccommodationBookingController extends ApiController
         try {
             $data = $request->validated();
             $booking = $this->bookingService->updateBooking($booking, $data, $request->user()->id);
+
+            $attachmentService = app(AttachmentService::class);
+            $attachmentFiles = $attachmentService->filesFromRequest($request, ['attachment', 'attachments', 'documents']);
+            if ($attachmentFiles !== []) {
+                $this->bookingService->storeAttachments($booking, $attachmentFiles, $request->user());
+            }
 
             return $this->success([
                 'message' => 'Booking updated successfully',

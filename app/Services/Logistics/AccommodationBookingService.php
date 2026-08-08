@@ -4,6 +4,8 @@ namespace App\Services\Logistics;
 
 use App\Models\Logistics\AccommodationBooking;
 use App\Models\Logistics\Trip;
+use App\Models\User;
+use App\Services\AttachmentService;
 use Illuminate\Pagination\Paginator;
 
 class AccommodationBookingService
@@ -55,6 +57,12 @@ class AccommodationBookingService
         $booking->delete();
     }
 
+    public function storeAttachments(AccommodationBooking $booking, array $files, User $user): void
+    {
+        $attachmentService = app(AttachmentService::class);
+        $attachmentService->storeMany($booking, $files, $user);
+    }
+
     /**
      * Get all bookings with optional filters
      */
@@ -93,7 +101,7 @@ class AccommodationBookingService
     public function getTripAccommodations(Trip $trip)
     {
         return $trip->accommodations()
-            ->with('createdBy:id,name,email')
+            ->with(['createdBy:id,name,email', 'attachments.uploader:id,name,email'])
             ->get()
             ->map(function ($booking) {
                 return [
@@ -107,6 +115,7 @@ class AccommodationBookingService
                     'check_out_date' => $booking->check_out_date?->format('Y-m-d'),
                     'passenger_count' => $booking->getPassengerCount(),
                     'created_by' => $booking->createdBy?->name,
+                    'attachments' => app(AttachmentService::class)->payloadFor($booking),
                     'created_at' => $booking->created_at,
                 ];
             });
@@ -145,6 +154,7 @@ class AccommodationBookingService
             'check_out_date' => $booking->check_out_date?->format('Y-m-d'),
             'number_of_nights' => $booking->number_of_nights,
             'created_by' => $booking->createdBy?->name,
+            'attachments' => app(AttachmentService::class)->payloadFor($booking),
             'created_at' => $booking->created_at->format('Y-m-d H:i'),
             'updated_at' => $booking->updated_at->format('Y-m-d H:i'),
         ];

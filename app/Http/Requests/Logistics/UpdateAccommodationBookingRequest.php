@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests\Logistics;
 
+use App\Services\AttachmentService;
 use Illuminate\Foundation\Http\FormRequest;
 
 class UpdateAccommodationBookingRequest extends FormRequest
@@ -22,6 +23,7 @@ class UpdateAccommodationBookingRequest extends FormRequest
             'number_of_nights' => 'nullable|integer|min:1|max:365',
             'hotel_name' => 'nullable|string|max:255',
             'check_in_date' => 'nullable|date|after_or_equal:today',
+            ...AttachmentService::validationRules(),
         ];
     }
 }

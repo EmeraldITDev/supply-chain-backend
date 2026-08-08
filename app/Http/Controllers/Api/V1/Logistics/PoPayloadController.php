@@ -2,7 +2,7 @@
 
 namespace App\Http\Controllers\Api\V1\Logistics;
 
-use App\Http\Controllers\ApiController;
+use App\Http\Controllers\Api\V1\Logistics\ApiController;
 use App\Models\Logistics\Trip;
 use Illuminate\Http\Request;
 
