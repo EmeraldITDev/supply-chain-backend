@@ -443,12 +443,13 @@ Route::middleware('auth:sanctum')->group(function () {
     // User management (admin only)
     Route::get('/users', [\App\Http\Controllers\Api\UserManagementController::class, 'index']);
     Route::get('/users/department-options', [\App\Http\Controllers\Api\UserManagementController::class, 'departmentOptions']);
-    Route::get('/users/{id}', [\App\Http\Controllers\Api\UserManagementController::class, 'show']);
+    Route::get('/users/eligible-passengers', [\App\Http\Controllers\Api\EligiblePassengersController::class, 'index']);
+    Route::get('/users/{id}', [\App\Http\Controllers\Api\UserManagementController::class, 'show'])->whereNumber('id');
     Route::post('/users', [\App\Http\Controllers\Api\UserManagementController::class, 'store']);
-    Route::put('/users/{id}', [\App\Http\Controllers\Api\UserManagementController::class, 'update']);
-    Route::delete('/users/{id}', [\App\Http\Controllers\Api\UserManagementController::class, 'destroy']);
-    Route::post('/users/{id}/signature', [\App\Http\Controllers\Api\UserManagementController::class, 'uploadSignature']);
-    Route::delete('/users/{id}/signature', [\App\Http\Controllers\Api\UserManagementController::class, 'deleteSignature']);
+    Route::put('/users/{id}', [\App\Http\Controllers\Api\UserManagementController::class, 'update'])->whereNumber('id');
+    Route::delete('/users/{id}', [\App\Http\Controllers\Api\UserManagementController::class, 'destroy'])->whereNumber('id');
+    Route::post('/users/{id}/signature', [\App\Http\Controllers\Api\UserManagementController::class, 'uploadSignature'])->whereNumber('id');
+    Route::delete('/users/{id}/signature', [\App\Http\Controllers\Api\UserManagementController::class, 'deleteSignature'])->whereNumber('id');
     Route::get('/departments/requisition-creators', [\App\Http\Controllers\Api\UserManagementController::class, 'listRequisitionCreators']);
     Route::put('/departments/{department}/requisition-creator', [\App\Http\Controllers\Api\UserManagementController::class, 'assignRequisitionCreator']);
     Route::post('/mrfs/{id}/workflow-reject', [\App\Http\Controllers\Api\MRFWorkflowController::class, 'rejectMRF']);
@@ -567,9 +568,6 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/reports/finance-ap/cycle-times', [FinanceApReportController::class, 'cycleTimes']);
     Route::get('/reports/finance-ap/sync-events', [FinanceApReportController::class, 'syncEvents']);
     Route::get('/config/finance-routing', [AppConfigController::class, 'financeRouting']);
-
-    // Eligible passengers / drivers for trip scheduling (excludes vendors & power users)
-    Route::get('/users/eligible-passengers', [EligiblePassengersController::class, 'index']);
 
     // Global search (supports formatted_id + legacy ids)
     Route::get('/search', [SearchController::class, 'search']);
