@@ -202,7 +202,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/journeys/{trip_id}', [LogisticsJourneyController::class, 'listByTrip'])->middleware($logisticsInternalRoles);
     Route::put('/journeys/{id}', [LogisticsJourneyController::class, 'update'])->middleware($logisticsInternalRoles);
     Route::post('/journeys/{id}/update-status', [LogisticsJourneyController::class, 'updateStatus'])->middleware('role:vendor,logistics_officer,logistics_manager,procurement_manager,supply_chain_director,admin');
-    Route::post('/journeys/{id}/checkpoints', [LogisticsJourneyController::class, 'updateStatus'])->middleware('role:vendor,logistics_officer,logistics_manager,procurement_manager,supply_chain_director,admin');
+    Route::post('/journeys/{id}/checkpoints', [LogisticsJourneyController::class, 'storeCheckpoint'])->middleware('role:vendor,logistics_officer,logistics_manager,procurement_manager,supply_chain_director,admin');
     Route::post('/journeys/{id}/feedback', [LogisticsJourneyController::class, 'feedback'])->middleware('role:vendor,logistics_officer,logistics_manager,procurement_manager,supply_chain_director,admin');
 
     // Fleet routes - forward to logistics controllers
@@ -637,7 +637,7 @@ Route::prefix('v1/logistics')->group(function () {
         Route::get('/journeys/{trip_id}', [LogisticsJourneyController::class, 'listByTrip'])->middleware($logisticsInternalRoles);
         Route::put('/journeys/{id}', [LogisticsJourneyController::class, 'update'])->middleware($logisticsInternalRoles);
         Route::post('/journeys/{id}/update-status', [LogisticsJourneyController::class, 'updateStatus'])->middleware('role:vendor,logistics_officer,logistics_manager,procurement_manager,supply_chain_director,admin');
-        Route::post('/journeys/{id}/checkpoints', [LogisticsJourneyController::class, 'updateStatus'])->middleware('role:vendor,logistics_officer,logistics_manager,procurement_manager,supply_chain_director,admin');
+        Route::post('/journeys/{id}/checkpoints', [LogisticsJourneyController::class, 'storeCheckpoint'])->middleware('role:vendor,logistics_officer,logistics_manager,procurement_manager,supply_chain_director,admin');
 
         // Trip Vendor Submission & Multi-Vendor Workflow
         Route::post('/trips/{tripId}/invite-vendors', [LogisticsTripVendorSubmissionController::class, 'inviteVendors'])->middleware($logisticsInternalRoles);

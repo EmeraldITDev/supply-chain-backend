@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api\V1\Logistics;
 
+use App\Http\Requests\Logistics\StoreJourneyCheckpointRequest;
 use App\Http\Requests\Logistics\StoreJourneyRequest;
 use App\Http\Requests\Logistics\UpdateJourneyRequest;
 use App\Http\Requests\Logistics\UpdateJourneyStatusRequest;
@@ -144,6 +145,45 @@ class JourneyController extends ApiController
         }
 
         $this->auditLogger->log('journey_status_updated', $request->user(), 'journey', (string) $journey->id, ['status' => $status], $request);
+
+        return $this->success([
+            'journey' => $this->presentJourney($journey->fresh()->load(['trip' => fn ($q) => $q->with(['vehicle', 'driver', 'vendor'])])),
+        ]);
+    }
+
+    public function storeCheckpoint(StoreJourneyCheckpointRequest $request, int $id)
+    {
+        $journey = Journey::find($id);
+
+        if (! $journey) {
+            return $this->error('Journey not found', 'NOT_FOUND', 404);
+        }
+
+        $data = $request->validated();
+        $timestamp = $data['timestamp'] ?? now();
+        $location = $data['location'] ?? null;
+        $notes = $data['notes'] ?? null;
+
+        $metadata = is_array($journey->metadata) ? $journey->metadata : [];
+        $checkpoints = $metadata['checkpoints'] ?? [];
+        $checkpoints[] = [
+            'location' => $location,
+            'notes' => $notes,
+            'timestamp' => $timestamp instanceof \DateTimeInterface ? $timestamp->toIso8601String() : (string) $timestamp,
+        ];
+
+        $metadata['checkpoints'] = $checkpoints;
+        if ($notes !== null) {
+            $metadata['notes'] = $notes;
+        }
+        $metadata['last_checkpoint_notes'] = $notes;
+
+        $journey->metadata = $metadata;
+        $journey->last_checkpoint_at = $timestamp;
+        $journey->last_checkpoint_location = $location;
+        $journey->save();
+
+        $this->auditLogger->log('journey_checkpoint_created', $request->user(), 'journey', (string) $journey->id, $data, $request);
 
         return $this->success([
             'journey' => $this->presentJourney($journey->fresh()->load(['trip' => fn ($q) => $q->with(['vehicle', 'driver', 'vendor'])])),
