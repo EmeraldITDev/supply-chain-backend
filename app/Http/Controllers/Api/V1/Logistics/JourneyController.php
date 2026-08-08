@@ -64,9 +64,25 @@ class JourneyController extends ApiController
         ], 201);
     }
 
+    public function show(int $id)
+    {
+        $journey = Journey::with(['trip' => fn ($q) => $q->with(['vehicle', 'driver', 'vendor'])])->find($id);
+
+        if (! $journey) {
+            return $this->error('Journey not found', 'NOT_FOUND', 404);
+        }
+
+        return $this->success([
+            'journey' => $this->presentJourney($journey),
+        ]);
+    }
+
     public function listByTrip(int $tripId)
     {
-        $paginator = Journey::where('trip_id', $tripId)->paginate(20);
+        $paginator = Journey::where(function ($query) use ($tripId) {
+            $query->where('trip_id', $tripId)
+                ->orWhere('trip_request_id', $tripId);
+        })->paginate(20);
 
         $items = collect($paginator->items())->map(fn ($j) => $this->presentJourney($j))->values()->all();
 
@@ -128,6 +144,14 @@ class JourneyController extends ApiController
             $journey->last_checkpoint_location = $request->input('location');
         }
         $journey->save();
+
+        $trip = $journey->trip;
+        if ($trip && in_array($status, [Journey::STATUS_COMPLETED, Journey::STATUS_CLOSED], true)) {
+            if ($trip->status !== Trip::STATUS_COMPLETED) {
+                $trip->status = Trip::STATUS_COMPLETED;
+                $trip->save();
+            }
+        }
 
         // Send notification for status change
         try {
@@ -245,11 +269,24 @@ class JourneyController extends ApiController
         }
 
         $base = $journey->toArray();
+        $base['id'] = $journey->id;
+        $base['journeyId'] = $journey->id;
+        $base['journey_id'] = $journey->id;
+        $base['tripId'] = $journey->trip_id;
+        $base['trip_id'] = $journey->trip_id;
+        $base['tripRequestId'] = $journey->trip_request_id;
+        $base['trip_request_id'] = $journey->trip_request_id;
+        $base['logisticsRequestId'] = $trip?->logistics_request_id ?? null;
+        $base['logistics_request_id'] = $trip?->logistics_request_id ?? null;
         $base['vehicle_plate_number'] = $vehiclePlate;
         $base['vehicle_make'] = $vehicleMake;
         $base['vehicle_model'] = $vehicleModel;
         $base['driver_name'] = $driverName;
         $base['passengers'] = $passengers;
+        $base['jccGenerated'] = $journey->jcc_generated ?? false;
+        $base['jcc_generated'] = $journey->jcc_generated ?? false;
+        $base['jccDocumentId'] = $journey->jcc_document_id ?? null;
+        $base['jcc_document_id'] = $journey->jcc_document_id ?? null;
         $base['trip'] = $trip ? $trip->load(['vehicle', 'driver', 'vendor'])->toArray() : null;
 
         return $base;
