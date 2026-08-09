@@ -235,13 +235,19 @@ class Trip extends Model
     public function availableActions(string $viewerRole): array
     {
         return match ($this->workflow_stage) {
+            self::WORKFLOW_TRIP_REQUEST => in_array($viewerRole, [
+                'logistics_manager', 'logistics_officer', 'admin'
+            ], true) ? ['view', 'forward_to_scd', 'request_changes'] : ['view'],
+            
             self::WORKFLOW_SUBMITTED => in_array($viewerRole, [
                 'supply_chain_director', 'supply_chain', 'admin'
             ], true) ? ['view', 'send_to_scd'] : ['view'],
 
             self::WORKFLOW_SCD_REVIEW => in_array($viewerRole, [
                 'supply_chain_director', 'supply_chain', 'admin'
-            ], true) ? ['view', 'scd_approve'] : ['view'],
+            ], true) ? ['view', 'scd_approve', 'scd_reject'] : (in_array($viewerRole, [
+                'logistics_manager', 'logistics_officer'
+            ], true) ? ['view', 'remind_scd'] : ['view']),
 
             self::WORKFLOW_SCD_APPROVED => in_array($viewerRole, [
                 'logistics_manager', 'logistics_officer', 'admin'

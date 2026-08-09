@@ -429,6 +429,35 @@ class TripRequestWorkflowController extends ApiController
     }
 
     /**
+     * Send a reminder to the Supply Chain Director for approval. No body expected.
+     */
+    public function remindScd(Request $request, int $id)
+    {
+        $user = $request->user();
+        if (! $user || ! $this->isLogisticsInternal($user)) {
+            return $this->error('Only logistics staff can send reminders to SCD', 'FORBIDDEN', 403);
+        }
+
+        $trip = $this->findActionableTripRequest($id);
+        if ($trip instanceof \Illuminate\Http\JsonResponse) {
+            return $trip;
+        }
+
+        if (! $trip->requiresScdApproval()) {
+            return $this->error('Trip request does not require SCD approval', 'INVALID_STATE', 422);
+        }
+
+        // Dispatch the same notification used when forwarding to director.
+        app(\App\Services\WorkflowNotificationService::class)
+            ->notifyScdTripPendingApproval($trip->fresh(['creator']), $user);
+
+        return $this->success([
+            'message' => 'Reminder dispatched to Supply Chain Director',
+            'trip' => $this->presentTripRequest($trip->fresh(['creator']), includeProgressSummary: true, viewer: $user),
+        ]);
+    }
+
+    /**
      * Update a trip request within the requester edit window (creator only).
      */
     public function update(Request $request, int $id)
