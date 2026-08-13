@@ -88,6 +88,18 @@ class WorkflowStateMapper
                 'status' => 'completed',
                 'current_stage' => 'completed',
             ],
+            WorkflowStateService::STATE_CHAIRMAN_REVIEW => [
+                'status'        => 'pending',
+                'current_stage' => 'chairman_review',
+            ],
+            WorkflowStateService::STATE_CHAIRMAN_APPROVED => [
+                'status'        => 'procurement_review',
+                'current_stage' => 'procurement_review',
+            ],
+            WorkflowStateService::STATE_CHAIRMAN_REJECTED => [
+                'status'        => 'rejected',
+                'current_stage' => 'rejected',
+            ],
             default => [],
         };
     }

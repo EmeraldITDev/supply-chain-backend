@@ -9,9 +9,9 @@ class WorkflowStateService
 {
     /**
      * Valid workflow states
-     * 
+     *
      * New simplified workflow:
-     * Employee → Supply Chain Director → Procurement Manager → RFQ/Vendor Selection → 
+     * Employee → Supply Chain Director → Procurement Manager → RFQ/Vendor Selection →
      * Quotations → PO Creation (ends here)
      */
     const STATE_MRF_CREATED = 'mrf_created';
@@ -36,8 +36,12 @@ class WorkflowStateService
     const STATE_MILESTONE_PAYMENT_IN_PROGRESS = 'milestone_payment_in_progress';
     const STATE_FINANCIALLY_COMPLETE = 'financially_complete';
     const STATE_OPERATIONALLY_COMPLETE = 'operationally_complete';
-    
+
     // Legacy states (kept for backward compatibility)
+    // Executive-originated MRF workflow states
+    const STATE_CHAIRMAN_REVIEW = 'chairman_review';
+    const STATE_CHAIRMAN_APPROVED = 'chairman_approved';
+    const STATE_CHAIRMAN_REJECTED = 'chairman_rejected';
     const STATE_EXECUTIVE_REVIEW = 'executive_review';
     const STATE_EXECUTIVE_APPROVED = 'executive_approved';
     const STATE_EXECUTIVE_REJECTED = 'executive_rejected';
@@ -50,7 +54,7 @@ class WorkflowStateService
 
     /**
      * Valid state transitions
-     * 
+     *
      * New workflow path:
      * MRF_CREATED → SUPPLY_CHAIN_DIRECTOR_REVIEW → (APPROVED/REJECTED)
      * SUPPLY_CHAIN_DIRECTOR_APPROVED → PROCUREMENT_REVIEW → (APPROVED)
@@ -63,6 +67,7 @@ class WorkflowStateService
             self::STATE_PARALLEL_FIRST_APPROVAL,
             self::STATE_SUPPLY_CHAIN_DIRECTOR_REVIEW,
             self::STATE_EXECUTIVE_REVIEW,
+            self::STATE_CHAIRMAN_REVIEW,
         ],
         self::STATE_PARALLEL_FIRST_APPROVAL => [
             self::STATE_EXECUTIVE_APPROVED,
@@ -99,11 +104,20 @@ class WorkflowStateService
         self::STATE_FINANCIALLY_COMPLETE => [self::STATE_OPERATIONALLY_COMPLETE],
         self::STATE_OPERATIONALLY_COMPLETE => [self::STATE_CLOSED],
         self::STATE_CLOSED => [], // Terminal state
-        
+
         // Legacy transitions (for backward compatibility with existing MRFs)
         self::STATE_EXECUTIVE_REVIEW => [self::STATE_EXECUTIVE_APPROVED, self::STATE_EXECUTIVE_REJECTED],
         self::STATE_EXECUTIVE_APPROVED => [self::STATE_PROCUREMENT_REVIEW, self::STATE_VENDOR_SELECTED],
         self::STATE_EXECUTIVE_REJECTED => [],
+
+        // Executive-originated MRF workflow
+        self::STATE_CHAIRMAN_REVIEW => [
+            self::STATE_CHAIRMAN_APPROVED,
+            self::STATE_CHAIRMAN_REJECTED,
+        ],
+        self::STATE_CHAIRMAN_APPROVED => [self::STATE_PROCUREMENT_REVIEW],
+
+        self::STATE_CHAIRMAN_REJECTED => [],
         self::STATE_VENDOR_SELECTED => [self::STATE_INVOICE_RECEIVED],
         self::STATE_INVOICE_RECEIVED => [self::STATE_INVOICE_APPROVED],
         self::STATE_INVOICE_APPROVED => [self::STATE_PO_GENERATED],
@@ -114,7 +128,7 @@ class WorkflowStateService
 
     /**
      * Role permissions for state transitions
-     * 
+     *
      * New workflow roles:
      * - employee/staff: Creates MRF
      * - supply_chain_director: Approves/rejects MRF
@@ -164,6 +178,10 @@ class WorkflowStateService
         'executive' => [
             self::STATE_PARALLEL_FIRST_APPROVAL => ['approve', 'reject'],
             self::STATE_EXECUTIVE_REVIEW => ['approve', 'reject'],
+            self::STATE_MRF_CREATED             => ['create'],
+        ],
+        'chairman' => [
+            self::STATE_CHAIRMAN_REVIEW => ['approve', 'reject'],
         ],
     ];
 
@@ -329,7 +347,7 @@ class WorkflowStateService
     private function normalizeRole(string $role): string
     {
         $normalized = strtolower($role);
-        
+
         // Map variations to standard roles
         $roleMap = [
             'procurement_manager' => 'procurement',

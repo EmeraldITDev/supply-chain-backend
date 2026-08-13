@@ -1376,7 +1376,7 @@ class MRFController extends Controller
         $procurementAuthors = ['procurement_manager', 'procurement'];
 
         // 1. ADD 'admin' to the privileged authors array
-        $privilegedAuthors = array_merge($logisticsAuthors, $procurementAuthors, ['admin']);
+        $privilegedAuthors = array_merge($logisticsAuthors, $procurementAuthors, ['admin', 'executive']);
 
         // 2. Safely extract and normalize the user's role (lowercase and trim)
         $currentRole = strtolower(trim((string) $user->scmRole()));
@@ -1384,8 +1384,9 @@ class MRFController extends Controller
         // 3. Drop the strict 'true' flag to prevent type mismatches
         $isPrivilegedAuthor = in_array($currentRole, $privilegedAuthors);
         $isDepartmentEmployee = in_array($currentRole, ['employee', 'staff', 'regular_staff']);
+        $isExecutive = $currentRole === 'executive';
 
-        if (!$isPrivilegedAuthor && !$isDepartmentEmployee) {
+        if (!$isPrivilegedAuthor && !$isDepartmentEmployee && !$isExecutive) {
             return response()->json([
                 'success' => false,
                 // Updated the error message string to reflect the new permissions
@@ -1396,7 +1397,7 @@ class MRFController extends Controller
         // Department employees still need to be the designated requisition
         // creator. Logistics authors are department-managed: any logistics
         // manager/officer may originate an MRF.
-        if ($isDepartmentEmployee && ! $user->designated_requisition_creator) {
+        if ($isDepartmentEmployee && ! $user->designated_requisition_creator && ! $isExecutive) {
             return response()->json([
                 'success' => false,
                 'error' => 'You are not authorised to create requisition requests for your department.',
@@ -1515,13 +1516,19 @@ class MRFController extends Controller
             $standardContractTypes = ['emerald', 'oando', 'dangote', 'heritage'];
             $isStandardType = in_array($normalizedContractType, $standardContractTypes, true);
 
-            // Parallel first approval: Executive and Supply Chain Director review simultaneously.
-            $initialStage = 'parallel_first_approval';
-            $initialWorkflowState = WorkflowStateService::STATE_PARALLEL_FIRST_APPROVAL;
-            if (! $isStandardType) {
-                $routedReason = 'parallel_first_approval_custom';
+            // Executive-originated MRFs go to Chairman for approval first,
+            // then straight to Procurement. All other roles use parallel first approval.
+            if ($currentRole === 'executive') {
+                $initialStage         = 'chairman_review';
+                $initialWorkflowState = WorkflowStateService::STATE_CHAIRMAN_REVIEW;
+                $routedReason         = 'executive_to_chairman';
             } else {
-                $routedReason = 'parallel_first_approval';
+                // Parallel first approval: Executive and Supply Chain Director review simultaneously.
+                $initialStage         = 'parallel_first_approval';
+                $initialWorkflowState = WorkflowStateService::STATE_PARALLEL_FIRST_APPROVAL;
+                $routedReason         = $isStandardType
+                    ? 'parallel_first_approval'
+                    : 'parallel_first_approval_custom';
             }
 
             $mrfSource = strtolower((string) ($request->input('source') ?? 'standard'));
