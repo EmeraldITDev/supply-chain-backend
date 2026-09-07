@@ -16,10 +16,15 @@ class VendorRegistrationDocument extends Model
         'file_url',
         'file_share_url',
         'uploaded_at',
+        'expiryDate',
+        'is_required',
+        'status',
     ];
 
     protected $casts = [
         'uploaded_at' => 'datetime',
+        'expiryDate' => 'datetime',
+        'is_required' => 'boolean',
     ];
 
     /**

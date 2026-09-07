@@ -17,7 +17,19 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        //
+        // Fallback only when the PgBouncer extension package is not loadable.
+        // The package provider (PostgresPgbouncerExtensionProvider) registers the
+        // proper connection when PDO::ATTR_EMULATE_PREPARES is enabled.
+        if (! class_exists(\PostgresPgbouncerExtension\Database\PostgresConnection::class)) {
+            \Illuminate\Database\Connection::resolverFor('pgsql', function ($connection, $database, $prefix, $config) {
+                return new \App\Database\PgbouncerPostgresConnection(
+                    $connection,
+                    $database,
+                    $prefix,
+                    $config
+                );
+            });
+        }
     }
 
     /**
