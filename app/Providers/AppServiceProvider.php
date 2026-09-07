@@ -35,6 +35,17 @@ class AppServiceProvider extends ServiceProvider
             URL::forceScheme('https');
         }
 
+        // Pre-warm the database connection on boot so the first request
+        // to each PHP-FPM worker reuses an existing connection instead
+        // of paying the full 3.5s connection overhead.
+        if (! $this->app->runningInConsole()) {
+            try {
+                \Illuminate\Support\Facades\DB::select('SELECT 1');
+            } catch (\Throwable) {
+                // Ignore — app still boots if DB is temporarily unavailable
+            }
+        }
+
         // Some proxies / SPA clients omit or rename Authorization; accept common alternates for Sanctum.
         Sanctum::$accessTokenRetrievalCallback = static function ($request) {
             if ($token = $request->bearerToken()) {
