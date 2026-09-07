@@ -54,6 +54,10 @@ return [
             'serialize' => false,
         ],
 
+        'apc' => [
+            'driver' => 'apc',
+        ],
+
         'database' => [
             'driver' => 'database',
             'connection' => env('DB_CACHE_CONNECTION'),

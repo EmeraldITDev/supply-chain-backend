@@ -23,7 +23,9 @@ RUN apt-get update && apt-get install -y \
         ctype \
         bcmath \
         zip \
-        gd
+        gd \
+    && pecl install apcu \
+    && docker-php-ext-enable apcu
 
 # Enable Apache rewrite (Laravel routing)
 RUN a2enmod rewrite
@@ -41,6 +43,9 @@ RUN { \
         echo "max_input_time = 180"; \
         echo "max_file_uploads = 30"; \
         echo "output_buffering = 4096"; \
+        echo "apc.enabled = 1"; \
+        echo "apc.enable_cli = 1"; \
+        echo "apc.shm_size = 64M"; \
     } > /usr/local/etc/php/conf.d/zz-supply-chain-overrides.ini
 
 # Mirror the long-request limits to Apache so it does not cut the connection
