@@ -62,19 +62,23 @@ class RoleDashboardQueueService
    */
   public function pendingVendorRegistrationItems(int $limit): Collection
   {
-    return $this->pendingVendorRegistrationsQuery()
-      ->orderByDesc('created_at')
-      ->limit($limit)
-      ->get(['id', 'company_name', 'category', 'email', 'contact_person', 'status', 'created_at'])
-      ->map(static fn (VendorRegistration $reg): array => [
-        'id' => $reg->id,
-        'companyName' => $reg->company_name,
-        'category' => $reg->category,
-        'email' => $reg->email,
-        'contactPerson' => $reg->contact_person,
-        'createdAt' => $reg->created_at?->toIso8601String(),
-        'status' => $reg->status,
-      ]);
+    return DashboardStatsCache::remember(
+        'dashboard.queue.pending_vendor_registrations',
+        fn (): Collection => $this->pendingVendorRegistrationsQuery()
+            ->orderByDesc('created_at')
+            ->limit(50)
+            ->get(['id', 'company_name', 'category', 'email', 'contact_person', 'status', 'created_at'])
+            ->map(static fn (VendorRegistration $reg): array => [
+                'id' => $reg->id,
+                'companyName' => $reg->company_name,
+                'category' => $reg->category,
+                'email' => $reg->email,
+                'contactPerson' => $reg->contact_person,
+                'createdAt' => $reg->created_at?->toIso8601String(),
+                'status' => $reg->status,
+            ]),
+        300,
+    )->slice(0, $limit)->values();
   }
 
   /**
@@ -82,11 +86,15 @@ class RoleDashboardQueueService
    */
   public function pendingMrfParallelFirstApprovalItems(int $limit): Collection
   {
-    return $this->pendingParallelFirstApprovalQuery()
-      ->orderByDesc('created_at')
-      ->limit($limit)
-      ->get()
-      ->map(fn (MRF $mrf): array => $this->mapMrfQueueItem($mrf));
+    return DashboardStatsCache::remember(
+        'dashboard.queue.pending_mrf_first_approval',
+        fn (): Collection => $this->pendingParallelFirstApprovalQuery()
+            ->orderByDesc('created_at')
+            ->limit(50)
+            ->get()
+            ->map(fn (MRF $mrf): array => $this->mapMrfQueueItem($mrf)),
+        300,
+    )->slice(0, $limit)->values();
   }
 
   /**
@@ -94,12 +102,16 @@ class RoleDashboardQueueService
    */
   public function pendingSrfScdApprovalItems(int $limit): Collection
   {
-    return $this->pendingSrfScdApprovalQuery()
-      ->with(['requester:id,name,email'])
-      ->orderByDesc('created_at')
-      ->limit($limit)
-      ->get()
-      ->map(fn (SRF $srf): array => $this->mapSrfScdItem($srf));
+    return DashboardStatsCache::remember(
+        'dashboard.queue.pending_srf_scd_approval',
+        fn (): Collection => $this->pendingSrfScdApprovalQuery()
+            ->with(['requester:id,name,email'])
+            ->orderByDesc('created_at')
+            ->limit(50)
+            ->get()
+            ->map(fn (SRF $srf): array => $this->mapSrfScdItem($srf)),
+        300,
+    )->slice(0, $limit)->values();
   }
 
   /**
@@ -107,12 +119,16 @@ class RoleDashboardQueueService
    */
   public function pendingTripScdApprovalItems(int $limit): Collection
   {
-    return $this->pendingTripScdApprovalQuery()
-      ->with(['creator:id,name,email,department'])
-      ->orderByDesc('created_at')
-      ->limit($limit)
-      ->get()
-      ->map(fn (Trip $trip): array => $this->mapTripScdApprovalItem($trip));
+    return DashboardStatsCache::remember(
+        'dashboard.queue.pending_trip_scd_approval',
+        fn (): Collection => $this->pendingTripScdApprovalQuery()
+            ->with(['creator:id,name,email,department'])
+            ->orderByDesc('created_at')
+            ->limit(50)
+            ->get()
+            ->map(fn (Trip $trip): array => $this->mapTripScdApprovalItem($trip)),
+        300,
+    )->slice(0, $limit)->values();
   }
 
   /**
@@ -120,12 +136,16 @@ class RoleDashboardQueueService
    */
   public function pendingTripPoSignatureItems(int $limit): Collection
   {
-    return $this->pendingTripPoSignatureQuery()
-      ->with(['creator:id,name,email,department'])
-      ->orderByDesc('created_at')
-      ->limit($limit)
-      ->get()
-      ->map(fn (Trip $trip): array => $this->mapTripPoSignatureItem($trip));
+    return DashboardStatsCache::remember(
+        'dashboard.queue.pending_trip_po_signature',
+        fn (): Collection => $this->pendingTripPoSignatureQuery()
+            ->with(['creator:id,name,email,department'])
+            ->orderByDesc('created_at')
+            ->limit(50)
+            ->get()
+            ->map(fn (Trip $trip): array => $this->mapTripPoSignatureItem($trip)),
+        300,
+    )->slice(0, $limit)->values();
   }
 
   /**

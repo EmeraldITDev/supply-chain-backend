@@ -12,6 +12,11 @@ class DashboardStatsCache
 
     private const KEYS = [
         'dashboard.procurement_manager.stats',
+        'dashboard.queue.pending_vendor_registrations',
+        'dashboard.queue.pending_mrf_first_approval',
+        'dashboard.queue.pending_srf_scd_approval',
+        'dashboard.queue.pending_trip_scd_approval',
+        'dashboard.queue.pending_trip_po_signature',
         'dashboard.procurement_manager.lists',
         'dashboard.supply_chain_director.stats',
         'dashboard.supply_chain_director.metrics',
