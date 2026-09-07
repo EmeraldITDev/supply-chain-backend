@@ -18,6 +18,7 @@ use App\Services\VendorDocumentService;
 use App\Services\QuotationAttachmentService;
 use App\Support\VendorCategoryDisplay;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Validator;
@@ -134,35 +135,37 @@ class VendorController extends Controller
         );
 
         $perPage = $this->resolvePerPage($request);
-        $paginator = $query
-            ->select([
-                'id', 'vendor_id', 'name', 'category', 'category_other', 'rating',
-                'total_orders', 'status', 'email', 'phone', 'address', 'tax_id',
-                'contact_person', 'created_at', 'updated_at',
-            ])
-            ->orderBy($sortBy, $sortDirection)
-            ->paginate($perPage);
-
-        $items = collect($paginator->items())->map(function ($vendor) {
-            return [
-                'id' => $vendor->vendor_id,
-                'name' => $vendor->name,
-                'category' => $vendor->category,
-                'categoryDisplay' => VendorCategoryDisplay::format($vendor->category, $vendor->category_other),
-                'categoryOther' => $vendor->category_other,
-                'category_other' => $vendor->category_other,
-                'rating' => $vendor->rating ? (float) $vendor->rating : 0,
-                'totalOrders' => $vendor->total_orders,
-                'status' => $vendor->status,
-                'email' => $vendor->email,
-                'phone' => $vendor->phone,
-                'address' => $vendor->address,
-                'taxId' => $vendor->tax_id,
-                'contactPerson' => $vendor->contact_person,
-            ];
-        })->values()->all();
-
-        return response()->json($this->paginatedJsonResponse($paginator, $items));
+        $cacheKey = 'vendors_list_' . md5(serialize($request->except(['_token'])));
+        $cached = Cache::remember($cacheKey, 30, function () use ($query, $sortBy, $sortDirection, $perPage) {
+            $paginator = $query
+                ->select([
+                    'id', 'vendor_id', 'name', 'category', 'category_other', 'rating',
+                    'total_orders', 'status', 'email', 'phone', 'address', 'tax_id',
+                    'contact_person', 'created_at', 'updated_at',
+                ])
+                ->orderBy($sortBy, $sortDirection)
+                ->paginate($perPage);
+            $items = collect($paginator->items())->map(function ($vendor) {
+                return [
+                    'id' => $vendor->vendor_id,
+                    'name' => $vendor->name,
+                    'category' => $vendor->category,
+                    'categoryDisplay' => VendorCategoryDisplay::format($vendor->category, $vendor->category_other),
+                    'categoryOther' => $vendor->category_other,
+                    'category_other' => $vendor->category_other,
+                    'rating' => $vendor->rating ? (float) $vendor->rating : 0,
+                    'totalOrders' => $vendor->total_orders,
+                    'status' => $vendor->status,
+                    'email' => $vendor->email,
+                    'phone' => $vendor->phone,
+                    'address' => $vendor->address,
+                    'taxId' => $vendor->tax_id,
+                    'contactPerson' => $vendor->contact_person,
+                ];
+            })->values()->all();
+            return $this->paginatedJsonResponse($paginator, $items);
+        });
+        return response()->json($cached);
     }
 
     /**
@@ -1126,6 +1129,8 @@ class VendorController extends Controller
      */
     public function approveRegistration(Request $request, $id, VendorApprovalService $approvalService)
     {
+        Cache::flush(); // Clear vendor list cache on any mutation
+
         $user = $request->user();
 
         // Check permission - allow procurement manager, supply chain director, and executive-level roles
@@ -1453,6 +1458,8 @@ class VendorController extends Controller
      */
     public function adminUpdate(Request $request, string $uuid)
     {
+        Cache::flush(); // Clear vendor list cache on any mutation
+
         $user = $request->user();
 
         // Check permission - only procurement_manager and supply_chain_director
@@ -1572,6 +1579,8 @@ class VendorController extends Controller
      */
     public function destroy(Request $request, $id)
     {
+        Cache::flush(); // Clear vendor list cache on any mutation
+
         $user = $request->user();
 
         if (! $this->userCanDeleteVendors($user)) {
@@ -1618,6 +1627,8 @@ class VendorController extends Controller
      */
     public function bulkDestroy(Request $request)
     {
+        Cache::flush(); // Clear vendor list cache on any mutation
+
         $user = $request->user();
 
         if (! $this->userCanDeleteVendors($user)) {

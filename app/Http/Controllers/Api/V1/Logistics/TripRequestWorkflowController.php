@@ -17,6 +17,7 @@ use App\Support\PassengerEligibility;
 use App\Support\TripBookingRules;
 use App\Support\TripDisplayStatus;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Validator;
@@ -90,19 +91,22 @@ class TripRequestWorkflowController extends ApiController
             }
         }
 
-        $paginator = $query->paginate($perPage);
-        $includeProgress = $request->boolean('include_progress');
-        $trips = $this->presentTripRequestPage(collect($paginator->items()), $user, $includeProgress);
-
-        return $this->success([
-            'trips' => $trips,
-            'pagination' => [
-                'total' => $paginator->total(),
-                'per_page' => $paginator->perPage(),
-                'current_page' => $paginator->currentPage(),
-                'last_page' => $paginator->lastPage(),
-            ],
-        ]);
+        $cacheKey = 'trip_requests_' . $user->id . '_' . md5(serialize($request->except(['_token'])));
+        $result = Cache::remember($cacheKey, 20, function () use ($query, $perPage, $user, $request) {
+            $paginator = $query->paginate($perPage);
+            $includeProgress = $request->boolean('include_progress');
+            $trips = $this->presentTripRequestPage(collect($paginator->items()), $user, $includeProgress);
+            return [
+                'trips' => $trips,
+                'pagination' => [
+                    'total' => $paginator->total(),
+                    'per_page' => $paginator->perPage(),
+                    'current_page' => $paginator->currentPage(),
+                    'last_page' => $paginator->lastPage(),
+                ],
+            ];
+        });
+        return $this->success($result);
     }
 
     /**
@@ -203,6 +207,10 @@ class TripRequestWorkflowController extends ApiController
      */
     public function destroy(Request $request, int $id)
     {
+        Cache::forget('trip_requests_' . $request->user()->id . '_' . md5(serialize([])));
+        // Broader flush for logistics inbox
+        Cache::flush();
+
         $user = $request->user();
         if (! $user || ! PassengerEligibility::canCreateTripRequest($user)) {
             return $this->error('You are not allowed to delete trip requests', 'FORBIDDEN', 403);
@@ -251,6 +259,10 @@ class TripRequestWorkflowController extends ApiController
 
     public function store(Request $request)
     {
+        Cache::forget('trip_requests_' . $request->user()->id . '_' . md5(serialize([])));
+        // Broader flush for logistics inbox
+        Cache::flush();
+
         $user = $request->user();
         if (! $user || ! PassengerEligibility::canCreateTripRequest($user)) {
             return $this->error('You are not allowed to create trip requests', 'FORBIDDEN', 403);
@@ -389,6 +401,10 @@ class TripRequestWorkflowController extends ApiController
 
     public function submit(Request $request, int $id)
     {
+        Cache::forget('trip_requests_' . $request->user()->id . '_' . md5(serialize([])));
+        // Broader flush for logistics inbox
+        Cache::flush();
+
         $user = $request->user();
         if (! $user || ! PassengerEligibility::canCreateTripRequest($user)) {
             return $this->error('You are not allowed to submit trip requests', 'FORBIDDEN', 403);
@@ -462,6 +478,10 @@ class TripRequestWorkflowController extends ApiController
      */
     public function update(Request $request, int $id)
     {
+        Cache::forget('trip_requests_' . $request->user()->id . '_' . md5(serialize([])));
+        // Broader flush for logistics inbox
+        Cache::flush();
+
         $user = $request->user();
         if (! $user || ! PassengerEligibility::canCreateTripRequest($user)) {
             return $this->error('You are not allowed to update trip requests', 'FORBIDDEN', 403);
@@ -623,6 +643,10 @@ class TripRequestWorkflowController extends ApiController
      */
     public function logisticsReview(Request $request, int $id)
     {
+        Cache::forget('trip_requests_' . $request->user()->id . '_' . md5(serialize([])));
+        // Broader flush for logistics inbox
+        Cache::flush();
+
         $user = $request->user();
 
         if (! $user || ! in_array($user->scmRole(), ['logistics_manager', 'logistics_officer', 'admin'], true)) {
@@ -756,6 +780,10 @@ class TripRequestWorkflowController extends ApiController
 
     public function forward(Request $request, int $id)
     {
+        Cache::forget('trip_requests_' . $request->user()->id . '_' . md5(serialize([])));
+        // Broader flush for logistics inbox
+        Cache::flush();
+
         $user = $request->user();
         if (! $user || ! $this->isLogisticsInternal($user)) {
             return $this->error('Only logistics managers can forward trip requests', 'FORBIDDEN', 403);
@@ -801,6 +829,10 @@ class TripRequestWorkflowController extends ApiController
      */
     public function requestChanges(Request $request, int $id)
     {
+        Cache::forget('trip_requests_' . $request->user()->id . '_' . md5(serialize([])));
+        // Broader flush for logistics inbox
+        Cache::flush();
+
         $user = $request->user();
         if (! $user || ! $this->isLogisticsInternal($user)) {
             return $this->error('Only logistics managers can request changes', 'FORBIDDEN', 403);
@@ -845,6 +877,10 @@ class TripRequestWorkflowController extends ApiController
 
     public function directorApprove(Request $request, int $id)
     {
+        Cache::forget('trip_requests_' . $request->user()->id . '_' . md5(serialize([])));
+        // Broader flush for logistics inbox
+        Cache::flush();
+
         $user = $request->user();
         if (! $user || ! $this->isSupervisingDirector($user)) {
             return $this->error('Supervising Director role required', 'FORBIDDEN', 403);
@@ -880,6 +916,10 @@ class TripRequestWorkflowController extends ApiController
 
     public function directorReject(Request $request, int $id)
     {
+        Cache::forget('trip_requests_' . $request->user()->id . '_' . md5(serialize([])));
+        // Broader flush for logistics inbox
+        Cache::flush();
+
         $user = $request->user();
         if (! $user || ! $this->isSupervisingDirector($user)) {
             return $this->error('Supervising Director role required', 'FORBIDDEN', 403);
@@ -926,6 +966,10 @@ class TripRequestWorkflowController extends ApiController
 
     public function directorReturn(Request $request, int $id)
     {
+        Cache::forget('trip_requests_' . $request->user()->id . '_' . md5(serialize([])));
+        // Broader flush for logistics inbox
+        Cache::flush();
+
         $user = $request->user();
         if (! $user || ! $this->isSupervisingDirector($user)) {
             return $this->error('Supervising Director role required', 'FORBIDDEN', 403);
@@ -976,6 +1020,10 @@ class TripRequestWorkflowController extends ApiController
      */
     public function convert(Request $request, int $id)
     {
+        Cache::forget('trip_requests_' . $request->user()->id . '_' . md5(serialize([])));
+        // Broader flush for logistics inbox
+        Cache::flush();
+
         $user = $request->user();
         if (! $user || ! $this->isLogisticsInternal($user)) {
             return $this->error('Only logistics managers can convert trip requests', 'FORBIDDEN', 403);
@@ -1205,6 +1253,10 @@ class TripRequestWorkflowController extends ApiController
      */
     public function reject(Request $request, int $id)
     {
+        Cache::forget('trip_requests_' . $request->user()->id . '_' . md5(serialize([])));
+        // Broader flush for logistics inbox
+        Cache::flush();
+
         $user = $request->user();
         if (! $user || ! $this->isLogisticsInternal($user)) {
             return $this->error('Only logistics managers can reject trip requests', 'FORBIDDEN', 403);
@@ -1319,6 +1371,10 @@ class TripRequestWorkflowController extends ApiController
 
     public function convertToLogisticsRequest(Request $request, int $id)
     {
+        Cache::forget('trip_requests_' . $request->user()->id . '_' . md5(serialize([])));
+        // Broader flush for logistics inbox
+        Cache::flush();
+
         $user = $request->user();
         if (! $user || ! $this->isLogisticsInternal($user)) {
             return $this->error('Only logistics managers can convert trip requests', 'FORBIDDEN', 403);
@@ -1486,6 +1542,10 @@ class TripRequestWorkflowController extends ApiController
 
     public function scdApprove(Request $request, int $id)
     {
+        Cache::forget('trip_requests_' . $request->user()->id . '_' . md5(serialize([])));
+        // Broader flush for logistics inbox
+        Cache::flush();
+
         $user = $request->user();
 
         if (! $user || ! in_array($user->scmRole(), ['supply_chain_director', 'supply_chain', 'admin'], true)) {

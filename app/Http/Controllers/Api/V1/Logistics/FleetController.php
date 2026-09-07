@@ -17,6 +17,7 @@ use App\Support\FleetVehicleLookup;
 use App\Services\WorkflowNotificationService;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Validator;
 
@@ -91,12 +92,15 @@ class FleetController extends ApiController
         );
 
         $perPage = $this->resolvePerPage($request);
-        $paginator = $query->orderBy($sortBy, $sortDirection)->paginate($perPage);
-
-        return $this->success([
-            'vehicles' => $paginator->items(),
-            'pagination' => $this->paginationPayload($paginator),
-        ]);
+        $cacheKey = 'fleet_vehicles_' . md5(serialize($request->except(['_token'])));
+        $result = Cache::remember($cacheKey, 30, function () use ($query, $sortBy, $sortDirection, $perPage) {
+            $paginator = $query->orderBy($sortBy, $sortDirection)->paginate($perPage);
+            return [
+                'vehicles' => $paginator->items(),
+                'pagination' => $this->paginationPayload($paginator),
+            ];
+        });
+        return $this->success($result);
     }
 
     public function show(string|int $id)
