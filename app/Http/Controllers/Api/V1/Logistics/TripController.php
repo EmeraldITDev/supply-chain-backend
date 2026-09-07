@@ -43,6 +43,9 @@ class TripController extends ApiController
 
     public function store(StoreTripRequest $request)
     {
+        // Clear trip list caches for all users when a trip is created or updated
+        Cache::flush();
+
         if ($cached = $this->idempotency->getCachedResponse($request)) {
             return response()->json($cached['response'], $cached['status']);
         }
@@ -149,6 +152,9 @@ class TripController extends ApiController
 
     public function update(UpdateTripRequest $request, int $id)
     {
+        // Clear trip list caches for all users when a trip is created or updated
+        Cache::flush();
+
         $trip = Trip::find($id);
 
         if (!$trip) {
