@@ -22,6 +22,7 @@ use App\Services\Logistics\FleetVehicleAssignmentGuard;
 use App\Services\Logistics\UploadService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
 
@@ -100,17 +101,19 @@ class TripController extends ApiController
         );
 
         $perPage = $this->resolvePerPage($request);
-        $paginator = $query->orderBy($sortBy, $sortDirection)->paginate($perPage);
-
-        $items = collect($paginator->items())
-            ->map(fn (Trip $trip) => $this->tripDirectory->presentListItem($trip, $canManage, $user))
-            ->values()
-            ->all();
-
-        return $this->success([
-            'trips' => $items,
-            'pagination' => $this->paginationPayload($paginator),
-        ]);
+        $cacheKey = 'trips_list_' . $user->id . '_' . md5(serialize($request->except(['_token'])));
+        $result = Cache::remember($cacheKey, 20, function () use ($query, $sortBy, $sortDirection, $perPage, $canManage, $user) {
+            $paginator = $query->orderBy($sortBy, $sortDirection)->paginate($perPage);
+            $items = collect($paginator->items())
+                ->map(fn (Trip $trip) => $this->tripDirectory->presentListItem($trip, $canManage, $user))
+                ->values()
+                ->all();
+            return [
+                'trips' => $items,
+                'pagination' => $this->paginationPayload($paginator),
+            ];
+        });
+        return $this->success($result);
     }
 
     public function show(Request $request, int $id)
