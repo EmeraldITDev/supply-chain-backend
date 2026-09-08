@@ -4,6 +4,7 @@ namespace App\Observers;
 
 use App\Models\Vendor;
 use App\Services\Finance\FinanceApVendorSyncService;
+use Illuminate\Support\Facades\Log;
 
 class VendorObserver
 {
@@ -39,9 +40,24 @@ class VendorObserver
         $vendorId = $vendor->id;
 
         dispatch(function () use ($vendorId) {
-            $fresh = Vendor::query()->find($vendorId);
-            if ($fresh) {
-                app(FinanceApVendorSyncService::class)->pushVendor($fresh);
+            try {
+                $fresh = Vendor::query()->find($vendorId);
+                if (! $fresh) {
+                    return;
+                }
+
+                $previousTimeout = config('finance_ap.http_timeout');
+                config(['finance_ap.http_timeout' => 5]);
+                try {
+                    app(FinanceApVendorSyncService::class)->pushVendor($fresh);
+                } finally {
+                    config(['finance_ap.http_timeout' => $previousTimeout]);
+                }
+            } catch (\Throwable $e) {
+                Log::warning('Finance AP vendor sync failed', [
+                    'vendor_id' => $vendorId,
+                    'error' => $e->getMessage(),
+                ]);
             }
         })->afterCommit();
     }

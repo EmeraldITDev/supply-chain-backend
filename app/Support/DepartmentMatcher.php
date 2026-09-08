@@ -134,6 +134,9 @@ class DepartmentMatcher
         ['teo', 'technical operations', 'engineering', 'eng', 'technical'],
     ];
 
+    /** @var list<object{id: int, department_name: string, code: string}>|null */
+    private static ?array $departmentCodesMemo = null;
+
     public static function normalizeKey(?string $value): string
     {
         $value = Str::of((string) $value)->lower()->trim();
@@ -287,7 +290,7 @@ class DepartmentMatcher
         $key = self::normalizeKey($label);
         $upper = strtoupper($label);
 
-        $rows = DB::table('department_codes')->select(['id', 'department_name', 'code'])->get();
+        $rows = self::getDepartmentCodes();
         $matches = [];
 
         foreach ($rows as $row) {
@@ -317,6 +320,23 @@ class DepartmentMatcher
         }
 
         return self::pickCanonicalDepartmentRow(array_values($matches));
+    }
+
+    /**
+     * @return list<object{id: int, department_name: string, code: string}>
+     */
+    private static function getDepartmentCodes(): array
+    {
+        if (self::$departmentCodesMemo !== null) {
+            return self::$departmentCodesMemo;
+        }
+
+        self::$departmentCodesMemo = DB::table('department_codes')
+            ->select(['id', 'department_name', 'code'])
+            ->get()
+            ->all();
+
+        return self::$departmentCodesMemo;
     }
 
     /**

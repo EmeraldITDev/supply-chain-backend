@@ -2,7 +2,6 @@
 
 namespace App\Http\Controllers\Api;
 
-use App\Jobs\SetDesignatedRequisitionCreator;
 use App\Http\Controllers\Controller;
 use App\Models\User;
 use App\Services\PermissionService;
@@ -534,7 +533,26 @@ class UserManagementController extends Controller
             ], 422);
         }
 
-        SetDesignatedRequisitionCreator::dispatch($targetUser->id, $departmentLabel);
+        DB::transaction(function () use ($departmentLabel, $targetUser): void {
+            $memberIds = DepartmentMatcher::matchingUserIds($departmentLabel);
+            if ($memberIds !== []) {
+                DB::table('users')
+                    ->whereIn('id', $memberIds)
+                    ->where('id', '!=', $targetUser->id)
+                    ->where('designated_requisition_creator', true)
+                    ->update([
+                        'designated_requisition_creator' => false,
+                        'updated_at' => now(),
+                    ]);
+            }
+            DB::table('users')
+                ->where('id', $targetUser->id)
+                ->update([
+                    'designated_requisition_creator' => true,
+                    'updated_at' => now(),
+                ]);
+        });
+        $targetUser->refresh();
 
         return response()->json([
             'success' => true,

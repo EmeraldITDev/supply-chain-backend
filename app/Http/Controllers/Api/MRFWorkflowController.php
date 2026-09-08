@@ -1891,8 +1891,6 @@ class MRFWorkflowController extends Controller
                     'has_rfq' => (bool) $rfq,
                 ],
             )
-                ->onConnection('database')
-                ->onQueue(config('queue.connections.database.queue', 'default'))
                 ->afterResponse();
 
             Log::info('PO generation queued', [
@@ -2342,7 +2340,7 @@ class MRFWorkflowController extends Controller
             $sigPath,
             $sigDiskName,
             (string) ($mrf->po_number ?: $mrf->mrf_id),
-        )->onConnection('database')->onQueue('default');
+        )->afterResponse();
 
         return response()->json([
             'success'    => true,
@@ -3249,8 +3247,6 @@ class MRFWorkflowController extends Controller
                         'has_rfq' => (bool) $rfq,
                     ],
                 )
-                    ->onConnection('database')
-                    ->onQueue(config('queue.connections.database.queue', 'default'))
                     ->afterResponse();
 
                 Log::info('PO draft generation queued', ['mrf_id' => $mrf->mrf_id, 'po_number' => $draftUpdate['po_number'] ?? $mrf->po_number]);
