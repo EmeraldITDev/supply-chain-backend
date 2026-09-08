@@ -182,10 +182,8 @@ class PurchaseOrderPdfService
         $currency = $data['currency'] ?? 'NGN';
         $paymentMilestones = $data['payment_milestones'] ?? [];
         $po_terms_mode = $data['po_terms_mode'] ?? [];
-        $categoryLine = $this->resolveCategoryLine(
-            (string) ($data['mrf_category'] ?? ''),
-            (string) ($data['mrf_department'] ?? ''),
-        );
+        $poType = (string) ($data['po_type'] ?? 'goods');
+        $categoryLine = $this->resolvePoCategoryLabel($poType);
 
         $poDateRaw = (string) $data['po_date'];
 
@@ -253,7 +251,7 @@ class PurchaseOrderPdfService
             $data['signature_image_url'] ?? null,
             invoiceEmail: (string) ($data['invoice_submission_email'] ?? ''),
             invoiceCc: (string) ($data['invoice_submission_cc'] ?? ''),
-            poType: (string) ($data['po_type'] ?? 'goods'),
+            poType: $poType,
             termsMode: (string) ($data['po_terms_mode'] ?? 'standard'),
             customTerms: (string) ($data['custom_terms'] ?? ''),
             specialTerms: (string) ($data['special_terms'] ?? ''),
@@ -290,10 +288,8 @@ class PurchaseOrderPdfService
         $taxRate = (float) ($data['tax_rate'] ?? $mrf['tax_rate'] ?? 0);
 
         $date = now()->setTimezone('Africa/Lagos');
-        $categoryLine = $this->resolveCategoryLine(
-            (string) ($mrf['category'] ?? ''),
-            (string) ($mrf['department'] ?? ''),
-        );
+        $poType = (string) ($mrf['po_type'] ?? $data['po_type'] ?? 'goods');
+        $categoryLine = $this->resolvePoCategoryLabel($poType);
 
         $lineItems = [];
         $subtotal = 0.0;
@@ -346,7 +342,7 @@ class PurchaseOrderPdfService
             $data['signature_image_url'] ?? null,
             invoiceEmail: (string) ($data['invoice_submission_email'] ?? $mrf['invoice_submission_email'] ?? ''),
             invoiceCc: (string) ($data['invoice_submission_cc'] ?? $mrf['invoice_submission_cc'] ?? ''),
-            poType: (string) ($mrf['po_type'] ?? 'goods'),
+            poType: $poType,
             termsMode: (string) ($mrf['po_terms_mode'] ?? 'standard'),
             customTerms: (string) ($mrf['custom_terms'] ?? ''),
             specialTerms: (string) ($mrf['po_special_terms'] ?? $data['special_terms'] ?? ''),
@@ -477,15 +473,25 @@ class PurchaseOrderPdfService
         ];
     }
 
-    private function resolveCategoryLine(string $category, string $department): string
+    /**
+     * First-column "PO category" label on the Emerald PDF — driven by po_type, not MRF category.
+     */
+    public function resolvePoCategoryLabel(?string $poType): string
     {
-        $raw = trim($category !== '' ? $category : $department);
-
-        if ($raw === '') {
-            return 'Procurement';
+        $type = strtolower(trim((string) $poType));
+        if ($type === '') {
+            $type = 'goods';
         }
 
-        return str_replace('-', ' ', $raw);
+        return strtoupper(str_replace(['-', '_'], ' ', $type));
+    }
+
+    /**
+     * @deprecated Use resolvePoCategoryLabel() — kept for any external callers.
+     */
+    private function resolveCategoryLine(string $category, string $department): string
+    {
+        return $this->resolvePoCategoryLabel($category !== '' ? $category : $department);
     }
 
     private function fmtTaxLabel(float $taxRate): string

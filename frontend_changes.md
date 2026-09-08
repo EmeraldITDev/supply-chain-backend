@@ -2065,3 +2065,20 @@ Historical MRFs had **null** `rfq_issued_at` / `quotation_received_at` (only new
 
 **Note:** `delivered_at` / actual delivery stays flagged until at least one MRF has `grn_completed_at` set (complete a GRN). That is expected — there is nothing to backfill if no goods have been received yet.
 
+---
+
+## PO PDF — first column uses PO Type (2026-09-08)
+
+### Behaviour
+- Emerald PO PDF first column shows **PO type** in uppercase (`LOGISTICS`, `GOODS`, `SERVICES`), not MRF `category`.
+- Header label: **`PO category`** (was blank).
+- MRF `category` is unchanged.
+- Applies on all new PO generations.
+
+### Refresh unsigned POs in SCD queue
+```bash
+php artisan po:refresh-unsigned-category --dry-run
+php artisan po:refresh-unsigned-category
+```
+Only regenerates POs with an unsigned PDF that are awaiting SCD signature (not yet signed).
+

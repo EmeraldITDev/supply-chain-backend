@@ -127,7 +127,7 @@
     <table class="items-table">
         <thead>
             <tr>
-                <th class="col-category">&nbsp;</th>
+                <th class="col-category">PO category</th>
                 <th>DESCRIPTION</th>
                 <th class="col-qty">QTY</th>
                 <th class="col-rate">RATE</th>
