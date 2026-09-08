@@ -42,24 +42,29 @@ class AIChatController extends Controller
         }
 
         $apiKey = config('services.gemini.key');
-        if (! is_string($apiKey) || $apiKey === '') {
-            Log::error('Gemini API key is not configured');
+        if (! is_string($apiKey) || trim($apiKey) === '') {
+            Log::error('Gemini API key is not configured on the backend (GEMINI_API_KEY)');
 
             return response()->json([
                 'success' => false,
-                'error' => 'AI service temporarily unavailable.',
+                'error' => 'AI is not configured on the server. Set GEMINI_API_KEY on the Render backend (not Vercel) and redeploy.',
+                'code' => 'GEMINI_KEY_MISSING',
             ], 503);
         }
 
-        $model = config('services.gemini.model', 'gemini-2.0-flash');
+        $model = $this->resolveGeminiModel(
+            (string) config('services.gemini.model', 'gemini-2.5-flash')
+        );
 
         try {
+            // Prefer x-goog-api-key header; do not put the key in the URL.
             $response = Http::withHeaders([
                 'Content-Type' => 'application/json',
+                'x-goog-api-key' => trim($apiKey),
             ])->timeout(30)->post(
                 'https://generativelanguage.googleapis.com/v1beta/models/'
                     .$model
-                    .':generateContent?key='.$apiKey,
+                    .':generateContent',
                 [
                     'system_instruction' => [
                         'parts' => [['text' => $systemPrompt]],
@@ -76,14 +81,26 @@ class AIChatController extends Controller
             );
 
             if ($response->failed()) {
+                $geminiMessage = data_get($response->json(), 'error.message');
                 Log::error('Gemini API error', [
                     'status' => $response->status(),
+                    'model' => $model,
                     'body' => $response->body(),
                 ]);
 
+                $clientError = 'AI service temporarily unavailable.';
+                if ($response->status() === 404) {
+                    $clientError = 'Gemini model is unavailable. On Render set GEMINI_MODEL=gemini-2.5-flash (gemini-2.0-flash is shut down), then redeploy.';
+                } elseif ($response->status() === 400 || $response->status() === 401 || $response->status() === 403) {
+                    $clientError = 'Gemini rejected the API key or request. Check GEMINI_API_KEY on Render.';
+                }
+
                 return response()->json([
                     'success' => false,
-                    'error' => 'AI service temporarily unavailable.',
+                    'error' => $clientError,
+                    'code' => 'GEMINI_API_ERROR',
+                    'gemini_status' => $response->status(),
+                    'gemini_message' => is_string($geminiMessage) ? $geminiMessage : null,
                 ], 503);
             }
 
@@ -104,8 +121,42 @@ class AIChatController extends Controller
             return response()->json([
                 'success' => false,
                 'error' => 'An error occurred. Please try again.',
+                'code' => 'GEMINI_EXCEPTION',
             ], 500);
         }
+    }
+
+    /**
+     * Map shut-down / legacy model ids to a current Gemini Flash model.
+     */
+    private function resolveGeminiModel(string $model): string
+    {
+        $model = trim($model);
+        if ($model === '') {
+            return 'gemini-2.5-flash';
+        }
+
+        $retired = [
+            'gemini-2.0-flash',
+            'gemini-2.0-flash-001',
+            'gemini-2.0-flash-lite',
+            'gemini-2.0-flash-lite-001',
+            'gemini-1.5-flash',
+            'gemini-1.5-flash-latest',
+            'gemini-1.5-pro',
+            'gemini-1.5-pro-latest',
+        ];
+
+        if (in_array($model, $retired, true)) {
+            Log::warning('Retired Gemini model requested; remapping', [
+                'from' => $model,
+                'to' => 'gemini-2.5-flash',
+            ]);
+
+            return 'gemini-2.5-flash';
+        }
+
+        return $model;
     }
 
     private function buildSystemPrompt($user, string $role, string $department): string

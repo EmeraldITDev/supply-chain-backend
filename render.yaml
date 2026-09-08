@@ -31,4 +31,9 @@ services:
         value: public
       - key: QUOTATION_ATTACHMENTS_DISK
         value: s3
+      # Required for AI Assistant — set the real key in the Render dashboard (do not commit secrets).
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_MODEL
+        value: gemini-2.5-flash
 
