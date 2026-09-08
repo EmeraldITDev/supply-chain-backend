@@ -291,7 +291,10 @@ class FinanceIntegrationService
 
         if ($this->workflowStateService->canTransition($state, WorkflowStateService::STATE_FINANCE_IN_REVIEW)) {
             $this->workflowStateService->transition($mrf, WorkflowStateService::STATE_FINANCE_IN_REVIEW, $user);
-            $mrf->update(['finance_ap_status' => 'in_review']);
+            $mrf->update([
+                'finance_ap_status' => 'in_review',
+                'finance_approved_at' => $mrf->finance_approved_at ?? now(),
+            ]);
         }
     }
 
@@ -314,8 +317,14 @@ class FinanceIntegrationService
 
         if ($this->workflowStateService->canTransition($state, WorkflowStateService::STATE_FINANCE_IN_REVIEW)) {
             $this->workflowStateService->transition($mrf, WorkflowStateService::STATE_FINANCE_IN_REVIEW, $user);
+            if (empty($mrf->finance_approved_at)) {
+                $mrf->update(['finance_approved_at' => now()]);
+            }
         } elseif ($this->workflowStateService->canTransition($state, WorkflowStateService::STATE_MILESTONE_PAYMENT_IN_PROGRESS)) {
             $this->workflowStateService->transition($mrf, WorkflowStateService::STATE_MILESTONE_PAYMENT_IN_PROGRESS, $user);
+            if (empty($mrf->finance_approved_at)) {
+                $mrf->update(['finance_approved_at' => now()]);
+            }
         }
 
         return ['workflowState' => $mrf->fresh()->workflow_state];

@@ -19,6 +19,8 @@ class PurchaseOrderService
         'current_stage', 'estimated_cost', 'currency', 'selected_vendor_id', 'requester_name',
         'department', 'po_draft_saved_at', 'po_generated_at', 'unsigned_po_url', 'signed_po_url',
         'expected_delivery_date', 'grn_completed_at', 'rfq_issued_at', 'quotation_received_at',
+        'po_value', 'executive_approved_at', 'director_approved_at', 'scd_approved_at',
+        'procurement_approved_at', 'finance_approved_at', 'payment_approved_at', 'procurement_review_started_at',
         'source', 'is_po_linked', 'linked_po_id', 'created_at', 'updated_at',
     ];
 
@@ -31,6 +33,8 @@ class PurchaseOrderService
         'selected_vendor_id', 'requester_id', 'requester_name', 'department',
         'po_draft_saved_at', 'po_generated_at', 'unsigned_po_url', 'signed_po_url',
         'expected_delivery_date', 'grn_completed_at', 'rfq_issued_at', 'quotation_received_at',
+        'po_value', 'executive_approved_at', 'director_approved_at', 'scd_approved_at',
+        'procurement_approved_at', 'finance_approved_at', 'payment_approved_at', 'procurement_review_started_at',
         'source', 'is_po_linked', 'linked_po_id', 'justification', 'created_at', 'updated_at',
     ];
 
@@ -112,7 +116,7 @@ class PurchaseOrderService
             'poGeneratedAt' => $mrf->po_generated_at?->toIso8601String(),
             'createdAt' => $mrf->created_at?->toIso8601String(),
             'updatedAt' => $mrf->updated_at?->toIso8601String(),
-        ], \App\Support\ProcurementDeliveryStatus::apiFields($mrf));
+        ], \App\Support\ExecutiveCommandCentreFields::apiFields($mrf));
     }
 
     public function findForEdit(string $id): ?MRF
@@ -204,7 +208,7 @@ class PurchaseOrderService
             'poGeneratedAt' => $mrf->po_generated_at?->toIso8601String(),
             'unsignedPoUrl' => $mrf->freshUnsignedPoStreamUrl() ?? $mrf->unsigned_po_url,
             'signedPoUrl' => $mrf->signed_po_url,
-        ], \App\Support\ProcurementDeliveryStatus::apiFields($mrf));
+        ], \App\Support\ExecutiveCommandCentreFields::apiFields($mrf));
     }
 
     /**

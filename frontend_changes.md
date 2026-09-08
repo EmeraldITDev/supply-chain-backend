@@ -1990,3 +1990,56 @@ Derived from `m_r_f_s.selected_vendor_id`; each metric cached 300s.
 - [ ] Activity feed → pass `group_by=day` (+ optional filters); render `data.grouped`
 - [ ] PO form → Expected Delivery Date picker bound to `expected_delivery_date`
 
+---
+
+## Executive Command Centre — Backend Data Fields (2026-09-08)
+
+### Backend change file set
+- [database/migrations/2026_09_08_120000_add_executive_command_centre_fields.php](database/migrations/2026_09_08_120000_add_executive_command_centre_fields.php)
+- [app/Support/ExecutiveCommandCentreFields.php](app/Support/ExecutiveCommandCentreFields.php)
+- [app/Services/VendorFulfilmentService.php](app/Services/VendorFulfilmentService.php)
+- [app/Models/MRF.php](app/Models/MRF.php)
+- [app/Models/Vendor.php](app/Models/Vendor.php)
+- [app/Http/Controllers/Api/MRFController.php](app/Http/Controllers/Api/MRFController.php)
+- [app/Http/Controllers/Api/MRFWorkflowController.php](app/Http/Controllers/Api/MRFWorkflowController.php)
+- [app/Http/Controllers/Api/SRFController.php](app/Http/Controllers/Api/SRFController.php)
+- [app/Http/Controllers/Api/VendorController.php](app/Http/Controllers/Api/VendorController.php)
+- [app/Http/Controllers/Api/PurchaseOrderController.php](app/Http/Controllers/Api/PurchaseOrderController.php)
+- [app/Http/Controllers/Api/ProcurementDocumentController.php](app/Http/Controllers/Api/ProcurementDocumentController.php)
+- [app/Services/ProcurementDocumentService.php](app/Services/ProcurementDocumentService.php)
+- [app/Services/PurchaseOrderService.php](app/Services/PurchaseOrderService.php)
+- [app/Services/Finance/FinanceIntegrationService.php](app/Services/Finance/FinanceIntegrationService.php)
+- [app/Jobs/ProcessPurchaseOrderGenerationJob.php](app/Jobs/ProcessPurchaseOrderGenerationJob.php)
+
+**Migration:** `php artisan migrate`
+
+All new response fields are **additive** (existing keys unchanged).
+
+| Field | Table | Written when | Returned by |
+|-------|-------|--------------|-------------|
+| `expected_delivery_date` | `m_r_f_s` | PO generate / draft (`delivery_date` \| `deliveryDate` \| `expected_delivery_date`); file-upload PO path now persists it | `GET /api/mrfs`, `GET /api/mrfs/{id}`, `GET /api/pos`, `GET /api/pos/{id}`, full-details, procurement-documents |
+| `po_created_at` / `poCreatedAt` | alias of `po_generated_at` | Written as `po_generated_at` on PO generate (sync + async job) | Same MRF/PO list & detail endpoints |
+| `delivered_at` / `goods_received_at` | alias of `grn_completed_at` | GRN document sync (`ProcurementDocumentService::syncGrnLegacyFields`) | MRF list/detail, PO payloads, `GET /api/mrfs/{id}/procurement-documents` |
+| `actual_delivery_date` | alias of `grn_completed_at` | Same as above | MRF/PO responses |
+| `executive_approved_at` | `m_r_f_s` | Executive approve action | MRF list/detail (Executive Command Centre fields) |
+| `scd_approved_at` | `m_r_f_s` (new column; also falls back to `director_approved_at`) | SCD / Lazarus director approve | MRF list/detail |
+| `director_approved_at` | `m_r_f_s` | SCD / Lazarus approve (existing) | MRF list/detail |
+| `procurement_approved_at` | `m_r_f_s` (new) | Procurement manager approve-for-RFQ | MRF list/detail |
+| `procurement_review_started_at` | `m_r_f_s` | When MRF enters procurement review | MRF list/detail |
+| `finance_approved_at` | `m_r_f_s` (new) | Finance payment process / Finance AP approve / handoff→in_review | MRF list/detail |
+| `payment_approved_at` | `m_r_f_s` | Chairman payment approve | MRF list/detail |
+| `po_value` / `final_amount` | `m_r_f_s` (new) | PO generation (subtotal + tax, fallback `estimated_cost`) | MRF list/detail, PO list/edit, procurement-documents |
+| `estimated_cost` | `m_r_f_s` / `s_r_f_s` | Required on MRF/SRF create (`estimatedCost` or `estimated_cost`) | Existing MRF/SRF responses; list also returns `missing_estimated_cost` for legacy rows |
+| `rating` | `vendors` | Manual ratings; also fulfilment-derived avg when no manual ratings | `GET /api/vendors`, `GET /api/vendors/{id}` |
+| `total_orders` | `vendors` | Incremented on first PO generation | Vendor list/detail |
+| `completed_orders` | `vendors` (new) | Incremented on GRN complete (or PO close if no GRN yet) | Vendor list/detail |
+| `on_time_deliveries` | `vendors` (new) | Incremented when GRN date ≤ `expected_delivery_date` | Vendor list/detail |
+
+### Frontend notes
+- Gap detection card: once these keys appear on live responses it clears automatically.
+- PO form: bind Expected Delivery Date → `expected_delivery_date` (must be after today on generate/draft).
+- MRF/SRF create: `estimatedCost` is now **required**; show a form warning if empty before submit.
+- Vendor performance panel: prefer top-level `rating`, `total_orders`, `completed_orders`, `on_time_deliveries` (still also under `performance.*`).
+- Cycle / ageing: use `po_created_at` (= `po_generated_at`) and `delivered_at` (= `grn_completed_at`).
+- Spend: use `po_value` for actual PO amount; `estimated_cost` for budget/trends.
+

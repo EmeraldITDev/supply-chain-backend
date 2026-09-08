@@ -139,11 +139,13 @@ class VendorController extends Controller
         $cacheKey = 'vendors_list_' . md5(serialize($request->except(['_token'])));
         $cached = Cache::remember($cacheKey, 30, function () use ($query, $sortBy, $sortDirection, $perPage) {
             $paginator = $query
-                ->select([
+                ->select(array_values(array_filter([
                     'id', 'vendor_id', 'name', 'category', 'category_other', 'rating',
                     'total_orders', 'status', 'email', 'phone', 'address', 'tax_id',
                     'contact_person', 'created_at', 'updated_at',
-                ])
+                    \Illuminate\Support\Facades\Schema::hasColumn('vendors', 'completed_orders') ? 'completed_orders' : null,
+                    \Illuminate\Support\Facades\Schema::hasColumn('vendors', 'on_time_deliveries') ? 'on_time_deliveries' : null,
+                ])))
                 ->orderBy($sortBy, $sortDirection)
                 ->paginate($perPage);
             $items = collect($paginator->items())->map(function ($vendor) {
@@ -156,6 +158,11 @@ class VendorController extends Controller
                     'category_other' => $vendor->category_other,
                     'rating' => $vendor->rating ? (float) $vendor->rating : 0,
                     'totalOrders' => $vendor->total_orders,
+                    'total_orders' => (int) ($vendor->total_orders ?? 0),
+                    'completedOrders' => (int) ($vendor->completed_orders ?? 0),
+                    'completed_orders' => (int) ($vendor->completed_orders ?? 0),
+                    'onTimeDeliveries' => (int) ($vendor->on_time_deliveries ?? 0),
+                    'on_time_deliveries' => (int) ($vendor->on_time_deliveries ?? 0),
                     'status' => $vendor->status,
                     'email' => $vendor->email,
                     'phone' => $vendor->phone,
@@ -413,6 +420,12 @@ class VendorController extends Controller
             'category_other' => $categoryOther,
             'rating'        => $vendor->rating ? (float) $vendor->rating : 0,
             'totalOrders'   => $vendor->total_orders,
+            'total_orders'  => (int) ($vendor->total_orders ?? 0),
+            'completedOrders' => (int) ($vendor->completed_orders ?? 0),
+            'completed_orders' => (int) ($vendor->completed_orders ?? 0),
+            'onTimeDeliveries' => (int) ($vendor->on_time_deliveries ?? 0),
+            'on_time_deliveries' => (int) ($vendor->on_time_deliveries ?? 0),
+            'performance'   => VendorPerformanceMetrics::forVendor((int) $vendor->id),
             'status'        => $vendor->status,
             'email'         => $vendor->email,
             'phone'         => $vendor->phone,

@@ -538,6 +538,7 @@ class MRF extends Model
         'description',
         'quantity',
         'estimated_cost',
+        'po_value',
         'currency',
         'justification',
         'requester_id',
@@ -570,6 +571,8 @@ class MRF extends Model
         'executive_approved_at',
         'director_approved_at',
         'procurement_review_started_at',
+        'procurement_approved_at',
+        'scd_approved_at',
         'last_action_by_role',
 
         'director_approved_by',
@@ -613,6 +616,7 @@ class MRF extends Model
         'payment_processed_at',
         'payment_approved_at',
         'payment_approved_by',
+        'finance_approved_at',
         // GRN (Goods Received Note)
         'grn_requested',
         'grn_requested_at',
@@ -641,6 +645,7 @@ class MRF extends Model
 
     protected $casts = [
         'estimated_cost' => 'decimal:2',
+        'po_value' => 'decimal:2',
         'date' => 'date',
         'is_resubmission' => 'boolean',
         'is_po_linked' => 'boolean',
@@ -651,7 +656,10 @@ class MRF extends Model
         'chairman_approved' => 'boolean',
         'chairman_approved_at' => 'datetime',
         'procurement_review_started_at' => 'datetime',
+        'procurement_approved_at' => 'datetime',
+        'scd_approved_at' => 'datetime',
         'director_approved_at' => 'datetime',
+        'finance_approved_at' => 'datetime',
         'rejected_at' => 'datetime',
         'po_generated_at' => 'datetime',
         'po_signed_at' => 'datetime',
@@ -914,6 +922,8 @@ class MRF extends Model
         'rejection_reason', 'is_resubmission', 'executive_approved', 'executive_approved_at',
         'po_number', 'po_draft_saved_at', 'unsigned_po_url', 'signed_po_url', 'po_generated_at', 'po_terms_mode',
         'expected_delivery_date', 'rfq_issued_at', 'quotation_received_at', 'grn_completed_at',
+        'po_value', 'executive_approved_at', 'director_approved_at', 'scd_approved_at',
+        'procurement_approved_at', 'finance_approved_at', 'payment_approved_at', 'procurement_review_started_at',
         'source', 'is_po_linked', 'linked_po_id', 'grn_completed',
     ];
 
@@ -935,7 +945,8 @@ class MRF extends Model
         'chairman_approved', 'chairman_approved_at', 'chairman_remarks',
         'po_number', 'unsigned_po_url', 'unsigned_po_share_url', 'signed_po_url', 'signed_po_share_url',
         'po_generated_at', 'po_terms_mode', 'po_type', 'source', 'is_po_linked', 'linked_po_id', 'po_draft_saved_at',
-        'expected_delivery_date', 'rfq_issued_at', 'quotation_received_at',
+        'expected_delivery_date', 'rfq_issued_at', 'quotation_received_at', 'po_value',
+        'procurement_approved_at', 'finance_approved_at', 'scd_approved_at',
         'po_generation_error', 'po_generation_failed_at',
     ];
 
@@ -1015,6 +1026,9 @@ class MRF extends Model
                 'urgency' => $this->urgency,
                 'quantity' => $this->quantity,
                 'estimatedCost' => $this->estimated_cost !== null ? (float) $this->estimated_cost : null,
+                'estimated_cost' => $this->estimated_cost !== null ? (float) $this->estimated_cost : null,
+                'missing_estimated_cost' => $this->estimated_cost === null,
+                'missingEstimatedCost' => $this->estimated_cost === null,
                 ...$this->currencyApiFields(),
                 'requester' => $this->requester_name,
                 'requesterId' => (string) $this->requester_id,
@@ -1068,7 +1082,7 @@ class MRF extends Model
                 'poTermsMode' => $this->po_terms_mode,
                 'priceComparisons' => [],
             ],
-            \App\Support\ProcurementDeliveryStatus::apiFields($this),
+            \App\Support\ExecutiveCommandCentreFields::apiFields($this),
             $this->poOriginApiFields(),
             $this->poDraftApiFields(),
         );

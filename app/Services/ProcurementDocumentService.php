@@ -216,6 +216,8 @@ class ProcurementDocumentService
 
     public function syncGrnLegacyFields(MRF $mrf, ProcurementDocument $document): void
     {
+        $alreadyCompleted = (bool) $mrf->grn_completed;
+
         $mrf->update([
             'grn_completed' => true,
             'grn_completed_at' => now(),
@@ -223,6 +225,17 @@ class ProcurementDocumentService
             'grn_url' => $document->file_url,
             'grn_share_url' => $document->file_url,
         ]);
+
+        if (! $alreadyCompleted) {
+            try {
+                app(VendorFulfilmentService::class)->recordCycleCompleted($mrf->fresh(), true);
+            } catch (\Throwable $e) {
+                \Log::warning('Vendor fulfilment update after GRN failed', [
+                    'mrf_id' => $mrf->mrf_id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
     }
 
     public function storeUpload(

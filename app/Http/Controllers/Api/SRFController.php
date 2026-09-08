@@ -411,8 +411,8 @@ class SRFController extends Controller
             'urgency' => 'required|in:Low,Medium,High,Critical',
             'description' => 'required|string',
             'duration' => 'required|string|max:255',
-            'estimatedCost' => 'nullable|numeric|min:0',
-            'estimated_cost' => 'nullable|numeric|min:0',
+            'estimatedCost' => 'required_without:estimated_cost|numeric|min:0',
+            'estimated_cost' => 'required_without:estimatedCost|numeric|min:0',
             'justification' => 'required|string',
             ...AttachmentService::validationRules(),
         ], RequestLineItemParser::validationRules(), PaymentMilestoneRequest::validationRules()));

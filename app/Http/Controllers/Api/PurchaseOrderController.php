@@ -208,6 +208,20 @@ class PurchaseOrderController extends Controller
 
         $mrf->refresh();
 
+        // If GRN already updated fulfilment, skip; otherwise update vendor counters on close.
+        if ($mrf->grn_completed) {
+            // GRN path already called recordCycleCompleted
+        } else {
+            try {
+                app(\App\Services\VendorFulfilmentService::class)->recordCycleCompleted($mrf, false);
+            } catch (\Throwable $e) {
+                \Log::warning('Vendor fulfilment update on PO close failed', [
+                    'mrf_id' => $mrf->mrf_id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+
         return response()->json([
             'success' => true,
             'message' => 'Purchase order closed successfully',

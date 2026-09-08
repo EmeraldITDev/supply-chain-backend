@@ -193,6 +193,7 @@ class MRFWorkflowController extends Controller
                 'workflow_state' => $nextWorkflowState,
                 'remarks' => $request->remarks,
                 'director_approved_at' => $isApproved ? now() : null,
+                'scd_approved_at' => $isApproved ? now() : null,
                 'director_approved_by' => $isApproved ? $user->name : null,
                 'director_remarks' => $isApproved ? $request->remarks : null,
                 'procurement_review_started_at' => $isApproved && ! $isHighValueCustomType && $nextWorkflowState === WorkflowStateService::STATE_PROCUREMENT_REVIEW ? now() : null,
@@ -364,6 +365,7 @@ class MRFWorkflowController extends Controller
             'workflow_state' => $isApproved ? 'supply_chain_director_approved' : 'supply_chain_director_rejected',
             'remarks' => $request->remarks,
             'director_approved_at' => $isApproved ? now() : null,
+            'scd_approved_at' => $isApproved ? now() : null,
             'director_approved_by' => $isApproved ? $user->name : null,
             'director_remarks' => $isApproved ? $request->remarks : null,
             'procurement_review_started_at' => $isApproved ? now() : null,
@@ -514,6 +516,7 @@ class MRFWorkflowController extends Controller
             'current_stage' => $isApproved ? 'rfq_issuance' : 'rejected',
             'workflow_state' => $isApproved ? 'procurement_approved' : 'supply_chain_director_rejected',
             'remarks' => $request->remarks,
+            'procurement_approved_at' => $isApproved ? now() : null,
         ]);
 
         // Record approval history
@@ -1949,11 +1952,29 @@ class MRFWorkflowController extends Controller
         $mergedTerms = $this->mergePoSpecialTerms($termsMode, $standardTerms, $customTerms);
 
         // Update MRF - set workflow state for SCD signature after PO generation
+        $deliveryDate = null;
+        foreach (['delivery_date', 'deliveryDate', 'expected_delivery_date'] as $dk) {
+            $raw = $request->input($dk);
+            if (is_string($raw) && trim($raw) !== '') {
+                try {
+                    $deliveryDate = Carbon::parse($raw)->toDateString();
+                    break;
+                } catch (\Throwable) {
+                }
+            }
+        }
+
+        $poTotalForSchedule = $subtotal + $taxAmount;
+        if ($poTotalForSchedule <= 0) {
+            $poTotalForSchedule = (float) ($mrf->estimated_cost ?? 0);
+        }
+
         $updateData = [
             'po_number' => $poNumber,
             'unsigned_po_url' => $poUrl,
             'po_generated_at' => now(),
             'po_draft_saved_at' => null,
+            'po_value' => $poTotalForSchedule > 0 ? $poTotalForSchedule : null,
             'workflow_state' => WorkflowStateService::STATE_PO_GENERATED,
             'status' => 'awaiting_scd_signature',
             'current_stage' => 'supply_chain',
@@ -1973,6 +1994,7 @@ class MRFWorkflowController extends Controller
                 PurchaseOrderInvoiceCc::defaultCc(),
             ),
             'currency' => PurchaseOrderCurrency::normalize($mrf->currency),
+            'expected_delivery_date' => $deliveryDate ?? $mrf->expected_delivery_date,
         ];
 
         if ($mrf->is_po_linked || ($mrf->source ?? 'standard') === 'po_generated') {
@@ -1987,13 +2009,14 @@ class MRFWorkflowController extends Controller
             $updateData['unsigned_po_share_url'] = $poUrl;
         }
 
+        $wasFirstPo = empty($mrf->po_generated_at);
         $mrf->update($updateData);
 
-        $poTotalForSchedule = $subtotal + $taxAmount;
-        if ($poTotalForSchedule <= 0) {
-            $poTotalForSchedule = (float) ($mrf->estimated_cost ?? 0);
-        }
         app(PaymentScheduleService::class)->lockOnPoGeneration($mrf, $poTotalForSchedule);
+
+        if ($wasFirstPo) {
+            app(\App\Services\VendorFulfilmentService::class)->recordPoGenerated($mrf->fresh());
+        }
 
         if ($storedPoPath && $poUrl) {
             $this->registerPoPdfInRegistry(
@@ -2471,6 +2494,7 @@ class MRFWorkflowController extends Controller
             'status' => 'chairman_payment',
             'current_stage' => 'chairman_payment',
             'payment_status' => 'processing',
+            'finance_approved_at' => now(),
         ]);
 
         // Record in approval history

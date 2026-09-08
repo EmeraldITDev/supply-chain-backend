@@ -123,12 +123,19 @@ class ProcessPurchaseOrderGenerationJob implements ShouldQueue
         $hasRfq = (bool) ($this->context['has_rfq'] ?? true);
 
         $dbStarted = microtime(true);
+        $wasFirstPo = empty($mrf->po_generated_at);
+        $poTotal = $subtotal + $taxAmount;
+        if ($poTotal <= 0) {
+            $poTotal = (float) ($mrf->estimated_cost ?? 0);
+        }
+
         $mrf->update([
             'po_number' => $poNumber,
             'unsigned_po_url' => $poUrl,
             'unsigned_po_share_url' => $poUrl,
             'po_generated_at' => now(),
             'po_draft_saved_at' => null,
+            'po_value' => $poTotal > 0 ? $poTotal : null,
             'workflow_state' => WorkflowStateService::STATE_PO_GENERATED,
             'status' => 'awaiting_scd_signature',
             'current_stage' => 'supply_chain',
@@ -139,11 +146,11 @@ class ProcessPurchaseOrderGenerationJob implements ShouldQueue
         ]);
         $dbMs = (int) round((microtime(true) - $dbStarted) * 1000);
 
-        $poTotal = $subtotal + $taxAmount;
-        if ($poTotal <= 0) {
-            $poTotal = (float) ($mrf->estimated_cost ?? 0);
-        }
         $paymentScheduleService->lockOnPoGeneration($mrf, $poTotal);
+
+        if ($wasFirstPo) {
+            app(\App\Services\VendorFulfilmentService::class)->recordPoGenerated($mrf->fresh());
+        }
 
         $this->registerPoPdf($mrf, $user, $poPath, $poUrl, $poFileName);
 

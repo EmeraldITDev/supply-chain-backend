@@ -31,6 +31,8 @@ class Vendor extends Model
         'category_other',
         'rating',
         'total_orders',
+        'completed_orders',
+        'on_time_deliveries',
         'status',
         'email',
         'phone',
@@ -61,6 +63,8 @@ class Vendor extends Model
     protected $casts = [
         'rating' => 'decimal:2',
         'total_orders' => 'integer',
+        'completed_orders' => 'integer',
+        'on_time_deliveries' => 'integer',
         'annual_revenue' => 'string',
         'profile_completed' => 'boolean',
         'onboarding_email_sent_at' => 'datetime',
