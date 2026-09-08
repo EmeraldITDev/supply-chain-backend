@@ -6,6 +6,9 @@ use App\Models\Vendor;
 use App\Models\MRF;
 use App\Observers\VendorObserver;
 use App\Observers\MrfObserver;
+use Illuminate\Cache\RateLimiting\Limit;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\URL;
 use Illuminate\Support\ServiceProvider;
 use Laravel\Sanctum\Sanctum;
@@ -37,6 +40,10 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        RateLimiter::for('ai-chat', function (Request $request) {
+            return Limit::perMinute(20)->by($request->user()?->id ?: $request->ip());
+        });
+
         Vendor::observe(VendorObserver::class);
         MRF::observe(MrfObserver::class);
 

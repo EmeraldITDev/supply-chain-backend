@@ -21,6 +21,7 @@ use App\Http\Controllers\Api\QuotationController;
 use App\Http\Controllers\Api\VendorController;
 use App\Http\Controllers\Api\NotificationController;
 use App\Http\Controllers\Api\SearchController;
+use App\Http\Controllers\Api\AIChatController;
 use App\Http\Controllers\Api\POTermsTemplateController;
 use App\Http\Controllers\Api\PriceComparisonController;
 use App\Http\Controllers\Api\UserSignatureFileController;
@@ -576,6 +577,9 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // Global search (supports formatted_id + legacy ids)
     Route::get('/search', [SearchController::class, 'search']);
+
+    // AI assistant (Gemini proxy — API key stays server-side)
+    Route::post('/ai/chat', [AIChatController::class, 'chat'])->middleware('throttle:ai-chat');
 
     // Admin mappings (optional; avoids redeploy for new codes)
     Route::middleware('role:admin')->group(function () {
