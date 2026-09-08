@@ -53,10 +53,14 @@ class ProcurementDashboardController extends Controller
             return $this->computePeriodStats($periodDays);
         });
 
+        $dataCapture = \App\Support\DashboardDataCapture::snapshot();
+
         return response()->json([
             'success' => true,
             'period_days' => $periodDays,
             'stats' => $payload,
+            'data_capture' => $dataCapture,
+            'dataCapture' => $dataCapture,
         ]);
     }
 
@@ -258,6 +262,9 @@ class ProcurementDashboardController extends Controller
         $stats['pendingQuotations'] = Quotation::where('status', 'Pending')->count();
         $stats['totalVendors'] = Vendor::where('status', 'Active')->count();
         $stats['rfqsOpen'] = RFQ::where('status', 'Open')->count();
+
+        $stats['data_capture'] = \App\Support\DashboardDataCapture::snapshot();
+        $stats['dataCapture'] = $stats['data_capture'];
 
         return $stats;
     }

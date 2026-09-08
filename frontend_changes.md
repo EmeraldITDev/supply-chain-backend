@@ -2043,3 +2043,25 @@ All new response fields are **additive** (existing keys unchanged).
 - Cycle / ageing: use `po_created_at` (= `po_generated_at`) and `delivered_at` (= `grn_completed_at`).
 - Spend: use `po_value` for actual PO amount; `estimated_cost` for budget/trends.
 
+---
+
+## Gap-card clearance — RFQ / quotation / delivery timestamps (2026-09-08)
+
+### Why the cards still showed
+Historical MRFs had **null** `rfq_issued_at` / `quotation_received_at` (only new RFQ/quotation actions wrote them). Gap cards clear only when live responses contain non-empty values.
+
+### Fix
+1. **Backfill migration** `2026_09_08_121500_backfill_rfq_and_quotation_timestamps_on_mrfs.php`
+   - `rfq_issued_at` ← earliest `r_f_q_s.created_at` per MRF
+   - `quotation_received_at` ← earliest quotation `submitted_at` / `created_at` per MRF
+2. **Aliases on MRF/PO payloads:** `delivered_at`, `goods_received_at`, `quotes_received_at` (same values as `grn_completed_at` / `quotation_received_at`)
+3. **`data_capture` / `dataCapture`** on:
+   - `GET /api/dashboard/procurement`
+   - `GET /api/dashboard/procurement-manager`
+   - `GET /api/dashboard/executive`  
+   Boolean flags + counts so the gap card can clear when `rfq_issued_at`, `quotation_received_at`, `delivered_at`, etc. are true.
+
+**Deploy:** `php artisan migrate` (runs backfill). Refresh dashboards after deploy.
+
+**Note:** `delivered_at` / actual delivery stays flagged until at least one MRF has `grn_completed_at` set (complete a GRN). That is expected — there is nothing to backfill if no goods have been received yet.
+

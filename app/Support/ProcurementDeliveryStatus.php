@@ -61,18 +61,27 @@ class ProcurementDeliveryStatus
 
         $actual = $mrf->grn_completed_at?->toIso8601String();
         $status = self::calculate($mrf);
+        $rfqIssued = $mrf->rfq_issued_at?->toIso8601String();
+        $quoteReceived = $mrf->quotation_received_at?->toIso8601String();
 
         return [
             'expected_delivery_date' => $expected,
             'expectedDeliveryDate' => $expected,
             'actual_delivery_date' => $actual,
             'actualDeliveryDate' => $actual,
+            'delivered_at' => $actual,
+            'deliveredAt' => $actual,
+            'goods_received_at' => $actual,
+            'goodsReceivedAt' => $actual,
             'delivery_status' => $status,
             'deliveryStatus' => $status,
-            'rfq_issued_at' => $mrf->rfq_issued_at?->toIso8601String(),
-            'rfqIssuedAt' => $mrf->rfq_issued_at?->toIso8601String(),
-            'quotation_received_at' => $mrf->quotation_received_at?->toIso8601String(),
-            'quotationReceivedAt' => $mrf->quotation_received_at?->toIso8601String(),
+            'rfq_issued_at' => $rfqIssued,
+            'rfqIssuedAt' => $rfqIssued,
+            'quotation_received_at' => $quoteReceived,
+            'quotationReceivedAt' => $quoteReceived,
+            // Alias used by progress-tracker / some dashboard gap checks
+            'quotes_received_at' => $quoteReceived,
+            'quotesReceivedAt' => $quoteReceived,
         ];
     }
 }

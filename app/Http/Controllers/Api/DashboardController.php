@@ -262,10 +262,13 @@ class DashboardController extends Controller
         }
 
         $poSummary = DashboardStatsCache::poSummaryCounts();
+        $dataCapture = \App\Support\DashboardDataCapture::snapshot();
 
         return response()->json([
             'success' => true,
             'stats' => $stats,
+            'data_capture' => $dataCapture,
+            'dataCapture' => $dataCapture,
             'po_summary' => $poSummary,
             'poSummary' => $poSummary,
             'listLimit' => $listLimit,
@@ -636,12 +639,15 @@ class DashboardController extends Controller
         $pendingExecutiveFirstApproval = $this->roleDashboardQueues->pendingMrfParallelFirstApprovalItems($listLimit);
 
         $poSummary = DashboardStatsCache::poSummaryCounts();
+        $dataCapture = \App\Support\DashboardDataCapture::snapshot();
 
         return response()->json([
             'success' => true,
             'listLimit' => $listLimit,
             'po_summary' => $poSummary,
             'poSummary' => $poSummary,
+            'data_capture' => $dataCapture,
+            'dataCapture' => $dataCapture,
             'pending_mrf_executive_first_approval' => $pendingExecutiveFirstApproval,
             'pending_mrf_executive_first_approval_count' => $executiveCounts['pending_mrf_executive_first_approval'],
         ]);
