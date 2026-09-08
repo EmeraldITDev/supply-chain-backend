@@ -1612,6 +1612,9 @@ class MRFWorkflowController extends Controller
             'taxRate' => 'nullable|numeric|min:0|max:100',
             'tax_amount' => 'nullable|numeric|min:0',
             'taxAmount' => 'nullable|numeric|min:0',
+            'delivery_date' => 'nullable|date|after:today',
+            'deliveryDate' => 'nullable|date|after:today',
+            'expected_delivery_date' => 'nullable|date|after:today',
         ]);
 
         if ($validator->fails()) {
@@ -1646,6 +1649,9 @@ class MRFWorkflowController extends Controller
             'taxRate' => 'nullable|numeric|min:0|max:100',
             'tax_amount' => 'nullable|numeric|min:0',
             'taxAmount' => 'nullable|numeric|min:0',
+            'delivery_date' => 'nullable|date|after:today',
+            'deliveryDate' => 'nullable|date|after:today',
+            'expected_delivery_date' => 'nullable|date|after:today',
             ]);
 
         if ($validator->fails()) {
@@ -2973,11 +2979,11 @@ class MRFWorkflowController extends Controller
             'invoiceSubmissionCc' => 'nullable|string|max:500',
             'remarks' => 'nullable|string',
             'currency' => PurchaseOrderCurrency::VALIDATION_RULE,
-            'delivery_date' => 'nullable|date',
-            'deliveryDate' => 'nullable|date',
+            'delivery_date' => 'nullable|date|after:today',
+            'deliveryDate' => 'nullable|date|after:today',
             'payment_terms' => 'nullable|string|max:2000',
             'paymentTerms' => 'nullable|string|max:2000',
-            'expected_delivery_date' => 'nullable|date',
+            'expected_delivery_date' => 'nullable|date|after:today',
         ]);
 
         if ($validator->fails()) {

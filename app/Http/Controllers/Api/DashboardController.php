@@ -17,7 +17,9 @@ use App\Services\WorkflowStateService;
 use App\Support\ProcurementOverviewAccess;
 use App\Support\UserRoleNormalizer;
 use App\Support\VendorCategoryDisplay;
+use Carbon\Carbon;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 
 class DashboardController extends Controller
@@ -201,6 +203,63 @@ class DashboardController extends Controller
                     : 0,
             ];
         });
+
+        $periodDays = max(1, min(365, (int) $request->get('period_days', 30)));
+        $periodStats = Cache::remember("procurement_dashboard_stats_{$periodDays}", 300, function () use ($periodDays) {
+            return app(ProcurementDashboardController::class)->computePeriodStats($periodDays);
+        });
+
+        $stats = array_merge($stats, [
+            'period_days' => $periodDays,
+            'pending_mrfs' => $periodStats['pending_mrfs'] ?? 0,
+            'pending_mrfs_previous' => $periodStats['pending_mrfs_previous'] ?? 0,
+            'pending_mrfs_change' => $periodStats['pending_mrfs_change'] ?? 0,
+            'pending_mrfs_change_pct' => $periodStats['pending_mrfs_change_pct'] ?? 0,
+            'approved_mrfs' => $periodStats['approved_mrfs'] ?? 0,
+            'approved_mrfs_previous' => $periodStats['approved_mrfs_previous'] ?? 0,
+            'approved_mrfs_change' => $periodStats['approved_mrfs_change'] ?? 0,
+            'approved_mrfs_change_pct' => $periodStats['approved_mrfs_change_pct'] ?? 0,
+            'rejected_mrfs' => $periodStats['rejected_mrfs'] ?? 0,
+            'rejected_mrfs_previous' => $periodStats['rejected_mrfs_previous'] ?? 0,
+            'rejected_mrfs_change' => $periodStats['rejected_mrfs_change'] ?? 0,
+            'rejected_mrfs_change_pct' => $periodStats['rejected_mrfs_change_pct'] ?? 0,
+            'pos_generated' => $periodStats['pos_generated'] ?? 0,
+            'pos_generated_previous' => $periodStats['pos_generated_previous'] ?? 0,
+            'pos_generated_change' => $periodStats['pos_generated_change'] ?? 0,
+            'pos_generated_change_pct' => $periodStats['pos_generated_change_pct'] ?? 0,
+            'pos_signed' => $periodStats['pos_signed'] ?? 0,
+            'pos_signed_previous' => $periodStats['pos_signed_previous'] ?? 0,
+            'pos_signed_change' => $periodStats['pos_signed_change'] ?? 0,
+            'pos_signed_change_pct' => $periodStats['pos_signed_change_pct'] ?? 0,
+            'vendor_registrations' => $periodStats['vendor_registrations'] ?? 0,
+            'vendor_registrations_previous' => $periodStats['vendor_registrations_previous'] ?? 0,
+            'vendor_registrations_change' => $periodStats['vendor_registrations_change'] ?? 0,
+            'vendor_registrations_change_pct' => $periodStats['vendor_registrations_change_pct'] ?? 0,
+            'rfqs_issued' => $periodStats['rfqs_issued'] ?? 0,
+            'rfqs_issued_previous' => $periodStats['rfqs_issued_previous'] ?? 0,
+            'rfqs_issued_change' => $periodStats['rfqs_issued_change'] ?? 0,
+            'rfqs_issued_change_pct' => $periodStats['rfqs_issued_change_pct'] ?? 0,
+            'quotations_received' => $periodStats['quotations_received'] ?? 0,
+            'quotations_received_previous' => $periodStats['quotations_received_previous'] ?? 0,
+            'quotations_received_change' => $periodStats['quotations_received_change'] ?? 0,
+            'quotations_received_change_pct' => $periodStats['quotations_received_change_pct'] ?? 0,
+            'average_cycle_time' => $periodStats['average_cycle_time'] ?? null,
+            'average_cycle_time_previous' => $periodStats['average_cycle_time_previous'] ?? null,
+            'average_cycle_time_change' => $periodStats['average_cycle_time_change'] ?? null,
+            'average_cycle_time_change_pct' => $periodStats['average_cycle_time_change_pct'] ?? null,
+            'on_time_delivery_rate' => $periodStats['on_time_delivery_rate'] ?? 0,
+            'on_time_delivery_rate_previous' => $periodStats['on_time_delivery_rate_previous'] ?? 0,
+            'on_time_delivery_rate_change' => $periodStats['on_time_delivery_rate_change'] ?? 0,
+            'on_time_delivery_rate_change_pct' => $periodStats['on_time_delivery_rate_change_pct'] ?? 0,
+            'onTimeDelivery_previous' => $periodStats['onTimeDelivery_previous'] ?? 0,
+            'onTimeDelivery_change' => $periodStats['onTimeDelivery_change'] ?? 0,
+            'onTimeDelivery_change_pct' => $periodStats['onTimeDelivery_change_pct'] ?? 0,
+        ]);
+
+        // Prefer GRN-based on-time rate when period intelligence is available
+        if (array_key_exists('on_time_delivery_rate', $periodStats)) {
+            $stats['onTimeDelivery'] = $periodStats['on_time_delivery_rate'];
+        }
 
         $poSummary = DashboardStatsCache::poSummaryCounts();
 
@@ -599,7 +658,19 @@ class DashboardController extends Controller
     public function getRecentActivities(Request $request)
     {
         $user = $request->user();
-        $limit = max(1, min((int) $request->query('limit', 20), 100));
+        $limit = max(1, min((int) $request->query('limit', 50), 200));
+        $wantsGrouped = $request->has('group_by')
+            || $request->boolean('grouped')
+            || $request->filled('event_types')
+            || $request->filled('vendor_id')
+            || $request->filled('project')
+            || $request->filled('from')
+            || $request->filled('to');
+
+        $groupBy = strtolower((string) $request->query('group_by', $wantsGrouped ? 'day' : ''));
+        if ($groupBy !== '' && ! in_array($groupBy, ['day', 'week', 'month'], true)) {
+            $groupBy = 'day';
+        }
 
         $vendorId = null;
         if ($user->scmRole() === 'vendor') {
@@ -611,7 +682,7 @@ class DashboardController extends Controller
 
         $role = $user->scmRole();
 
-        $activities = Activity::query()
+        $baseQuery = Activity::query()
             ->where(function ($q) use ($user, $vendorId, $role) {
                 $q->where('user_id', $user->id);
 
@@ -677,27 +748,150 @@ class DashboardController extends Controller
                             });
                     });
                 }
-            })
+
+                // Procurement managers also see RFQ / PO / approval activities
+                if (in_array($role, ['procurement_manager', 'procurement', 'admin', 'supply_chain_director', 'supply_chain'], true)) {
+                    $q->orWhereIn('type', [
+                        'rfq_sent', 'quotation_submitted', 'po_generated', 'mrf_created',
+                        'approval', 'mrf_approved', 'mrf_rejected', 'vendor_selected',
+                    ]);
+                }
+            });
+
+        $total = (clone $baseQuery)->count();
+
+        $filteredQuery = clone $baseQuery;
+
+        if ($request->filled('event_types')) {
+            $types = array_values(array_filter(array_map(
+                'trim',
+                explode(',', (string) $request->query('event_types'))
+            )));
+            if ($types !== []) {
+                $filteredQuery->whereIn('type', $types);
+            }
+        }
+
+        if ($request->filled('vendor_id')) {
+            $filterVendorKey = (string) $request->query('vendor_id');
+            $filterVendor = Vendor::query()
+                ->where('vendor_id', $filterVendorKey)
+                ->orWhere('id', is_numeric($filterVendorKey) ? (int) $filterVendorKey : 0)
+                ->first();
+            if ($filterVendor) {
+                $filteredQuery->where(function ($q) use ($filterVendor) {
+                    $q->where('description', 'like', '%' . $filterVendor->name . '%')
+                        ->orWhereExists(function ($sub) use ($filterVendor) {
+                            $sub->selectRaw('1')
+                                ->from('m_r_f_s')
+                                ->whereColumn('m_r_f_s.mrf_id', 'activities.entity_id')
+                                ->where('m_r_f_s.selected_vendor_id', $filterVendor->id);
+                        });
+                });
+            }
+        }
+
+        if ($request->filled('project')) {
+            $project = trim((string) $request->query('project'));
+            $filteredQuery->where(function ($q) use ($project) {
+                $q->where('description', 'like', '%' . $project . '%')
+                    ->orWhere('entity_id', 'like', '%' . $project . '%')
+                    ->orWhereExists(function ($sub) use ($project) {
+                        $sub->selectRaw('1')
+                            ->from('m_r_f_s')
+                            ->whereColumn('m_r_f_s.mrf_id', 'activities.entity_id')
+                            ->where(function ($m) use ($project) {
+                                $m->where('m_r_f_s.contract_type', $project)
+                                    ->orWhere('m_r_f_s.mrf_id', 'like', '%' . $project . '%')
+                                    ->orWhere('m_r_f_s.title', 'like', '%' . $project . '%');
+                            });
+                    });
+            });
+        }
+
+        if ($request->filled('from')) {
+            $filteredQuery->where('created_at', '>=', Carbon::parse($request->query('from'))->startOfDay());
+        }
+        if ($request->filled('to')) {
+            $filteredQuery->where('created_at', '<=', Carbon::parse($request->query('to'))->endOfDay());
+        }
+
+        $filteredCount = (clone $filteredQuery)->count();
+
+        $activities = $filteredQuery
             ->orderByDesc('created_at')
             ->limit($limit)
-            ->get()
-            ->map(function ($activity) {
-                return [
-                    'id' => (string) $activity->id,
-                    'type' => $activity->type,
-                    'title' => $activity->title,
-                    'description' => $activity->description,
-                    'timestamp' => $activity->created_at->toIso8601String(),
-                    'user' => $activity->user_name,
-                    'entityId' => $activity->entity_id,
-                    'entityType' => $activity->entity_type,
-                    'status' => $activity->status,
-                ];
-            });
+            ->get();
+
+        $flat = $activities->map(function ($activity) {
+            return [
+                'id' => (string) $activity->id,
+                'type' => $activity->type,
+                'event_type' => $activity->type,
+                'title' => $activity->title,
+                'description' => $activity->description,
+                'timestamp' => $activity->created_at->toIso8601String(),
+                'occurred_at' => $activity->created_at->toIso8601String(),
+                'user' => $activity->user_name,
+                'actor' => $activity->user_name,
+                'entityId' => $activity->entity_id,
+                'entityType' => $activity->entity_type,
+                'mrf_id' => $activity->entity_type === 'mrf' ? $activity->entity_id : null,
+                'status' => $activity->status,
+            ];
+        })->values();
+
+        if ($groupBy === '') {
+            return response()->json([
+                'success' => true,
+                'data' => $flat,
+            ]);
+        }
+
+        $grouped = $flat->groupBy(function ($event) use ($groupBy) {
+            $dt = Carbon::parse($event['occurred_at']);
+
+            return match ($groupBy) {
+                'week' => $dt->copy()->startOfWeek()->toDateString(),
+                'month' => $dt->copy()->startOfMonth()->format('Y-m'),
+                default => $dt->toDateString(),
+            };
+        })->map(function ($events, $key) use ($groupBy) {
+            $date = Carbon::parse(strlen($key) === 7 ? $key . '-01' : $key);
+            $label = match ($groupBy) {
+                'week' => 'Week of ' . $date->format('M j, Y'),
+                'month' => $date->format('F Y'),
+                default => ($date->isToday()
+                    ? 'Today'
+                    : ($date->isYesterday() ? 'Yesterday' : $date->format('M j, Y'))),
+            };
+
+            return [
+                'date' => $groupBy === 'month' ? $key : $date->toDateString(),
+                'label' => $label,
+                'events' => $events->map(function ($e) {
+                    return [
+                        'id' => (int) $e['id'],
+                        'event_type' => $e['event_type'],
+                        'description' => $e['description'],
+                        'mrf_id' => $e['mrf_id'],
+                        'vendor_name' => null,
+                        'occurred_at' => $e['occurred_at'],
+                        'actor' => $e['actor'],
+                    ];
+                })->values()->all(),
+            ];
+        })->values()->all();
 
         return response()->json([
             'success' => true,
-            'data' => $activities
+            'data' => [
+                'grouped' => $grouped,
+                'total' => $total,
+                'filtered' => $filteredCount,
+            ],
+            // Backward-compatible flat list for older clients
+            'activities' => $flat,
         ]);
     }
 

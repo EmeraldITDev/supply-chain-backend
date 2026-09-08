@@ -828,6 +828,7 @@ class MRFController extends Controller
             'poGeneratedAt' => $mrf->po_generated_at?->toIso8601String(),
             'po_signed_at' => $mrf->po_signed_at?->toIso8601String(),
             'poSignedAt' => $mrf->po_signed_at?->toIso8601String(),
+            ...\App\Support\ProcurementDeliveryStatus::apiFields($mrf),
             'custom_terms' => $mrf->custom_terms,
             'customTerms' => $mrf->custom_terms,
             'po_terms_mode' => $mrf->po_terms_mode,
@@ -1139,6 +1140,7 @@ class MRFController extends Controller
                     'executiveRemarks' => $mrf->executive_remarks,
                     'chairmanApproved' => (bool) $mrf->chairman_approved,
                     'chairmanApprovedAt' => $mrf->chairman_approved_at ? $mrf->chairman_approved_at->toIso8601String() : null,
+                    ...\App\Support\ProcurementDeliveryStatus::apiFields($mrf),
                     'attachments' => $attachments,
                     'documents' => $attachments,
                 'rfqs' => $rfqs->map(function ($rfq) {

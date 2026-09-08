@@ -445,6 +445,14 @@ class MRF extends Model
             'expectedDeliveryDate' => $delivery,
             'delivery_date' => $delivery,
             'deliveryDate' => $delivery,
+            'actual_delivery_date' => $this->grn_completed_at?->toIso8601String(),
+            'actualDeliveryDate' => $this->grn_completed_at?->toIso8601String(),
+            'delivery_status' => \App\Support\ProcurementDeliveryStatus::calculate($this),
+            'deliveryStatus' => \App\Support\ProcurementDeliveryStatus::calculate($this),
+            'rfq_issued_at' => $this->rfq_issued_at?->toIso8601String(),
+            'rfqIssuedAt' => $this->rfq_issued_at?->toIso8601String(),
+            'quotation_received_at' => $this->quotation_received_at?->toIso8601String(),
+            'quotationReceivedAt' => $this->quotation_received_at?->toIso8601String(),
             'unsigned_po_url' => $this->unsigned_po_url,
             'unsignedPoUrl' => $this->unsigned_po_url,
             'signed_po_url' => $this->signed_po_url,
@@ -585,6 +593,8 @@ class MRF extends Model
         'po_generated_at',
         'po_signed_at',
         'po_draft_saved_at',
+        'rfq_issued_at',
+        'quotation_received_at',
         // PO Details
         'ship_to_address',
         'tax_rate',
@@ -646,6 +656,8 @@ class MRF extends Model
         'po_generated_at' => 'datetime',
         'po_signed_at' => 'datetime',
         'po_draft_saved_at' => 'datetime',
+        'rfq_issued_at' => 'datetime',
+        'quotation_received_at' => 'datetime',
         'po_generation_failed_at' => 'datetime',
         // Note: tax_rate and tax_amount casts commented out until migration runs
         // Uncomment after running: php artisan migrate (migration: 2026_01_24_180004_add_po_details_to_m_r_f_s_table)
@@ -901,6 +913,7 @@ class MRF extends Model
         'date', 'created_at', 'updated_at', 'status', 'current_stage', 'workflow_state', 'first_approval_by_role',
         'rejection_reason', 'is_resubmission', 'executive_approved', 'executive_approved_at',
         'po_number', 'po_draft_saved_at', 'unsigned_po_url', 'signed_po_url', 'po_generated_at', 'po_terms_mode',
+        'expected_delivery_date', 'rfq_issued_at', 'quotation_received_at', 'grn_completed_at',
         'source', 'is_po_linked', 'linked_po_id', 'grn_completed',
     ];
 
@@ -922,6 +935,7 @@ class MRF extends Model
         'chairman_approved', 'chairman_approved_at', 'chairman_remarks',
         'po_number', 'unsigned_po_url', 'unsigned_po_share_url', 'signed_po_url', 'signed_po_share_url',
         'po_generated_at', 'po_terms_mode', 'po_type', 'source', 'is_po_linked', 'linked_po_id', 'po_draft_saved_at',
+        'expected_delivery_date', 'rfq_issued_at', 'quotation_received_at',
         'po_generation_error', 'po_generation_failed_at',
     ];
 
@@ -1054,9 +1068,18 @@ class MRF extends Model
                 'poTermsMode' => $this->po_terms_mode,
                 'priceComparisons' => [],
             ],
+            \App\Support\ProcurementDeliveryStatus::apiFields($this),
             $this->poOriginApiFields(),
             $this->poDraftApiFields(),
         );
+    }
+
+    /**
+     * Delivery status for procurement intelligence dashboards.
+     */
+    public function calculateDeliveryStatus(): string
+    {
+        return \App\Support\ProcurementDeliveryStatus::calculate($this);
     }
 
     /**

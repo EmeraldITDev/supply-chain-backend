@@ -1769,3 +1769,224 @@ Returns **422** if all documents fail, **200/201** if at least one succeeds.
 - Verify Logistics Manager sees documents in overview (read-only).
 - Verify fresh S3 URLs on every document list fetch.
 
+---
+
+## Procurement Intelligence Dashboard — Backend Data Enhancements (2026-09-08)
+
+### Backend change file set
+- [database/migrations/2026_09_08_112100_add_procurement_intelligence_fields_to_m_r_f_s_table.php](database/migrations/2026_09_08_112100_add_procurement_intelligence_fields_to_m_r_f_s_table.php)
+- [app/Support/ProcurementDeliveryStatus.php](app/Support/ProcurementDeliveryStatus.php)
+- [app/Support/VendorPerformanceMetrics.php](app/Support/VendorPerformanceMetrics.php)
+- [app/Http/Controllers/Api/ProcurementDashboardController.php](app/Http/Controllers/Api/ProcurementDashboardController.php)
+- [app/Http/Controllers/Api/DashboardController.php](app/Http/Controllers/Api/DashboardController.php)
+- [app/Http/Controllers/Api/MRFController.php](app/Http/Controllers/Api/MRFController.php)
+- [app/Http/Controllers/Api/MRFWorkflowController.php](app/Http/Controllers/Api/MRFWorkflowController.php)
+- [app/Http/Controllers/Api/RFQController.php](app/Http/Controllers/Api/RFQController.php)
+- [app/Http/Controllers/Api/RFQWorkflowController.php](app/Http/Controllers/Api/RFQWorkflowController.php)
+- [app/Http/Controllers/Api/QuotationController.php](app/Http/Controllers/Api/QuotationController.php)
+- [app/Http/Controllers/Api/VendorController.php](app/Http/Controllers/Api/VendorController.php)
+- [app/Models/MRF.php](app/Models/MRF.php)
+- [app/Services/PurchaseOrderService.php](app/Services/PurchaseOrderService.php)
+- [routes/api.php](routes/api.php)
+
+### Migration
+Run: `php artisan migrate`
+
+Adds (idempotent `hasColumn` guards):
+- `m_r_f_s.expected_delivery_date` (date, nullable) — already existed in many envs; migration is safe
+- `m_r_f_s.rfq_issued_at` (timestamp, nullable) — set on first RFQ send
+- `m_r_f_s.quotation_received_at` (timestamp, nullable) — set on first quotation submit
+
+### 1) Expected Delivery Date on POs
+- Field: `expected_delivery_date` / `expectedDeliveryDate` / `delivery_date` / `deliveryDate` (Y-m-d)
+- Appears on: `GET /api/mrfs`, `GET /api/mrfs/{id}`, `GET /api/mrfs/{id}?for_po=1`, `GET /api/pos`, `GET /api/pos/{id}`, full-details
+- Set via PO generate / draft: `POST /api/mrfs/{id}/generate-po` accepts `expected_delivery_date` | `delivery_date` | `deliveryDate` with validation `nullable|date|after:today`
+- **Frontend:** show an “Expected Delivery Date” date picker on PO generate / edit; stop estimating overdue from a fixed 21-day window — use this field
+
+### 2) Actual delivery + delivery status
+Added on MRF list/detail/PO responses:
+| Field | Source |
+|-------|--------|
+| `actual_delivery_date` / `actualDeliveryDate` | `grn_completed_at` (ISO8601) — no new column |
+| `delivery_status` / `deliveryStatus` | `on_time` \| `late` \| `delivered` \| `overdue` \| `in_transit` \| `pending` |
+| `rfq_issued_at` / `rfqIssuedAt` | first RFQ send |
+| `quotation_received_at` / `quotationReceivedAt` | first quotation received |
+
+Use for on-time rate (`actual ≤ expected`), delay days (`actual − expected`), overdue (`expected < today` AND actual null).
+
+### 3) GET /api/dashboard/procurement (also `/api/procurement/stats`)
+**Roles:** procurement manager / overview roles (same as procurement-manager dashboard)
+
+**Query:** `period_days` (default `30`)
+
+**Response shape (additive period comparison):**
+```json
+{
+  "success": true,
+  "period_days": 30,
+  "stats": {
+    "pending_mrfs": 12,
+    "pending_mrfs_previous": 9,
+    "pending_mrfs_change": 3,
+    "pending_mrfs_change_pct": 33.3,
+    "approved_mrfs": 0,
+    "approved_mrfs_previous": 0,
+    "approved_mrfs_change": 0,
+    "approved_mrfs_change_pct": 0,
+    "rejected_mrfs": 0,
+    "rejected_mrfs_previous": 0,
+    "rejected_mrfs_change": 0,
+    "rejected_mrfs_change_pct": 0,
+    "pos_generated": 0,
+    "pos_generated_previous": 0,
+    "pos_generated_change": 0,
+    "pos_generated_change_pct": 0,
+    "pos_signed": 0,
+    "pos_signed_previous": 0,
+    "pos_signed_change": 0,
+    "pos_signed_change_pct": 0,
+    "vendor_registrations": 0,
+    "vendor_registrations_previous": 0,
+    "vendor_registrations_change": 0,
+    "vendor_registrations_change_pct": 0,
+    "rfqs_issued": 0,
+    "rfqs_issued_previous": 0,
+    "rfqs_issued_change": 0,
+    "rfqs_issued_change_pct": 0,
+    "quotations_received": 0,
+    "quotations_received_previous": 0,
+    "quotations_received_change": 0,
+    "quotations_received_change_pct": 0,
+    "average_cycle_time": 14.2,
+    "average_cycle_time_previous": 16.0,
+    "average_cycle_time_change": -1.8,
+    "average_cycle_time_change_pct": -11.3,
+    "on_time_delivery_rate": 82.5,
+    "on_time_delivery_rate_previous": 75.0,
+    "on_time_delivery_rate_change": 7.5,
+    "on_time_delivery_rate_change_pct": 10.0
+  }
+}
+```
+
+Previous period = same duration ending at current period start (e.g. days 31–60 when `period_days=30`). Cached 300s per `period_days`.
+
+`GET /api/dashboard/procurement-manager` also accepts `period_days` and merges the same `_previous` / `_change` / `_change_pct` keys into `stats` (existing snapshot keys preserved).
+
+### 4) GET /api/procurement/pipeline-stats
+**Query:** `period_days` (default `30`)
+
+```json
+{
+  "success": true,
+  "data": {
+    "period_days": 30,
+    "stages": [
+      {
+        "name": "MRF to Approval",
+        "avg_days": 2.4,
+        "volume": 18,
+        "is_slow": false
+      },
+      {
+        "name": "Approval to RFQ",
+        "avg_days": 1.1,
+        "volume": 15,
+        "is_slow": false
+      },
+      {
+        "name": "RFQ to Quotation",
+        "avg_days": 5.0,
+        "volume": 12,
+        "is_slow": true
+      },
+      {
+        "name": "Quotation to PO",
+        "avg_days": 1.8,
+        "volume": 10,
+        "is_slow": false
+      },
+      {
+        "name": "PO to Delivery",
+        "avg_days": 12.0,
+        "volume": 8,
+        "is_slow": true
+      }
+    ]
+  }
+}
+```
+
+`is_slow` = stage `avg_days` > 150% of the mean of all stages that have an average. Cached 300s.
+
+### 5) GET /api/mrfs — added fields
+Per list/detail row (dual snake/camel):
+- `expected_delivery_date`, `actual_delivery_date`, `delivery_status`
+- `rfq_issued_at`, `quotation_received_at`
+
+### 6) GET /api/vendors — performance object
+Each vendor row now includes:
+```json
+"performance": {
+  "total_pos": 12,
+  "completed_pos": 10,
+  "on_time_deliveries": 8,
+  "late_deliveries": 2,
+  "average_delivery_days": 11.5,
+  "fulfilment_rate": 83.3
+}
+```
+Derived from `m_r_f_s.selected_vendor_id`; each metric cached 300s.
+
+### 7) GET /api/dashboard/recent-activities — grouping + filters
+**Existing behaviour (unchanged):** omit new params → `data` remains a flat array.
+
+**Intelligence mode:** pass `group_by=day|week|month` (or any of `event_types`, `vendor_id`, `project`, `from`, `to`) → grouped response:
+
+**Query params:**
+- `group_by` — `day` (default when filters used), `week`, `month`
+- `event_types` — comma-separated (e.g. `mrf_created,po_generated,rfq_sent,approval`)
+- `vendor_id` — public vendor id or numeric PK
+- `project` — contract type / MRF id / title fragment
+- `from`, `to` — date range
+- `limit` — max events (default 50, max 200)
+
+```json
+{
+  "success": true,
+  "data": {
+    "grouped": [
+      {
+        "date": "2026-09-08",
+        "label": "Today",
+        "events": [
+          {
+            "id": 1,
+            "event_type": "po_generated",
+            "description": "PO generated…",
+            "mrf_id": "MRF-EMERALD-2026-070",
+            "vendor_name": null,
+            "occurred_at": "2026-09-08T10:30:00+00:00",
+            "actor": "Lateef Olanrewaju"
+          }
+        ]
+      }
+    ],
+    "total": 47,
+    "filtered": 12
+  },
+  "activities": []
+}
+```
+
+`activities` is a flat copy for transitional clients. Grouping is server-side.
+
+### Frontend checklist
+- [ ] Wire intelligence KPI cards to `GET /api/dashboard/procurement?period_days=` (or extended procurement-manager `stats`) and show `_change` / `_change_pct`
+- [ ] Replace 21-day overdue heuristic with `expected_delivery_date` + `delivery_status`
+- [ ] Compute on-time / delay from `actual_delivery_date` vs `expected_delivery_date`
+- [ ] Pipeline view → `GET /api/procurement/pipeline-stats`; highlight `is_slow`
+- [ ] Vendor rankings table → use `performance.*`
+- [ ] Activity feed → pass `group_by=day` (+ optional filters); render `data.grouped`
+- [ ] PO form → Expected Delivery Date picker bound to `expected_delivery_date`
+

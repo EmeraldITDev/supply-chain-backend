@@ -533,6 +533,14 @@ class QuotationController extends Controller
         ]);
         }
 
+        // Stamp first quotation received time on the parent MRF (procurement cycle metrics)
+        $mrfForTimestamp = $rfq->mrf_id
+            ? ($rfq->relationLoaded('mrf') ? $rfq->mrf : \App\Models\MRF::find($rfq->mrf_id))
+            : null;
+        if ($mrfForTimestamp && empty($mrfForTimestamp->quotation_received_at)) {
+            $mrfForTimestamp->forceFill(['quotation_received_at' => now()])->save();
+        }
+
         // Handle quotation items if provided
         if ($request->has('items') && is_array($request->items) && count($request->items) > 0) {
             foreach ($request->items as $itemData) {

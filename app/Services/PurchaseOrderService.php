@@ -18,6 +18,7 @@ class PurchaseOrderService
         'id', 'mrf_id', 'formatted_id', 'po_number', 'title', 'status', 'workflow_state',
         'current_stage', 'estimated_cost', 'currency', 'selected_vendor_id', 'requester_name',
         'department', 'po_draft_saved_at', 'po_generated_at', 'unsigned_po_url', 'signed_po_url',
+        'expected_delivery_date', 'grn_completed_at', 'rfq_issued_at', 'quotation_received_at',
         'source', 'is_po_linked', 'linked_po_id', 'created_at', 'updated_at',
     ];
 
@@ -29,6 +30,7 @@ class PurchaseOrderService
         'po_special_terms', 'invoice_submission_email', 'invoice_submission_cc',
         'selected_vendor_id', 'requester_id', 'requester_name', 'department',
         'po_draft_saved_at', 'po_generated_at', 'unsigned_po_url', 'signed_po_url',
+        'expected_delivery_date', 'grn_completed_at', 'rfq_issued_at', 'quotation_received_at',
         'source', 'is_po_linked', 'linked_po_id', 'justification', 'created_at', 'updated_at',
     ];
 
@@ -110,7 +112,7 @@ class PurchaseOrderService
             'poGeneratedAt' => $mrf->po_generated_at?->toIso8601String(),
             'createdAt' => $mrf->created_at?->toIso8601String(),
             'updatedAt' => $mrf->updated_at?->toIso8601String(),
-        ]);
+        ], \App\Support\ProcurementDeliveryStatus::apiFields($mrf));
     }
 
     public function findForEdit(string $id): ?MRF
@@ -202,7 +204,7 @@ class PurchaseOrderService
             'poGeneratedAt' => $mrf->po_generated_at?->toIso8601String(),
             'unsignedPoUrl' => $mrf->freshUnsignedPoStreamUrl() ?? $mrf->unsigned_po_url,
             'signedPoUrl' => $mrf->signed_po_url,
-        ]);
+        ], \App\Support\ProcurementDeliveryStatus::apiFields($mrf));
     }
 
     /**

@@ -10,6 +10,7 @@ use App\Http\Controllers\Api\DashboardKpiController;
 use App\Http\Controllers\Api\EligiblePassengersController;
 use App\Http\Controllers\Api\AppConfigController;
 use App\Http\Controllers\Api\FinanceApReportController;
+use App\Http\Controllers\Api\ProcurementDashboardController;
 use App\Http\Controllers\Api\ProcurementReportController;
 use App\Http\Controllers\Api\ReportingEngineController;
 use App\Http\Controllers\Api\ReportsDashboardController;
@@ -537,6 +538,9 @@ Route::middleware('auth:sanctum')->group(function () {
     // Dashboard routes
     Route::get('/dashboard/kpis', [DashboardKpiController::class, 'index']);
     Route::get('/dashboard/procurement-manager', [DashboardController::class, 'procurementManagerDashboard']);
+    Route::get('/dashboard/procurement', [ProcurementDashboardController::class, 'stats']);
+    Route::get('/procurement/stats', [ProcurementDashboardController::class, 'stats']);
+    Route::get('/procurement/pipeline-stats', [ProcurementDashboardController::class, 'pipelineStats']);
     Route::get('/dashboard/logistics-statistics', [LogisticsDashboardController::class, 'stats'])->middleware('role:procurement_manager,logistics_manager,logistics_officer,supply_chain_director,admin,executive,chairman,finance');
     Route::get('/dashboard/supply-chain-director', [DashboardController::class, 'supplyChainDirectorDashboard']);
     Route::get('/dashboard/executive', [DashboardController::class, 'executiveDashboard']);

@@ -17,6 +17,7 @@ use App\Services\VendorDirectoryExportService;
 use App\Services\VendorDocumentService;
 use App\Services\QuotationAttachmentService;
 use App\Support\VendorCategoryDisplay;
+use App\Support\VendorPerformanceMetrics;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Hash;
@@ -161,6 +162,7 @@ class VendorController extends Controller
                     'address' => $vendor->address,
                     'taxId' => $vendor->tax_id,
                     'contactPerson' => $vendor->contact_person,
+                    'performance' => VendorPerformanceMetrics::forVendor((int) $vendor->id),
                 ];
             })->values()->all();
             return $this->paginatedJsonResponse($paginator, $items);

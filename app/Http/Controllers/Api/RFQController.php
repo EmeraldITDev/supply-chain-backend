@@ -417,6 +417,11 @@ class RFQController extends Controller
 
         $rfq->load('vendors');
 
+        // Stamp first RFQ issue time on the parent MRF (procurement cycle metrics)
+        if ($mrf && empty($mrf->rfq_issued_at)) {
+            $mrf->forceFill(['rfq_issued_at' => now()])->save();
+        }
+
         // Log activity - RFQ sent to vendors
         try {
             Activity::create([
