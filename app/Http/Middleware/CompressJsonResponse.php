@@ -19,6 +19,11 @@ class CompressJsonResponse
         /** @var Response $response */
         $response = $next($request);
 
+        // Never buffer or gzip streamed SSE responses (AI chat, etc.).
+        if ($response instanceof \Symfony\Component\HttpFoundation\StreamedResponse) {
+            return $response;
+        }
+
         if ($response->headers->has('Content-Encoding')) {
             return $response;
         }
@@ -29,6 +34,9 @@ class CompressJsonResponse
         }
 
         $contentType = (string) $response->headers->get('Content-Type', '');
+        if (str_contains($contentType, 'text/event-stream')) {
+            return $response;
+        }
         if (
             $contentType !== ''
             && ! str_contains($contentType, 'json')

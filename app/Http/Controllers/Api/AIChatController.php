@@ -7,6 +7,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class AIChatController extends Controller
 {
@@ -34,7 +35,7 @@ class AIChatController extends Controller
         '/budget',
     ];
 
-    public function chat(Request $request): JsonResponse
+    public function chat(Request $request): JsonResponse|StreamedResponse
     {
         $request->validate([
             'message' => 'required|string|max:2000',
@@ -97,71 +98,77 @@ class AIChatController extends Controller
             (string) config('services.gemini.model', 'gemini-2.5-flash')
         );
 
-        try {
-            $response = Http::withHeaders([
-                'Content-Type' => 'application/json',
-                'x-goog-api-key' => trim($apiKey),
-            ])->timeout(30)->post(
-                'https://generativelanguage.googleapis.com/v1beta/models/'
-                    .$model
-                    .':generateContent',
-                [
-                    'system_instruction' => [
-                        'parts' => [['text' => $systemPrompt]],
-                    ],
-                    'contents' => $contents,
-                    'generationConfig' => [
-                        'maxOutputTokens' => 1024,
-                        'temperature' => 0.7,
-                    ],
-                ]
-            );
-
-            if ($response->failed()) {
-                $geminiMessage = data_get($response->json(), 'error.message');
-                Log::error('Gemini API error', [
-                    'status' => $response->status(),
-                    'model' => $model,
-                    'history_turns' => count($request->history ?? []),
-                    'body' => $response->body(),
-                ]);
-
-                $clientError = 'AI service temporarily unavailable.';
-                if ($response->status() === 404) {
-                    $clientError = 'Gemini model is unavailable. On Render set GEMINI_MODEL to a current Flash model, then redeploy.';
-                } elseif (in_array($response->status(), [400, 401, 403], true)) {
-                    $clientError = 'Gemini rejected the API key or request. Check GEMINI_API_KEY on Render.';
-                }
-
-                return response()->json([
-                    'success' => false,
-                    'error' => $clientError,
-                    'code' => 'GEMINI_API_ERROR',
-                    'gemini_status' => $response->status(),
-                    'gemini_message' => is_string($geminiMessage) ? $geminiMessage : null,
-                ], 503);
+        return response()->stream(function () use ($contents, $systemPrompt, $apiKey, $model, $request) {
+            // Disable PHP output buffering so tokens reach the client immediately.
+            while (ob_get_level() > 0) {
+                ob_end_flush();
             }
 
-            $data = $response->json();
-            $reply = $data['candidates'][0]['content']['parts'][0]['text']
-                ?? 'I could not generate a response. Please try again.';
+            try {
+                $response = Http::withHeaders([
+                    'Content-Type' => 'application/json',
+                    'x-goog-api-key' => trim($apiKey),
+                    'Accept' => 'text/event-stream',
+                ])->timeout(60)->withOptions(['stream' => true])->post(
+                    'https://generativelanguage.googleapis.com/v1beta/models/'
+                        .$model
+                        .':streamGenerateContent?alt=sse',
+                    [
+                        'system_instruction' => [
+                            'parts' => [['text' => $systemPrompt]],
+                        ],
+                        'contents' => $contents,
+                        'generationConfig' => [
+                            'maxOutputTokens' => 1024,
+                            'temperature' => 0.7,
+                        ],
+                    ]
+                );
 
-            return response()->json([
-                'success' => true,
-                'data' => [
-                    'reply' => $reply,
-                    'model' => $data['modelVersion'] ?? $model,
-                ],
-            ]);
-        } catch (\Exception $e) {
-            Log::error('AI chat error', ['error' => $e->getMessage()]);
+                if ($response->failed()) {
+                    $body = $response->body();
+                    $geminiMessage = data_get(json_decode($body, true), 'error.message');
+                    Log::error('Gemini streaming API error', [
+                        'status' => $response->status(),
+                        'model' => $model,
+                        'history_turns' => count($request->history ?? []),
+                        'body' => $body,
+                    ]);
 
-            return response()->json([
-                'success' => false,
-                'error' => 'An error occurred. Please try again.',
-                'code' => 'GEMINI_EXCEPTION',
-            ], 500);
-        }
+                    echo 'data: '.json_encode([
+                        'error' => 'AI service temporarily unavailable.',
+                        'code' => 'GEMINI_API_ERROR',
+                        'gemini_status' => $response->status(),
+                        'gemini_message' => is_string($geminiMessage) ? $geminiMessage : null,
+                    ])."\n\n";
+                    flush();
+
+                    return;
+                }
+
+                $body = $response->toPsrResponse()->getBody();
+                while (! $body->eof()) {
+                    $chunk = $body->read(1024);
+                    if ($chunk === '' || $chunk === false) {
+                        break;
+                    }
+                    echo $chunk;
+                    flush();
+                }
+            } catch (\Throwable $e) {
+                Log::error('AI chat stream error', ['error' => $e->getMessage()]);
+                echo 'data: '.json_encode([
+                    'error' => 'An error occurred. Please try again.',
+                    'code' => 'GEMINI_EXCEPTION',
+                ])."\n\n";
+                flush();
+            }
+        }, 200, [
+            'Content-Type' => 'text/event-stream',
+            'Cache-Control' => 'no-cache, no-transform',
+            'Connection' => 'keep-alive',
+            'X-Accel-Buffering' => 'no',
+        ]);
     }
 
     /**
