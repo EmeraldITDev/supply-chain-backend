@@ -10,6 +10,30 @@ use Illuminate\Support\Facades\Log;
 
 class AIChatController extends Controller
 {
+    /** Verified React Router paths only — never invent paths outside this list. */
+    private const APPROVED_PATHS = [
+        '/dashboard',
+        '/procurement',
+        '/supply-chain',
+        '/executive',
+        '/chairman',
+        '/new-mrf',
+        '/new-srf',
+        '/department',
+        '/vendors',
+        '/logistics',
+        '/warehouse',
+        '/reports',
+        '/reports/procurement',
+        '/trips',
+        '/trip-request',
+        '/vendor-portal',
+        '/settings',
+        '/accounts-payable',
+        '/accounts-receivable',
+        '/budget',
+    ];
+
     public function chat(Request $request): JsonResponse
     {
         $request->validate([
@@ -24,21 +48,38 @@ class AIChatController extends Controller
         $department = (string) ($user->department ?? '');
         $systemPrompt = $this->buildSystemPrompt($user, $role, $department);
 
-        $messages = [];
+        // Build Gemini contents from prior turns + current message.
+        $contents = [];
         foreach ($request->history ?? [] as $msg) {
-            $messages[] = [
-                'role' => $msg['role'],
-                'content' => $msg['content'],
+            $roleName = $msg['role'] ?? '';
+            $text = trim((string) ($msg['content'] ?? ''));
+            if (! in_array($roleName, ['user', 'assistant'], true) || $text === '') {
+                continue;
+            }
+            $contents[] = [
+                'role' => $roleName === 'assistant' ? 'model' : 'user',
+                'parts' => [['text' => $text]],
             ];
         }
-        $messages[] = [
+        $contents[] = [
             'role' => 'user',
-            'content' => $request->message,
+            'parts' => [['text' => $request->message]],
         ];
 
-        // Gemini contents should start with a user turn.
-        while (! empty($messages) && ($messages[0]['role'] ?? '') === 'assistant') {
-            array_shift($messages);
+        // Gemini requires the first turn to be user.
+        while (! empty($contents) && ($contents[0]['role'] ?? '') === 'model') {
+            array_shift($contents);
+        }
+
+        // Merge consecutive same-role turns (Gemini rejects non-alternating roles).
+        $contents = $this->mergeConsecutiveRoles($contents);
+
+        if (empty($contents)) {
+            return response()->json([
+                'success' => false,
+                'error' => 'No message content to send.',
+                'code' => 'EMPTY_CONTENTS',
+            ], 422);
         }
 
         $apiKey = config('services.gemini.key');
@@ -57,7 +98,6 @@ class AIChatController extends Controller
         );
 
         try {
-            // Prefer x-goog-api-key header; do not put the key in the URL.
             $response = Http::withHeaders([
                 'Content-Type' => 'application/json',
                 'x-goog-api-key' => trim($apiKey),
@@ -69,10 +109,7 @@ class AIChatController extends Controller
                     'system_instruction' => [
                         'parts' => [['text' => $systemPrompt]],
                     ],
-                    'contents' => array_map(fn ($msg) => [
-                        'role' => $msg['role'] === 'assistant' ? 'model' : 'user',
-                        'parts' => [['text' => $msg['content']]],
-                    ], $messages),
+                    'contents' => $contents,
                     'generationConfig' => [
                         'maxOutputTokens' => 1024,
                         'temperature' => 0.7,
@@ -85,13 +122,14 @@ class AIChatController extends Controller
                 Log::error('Gemini API error', [
                     'status' => $response->status(),
                     'model' => $model,
+                    'history_turns' => count($request->history ?? []),
                     'body' => $response->body(),
                 ]);
 
                 $clientError = 'AI service temporarily unavailable.';
                 if ($response->status() === 404) {
-                    $clientError = 'Gemini model is unavailable. On Render set GEMINI_MODEL=gemini-2.5-flash (gemini-2.0-flash is shut down), then redeploy.';
-                } elseif ($response->status() === 400 || $response->status() === 401 || $response->status() === 403) {
+                    $clientError = 'Gemini model is unavailable. On Render set GEMINI_MODEL to a current Flash model, then redeploy.';
+                } elseif (in_array($response->status(), [400, 401, 403], true)) {
                     $clientError = 'Gemini rejected the API key or request. Check GEMINI_API_KEY on Render.';
                 }
 
@@ -127,8 +165,33 @@ class AIChatController extends Controller
     }
 
     /**
-     * Map shut-down / legacy model ids to a current Gemini Flash model.
+     * @param  list<array{role: string, parts: list<array{text: string}>}>  $contents
+     * @return list<array{role: string, parts: list<array{text: string}>}>
      */
+    private function mergeConsecutiveRoles(array $contents): array
+    {
+        $merged = [];
+        foreach ($contents as $turn) {
+            $role = $turn['role'];
+            $text = $turn['parts'][0]['text'] ?? '';
+            if ($text === '') {
+                continue;
+            }
+            $last = end($merged);
+            if ($last !== false && ($last['role'] ?? null) === $role) {
+                $merged[count($merged) - 1]['parts'][0]['text'] =
+                    trim($last['parts'][0]['text']."\n\n".$text);
+            } else {
+                $merged[] = [
+                    'role' => $role,
+                    'parts' => [['text' => $text]],
+                ];
+            }
+        }
+
+        return $merged;
+    }
+
     private function resolveGeminiModel(string $model): string
     {
         $model = trim($model);
@@ -165,6 +228,10 @@ class AIChatController extends Controller
         $navigationMap = $this->getNavigationMap($role);
         $employeeId = $user->employee_id ?? 'N/A';
         $name = $user->name ?? 'User';
+        $approvedPaths = implode("\n", array_map(
+            fn (string $path) => "- {$path}",
+            self::APPROVED_PATHS
+        ));
 
         return <<<PROMPT
 You are the AI assistant for Emerald Industrial Co. CFZE's Supply Chain Management (SCM) platform. You are embedded directly in the platform and help users navigate it, understand their data, and complete procurement workflows.
@@ -179,8 +246,11 @@ You are the AI assistant for Emerald Industrial Co. CFZE's Supply Chain Manageme
 {$roleContext}
 
 ## Platform Navigation
-The platform has these main sections accessible to this user:
+The platform has these main sections accessible to this user (path in parentheses):
 {$navigationMap}
+
+## Approved Navigation Paths (exact strings only)
+{$approvedPaths}
 
 ## Platform Glossary
 - MRF: Material Request Form — used to request procurement of goods
@@ -218,8 +288,9 @@ The platform has these main sections accessible to this user:
 ## Response Guidelines
 - Be concise and direct — users are busy professionals
 - When a user asks how to do something, give numbered steps
-- When a user asks where something is, tell them the exact menu item or page name
+- When a user asks where something is, tell them the exact menu item or page name and the path
 - When referring to navigation, use the exact names shown in the sidebar
+- Remember prior turns in this conversation and answer follow-ups in that context
 - If a user asks about their specific data (their MRFs, their approvals), let them know you can see their role context but they should check the relevant dashboard section for live data
 - Never make up data or invent MRF numbers, PO numbers, or vendor names
 - If you cannot answer something, say so clearly and suggest where they can find the answer
@@ -229,10 +300,24 @@ The platform has these main sections accessible to this user:
 ## Navigation Actions
 When your response involves navigating somewhere, end your message with a JSON action block on its own line:
 ACTION:{"type":"navigate","path":"/procurement"}
-or
-ACTION:{"type":"navigate","path":"/new-mrf"}
 
+Only use these exact paths — do not invent paths that are not in the approved list above.
+Never use /supply-chain-dashboard, /procurement-dashboard, /mrf-list, /po-list, or any path with a -dashboard suffix.
+There is no /logistics/fleet route — fleet lives under Logistics at /logistics.
 Only include an ACTION block when navigation would genuinely help the user complete their task.
+
+## Critical Navigation Rule
+You must ONLY use navigation paths from the approved list above.
+NEVER invent a path. NEVER use /supply-chain-dashboard, /procurement-dashboard, /mrf-list, /po-list, or any other path not explicitly listed.
+If you are not certain a path exists, do not include an ACTION block.
+It is better to describe where to go than to send the user to a 404 page.
+
+When a user asks to go somewhere, confirm you know the exact path before including an ACTION block.
+If the destination maps to a tab within a page rather than its own route (for example MRFs, RFQs, and Purchase Orders are tabs within /procurement), tell the user to go to that page and then click the relevant tab — do not guess a sub-route.
+Examples:
+- Purchase orders / RFQs / MRFs → /procurement (then the matching tab)
+- Sign a PO / SCD approvals → /supply-chain
+- Executive approvals → /executive
 PROMPT;
     }
 
@@ -260,19 +345,30 @@ PROMPT;
 
     private function getNavigationMap(string $role): string
     {
-        $common = "- Dashboard: overview of activity and pending items\n- Trip Request: submit a request for travel\n- All Trips: view travel records";
+        $common = implode("\n", [
+            '- Dashboard (/dashboard): overview of activity and pending items',
+            '- Trip Request (/trip-request): submit a request for travel',
+            '- All Trips (/trips): view travel records',
+        ]);
 
-        $procurement = "- Procurement > Material Requests (MRN): initial material requests\n- Procurement > MRF Official: formal material request forms\n- Procurement > All MRFs: all material requests\n- Procurement > RFQ Management: manage requests for quotation\n- Procurement > Service Requests: service request forms\n- Procurement > Purchase Orders: manage and generate POs\n- Procurement > Logistics POs: purchase orders for logistics\n- Vendors: vendor directory and registrations\n- Logistics: trip management, fleet, journey tracking\n- Warehouse & Inventory: stock management\n- Reports: procurement analytics and reporting";
+        $procurement = implode("\n", [
+            '- Procurement (/procurement): MRFs, RFQs, Service Requests, Purchase Orders, and Logistics POs (use in-page tabs — no separate routes)',
+            '- Vendors (/vendors): vendor directory and registrations',
+            '- Logistics (/logistics): trip management, fleet, journey tracking',
+            '- Warehouse & Inventory (/warehouse): stock management',
+            '- Reports (/reports): analytics overview',
+            '- Procurement Reports (/reports/procurement): procurement analytics',
+        ]);
 
         return match ($role) {
             'procurement_manager', 'procurement' => $common."\n".$procurement,
-            'supply_chain_director', 'supply_chain' => $common."\n- Supply Chain Dashboard: approvals queue and PO signing\n".$procurement,
-            'executive', 'director' => $common."\n- Executive Dashboard: approvals and my requests\n- New MRF: create a material request\n- New SRF: create a service request\n".$procurement,
-            'logistics_manager', 'logistics', 'logistics_officer' => $common."\n- Logistics > Overview: logistics dashboard\n- Logistics > Trips: all trip records\n- Logistics > Journeys: active journey tracking\n- Logistics > Fleet: vehicle management\n- Logistics > GPS: live tracking\n- Logistics > Materials: material movements",
-            'vendor' => "- Vendor Portal: your quotations, invoices, and trip assignments",
-            'chairman' => $common."\n- Chairman Dashboard: high-value MRF and payment approvals",
-            'finance', 'finance_officer' => $common."\n- Finance Dashboard: payment processing and AP visibility\n".$procurement,
-            default => $common."\n- My Requests: your submitted MRFs and SRFs\n- New MRF: create a material request\n- New SRF: create a service request\n- Annual Planning: department budget planning",
+            'supply_chain_director', 'supply_chain' => $common."\n- Supply Chain Dashboard (/supply-chain): approvals queue and PO signing\n".$procurement,
+            'executive', 'director' => $common."\n- Executive Dashboard (/executive): approvals and my requests\n- New MRF (/new-mrf): create a material request\n- New SRF (/new-srf): create a service request\n".$procurement,
+            'logistics_manager', 'logistics', 'logistics_officer' => $common."\n- Logistics (/logistics): overview, trips, journeys, fleet, GPS, and materials (in-page sections — not separate routes)\n- Vendors (/vendors): vendor directory",
+            'vendor' => '- Vendor Portal (/vendor-portal): your quotations, invoices, and trip assignments',
+            'chairman' => $common."\n- Chairman Dashboard (/chairman): high-value MRF and payment approvals",
+            'finance', 'finance_officer' => $common."\n- Accounts Payable (/accounts-payable): AP visibility\n".$procurement,
+            default => $common."\n- My Requests (/department): your submitted MRFs and SRFs\n- New MRF (/new-mrf): create a material request\n- New SRF (/new-srf): create a service request\n- Annual Planning (/department): department budget planning (Annual Planning tab)",
         };
     }
 }
