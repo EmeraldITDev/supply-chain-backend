@@ -2082,3 +2082,100 @@ php artisan po:refresh-unsigned-category
 ```
 Only regenerates POs with an unsigned PDF that are awaiting SCD signature (not yet signed).
 
+---
+
+## Signed PO Edit and Re-signing Workflow
+
+Procurement Managers and Admins can unlock a **signed** Purchase Order, edit it, and send it back to the Supply Chain Director for a new signature. The previous signed PDF is invalidated; the original unsigned PDF is kept for audit. Each unlock+resubmit increments `revision_number` and stores a before/after change log.
+
+### POST `/api/pos/{id}/unlock-for-edit`
+
+Roles: `procurement_manager`, `admin` (`procurement` alias accepted).
+
+Request:
+```json
+{ "reason": "string (required, min 3 chars)" }
+```
+
+Response:
+```json
+{
+  "success": true,
+  "message": "Purchase order unlocked for revision",
+  "data": {
+    "id": "MRF-…",
+    "poNumber": "PO-…",
+    "status": "pending_revision",
+    "workflowState": "pending_revision",
+    "unsignedPoUrl": "https://… (preserved)",
+    "signedPoUrl": null,
+    "revisionNumber": 0,
+    "unlockedBy": 12,
+    "unlockedAt": "2026-09-18T11:00:00+00:00",
+    "unlockReason": "Supplier quoted a new unit price",
+    "items": []
+  }
+}
+```
+
+Frontend: shown only to PM/admin on signed POs via **Edit PO**. Confirmation copy is: *"This PO has already been signed. Editing it will invalidate the current signature and require the Supply Chain Director to sign again. Do you want to continue?"* with a required reason. On success the PO edit form opens, pre-populated, with every field editable.
+
+### PUT `/api/pos/{id}` (extended)
+
+Roles: `procurement_manager`, `admin` (`procurement` alias accepted).
+
+Allowed when the PO is a **draft** (existing behaviour) **or** `pending_revision`. Signed / any other status returns HTTP 422 `INVALID_STATUS` until unlock.
+
+Request (camelCase; snake_case aliases accepted):
+```json
+{
+  "items": [{ "itemName": "Pipe", "quantity": 4, "unitPrice": 250, "description": "" }],
+  "selectedVendorId": "VND-…",
+  "expectedDeliveryDate": "2026-10-01",
+  "paymentTerms": "Net 45",
+  "remarks": "Updated after supplier confirmation",
+  "customTerms": "…",
+  "shipToAddress": "…",
+  "taxRate": 7.5,
+  "estimatedCost": 1000
+}
+```
+
+Response: `{ "success": true, "message": "Purchase order updated", "data": { /* same edit payload as GET /api/pos/{id} */ } }`
+
+Frontend: the revision form saves here first, then immediately calls submit-for-resign. Line items, quantities, unit prices, supplier, delivery date, payment terms, and notes are all editable.
+
+### POST `/api/pos/{id}/submit-for-resign`
+
+Roles: `procurement_manager`, `admin` (`procurement` alias accepted).
+
+Must be `pending_revision`. Regenerates the unsigned PO PDF, uploads it to S3, stores the new URL as `unsigned_po_url`, sets `status` / `workflow_state` to `pending_scd_signature`, increments `revision_number`, appends `revision_history`, and notifies every `supply_chain_director` in-app **and** by email.
+
+The change summary is a real diff of the unlock snapshot vs current values (total value, line quantities, unit prices, supplier, plus other scalar fields that changed). The notification includes PO number, editor name, revision timestamp, that field-level summary, and a link to `/supply-chain?po={mrf_id}`.
+
+Request: empty body.
+
+Response:
+```json
+{
+  "success": true,
+  "message": "Purchase order updated and sent for SCD re-signing",
+  "revision_number": 1,
+  "changed_fields": [
+    { "field": "total_value", "label": "Total value", "before": 1000, "after": 1600, "before_display": "1000", "after_display": "1600" }
+  ],
+  "notifications": { "emailed": 1, "notified": 1 },
+  "data": { "status": "pending_scd_signature", "revisionNumber": 1, "revisionHistory": [] }
+}
+```
+
+Frontend: called automatically after a successful revision save. Shows *"PO updated and SCD notified for re-signing"*.
+
+### GET `/api/pos/{id}` and MRF/PO list payloads (updated)
+
+New fields on PO/MRF responses: `revision_number`, `revision_history[]`, `latest_revision_summary`, `unlocked_by`, `unlocked_at`, `unlock_reason` (plus camelCase aliases).
+
+Frontend:
+- SCD dashboard / signing queue: amber **Revised** badge when `revision_number > 0`.
+- SCD PO workspace and PO detail: **Revision Summary** table with previous vs new values side by side.
+

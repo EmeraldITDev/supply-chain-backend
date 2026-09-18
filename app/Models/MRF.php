@@ -966,7 +966,8 @@ class MRF extends Model
         'expected_delivery_date', 'rfq_issued_at', 'quotation_received_at', 'grn_completed_at',
         'po_value', 'executive_approved_at', 'director_approved_at', 'scd_approved_at',
         'procurement_approved_at', 'finance_approved_at', 'payment_approved_at', 'procurement_review_started_at',
-        'source', 'is_po_linked', 'linked_po_id', 'grn_completed', 'revision_number',
+        'source', 'is_po_linked', 'linked_po_id', 'grn_completed',
+        'revision_number', 'revision_history', 'unlocked_by', 'unlocked_at', 'unlock_reason',
     ];
 
     /**

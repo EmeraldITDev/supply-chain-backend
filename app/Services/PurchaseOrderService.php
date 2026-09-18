@@ -21,7 +21,8 @@ class PurchaseOrderService
         'expected_delivery_date', 'grn_completed_at', 'rfq_issued_at', 'quotation_received_at',
         'po_value', 'executive_approved_at', 'director_approved_at', 'scd_approved_at',
         'procurement_approved_at', 'finance_approved_at', 'payment_approved_at', 'procurement_review_started_at',
-        'source', 'is_po_linked', 'linked_po_id', 'revision_number', 'created_at', 'updated_at',
+        'source', 'is_po_linked', 'linked_po_id', 'revision_number', 'revision_history',
+        'created_at', 'updated_at',
     ];
 
     /** Columns required to populate the PO edit modal. */
@@ -165,6 +166,7 @@ class PurchaseOrderService
             'contractType' => $mrf->contract_type,
             'status' => $mrf->status,
             'workflowState' => $mrf->workflow_state,
+            'workflow_state' => $mrf->workflow_state,
             'currentStage' => $mrf->current_stage,
             'estimatedCost' => $mrf->estimated_cost !== null ? (float) $mrf->estimated_cost : null,
             'shipToAddress' => $mrf->ship_to_address,
