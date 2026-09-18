@@ -103,7 +103,7 @@ class MRF extends Model
         return array_merge([
             'scmTransactionId' => $this->scm_transaction_id,
             'scm_transaction_id' => $this->scm_transaction_id,
-        ], $this->poOriginApiFields(), $this->poDraftApiFields());
+        ], $this->poOriginApiFields(), $this->poDraftApiFields(), $this->poRevisionApiFields());
     }
 
     public function isPoDraft(): bool
@@ -319,7 +319,7 @@ class MRF extends Model
 
                 // 3. Your clean PO signature logic
                 $inner->orWhere(function ($po) {
-                    $po->where('workflow_state', 'po_generated')
+                    $po->whereIn('workflow_state', ['po_generated', 'pending_scd_signature'])
                     ->whereNotNull('unsigned_po_url')
                     ->where('unsigned_po_url', '!=', '')
                     ->where(function ($signed) {
@@ -374,6 +374,33 @@ class MRF extends Model
             'poGenerationError' => $genError,
             'po_generation_failed_at' => $genFailedAt,
             'poGenerationFailedAt' => $genFailedAt,
+        ];
+    }
+
+    /**
+     * Signed-PO revision fields for list/detail/edit payloads.
+     *
+     * @return array<string, mixed>
+     */
+    public function poRevisionApiFields(): array
+    {
+        $history = is_array($this->revision_history) ? array_values($this->revision_history) : [];
+        $latest = $history !== [] ? $history[array_key_last($history)] : null;
+        $unlockedAt = $this->unlocked_at?->toIso8601String();
+
+        return [
+            'revision_number' => (int) ($this->revision_number ?? 0),
+            'revisionNumber' => (int) ($this->revision_number ?? 0),
+            'revision_history' => $history,
+            'revisionHistory' => $history,
+            'latest_revision_summary' => is_array($latest) ? ($latest['changed_fields'] ?? null) : null,
+            'latestRevisionSummary' => is_array($latest) ? ($latest['changed_fields'] ?? null) : null,
+            'unlocked_by' => $this->unlocked_by,
+            'unlockedBy' => $this->unlocked_by,
+            'unlocked_at' => $unlockedAt,
+            'unlockedAt' => $unlockedAt,
+            'unlock_reason' => $this->unlock_reason,
+            'unlockReason' => $this->unlock_reason,
         ];
     }
 
@@ -641,6 +668,12 @@ class MRF extends Model
         'linked_po_id',
         'finance_ap_case_id',
         'finance_ap_status',
+        'unlocked_by',
+        'unlocked_at',
+        'unlock_reason',
+        'revision_number',
+        'revision_history',
+        'revision_snapshot',
     ];
 
     protected $casts = [
@@ -679,7 +712,16 @@ class MRF extends Model
         'grn_completed_at' => 'datetime',
         'invoice_approved_at' => 'datetime',
         'expected_delivery_date' => 'date',
+        'unlocked_at' => 'datetime',
+        'revision_number' => 'integer',
+        'revision_history' => 'array',
+        'revision_snapshot' => 'array',
     ];
+
+    public function unlockedBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'unlocked_by');
+    }
 
     /**
      * Get the user who requested this MRF
@@ -924,7 +966,7 @@ class MRF extends Model
         'expected_delivery_date', 'rfq_issued_at', 'quotation_received_at', 'grn_completed_at',
         'po_value', 'executive_approved_at', 'director_approved_at', 'scd_approved_at',
         'procurement_approved_at', 'finance_approved_at', 'payment_approved_at', 'procurement_review_started_at',
-        'source', 'is_po_linked', 'linked_po_id', 'grn_completed',
+        'source', 'is_po_linked', 'linked_po_id', 'grn_completed', 'revision_number',
     ];
 
     /**
@@ -948,6 +990,7 @@ class MRF extends Model
         'expected_delivery_date', 'rfq_issued_at', 'quotation_received_at', 'po_value',
         'procurement_approved_at', 'finance_approved_at', 'scd_approved_at',
         'po_generation_error', 'po_generation_failed_at',
+        'revision_number', 'revision_history', 'unlocked_by', 'unlocked_at', 'unlock_reason',
     ];
 
     /**

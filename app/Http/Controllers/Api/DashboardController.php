@@ -732,10 +732,13 @@ class DashboardController extends Controller
                                                 'vendor_selected',
                                                 'vendor_approved',
                                                 'awaiting_scd_signature',
+                                                'pending_scd_signature',
                                             ])->orWhere('m_r_f_s.current_stage', 'supply_chain')
                                                 ->orWhereIn('m_r_f_s.workflow_state', [
                                                     WorkflowStateService::STATE_SUPPLY_CHAIN_DIRECTOR_REVIEW,
                                                     WorkflowStateService::STATE_SUPPLY_CHAIN_DIRECTOR_APPROVED,
+                                                    WorkflowStateService::STATE_PO_GENERATED,
+                                                    WorkflowStateService::STATE_PENDING_SCD_SIGNATURE,
                                                 ]);
                                         });
                                     }

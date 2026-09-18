@@ -13,6 +13,35 @@ class UpdatePurchaseOrderRequest extends FormRequest
     protected function prepareForValidation(): void
     {
         RequestLineItemParser::mergeIntoRequest($this);
+
+        $aliases = [
+            'estimated_cost' => 'estimatedCost',
+            'ship_to_address' => 'shipToAddress',
+            'tax_rate' => 'taxRate',
+            'tax_amount' => 'taxAmount',
+            'custom_terms' => 'customTerms',
+            'po_terms_mode' => 'poTermsMode',
+            'po_special_terms' => 'poSpecialTerms',
+            'invoice_submission_email' => 'invoiceSubmissionEmail',
+            'invoice_submission_cc' => 'invoiceSubmissionCc',
+            'selected_vendor_id' => 'selectedVendorId',
+            'po_number' => 'poNumber',
+            'expected_delivery_date' => 'expectedDeliveryDate',
+            'delivery_date' => 'expectedDeliveryDate',
+            'payment_terms' => 'paymentTerms',
+            'po_payment_terms' => 'paymentTerms',
+            'notes' => 'remarks',
+        ];
+
+        $merge = [];
+        foreach ($aliases as $from => $to) {
+            if ($this->exists($from) && ! $this->exists($to)) {
+                $merge[$to] = $this->input($from);
+            }
+        }
+        if ($merge !== []) {
+            $this->merge($merge);
+        }
     }
 
     public function authorize(): bool
@@ -20,7 +49,7 @@ class UpdatePurchaseOrderRequest extends FormRequest
         $user = $this->user();
 
         return $user !== null
-            && in_array($user->scmRole(), ['procurement_manager', 'procurement', 'supply_chain_director', 'admin'], true);
+            && in_array($user->scmRole(), ['procurement_manager', 'procurement', 'admin'], true);
     }
 
     public function rules(): array
@@ -43,10 +72,16 @@ class UpdatePurchaseOrderRequest extends FormRequest
             'invoiceSubmissionEmail' => 'nullable|string|max:255',
             'invoiceSubmissionCc' => 'nullable|string|max:500',
             'selectedVendorId' => 'nullable|string|max:50',
+            'expectedDeliveryDate' => 'nullable|date',
+            'paymentTerms' => 'nullable|string|max:1000',
+            'remarks' => 'nullable|string',
+            'notes' => 'nullable|string',
             'documents' => 'nullable|array',
             'documents.*.file' => 'nullable|file|mimes:pdf,jpg,jpeg,png,doc,docx|max:20480',
             'documents.*.type' => 'nullable|string|max:50',
             'documents.*.remarks' => 'nullable|string|max:2000',
+            'items.*.unit_price' => 'nullable|numeric|min:0',
+            'items.*.unitPrice' => 'nullable|numeric|min:0',
         ], RequestLineItemParser::validationRules());
     }
 

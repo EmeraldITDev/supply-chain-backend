@@ -165,11 +165,13 @@ class PaymentScheduleService
         $state = strtolower((string) ($mrf->workflow_state ?? ''));
         $status = strtolower((string) ($mrf->status ?? ''));
 
-        if ($state === WorkflowStateService::STATE_PO_GENERATED) {
+        if ($state === WorkflowStateService::STATE_PO_GENERATED
+            || $state === WorkflowStateService::STATE_PENDING_REVISION
+            || $state === WorkflowStateService::STATE_PENDING_SCD_SIGNATURE) {
             return true;
         }
 
-        if ($status === 'awaiting_scd_signature') {
+        if (in_array($status, ['awaiting_scd_signature', 'pending_scd_signature', 'pending_revision'], true)) {
             return true;
         }
 

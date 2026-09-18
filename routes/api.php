@@ -420,6 +420,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/pos/{id}', [\App\Http\Controllers\Api\PurchaseOrderController::class, 'show']);
     Route::put('/pos/{id}', [\App\Http\Controllers\Api\PurchaseOrderController::class, 'update']);
     Route::patch('/pos/{id}', [\App\Http\Controllers\Api\PurchaseOrderController::class, 'update']);
+    Route::post('/pos/{id}/unlock-for-edit', [\App\Http\Controllers\Api\PurchaseOrderController::class, 'unlockForEdit']);
+    Route::post('/pos/{id}/submit-for-resign', [\App\Http\Controllers\Api\PurchaseOrderController::class, 'submitForResign']);
     Route::post('/pos/{id}/close', [\App\Http\Controllers\Api\PurchaseOrderController::class, 'close']);
     Route::post('/mrfs/{id}/reject-po', [\App\Http\Controllers\Api\MRFWorkflowController::class, 'rejectPO']);
     Route::post('/mrfs/{id}/process-payment', [\App\Http\Controllers\Api\MRFWorkflowController::class, 'processPayment']);

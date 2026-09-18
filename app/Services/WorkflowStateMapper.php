@@ -48,6 +48,14 @@ class WorkflowStateMapper
                 'status' => 'awaiting_scd_signature',
                 'current_stage' => 'procurement_review',
             ],
+            WorkflowStateService::STATE_PENDING_REVISION => [
+                'status' => 'pending_revision',
+                'current_stage' => 'procurement',
+            ],
+            WorkflowStateService::STATE_PENDING_SCD_SIGNATURE => [
+                'status' => 'pending_scd_signature',
+                'current_stage' => 'supply_chain',
+            ],
             WorkflowStateService::STATE_PO_SIGNED => [
                 'status' => 'signed',
                 'current_stage' => 'finance',

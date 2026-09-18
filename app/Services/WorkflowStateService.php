@@ -25,6 +25,8 @@ class WorkflowStateService
     const STATE_QUOTATIONS_RECEIVED = 'quotations_received';
     const STATE_QUOTATIONS_EVALUATED = 'quotations_evaluated';
     const STATE_PO_GENERATED = 'po_generated';
+    const STATE_PENDING_REVISION = 'pending_revision';
+    const STATE_PENDING_SCD_SIGNATURE = 'pending_scd_signature';
     const STATE_PO_SIGNED = 'po_signed';
     const STATE_CLOSED = 'closed';
 
@@ -84,7 +86,10 @@ class WorkflowStateService
         self::STATE_QUOTATIONS_RECEIVED => [self::STATE_QUOTATIONS_EVALUATED],
         self::STATE_QUOTATIONS_EVALUATED => [self::STATE_PO_GENERATED],
         self::STATE_PO_GENERATED => [self::STATE_PO_SIGNED],
+        self::STATE_PENDING_REVISION => [self::STATE_PENDING_SCD_SIGNATURE],
+        self::STATE_PENDING_SCD_SIGNATURE => [self::STATE_PO_SIGNED],
         self::STATE_PO_SIGNED => [
+            self::STATE_PENDING_REVISION,
             self::STATE_DELIVERY_CONFIRMATION_PENDING,
             self::STATE_FINANCE_HANDOFF_PENDING,
             self::STATE_PAYMENT_PROCESSED,
@@ -314,6 +319,7 @@ class WorkflowStateService
 
         if (! $force
             && $currentState !== self::STATE_PO_SIGNED
+            && $currentState !== self::STATE_PENDING_SCD_SIGNATURE
             && ! $this->canTransition($currentState, self::STATE_PO_SIGNED)) {
             Log::warning('Cannot apply PO signed transition', [
                 'mrf_id' => $mrf->mrf_id,
@@ -339,6 +345,35 @@ class WorkflowStateService
         ]);
 
         return true;
+    }
+
+    /**
+     * Status values that mean the PO is waiting for the Supply Chain Director to sign.
+     *
+     * @return list<string>
+     */
+    public static function awaitingScdSignatureStatuses(): array
+    {
+        return ['supply_chain', 'awaiting_scd_signature', self::STATE_PENDING_SCD_SIGNATURE];
+    }
+
+    /**
+     * Workflow states that mean the PO is waiting for the Supply Chain Director to sign.
+     *
+     * @return list<string>
+     */
+    public static function awaitingScdSignatureStates(): array
+    {
+        return [self::STATE_PO_GENERATED, self::STATE_PENDING_SCD_SIGNATURE];
+    }
+
+    public static function isAwaitingScdSignature(?string $status, ?string $workflowState): bool
+    {
+        $status = strtolower(trim((string) $status));
+        $state = strtolower(trim((string) $workflowState));
+
+        return in_array($status, self::awaitingScdSignatureStatuses(), true)
+            || in_array($state, self::awaitingScdSignatureStates(), true);
     }
 
     /**
@@ -380,6 +415,8 @@ class WorkflowStateService
             self::STATE_INVOICE_RECEIVED => 'Invoice Received',
             self::STATE_INVOICE_APPROVED => 'Invoice Approved',
             self::STATE_PO_GENERATED => 'PO Generated',
+            self::STATE_PENDING_REVISION => 'Pending Revision',
+            self::STATE_PENDING_SCD_SIGNATURE => 'Pending SCD Signature',
             self::STATE_PO_SIGNED => 'PO Signed',
             self::STATE_DELIVERY_CONFIRMATION_PENDING => 'Delivery Confirmation Pending',
             self::STATE_DELIVERY_CONFIRMATION_COMPLETE => 'Delivery Confirmation Complete',

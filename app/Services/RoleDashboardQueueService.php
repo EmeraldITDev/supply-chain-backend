@@ -21,6 +21,7 @@ class RoleDashboardQueueService
   private const MRF_QUEUE_LIST_COLUMNS = [
     'id', 'mrf_id', 'formatted_id', 'title', 'category', 'urgency', 'requester_name',
     'estimated_cost', 'created_at', 'workflow_state', 'current_stage', 'first_approval_by_role',
+    'po_number', 'unsigned_po_url', 'signed_po_url', 'revision_number', 'revision_history',
   ];
 
   private const TRIP_QUEUE_LIST_COLUMNS = [

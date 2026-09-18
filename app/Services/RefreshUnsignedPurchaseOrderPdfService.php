@@ -29,9 +29,9 @@ class RefreshUnsignedPurchaseOrderPdfService
     /**
      * @return array{success: bool, mrf_id?: string, po_number?: string, error?: string}
      */
-    public function refresh(MRF $mrf, ?User $actor = null): array
+    public function refresh(MRF $mrf, ?User $actor = null, bool $ignoreStatus = false): array
     {
-        if (! $this->isAwaitingScdSignature($mrf)) {
+        if (! $ignoreStatus && ! $this->isAwaitingScdSignature($mrf)) {
             return [
                 'success' => false,
                 'mrf_id' => $mrf->mrf_id,
@@ -112,8 +112,9 @@ class RefreshUnsignedPurchaseOrderPdfService
     {
         $hasUnsigned = filled($mrf->unsigned_po_url);
         $notSigned = blank($mrf->signed_po_url);
-        $awaiting = strtolower((string) $mrf->status) === 'awaiting_scd_signature'
-            || ($mrf->workflow_state ?? null) === WorkflowStateService::STATE_PO_GENERATED;
+        $awaiting = WorkflowStateService::isAwaitingScdSignature($mrf->status, $mrf->workflow_state)
+            || strtolower((string) $mrf->status) === WorkflowStateService::STATE_PENDING_REVISION
+            || ($mrf->workflow_state ?? null) === WorkflowStateService::STATE_PENDING_REVISION;
 
         return $hasUnsigned && $notSigned && $awaiting;
     }

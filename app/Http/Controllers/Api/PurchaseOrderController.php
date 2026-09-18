@@ -5,17 +5,20 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Concerns\ResolvesPaginatedLists;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Procurement\StorePurchaseOrderRequest;
+use App\Http\Requests\Procurement\UnlockPurchaseOrderForEditRequest;
 use App\Http\Requests\Procurement\UpdatePurchaseOrderRequest;
 use App\Models\MRF;
 use App\Models\ProcurementDocument;
 use App\Services\FinanceAp\ClosureReadinessService;
 use App\Services\ProcurementDocumentService;
+use App\Services\PurchaseOrderRevisionService;
 use App\Services\PurchaseOrderService;
 use App\Services\WorkflowStateService;
 use App\Support\RequestLineItemParser;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Validation\ValidationException;
 
 class PurchaseOrderController extends Controller
 {
@@ -23,6 +26,7 @@ class PurchaseOrderController extends Controller
 
     public function __construct(
         private PurchaseOrderService $purchaseOrders,
+        private PurchaseOrderRevisionService $revisions,
         private ClosureReadinessService $closureReadiness,
         private WorkflowStateService $workflowStateService,
     ) {
@@ -102,7 +106,7 @@ class PurchaseOrderController extends Controller
     }
 
     /**
-     * PUT /api/pos/{id} — update draft PO fields.
+     * PUT /api/pos/{id} — update draft or pending_revision PO fields.
      */
     public function update(UpdatePurchaseOrderRequest $request, string $id): JsonResponse
     {
@@ -119,7 +123,31 @@ class PurchaseOrderController extends Controller
         $validated = $request->validated();
         $validated['items'] = RequestLineItemParser::resolve($request);
 
-        $updated = $this->purchaseOrders->updateDraft($mrf, $validated);
+        $payload = null;
+
+        try {
+            if ($this->revisions->isPendingRevision($mrf)) {
+                $payload = $this->revisions->updatePendingRevision($mrf, $validated);
+                $updated = $this->purchaseOrders->findForEdit($mrf->mrf_id) ?? $mrf->fresh() ?? $mrf;
+            } elseif ($this->revisions->isDraftEditable($mrf)) {
+                $updated = $this->purchaseOrders->updateDraft($mrf, $validated);
+            } else {
+                return response()->json([
+                    'success' => false,
+                    'error' => 'This purchase order cannot be edited in its current status. Unlock a signed PO first.',
+                    'code' => 'INVALID_STATUS',
+                    'current_status' => $mrf->status,
+                    'current_workflow_state' => $mrf->workflow_state,
+                ], 422);
+            }
+        } catch (ValidationException $e) {
+            return response()->json([
+                'success' => false,
+                'error' => collect($e->errors())->flatten()->first() ?: 'Update blocked',
+                'errors' => $e->errors(),
+                'code' => 'INVALID_STATUS',
+            ], 422);
+        }
 
         if ($request->hasFile('documents')) {
             $this->attachDocumentsToMrf($request, $updated);
@@ -130,8 +158,76 @@ class PurchaseOrderController extends Controller
         return response()->json([
             'success' => true,
             'message' => 'Purchase order updated',
-            'data' => $this->purchaseOrders->mapEditPayload($fresh),
+            'data' => $payload['data'] ?? $this->purchaseOrders->mapEditPayload($fresh),
         ]);
+    }
+
+    /**
+     * POST /api/pos/{id}/unlock-for-edit
+     */
+    public function unlockForEdit(UnlockPurchaseOrderForEditRequest $request, string $id): JsonResponse
+    {
+        $mrf = $this->findMrfByPoReference($id);
+
+        if (! $mrf) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Purchase order not found',
+                'code' => 'NOT_FOUND',
+            ], 404);
+        }
+
+        $reason = trim((string) ($request->input('reason') ?: $request->input('unlock_reason', '')));
+
+        try {
+            $payload = $this->revisions->unlockForEdit($mrf, $request->user(), $reason);
+        } catch (ValidationException $e) {
+            return response()->json([
+                'success' => false,
+                'error' => collect($e->errors())->flatten()->first() ?: 'Unable to unlock purchase order',
+                'errors' => $e->errors(),
+                'code' => 'INVALID_STATUS',
+            ], 422);
+        }
+
+        return response()->json($payload);
+    }
+
+    /**
+     * POST /api/pos/{id}/submit-for-resign
+     */
+    public function submitForResign(Request $request, string $id): JsonResponse
+    {
+        if (! PurchaseOrderRevisionService::userCanRevise($request->user())) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Only Procurement Managers and Admins can submit a revised PO for re-signing.',
+                'code' => 'FORBIDDEN',
+            ], 403);
+        }
+
+        $mrf = $this->findMrfByPoReference($id);
+
+        if (! $mrf) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Purchase order not found',
+                'code' => 'NOT_FOUND',
+            ], 404);
+        }
+
+        try {
+            $payload = $this->revisions->submitForResign($mrf, $request->user());
+        } catch (ValidationException $e) {
+            return response()->json([
+                'success' => false,
+                'error' => collect($e->errors())->flatten()->first() ?: 'Unable to submit for re-signing',
+                'errors' => $e->errors(),
+                'code' => 'INVALID_STATUS',
+            ], 422);
+        }
+
+        return response()->json($payload);
     }
 
     /**

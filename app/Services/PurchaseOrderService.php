@@ -17,11 +17,11 @@ class PurchaseOrderService
     public const LIST_SELECT = [
         'id', 'mrf_id', 'formatted_id', 'po_number', 'title', 'status', 'workflow_state',
         'current_stage', 'estimated_cost', 'currency', 'selected_vendor_id', 'requester_name',
-        'department', 'po_draft_saved_at', 'po_generated_at', 'unsigned_po_url', 'signed_po_url',
+        'department',         'po_draft_saved_at', 'po_generated_at', 'unsigned_po_url', 'signed_po_url',
         'expected_delivery_date', 'grn_completed_at', 'rfq_issued_at', 'quotation_received_at',
         'po_value', 'executive_approved_at', 'director_approved_at', 'scd_approved_at',
         'procurement_approved_at', 'finance_approved_at', 'payment_approved_at', 'procurement_review_started_at',
-        'source', 'is_po_linked', 'linked_po_id', 'created_at', 'updated_at',
+        'source', 'is_po_linked', 'linked_po_id', 'revision_number', 'created_at', 'updated_at',
     ];
 
     /** Columns required to populate the PO edit modal. */
@@ -35,7 +35,9 @@ class PurchaseOrderService
         'expected_delivery_date', 'grn_completed_at', 'rfq_issued_at', 'quotation_received_at',
         'po_value', 'executive_approved_at', 'director_approved_at', 'scd_approved_at',
         'procurement_approved_at', 'finance_approved_at', 'payment_approved_at', 'procurement_review_started_at',
-        'source', 'is_po_linked', 'linked_po_id', 'justification', 'created_at', 'updated_at',
+        'source', 'is_po_linked', 'linked_po_id', 'justification', 'remarks', 'po_payment_terms',
+        'revision_number', 'revision_history', 'unlocked_by', 'unlocked_at', 'unlock_reason',
+        'created_at', 'updated_at',
     ];
 
     public function __construct(
@@ -95,7 +97,7 @@ class PurchaseOrderService
         $vendor = $mrf->relationLoaded('selectedVendor') ? $mrf->selectedVendor : null;
         $poNumber = $mrf->effectivePoNumber();
 
-        return array_merge($mrf->poOriginApiFields(), $mrf->poDraftApiFields(), [
+        return array_merge($mrf->poOriginApiFields(), $mrf->poDraftApiFields(), $mrf->poRevisionApiFields(), [
             'id' => $mrf->mrf_id,
             'numericId' => $mrf->id,
             'formattedId' => $mrf->formatted_id,
@@ -152,7 +154,7 @@ class PurchaseOrderService
 
         $poNumber = $mrf->effectivePoNumber();
 
-        return array_merge($mrf->poOriginApiFields(), $mrf->poDraftApiFields(), $mrf->currencyApiFields(), [
+        return array_merge($mrf->poOriginApiFields(), $mrf->poDraftApiFields(), $mrf->poRevisionApiFields(), $mrf->currencyApiFields(), [
             'id' => $mrf->mrf_id,
             'numericId' => $mrf->id,
             'formattedId' => $mrf->formatted_id,
@@ -205,6 +207,12 @@ class PurchaseOrderService
                 'selectionReason' => $row->selection_reason,
             ])->values(),
             'paymentMilestones' => $paymentMilestones,
+            'expectedDeliveryDate' => $mrf->expected_delivery_date?->format('Y-m-d'),
+            'expected_delivery_date' => $mrf->expected_delivery_date?->format('Y-m-d'),
+            'paymentTerms' => $mrf->po_payment_terms,
+            'po_payment_terms' => $mrf->po_payment_terms,
+            'remarks' => $mrf->remarks,
+            'notes' => $mrf->remarks,
             'poGeneratedAt' => $mrf->po_generated_at?->toIso8601String(),
             'unsignedPoUrl' => $mrf->freshUnsignedPoStreamUrl() ?? $mrf->unsigned_po_url,
             'signedPoUrl' => $mrf->signed_po_url,
@@ -286,6 +294,10 @@ class PurchaseOrderService
             'invoiceSubmissionEmail' => 'invoice_submission_email',
             'invoiceSubmissionCc' => 'invoice_submission_cc',
             'poNumber' => 'po_number',
+            'remarks' => 'remarks',
+            'notes' => 'remarks',
+            'paymentTerms' => 'po_payment_terms',
+            'poPaymentTerms' => 'po_payment_terms',
         ] as $input => $column) {
             if (array_key_exists($input, $validated)) {
                 $update[$column] = $validated[$input];
@@ -309,19 +321,48 @@ class PurchaseOrderService
         }
 
         if (array_key_exists('selectedVendorId', $validated) && filled($validated['selectedVendorId'])) {
-            $vendor = Vendor::query()->where('vendor_id', $validated['selectedVendorId'])->first();
+            $vendorId = $validated['selectedVendorId'];
+            $vendor = Vendor::query()
+                ->where('vendor_id', $vendorId)
+                ->when(is_numeric($vendorId), fn ($q) => $q->orWhere('id', (int) $vendorId))
+                ->first();
             if ($vendor) {
                 $update['selected_vendor_id'] = $vendor->id;
             }
         }
 
+        if (array_key_exists('expectedDeliveryDate', $validated)) {
+            $update['expected_delivery_date'] = $validated['expectedDeliveryDate'] ?: null;
+        }
+
+        $isRevision = strtolower((string) ($mrf->status ?? '')) === WorkflowStateService::STATE_PENDING_REVISION
+            || ($mrf->workflow_state ?? null) === WorkflowStateService::STATE_PENDING_REVISION;
+
         if ($update !== []) {
-            $update['po_draft_saved_at'] = now();
+            if (! $isRevision) {
+                $update['po_draft_saved_at'] = now();
+            }
             $mrf->update($update);
         }
 
         if (! empty($validated['items'])) {
             $this->lineItemBudgetService->syncMrfItems($mrf, $validated['items']);
+            $mrf->load('items');
+            $itemTotal = (float) $mrf->items->sum(function ($item) {
+                if ($item->total_price !== null) {
+                    return (float) $item->total_price;
+                }
+
+                return (float) ($item->unit_price ?? 0) * (float) ($item->quantity ?? 0);
+            });
+            $tax = (float) ($mrf->tax_amount ?? 0);
+            $total = $itemTotal + $tax;
+            if ($total > 0) {
+                $mrf->update([
+                    'estimated_cost' => $total,
+                    'po_value' => $total,
+                ]);
+            }
         }
 
         return $mrf->fresh();

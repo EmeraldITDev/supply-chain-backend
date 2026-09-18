@@ -51,6 +51,36 @@ class WorkflowStateServiceTest extends TestCase
         $this->assertSame('finance', $legacy['current_stage']);
     }
 
+    public function test_signed_po_can_transition_to_pending_revision_then_pending_scd_signature(): void
+    {
+        $service = app(WorkflowStateService::class);
+
+        $this->assertTrue($service->canTransition(
+            WorkflowStateService::STATE_PO_SIGNED,
+            WorkflowStateService::STATE_PENDING_REVISION
+        ));
+        $this->assertTrue($service->canTransition(
+            WorkflowStateService::STATE_PENDING_REVISION,
+            WorkflowStateService::STATE_PENDING_SCD_SIGNATURE
+        ));
+        $this->assertTrue($service->canTransition(
+            WorkflowStateService::STATE_PENDING_SCD_SIGNATURE,
+            WorkflowStateService::STATE_PO_SIGNED
+        ));
+    }
+
+    public function test_workflow_state_mapper_maps_revision_states(): void
+    {
+        $mapper = app(WorkflowStateMapper::class);
+
+        $revision = $mapper->legacyFieldsFor(WorkflowStateService::STATE_PENDING_REVISION);
+        $this->assertSame('pending_revision', $revision['status']);
+
+        $resign = $mapper->legacyFieldsFor(WorkflowStateService::STATE_PENDING_SCD_SIGNATURE);
+        $this->assertSame('pending_scd_signature', $resign['status']);
+        $this->assertSame('supply_chain', $resign['current_stage']);
+    }
+
     public function test_closure_transition_blocked_when_readiness_fails(): void
     {
         $this->mock(\App\Services\FinanceAp\ClosureReadinessService::class, function ($mock) {

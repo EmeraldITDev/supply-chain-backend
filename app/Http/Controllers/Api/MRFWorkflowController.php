@@ -2149,8 +2149,8 @@ class MRFWorkflowController extends Controller
 
         $statusLower = strtolower(trim((string) ($mrf->status ?? '')));
         $workflowStateLower = strtolower(trim((string) ($mrf->workflow_state ?? '')));
-        $allowedStatuses = ['supply_chain', 'awaiting_scd_signature'];
-        $allowedStates = ['po_generated', 'awaiting_scd_signature'];
+        $allowedStatuses = WorkflowStateService::awaitingScdSignatureStatuses();
+        $allowedStates = WorkflowStateService::awaitingScdSignatureStates();
         if (!in_array($statusLower, $allowedStatuses, true) && !in_array($workflowStateLower, $allowedStates, true)) {
             return response()->json([
                 'success' => false,
@@ -2289,7 +2289,7 @@ class MRFWorkflowController extends Controller
         if (!$mrf) {
             return response()->json(['success' => false, 'error' => 'PO not found', 'code' => 'NOT_FOUND'], 404);
         }
-        if (strtolower((string) $mrf->status) !== 'awaiting_scd_signature') {
+        if (! WorkflowStateService::isAwaitingScdSignature($mrf->status, $mrf->workflow_state)) {
             return response()->json([
                 'success' => false,
                 'error' => 'PO is not awaiting SCD signature.',
@@ -2330,8 +2330,8 @@ class MRFWorkflowController extends Controller
             $poData['data']['signature_image_url'] = $sigDisk->path($sigPath);
         }
 
-        // Dispatch PDF generation to queue — return immediately
-        $mrf->update(['status' => 'awaiting_scd_signature']); // keep status while processing
+        // Dispatch PDF generation to queue — return immediately.
+        // Leave pending_scd_signature / awaiting_scd_signature as-is while processing.
 
         ProcessPoSignatureJob::dispatch(
             $mrf->id,
@@ -2381,7 +2381,7 @@ class MRFWorkflowController extends Controller
         }
 
         // Check if MRF is in SCD signature stage
-        if (!in_array(strtolower((string) $mrf->status), ['supply_chain', 'awaiting_scd_signature'])) {
+        if (! WorkflowStateService::isAwaitingScdSignature($mrf->status, $mrf->workflow_state)) {
             return response()->json([
                 'success' => false,
                 'error' => 'MRF is not pending PO signature',
