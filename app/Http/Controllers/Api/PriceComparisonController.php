@@ -9,6 +9,7 @@ use App\Models\PriceComparison;
 use App\Models\Vendor;
 use App\Services\ManualVendorOnboardingService;
 use App\Services\PaymentScheduleService;
+use App\Services\PurchaseOrderRevisionService;
 use App\Support\ProcurementOverviewAccess;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -19,6 +20,7 @@ class PriceComparisonController extends Controller
 {
     public function __construct(
         private ManualVendorOnboardingService $manualVendorOnboarding,
+        private PurchaseOrderRevisionService $poRevisions,
     ) {
     }
 
@@ -125,10 +127,10 @@ class PriceComparisonController extends Controller
             ], 404);
         }
 
-        if (!empty(trim((string) $mrf->signed_po_url))) {
+        if ($this->poRevisions->isSignedAndLocked($mrf)) {
             return response()->json([
                 'success' => false,
-                'error' => 'Cannot modify price comparison after the PO has been signed.',
+                'error' => 'Cannot modify price comparison after the PO has been signed. Unlock the PO for revision first.',
                 'code' => 'PO_ALREADY_SIGNED',
             ], 422);
         }

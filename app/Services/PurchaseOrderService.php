@@ -62,16 +62,14 @@ class PurchaseOrderService
             $search = trim((string) $request->search);
             if ($search !== '') {
                 $escaped = str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $search);
-                $prefix = $escaped.'%';
                 $contains = '%'.$escaped.'%';
-                $query->where(function ($q) use ($prefix, $contains, $search) {
-                    $q->where('mrf_id', 'like', $prefix)
-                        ->orWhere('formatted_id', 'like', $prefix)
-                        ->orWhere('po_number', 'like', $prefix)
-                        ->orWhere('linked_po_id', 'like', $prefix);
-                    if (strlen($search) >= 3) {
-                        $q->orWhere('requester_name', 'like', $contains);
-                    }
+                $query->where(function ($q) use ($contains) {
+                    $q->where('mrf_id', 'ilike', $contains)
+                        ->orWhere('formatted_id', 'ilike', $contains)
+                        ->orWhere('po_number', 'ilike', $contains)
+                        ->orWhere('linked_po_id', 'ilike', $contains)
+                        ->orWhere('title', 'ilike', $contains)
+                        ->orWhere('requester_name', 'ilike', $contains);
                 });
             }
         }

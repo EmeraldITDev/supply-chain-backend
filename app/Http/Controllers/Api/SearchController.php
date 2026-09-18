@@ -24,9 +24,14 @@ class SearchController extends Controller
         $needle = '%' . strtolower($q) . '%';
 
         $mrfs = MRF::query()
-            ->whereRaw('LOWER(COALESCE(formatted_id, \'\')) LIKE ?', [$needle])
-            ->orWhereRaw('LOWER(mrf_id) LIKE ?', [$needle])
-            ->orWhereRaw('LOWER(title) LIKE ?', [$needle])
+            ->where(function ($query) use ($needle) {
+                $query->whereRaw('LOWER(COALESCE(formatted_id, \'\')) LIKE ?', [$needle])
+                    ->orWhereRaw('LOWER(mrf_id) LIKE ?', [$needle])
+                    ->orWhereRaw('LOWER(COALESCE(po_number, \'\')) LIKE ?', [$needle])
+                    ->orWhereRaw('LOWER(COALESCE(linked_po_id, \'\')) LIKE ?', [$needle])
+                    ->orWhereRaw('LOWER(COALESCE(title, \'\')) LIKE ?', [$needle])
+                    ->orWhereRaw('LOWER(COALESCE(requester_name, \'\')) LIKE ?', [$needle]);
+            })
             ->limit(20)
             ->get()
             ->map(fn ($m) => [
@@ -35,14 +40,17 @@ class SearchController extends Controller
                 'formatted_id' => $m->formatted_id,
                 'legacy_id' => $m->mrf_id,
                 'title' => $m->title,
+                'po_number' => $m->po_number,
                 'status' => $m->status,
                 'created_at' => $m->created_at?->toIso8601String(),
             ]);
 
         $srfs = SRF::query()
-            ->whereRaw('LOWER(COALESCE(formatted_id, \'\')) LIKE ?', [$needle])
-            ->orWhereRaw('LOWER(srf_id) LIKE ?', [$needle])
-            ->orWhereRaw('LOWER(title) LIKE ?', [$needle])
+            ->where(function ($query) use ($needle) {
+                $query->whereRaw('LOWER(COALESCE(formatted_id, \'\')) LIKE ?', [$needle])
+                    ->orWhereRaw('LOWER(srf_id) LIKE ?', [$needle])
+                    ->orWhereRaw('LOWER(COALESCE(title, \'\')) LIKE ?', [$needle]);
+            })
             ->limit(20)
             ->get()
             ->map(fn ($s) => [
@@ -56,9 +64,11 @@ class SearchController extends Controller
             ]);
 
         $rfqs = RFQ::query()
-            ->whereRaw('LOWER(COALESCE(formatted_id, \'\')) LIKE ?', [$needle])
-            ->orWhereRaw('LOWER(rfq_id) LIKE ?', [$needle])
-            ->orWhereRaw('LOWER(title) LIKE ?', [$needle])
+            ->where(function ($query) use ($needle) {
+                $query->whereRaw('LOWER(COALESCE(formatted_id, \'\')) LIKE ?', [$needle])
+                    ->orWhereRaw('LOWER(rfq_id) LIKE ?', [$needle])
+                    ->orWhereRaw('LOWER(COALESCE(title, \'\')) LIKE ?', [$needle]);
+            })
             ->limit(20)
             ->get()
             ->map(fn ($r) => [

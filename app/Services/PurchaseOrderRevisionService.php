@@ -50,14 +50,9 @@ class PurchaseOrderRevisionService
             return false;
         }
 
-        $status = strtolower(trim((string) ($mrf->status ?? '')));
-        $state = strtolower(trim((string) ($mrf->workflow_state ?? '')));
-        $hasSignedUrl = trim((string) ($mrf->signed_po_url ?? '')) !== '';
-
-        return $hasSignedUrl && (
-            $state === WorkflowStateService::STATE_PO_SIGNED
-            || in_array($status, ['signed', 'po_signed'], true)
-        );
+        // Any non-empty signed PDF URL locks the PO until unlock-for-edit,
+        // even after workflow_state advances past po_signed (delivery/finance).
+        return trim((string) ($mrf->signed_po_url ?? '')) !== '';
     }
 
     public function isDraftEditable(MRF $mrf): bool

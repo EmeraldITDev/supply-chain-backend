@@ -355,11 +355,11 @@ class MRFController extends Controller
         $items = MRF::query()
             ->select(['id', 'mrf_id', 'formatted_id', 'title', 'po_number', 'linked_po_id'])
             ->where(function ($q) use ($like) {
-                $q->where('mrf_id', 'like', $like)
-                    ->orWhere('formatted_id', 'like', $like)
-                    ->orWhere('po_number', 'like', $like)
-                    ->orWhere('linked_po_id', 'like', $like)
-                    ->orWhere('title', 'like', $like);
+                $q->where('mrf_id', 'ilike', $like)
+                    ->orWhere('formatted_id', 'ilike', $like)
+                    ->orWhere('po_number', 'ilike', $like)
+                    ->orWhere('linked_po_id', 'ilike', $like)
+                    ->orWhere('title', 'ilike', $like);
             })
             ->orderByDesc('updated_at')
             ->limit(20)
@@ -432,25 +432,21 @@ class MRFController extends Controller
             $query->whereDate('date', '<=', $request->date_to);
         }
 
-        // Search indexed identifier / requester columns.
-        // Prefer prefix LIKE (no leading %) so B-tree indexes remain usable.
-        // Fall back to contains only for short tokens when prefix yields nothing
-        // would be too aggressive; use prefix for all PO/MRF identifier searches.
+        // Case-insensitive contains search across identifiers / requester / title.
+        // Prefix-only matching missed vendor tokens inside PO numbers (e.g. "bluegate"
+        // inside "PO-180926-BLUEGATE-0002").
         if ($request->filled('search')) {
             $search = trim((string) $request->search);
             if ($search !== '') {
                 $escaped = str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $search);
-                $prefix = $escaped.'%';
-                $query->where(function ($q) use ($prefix, $escaped) {
-                    $q->where('mrf_id', 'like', $prefix)
-                        ->orWhere('formatted_id', 'like', $prefix)
-                        ->orWhere('po_number', 'like', $prefix)
-                        ->orWhere('requester_name', 'like', $prefix);
-                    // Exact substring still allowed for requester names (user expectation),
-                    // but only as OR on the denormalised requester_name column.
-                    if (strlen($escaped) >= 3) {
-                        $q->orWhere('requester_name', 'like', '%'.$escaped.'%');
-                    }
+                $contains = '%'.$escaped.'%';
+                $query->where(function ($q) use ($contains) {
+                    $q->where('mrf_id', 'ilike', $contains)
+                        ->orWhere('formatted_id', 'ilike', $contains)
+                        ->orWhere('po_number', 'ilike', $contains)
+                        ->orWhere('linked_po_id', 'ilike', $contains)
+                        ->orWhere('title', 'ilike', $contains)
+                        ->orWhere('requester_name', 'ilike', $contains);
                 });
             }
         }
