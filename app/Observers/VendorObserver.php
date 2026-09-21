@@ -28,6 +28,32 @@ class VendorObserver
 
     public function updated(Vendor $vendor): void
     {
+        if ($vendor->wasChanged(self::SYNC_FIELDS) || $vendor->wasChanged(['rating', 'total_orders', 'completed_orders', 'on_time_deliveries', 'status'])) {
+            try {
+                $changes = [];
+                foreach (array_merge(self::SYNC_FIELDS, ['rating', 'total_orders', 'completed_orders', 'on_time_deliveries']) as $field) {
+                    if ($vendor->wasChanged($field)) {
+                        $changes[$field] = [
+                            'previous' => $vendor->getOriginal($field),
+                            'new' => $vendor->getAttribute($field),
+                        ];
+                    }
+                }
+                if ($changes !== []) {
+                    app(\App\Services\ScmAuditService::class)->record(
+                        'vendor_updated',
+                        'Vendor',
+                        $vendor->vendor_id,
+                        auth()->user(),
+                        'Vendor record updated',
+                        ['changes' => $changes],
+                    );
+                }
+            } catch (\Throwable $e) {
+                Log::warning('Vendor audit write failed', ['error' => $e->getMessage()]);
+            }
+        }
+
         if (! $vendor->wasChanged(self::SYNC_FIELDS)) {
             return;
         }

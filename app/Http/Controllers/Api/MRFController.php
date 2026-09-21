@@ -409,6 +409,26 @@ class MRFController extends Controller
             }
         }
 
+        // Active vs historical procurement requests (additive; default unchanged unless lifecycle set)
+        $lifecycle = strtolower(trim((string) $request->input('lifecycle', '')));
+        if ($lifecycle === 'active' || $lifecycle === 'open') {
+            $query->where(function ($q) {
+                $q->where(function ($active) {
+                    $active->whereNull('status')
+                        ->orWhereRaw('LOWER(status) NOT IN (?, ?)', ['completed', 'cancelled']);
+                })->where(function ($active) {
+                    $active->whereNull('workflow_state')
+                        ->orWhere('workflow_state', '!=', \App\Services\WorkflowStateService::STATE_CLOSED);
+                });
+            });
+        } elseif ($lifecycle === 'historical' || $lifecycle === 'completed' || $lifecycle === 'closed') {
+            $query->where(function ($q) {
+                $q->whereRaw('LOWER(status) = ?', ['completed'])
+                    ->orWhere('workflow_state', \App\Services\WorkflowStateService::STATE_CLOSED)
+                    ->orWhereIn('workflow_state', MRF::poCompletedWorkflowStates());
+            });
+        }
+
         if ($request->filled('workflow_state')) {
             $query->where('workflow_state', $request->workflow_state);
         }

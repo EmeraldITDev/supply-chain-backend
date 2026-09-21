@@ -257,11 +257,11 @@ class WorkflowStateService
     /**
      * Transition MRF to new state and sync legacy status/current_stage fields.
      */
-    public function applyWorkflowState(MRF $mrf, string $newState, $user, bool $force = false): bool
+    public function applyWorkflowState(MRF $mrf, string $newState, $user, bool $force = false, bool $bypassClosureReadiness = false): bool
     {
         $currentState = $mrf->workflow_state ?? self::STATE_MRF_CREATED;
 
-        if ($newState === self::STATE_CLOSED) {
+        if ($newState === self::STATE_CLOSED && ! $bypassClosureReadiness) {
             $readiness = app(\App\Services\FinanceAp\ClosureReadinessService::class)->evaluate($mrf);
 
             if (! $readiness['can_close']) {
@@ -297,9 +297,19 @@ class WorkflowStateService
             'to_state' => $newState,
             'user_id' => $user->id ?? null,
             'legacy' => $legacy,
+            'bypass_closure_readiness' => $bypassClosureReadiness,
         ]);
 
         return true;
+    }
+
+    /**
+     * Force-close bypass for authorised users when Finance AP did not update status.
+     * Still records the transition; callers must enforce role + eligibility + reason.
+     */
+    public function forceClose(MRF $mrf, $user): bool
+    {
+        return $this->applyWorkflowState($mrf, self::STATE_CLOSED, $user, true, true);
     }
 
     /**

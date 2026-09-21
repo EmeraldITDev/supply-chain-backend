@@ -23,6 +23,7 @@ class RFQ extends Model
         'estimated_cost',
         'deadline',
         'payment_terms',
+        'custom_payment_schedule',
         'delivery_terms',
         'technical_requirements',
         'notes',
@@ -34,12 +35,17 @@ class RFQ extends Model
         'created_by',
         'selected_vendor_id',
         'selected_quotation_id',
+        'selection_reason',
+        'selected_at',
+        'selected_by',
     ];
 
     protected $casts = [
         'estimated_cost' => 'decimal:2',
         'deadline' => 'date',
         'supporting_documents' => 'array',
+        'custom_payment_schedule' => 'array',
+        'selected_at' => 'datetime',
     ];
 
     /**
@@ -108,16 +114,29 @@ class RFQ extends Model
     public function extendedDetailApiFields(): array
     {
         $additionalNotes = $this->additional_notes ?? $this->notes;
+        $isStandalone = $this->mrf_id === null;
 
         return [
+            'isStandalone' => $isStandalone,
+            'is_standalone' => $isStandalone,
+            'linkedToMrf' => ! $isStandalone,
+            'linked_to_mrf' => ! $isStandalone,
             'paymentTerms' => $this->payment_terms,
             'payment_terms' => $this->payment_terms,
+            'customPaymentSchedule' => $this->custom_payment_schedule,
+            'custom_payment_schedule' => $this->custom_payment_schedule,
             'deliveryTerms' => $this->delivery_terms,
             'delivery_terms' => $this->delivery_terms,
             'technicalRequirements' => $this->technical_requirements,
             'technical_requirements' => $this->technical_requirements,
             'additionalNotes' => $additionalNotes,
             'additional_notes' => $additionalNotes,
+            'selectionReason' => $this->selection_reason,
+            'selection_reason' => $this->selection_reason,
+            'selectedAt' => optional($this->selected_at)?->toIso8601String(),
+            'selected_at' => optional($this->selected_at)?->toIso8601String(),
+            'selectedBy' => $this->selected_by,
+            'selected_by' => $this->selected_by,
             'termsAndConditions' => $this->terms_and_conditions,
             'terms_and_conditions' => $this->terms_and_conditions,
             'notes' => $this->notes,

@@ -511,7 +511,7 @@ class RFQWorkflowController extends Controller
         $validator = Validator::make($request->all(), [
             'quotation_id' => 'required|exists:quotations,quotation_id',
             'remarks' => 'nullable|string|max:2000',
-            'selection_reason' => 'nullable|string|max:2000',
+            'selection_reason' => 'required_without_all:selectionReason,remarks|nullable|string|max:2000',
             'selectionReason' => 'nullable|string|max:2000',
         ]);
 
@@ -530,6 +530,14 @@ class RFQWorkflowController extends Controller
             ?? ''));
         $selectionReasonText = $selectionReasonText === '' ? null : $selectionReasonText;
 
+        if ($selectionReasonText === null) {
+            return response()->json([
+                'success' => false,
+                'error' => 'A selection reason is required for auditability',
+                'code' => 'VALIDATION_ERROR',
+            ], 422);
+        }
+
         // Get the selected quotation
         $selectedQuotation = Quotation::where('quotation_id', $request->quotation_id)
             ->where('rfq_id', $rfq->id)
@@ -546,12 +554,15 @@ class RFQWorkflowController extends Controller
         // Use transaction to ensure data consistency
         DB::beginTransaction();
         try {
-            // Update RFQ
+            // Update RFQ — persist auditable selection metadata on the RFQ itself
             $rfq->update([
                 'status' => 'Awarded',
                 'workflow_state' => 'supply_chain_review', // Move to Supply Chain Director for approval
                 'selected_vendor_id' => $selectedQuotation->vendor_id,
                 'selected_quotation_id' => $selectedQuotation->id,
+                'selection_reason' => $selectionReasonText,
+                'selected_at' => now(),
+                'selected_by' => $user->id,
             ]);
 
             // Update selected quotation
@@ -596,6 +607,26 @@ class RFQWorkflowController extends Controller
             }
 
             DB::commit();
+
+            try {
+                app(\App\Services\ScmAuditService::class)->record(
+                    'quotation_selected',
+                    'RFQ',
+                    $rfq->rfq_id,
+                    $user,
+                    'Procurement Manager selected quotation',
+                    [
+                        'selected_vendor_id' => $selectedQuotation->vendor_id,
+                        'selected_quotation_id' => $selectedQuotation->quotation_id,
+                        'selection_reason' => $selectionReasonText,
+                        'selected_at' => now()->toIso8601String(),
+                        'mrf_id' => $rfq->mrf_id,
+                    ],
+                    $request
+                );
+            } catch (\Throwable $e) {
+                \Log::warning('Failed to write RFQ selection audit', ['error' => $e->getMessage()]);
+            }
 
             // Send notifications
             $this->notificationService->notifyQuotationAwarded($selectedQuotation);
@@ -642,6 +673,8 @@ class RFQWorkflowController extends Controller
                     ],
                     'selection_reason' => $selectionReasonText,
                     'selectionReason' => $selectionReasonText,
+                    'selected_at' => optional($rfq->selected_at)?->toIso8601String(),
+                    'selected_by' => $rfq->selected_by,
                 ],
             ]);
         } catch (\Exception $e) {

@@ -39,6 +39,11 @@ class VendorFulfilmentService
     public function recordCycleCompleted(MRF $mrf, bool $fromGrn = true): void
     {
         unset($fromGrn); // Reserved for callers distinguishing GRN vs close paths.
+
+        if ($mrf->vendor_fulfilment_recorded_at) {
+            return;
+        }
+
         $vendor = $this->resolveVendor($mrf);
         if (! $vendor) {
             return;
@@ -46,6 +51,12 @@ class VendorFulfilmentService
 
         try {
             DB::transaction(function () use ($vendor, $mrf, $fromGrn) {
+                // Re-check under lock via MRF row to prevent duplicate scoring.
+                $lockedMrf = MRF::query()->whereKey($mrf->id)->lockForUpdate()->first();
+                if (! $lockedMrf || $lockedMrf->vendor_fulfilment_recorded_at) {
+                    return;
+                }
+
                 $locked = Vendor::query()->whereKey($vendor->id)->lockForUpdate()->first();
                 if (! $locked) {
                     return;
@@ -77,6 +88,7 @@ class VendorFulfilmentService
                 }
 
                 $locked->update($update);
+                $lockedMrf->forceFill(['vendor_fulfilment_recorded_at' => now()])->save();
             });
 
             $this->forgetPerformanceCache((int) $vendor->id);

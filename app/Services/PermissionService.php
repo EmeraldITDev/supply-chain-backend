@@ -501,8 +501,9 @@ class PermissionService
      */
     public function canUploadProcurementDocument(User $user, MRF $mrf, string $type): bool
     {
+        // Historical supporting docs (waybill, etc.) may be added after closure by authorised users.
         if ($this->isMRFClosed($mrf)) {
-            return false;
+            return $this->canUploadHistoricalSupportingDocument($user, $mrf, $type);
         }
 
         // Allow uploads immediately after a PO number is present even if the
@@ -523,6 +524,55 @@ class PermissionService
         }
 
         return $this->workflowStateAllowsProcurementDocuments($mrf);
+    }
+
+    /**
+     * Post-closure supporting documentation (waybill optional; never blocks closure).
+     */
+    public function canUploadHistoricalSupportingDocument(User $user, MRF $mrf, string $type): bool
+    {
+        $role = $user->scmRole();
+        if (! in_array($role, ['admin', 'procurement_manager', 'procurement', 'supply_chain_director', 'supply_chain'], true)) {
+            return false;
+        }
+
+        // Do not reopen GRN/invoice gates after close — only supporting evidence.
+        $allowed = [
+            ProcurementDocument::TYPE_WAYBILL,
+            ProcurementDocument::TYPE_DELIVERY_CONFIRMATION,
+            ProcurementDocument::TYPE_JCC,
+            ProcurementDocument::TYPE_OTHER,
+            ProcurementDocument::TYPE_PFI,
+        ];
+
+        return in_array($type, $allowed, true);
+    }
+
+    public function canForceClose(User $user, MRF $mrf): bool
+    {
+        if ($this->isMRFClosed($mrf)) {
+            return false;
+        }
+
+        $role = $user->scmRole();
+        if (! in_array($role, ['admin', 'procurement_manager'], true)) {
+            return false;
+        }
+
+        $status = strtolower(trim((string) ($mrf->status ?? '')));
+        if (in_array($status, ['paid', 'completed', 'finance'], true)) {
+            return true;
+        }
+
+        $state = (string) ($mrf->workflow_state ?? '');
+
+        return in_array($state, [
+            WorkflowStateService::STATE_FINANCIALLY_COMPLETE,
+            WorkflowStateService::STATE_OPERATIONALLY_COMPLETE,
+            WorkflowStateService::STATE_PAYMENT_PROCESSED,
+            WorkflowStateService::STATE_MILESTONE_PAYMENT_IN_PROGRESS,
+            WorkflowStateService::STATE_FINANCE_IN_REVIEW,
+        ], true);
     }
 
     public function canManageDeliveryConfirmation(User $user, MRF $mrf): bool
@@ -687,9 +737,15 @@ class PermissionService
     {
         $isClosed = $this->isMRFClosed($mrf);
 
-        // If MRF is closed, no actions are available
+        // If MRF is closed, limited historical actions remain available
         if ($isClosed) {
             $routing = app(FinanceRoutingService::class)->routingMeta($mrf);
+
+            $canHistoricalDocs = $this->canUploadHistoricalSupportingDocument(
+                $user,
+                $mrf,
+                ProcurementDocument::TYPE_WAYBILL
+            );
 
             $actions = [
                 'usesFinanceAp' => $routing['usesFinanceAp'],
@@ -713,10 +769,20 @@ class PermissionService
                 'canViewGRN' => $this->canViewGRN($user, $mrf),
                 'showDeliveryConfirmationPanel' => false,
                 'canManageDeliveryConfirmation' => false,
-                'canUploadWaybill' => false,
-                'canUploadJcc' => false,
-                'canUploadDeliveryConfirmation' => false,
-                'availableActions' => ['view'],
+                'canUploadWaybill' => $canHistoricalDocs,
+                'canUploadJcc' => $this->canUploadHistoricalSupportingDocument($user, $mrf, ProcurementDocument::TYPE_JCC),
+                'canUploadDeliveryConfirmation' => $this->canUploadHistoricalSupportingDocument(
+                    $user,
+                    $mrf,
+                    ProcurementDocument::TYPE_DELIVERY_CONFIRMATION
+                ),
+                'canUploadHistoricalSupportingDocument' => $canHistoricalDocs,
+                'canForceClose' => false,
+                'canClose' => false,
+                'availableActions' => array_values(array_filter([
+                    'view',
+                    $canHistoricalDocs ? 'upload_historical_document' : null,
+                ])),
             ];
 
             if (ProcurementOverviewAccess::isProcurementOverviewOnly($user)) {
@@ -770,6 +836,9 @@ class PermissionService
                 $mrf,
                 ProcurementDocument::TYPE_DELIVERY_CONFIRMATION
             ),
+            'canForceClose' => $this->canForceClose($user, $mrf),
+            'canClose' => false, // readiness-gated close is exposed via PO close endpoint
+            'canUploadHistoricalSupportingDocument' => false,
         ];
 
         // Build list of available action keys
@@ -777,6 +846,7 @@ class PermissionService
         if ($actions['canEdit']) $availableActions[] = 'edit';
         if ($actions['canApprove']) $availableActions[] = 'approve';
         if ($actions['canReject']) $availableActions[] = 'reject';
+        if ($actions['canForceClose']) $availableActions[] = 'force_close';
         if ($actions['canSelectVendors']) $availableActions[] = 'select_vendors';
         if ($actions['canViewInvoices']) $availableActions[] = 'view_invoices';
         if ($actions['canApproveInvoice']) $availableActions[] = 'approve_invoice';

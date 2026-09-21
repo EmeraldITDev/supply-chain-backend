@@ -54,8 +54,28 @@ class PurchaseOrderService
             ->select(self::LIST_SELECT)
             ->forPoList();
 
-        if ($request->filled('status') && strtolower((string) $request->status) !== 'all') {
-            $query->withPoLifecycleStatus((string) $request->status);
+        $status = $request->filled('status') ? strtolower((string) $request->status) : null;
+        $includeCompleted = $request->boolean('include_completed') || $request->boolean('includeCompleted');
+        $lifecycle = strtolower(trim((string) $request->input('lifecycle', '')));
+
+        if ($status && $status !== 'all') {
+            $query->withPoLifecycleStatus($status);
+        } elseif ($lifecycle === 'historical' || $lifecycle === 'completed') {
+            $query->withPoLifecycleStatus('completed');
+        } elseif (! $includeCompleted && $lifecycle !== 'all') {
+            // Active PO table: ongoing procurement only (exclude completed/closed by default).
+            $query->where(function ($q) {
+                $q->where(function ($active) {
+                    $active->whereNull('grn_completed')
+                        ->orWhere('grn_completed', false);
+                })->where(function ($active) {
+                    $active->whereNull('status')
+                        ->orWhereRaw('LOWER(status) != ?', ['completed']);
+                })->where(function ($active) {
+                    $active->whereNull('workflow_state')
+                        ->orWhereNotIn('workflow_state', MRF::poCompletedWorkflowStates());
+                });
+            });
         }
 
         if ($request->filled('search')) {

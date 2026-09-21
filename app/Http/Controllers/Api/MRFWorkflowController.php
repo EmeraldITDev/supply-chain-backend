@@ -2928,10 +2928,21 @@ class MRFWorkflowController extends Controller
                 'message' => 'PO deleted successfully. MRF is now ready for PO regeneration.',
                 'data' => [
                     'mrf_id' => $mrf->mrf_id,
+                    'mrfId' => $mrf->mrf_id,
+                    'id' => $mrf->mrf_id,
+                    'poNumber' => null,
                     'status' => $mrf->status,
                     'current_stage' => $mrf->current_stage,
                     'previous_status' => $mrf->getOriginal('status'),
                     'previous_stage' => $mrf->getOriginal('current_stage'),
+                    // Client cache keys to drop immediately (no full page refresh).
+                    'invalidate' => [
+                        'pos',
+                        'mrfs',
+                        'mrf_po',
+                        'dashboard.po.summary_counts',
+                    ],
+                    'removedFromPoList' => true,
                 ]
             ]);
         } catch (\Exception $e) {

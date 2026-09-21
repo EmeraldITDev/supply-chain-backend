@@ -178,13 +178,27 @@ class VendorController extends Controller
     }
 
     /**
-     * Lightweight vendor search for PO/RFQ comboboxes (search required, max 20 rows).
+     * Lightweight vendor search for PO/RFQ comboboxes.
+     * For RFQ/PO purpose, empty search returns active eligible vendors (fixes Manual Select empty list).
      */
     private function dropdownIndex(Request $request): \Illuminate\Http\JsonResponse
     {
         $search = trim((string) $request->input('search', $request->input('q', '')));
-        $allowEmpty = $request->boolean('allow_empty') || $request->boolean('allowEmpty');
-        $limit = (int) max(1, min(100, (int) $request->input('limit', 20)));
+
+        // Default: allow empty search so Manual Select is not blank on open.
+        // Pass allow_empty=0 to require the user to type first.
+        $allowEmpty = true;
+        if ($request->has('allow_empty') || $request->has('allowEmpty')) {
+            $allowEmpty = $request->boolean('allow_empty') || $request->boolean('allowEmpty');
+        }
+
+        $limit = (int) max(1, min(100, (int) $request->input('limit', 50)));
+
+        // Default Active-only; pass include_inactive=1 to broaden.
+        $activeOnly = ! ($request->boolean('include_inactive') || $request->boolean('includeInactive'));
+        if ($request->has('active_only') || $request->has('activeOnly')) {
+            $activeOnly = $request->boolean('active_only') || $request->boolean('activeOnly');
+        }
 
         if ($search === '' && ! $allowEmpty) {
             return response()->json([
@@ -193,7 +207,11 @@ class VendorController extends Controller
             ]);
         }
 
-        $itemsQuery = Vendor::query()->forDirectory(false)->select(['vendor_id', 'name']);
+        $itemsQuery = Vendor::query()->forDirectory(false)->select(['vendor_id', 'name', 'status']);
+
+        if ($activeOnly) {
+            $itemsQuery->whereRaw('LOWER(status) = ?', ['active']);
+        }
 
         if ($search !== '') {
             // Sanitize search term and match across common fields (name, vendor_id, email, phone)
@@ -215,6 +233,7 @@ class VendorController extends Controller
             ->map(fn ($vendor) => [
                 'id' => $vendor->vendor_id,
                 'name' => $vendor->name,
+                'status' => $vendor->status,
             ])
             ->values()
             ->all();

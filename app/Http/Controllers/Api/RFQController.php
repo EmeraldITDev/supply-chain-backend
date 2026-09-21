@@ -215,10 +215,14 @@ class RFQController extends Controller
             'payment_schedule' => $this->paymentSchedulePayload($rfq->mrf),
             'payment_milestones' => $rfq->mrf
                 ? app(PaymentScheduleService::class)->paymentMilestonesForMrf($rfq->mrf)
-                : [],
+                : (is_array($rfq->custom_payment_schedule['milestones'] ?? null)
+                    ? $rfq->custom_payment_schedule['milestones']
+                    : []),
             'paymentMilestones' => $rfq->mrf
                 ? app(PaymentScheduleService::class)->paymentMilestonesForMrf($rfq->mrf)
-                : [],
+                : (is_array($rfq->custom_payment_schedule['milestones'] ?? null)
+                    ? $rfq->custom_payment_schedule['milestones']
+                    : []),
             'supportingDocuments' => $this->supportingDocumentsPayload($rfq),
             'supporting_documents' => $this->supportingDocumentsPayload($rfq),
             'deadline' => $rfq->deadline?->format('Y-m-d'),
@@ -245,10 +249,15 @@ class RFQController extends Controller
     public function store(Request $request)
     {
         $validator = Validator::make($request->all(), [
+            // MRF is optional: RFQs may be created from an approved MRF or as standalone.
             'mrfId' => [
-                'required',
+                'nullable',
                 'string',
                 function ($attribute, $value, $fail) {
+                    if ($value === null || $value === '') {
+                        return;
+                    }
+
                     $exists = MRF::where(function ($q) use ($value) {
                         $q->where('mrf_id', $value)->orWhere('formatted_id', $value);
                         if (is_numeric((string) $value)) {
@@ -271,6 +280,10 @@ class RFQController extends Controller
             'vendorIds.*' => 'required|string|exists:vendors,vendor_id',
             'paymentTerms' => 'nullable|string',
             'payment_terms' => 'nullable|string',
+            'customPaymentTerms' => 'nullable|string|max:5000',
+            'custom_payment_terms' => 'nullable|string|max:5000',
+            'paymentTermMode' => 'nullable|in:template,custom,predefined,free_text',
+            'payment_term_mode' => 'nullable|in:template,custom,predefined,free_text',
             'deliveryTerms' => 'nullable|string',
             'delivery_terms' => 'nullable|string',
             'technicalRequirements' => 'nullable|string',
@@ -386,6 +399,36 @@ class RFQController extends Controller
             'created_at' => $createdAt,
         ]);
 
+        $customPaymentTerms = trim((string) ($request->input('customPaymentTerms')
+            ?? $request->input('custom_payment_terms')
+            ?? ''));
+        $paymentTermsFallback = $request->paymentTerms ?? $request->payment_terms;
+        if ($customPaymentTerms !== '') {
+            $paymentTermsFallback = $customPaymentTerms;
+        }
+
+        $customPaymentSchedule = null;
+        if (PaymentMilestoneRequest::provided($request) && ! $mrf) {
+            $milestones = PaymentMilestoneRequest::resolve($request);
+            $customPaymentSchedule = [
+                'mode' => 'custom',
+                'milestones' => $milestones,
+                'summary' => $paymentTermsFallback,
+            ];
+            if ($paymentTermsFallback === null || $paymentTermsFallback === '') {
+                $paymentTermsFallback = collect($milestones)
+                    ->map(fn ($m) => trim(($m['percentage'] ?? '').'% '.($m['label'] ?? '')))
+                    ->filter()
+                    ->implode(' / ');
+            }
+        } elseif ($customPaymentTerms !== '') {
+            $customPaymentSchedule = [
+                'mode' => 'custom',
+                'description' => $customPaymentTerms,
+                'milestones' => [],
+            ];
+        }
+
         $rfq = RFQ::create([
             'rfq_id' => RFQ::generateRFQId(),
             'formatted_id' => $formattedId,
@@ -397,7 +440,8 @@ class RFQController extends Controller
             'quantity' => $request->quantity,
             'estimated_cost' => $estimatedCost,
             'deadline' => $request->deadline,
-            'payment_terms' => $this->resolvePaymentTermsForMrf($mrf, $request->paymentTerms ?? $request->payment_terms),
+            'payment_terms' => $this->resolvePaymentTermsForMrf($mrf, $paymentTermsFallback),
+            'custom_payment_schedule' => $customPaymentSchedule,
             'delivery_terms' => $request->input('delivery_terms') ?? $request->input('deliveryTerms'),
             'technical_requirements' => $request->input('technical_requirements') ?? $request->input('technicalRequirements'),
             'additional_notes' => $request->input('additional_notes') ?? $request->input('additionalNotes') ?? $request->notes,
@@ -483,10 +527,14 @@ class RFQController extends Controller
             'payment_schedule' => $this->paymentSchedulePayload($rfq->mrf),
             'payment_milestones' => $mrf
                 ? app(PaymentScheduleService::class)->paymentMilestonesForMrf($mrf)
-                : [],
+                : (is_array($rfq->custom_payment_schedule['milestones'] ?? null)
+                    ? $rfq->custom_payment_schedule['milestones']
+                    : []),
             'paymentMilestones' => $mrf
                 ? app(PaymentScheduleService::class)->paymentMilestonesForMrf($mrf)
-                : [],
+                : (is_array($rfq->custom_payment_schedule['milestones'] ?? null)
+                    ? $rfq->custom_payment_schedule['milestones']
+                    : []),
             'supportingDocuments' => $this->supportingDocumentsPayload($rfq),
             'supporting_documents' => $this->supportingDocumentsPayload($rfq),
             'deadline' => $rfq->deadline->format('Y-m-d'),

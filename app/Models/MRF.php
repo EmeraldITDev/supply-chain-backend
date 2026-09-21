@@ -668,6 +668,12 @@ class MRF extends Model
         'linked_po_id',
         'finance_ap_case_id',
         'finance_ap_status',
+        'vendor_fulfilment_recorded_at',
+        'force_closed_at',
+        'force_closed_by',
+        'force_close_reason',
+        'force_close_previous_status',
+        'force_close_previous_workflow_state',
         'unlocked_by',
         'unlocked_at',
         'unlock_reason',
@@ -716,6 +722,8 @@ class MRF extends Model
         'revision_number' => 'integer',
         'revision_history' => 'array',
         'revision_snapshot' => 'array',
+        'vendor_fulfilment_recorded_at' => 'datetime',
+        'force_closed_at' => 'datetime',
     ];
 
     public function unlockedBy(): BelongsTo

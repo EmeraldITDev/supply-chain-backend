@@ -329,6 +329,199 @@ class PurchaseOrderController extends Controller
         ]);
     }
 
+    /**
+     * POST /api/pos/{id}/force-close
+     *
+     * Exception path when Finance AP has not updated/closed the record.
+     * Does not replace the normal close endpoint. Admin + Procurement Manager only.
+     * Label for UI: "Force Close — Finance AP Status Not Updated"
+     */
+    public function forceClose(Request $request, string $id): JsonResponse
+    {
+        $user = $request->user();
+        $allowedRoles = ['admin', 'procurement_manager'];
+
+        $hasAllowedRole =
+            ($user->scmRole() !== null && in_array($user->scmRole(), $allowedRoles, true))
+            || (method_exists($user, 'hasAnyRole') && $user->hasAnyRole($allowedRoles));
+
+        if (! $hasAllowedRole) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Only Admin or Procurement Manager may force-close',
+                'code' => 'FORBIDDEN',
+            ], 403);
+        }
+
+        $mrf = $this->findMrfByPoReference($id);
+
+        if (! $mrf) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Purchase order not found',
+                'code' => 'NOT_FOUND',
+            ], 404);
+        }
+
+        if (($mrf->workflow_state ?? null) === WorkflowStateService::STATE_CLOSED) {
+            return response()->json([
+                'success' => true,
+                'message' => 'Purchase order is already closed',
+                'data' => [
+                    'mrfId' => $mrf->mrf_id,
+                    'poNumber' => $mrf->po_number,
+                    'workflowState' => $mrf->workflow_state,
+                ],
+            ]);
+        }
+
+        $validator = \Illuminate\Support\Facades\Validator::make($request->all(), [
+            'reason' => 'required|string|min:10|max:5000',
+            'force_close_reason' => 'nullable|string|min:10|max:5000',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'error' => 'A mandatory reason is required for force close',
+                'errors' => $validator->errors(),
+                'code' => 'VALIDATION_ERROR',
+            ], 422);
+        }
+
+        $reason = trim((string) ($request->input('reason') ?? $request->input('force_close_reason')));
+
+        if (! $this->isForceCloseEligible($mrf)) {
+            $readiness = $this->closureReadiness->evaluate($mrf);
+
+            return response()->json([
+                'success' => false,
+                'error' => 'Force close is only available when payment/completion conditions are met but Finance AP has not closed the record',
+                'code' => 'FORCE_CLOSE_NOT_ELIGIBLE',
+                'blockers' => $readiness['blockers'] ?? [],
+                'eligibilityHint' => 'Require paid/complete milestones, financially_complete, or legacy paid/completed status.',
+            ], 422);
+        }
+
+        $previousStatus = $mrf->status;
+        $previousWorkflow = $mrf->workflow_state;
+
+        if (! $this->workflowStateService->forceClose($mrf, $user)) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Unable to force-close purchase order',
+                'code' => 'TRANSITION_FAILED',
+            ], 422);
+        }
+
+        $mrf->forceFill([
+            'force_closed_at' => now(),
+            'force_closed_by' => $user->id,
+            'force_close_reason' => $reason,
+            'force_close_previous_status' => $previousStatus,
+            'force_close_previous_workflow_state' => $previousWorkflow,
+        ])->save();
+
+        \App\Models\MRFApprovalHistory::record(
+            $mrf,
+            'force_closed',
+            'finance_ap_bypass',
+            $user,
+            $reason
+        );
+
+        app(\App\Services\ScmAuditService::class)->record(
+            'force_close',
+            'MRF',
+            $mrf->mrf_id,
+            $user,
+            'Force Close — Finance AP Status Not Updated',
+            [
+                'previous_status' => $previousStatus,
+                'previous_workflow_state' => $previousWorkflow,
+                'new_status' => $mrf->fresh()->status,
+                'new_workflow_state' => WorkflowStateService::STATE_CLOSED,
+                'reason' => $reason,
+                'po_number' => $mrf->po_number,
+            ],
+            $request
+        );
+
+        $mrf->refresh();
+
+        if (! $mrf->vendor_fulfilment_recorded_at && ! $mrf->grn_completed) {
+            try {
+                app(\App\Services\VendorFulfilmentService::class)->recordCycleCompleted($mrf, false);
+            } catch (\Throwable $e) {
+                \Log::warning('Vendor fulfilment update on force close failed', [
+                    'mrf_id' => $mrf->mrf_id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        } elseif (! $mrf->vendor_fulfilment_recorded_at && $mrf->grn_completed) {
+            // GRN path usually recorded fulfilment; stamp idempotency flag if missing.
+            $mrf->forceFill(['vendor_fulfilment_recorded_at' => now()])->save();
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Purchase order force-closed (Finance AP status not updated)',
+            'data' => [
+                'mrfId' => $mrf->mrf_id,
+                'poNumber' => $mrf->po_number,
+                'workflowState' => $mrf->workflow_state,
+                'forceClosedAt' => optional($mrf->force_closed_at)?->toIso8601String(),
+                'forceCloseReason' => $mrf->force_close_reason,
+                'previousStatus' => $previousStatus,
+                'previousWorkflowState' => $previousWorkflow,
+            ],
+        ]);
+    }
+
+    /**
+     * Eligible when payment/completion is effectively done but normal can_close may still be blocked
+     * (e.g. Finance AP never flipped case_closed / operational docs stuck).
+     */
+    private function isForceCloseEligible(MRF $mrf): bool
+    {
+        $readiness = $this->closureReadiness->evaluate($mrf);
+
+        if ($readiness['financially_complete'] ?? false) {
+            return true;
+        }
+
+        $status = strtolower(trim((string) ($mrf->status ?? '')));
+        if (in_array($status, ['paid', 'completed', 'finance'], true)) {
+            return true;
+        }
+
+        $state = (string) ($mrf->workflow_state ?? '');
+        if (in_array($state, [
+            WorkflowStateService::STATE_FINANCIALLY_COMPLETE,
+            WorkflowStateService::STATE_OPERATIONALLY_COMPLETE,
+            WorkflowStateService::STATE_PAYMENT_PROCESSED,
+            WorkflowStateService::STATE_MILESTONE_PAYMENT_IN_PROGRESS,
+            WorkflowStateService::STATE_FINANCE_IN_REVIEW,
+        ], true)) {
+            // Allow finance-stage force close when at least one milestone is paid/complete.
+            $schedule = app(\App\Services\PaymentScheduleService::class)->findForMrf($mrf);
+            if ($schedule) {
+                $schedule->loadMissing('milestones');
+                $anyPaid = $schedule->milestones->contains(function ($m) {
+                    return in_array($m->status, [
+                        \App\Models\PaymentMilestone::STATUS_PAID,
+                        \App\Models\PaymentMilestone::STATUS_COMPLETE,
+                    ], true);
+                });
+                if ($anyPaid) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
     private function findMrfByPoReference(string $id): ?MRF
     {
         return MRF::query()

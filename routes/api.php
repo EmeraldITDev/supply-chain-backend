@@ -372,6 +372,9 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // MRF routes
     Route::get('/mrfs/contract-types', [ContractTypeController::class, 'index']);
+    Route::post('/mrfs/bulk-approve', [\App\Http\Controllers\Api\MrfBulkActionController::class, 'approve']);
+    Route::post('/mrfs/bulk-reject', [\App\Http\Controllers\Api\MrfBulkActionController::class, 'reject']);
+    Route::post('/mrfs/bulk-export', [\App\Http\Controllers\Api\MrfBulkActionController::class, 'export']);
     Route::get('/mrfs', [MRFController::class, 'index']);
     Route::get('/mrfs/{id}', [MRFController::class, 'show']);
     Route::get('/mrfs/{id}/full-details', [MRFController::class, 'getFullDetails']); // Full MRF with all quotations
@@ -423,6 +426,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/pos/{id}/unlock-for-edit', [\App\Http\Controllers\Api\PurchaseOrderController::class, 'unlockForEdit']);
     Route::post('/pos/{id}/submit-for-resign', [\App\Http\Controllers\Api\PurchaseOrderController::class, 'submitForResign']);
     Route::post('/pos/{id}/close', [\App\Http\Controllers\Api\PurchaseOrderController::class, 'close']);
+    Route::post('/pos/{id}/force-close', [\App\Http\Controllers\Api\PurchaseOrderController::class, 'forceClose']);
     Route::post('/mrfs/{id}/reject-po', [\App\Http\Controllers\Api\MRFWorkflowController::class, 'rejectPO']);
     Route::post('/mrfs/{id}/process-payment', [\App\Http\Controllers\Api\MRFWorkflowController::class, 'processPayment']);
     Route::post('/mrfs/{id}/approve-payment', [\App\Http\Controllers\Api\MRFWorkflowController::class, 'approvePayment']);

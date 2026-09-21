@@ -2179,3 +2179,112 @@ Frontend:
 - SCD dashboard / signing queue: amber **Revised** badge when `revision_number > 0`.
 - SCD PO workspace and PO detail: **Revision Summary** table with previous vs new values side by side.
 
+
+---
+
+## SCM Portal Procurement Workflow Enhancement (2026-09-21)
+
+Backend additive changes. Migrate first: `php artisan migrate` (`2026_09_21_200000_add_procurement_workflow_enhancement_fields`).
+
+### 1. Optional MRF on RFQ create
+
+`POST /api/rfqs` — `mrfId` is **nullable**. Omit it (or send null) for a standalone RFQ.
+
+Response flags (also on GET list/show via `extendedDetailApiFields`):
+- `isStandalone` / `is_standalone`
+- `linkedToMrf` / `linked_to_mrf`
+
+UI: distinguish “Linked to MRF” vs “Standalone RFQ”. Keep existing MRF-linked flow unchanged when `mrfId` is provided.
+
+### 2. Vendor Manual Select fix
+
+Root cause: `GET /api/vendors?dropdown=1` returned `[]` when `search` was empty unless `allow_empty=1`.
+
+Now dropdown returns up to 50 **Active** vendors when search is empty (capped). Preferred RFQ call:
+
+`GET /api/vendors?dropdown=1&purpose=rfq&allow_empty=1`
+
+Optional: `active_only=1`, `limit=50`, `search=…`.
+
+### 3. Custom payment terms
+
+Existing templates + milestone arrays still work when an MRF is linked (`PaymentScheduleService`).
+
+New / clarified fields on RFQ create:
+- `customPaymentTerms` / `custom_payment_terms` (free-text, e.g. “75% upfront / 25% upon delivery”)
+- `paymentTermMode`: `template` | `custom` | `predefined` | `free_text`
+- `payment_milestones` / `milestones` without MRF → stored on RFQ as `custom_payment_schedule` JSON + summary in `payment_terms`
+
+Exposed on RFQ payloads as `customPaymentSchedule` / `custom_payment_schedule`. Visible to vendors via existing RFQ detail fields.
+
+### 4–5. Quotation selection auditability
+
+`POST /api/rfqs/{id}/select-vendor` now **requires** a selection reason (`selection_reason` | `selectionReason` | `remarks`).
+
+Persisted on RFQ: `selection_reason`, `selected_at`, `selected_by` (in addition to existing `price_comparisons.selection_reason` when MRF-linked).
+
+SCD can read reason from RFQ detail / selection response.
+
+### 6. PO delete → immediate UI update
+
+`DELETE /api/mrfs/{id}/po` success payload now includes:
+- `mrfId`, `id`, `removedFromPoList: true`
+- `invalidate: ["pos","mrfs","mrf_po","dashboard.po.summary_counts"]`
+
+Frontend **must** on success:
+1. Remove the row from local PO list state / React Query cache by `mrfId`
+2. Invalidate the keys above (do not wait for full page refresh)
+
+Permissions unchanged (`procurement_manager`, `procurement`, `admin`).
+
+### 7–10. Force close + active vs completed lists
+
+**Normal close unchanged:** `POST /api/pos/{id}/close` (readiness-gated; Finance AP path intact).
+
+**Exception path:** `POST /api/pos/{id}/force-close`  
+Roles: **admin**, **procurement_manager** only.  
+Body: `{ "reason": "…" }` (required, min 10 chars).  
+UI label: **Force Close — Finance AP Status Not Updated**
+
+Eligible when financially complete / paid / completed / finance-stage with paid milestones, but Finance AP has not closed.
+
+Audit: `mrf_approval_history` action `force_closed` + `audit_logs` + columns `force_closed_at`, `force_closed_by`, `force_close_reason`, previous status/state.
+
+Available-actions: `canForceClose`, `availableActions` may include `force_close`.
+
+**Active PO list:** `GET /api/pos` excludes completed/closed by default.  
+- Historical: `?status=completed` or `?lifecycle=historical`  
+- All: `?status=all` or `?include_completed=1`
+
+**Active MRFs:** `GET /api/mrfs?lifecycle=active` vs `?lifecycle=historical` (records never deleted).
+
+### 11. Historical supporting docs
+
+Closed MRFs: Admin / PM / SCD may still upload supporting types (waybill, JCC, delivery confirmation, other, PFI) via existing `POST /api/mrfs/{id}/procurement-documents`. Waybill remains optional and never blocks closure. Flags: `canUploadHistoricalSupportingDocument`, `canUploadWaybill` when closed.
+
+### 13. Additive audit
+
+`ScmAuditService` writes to `audit_logs` for force-close and vendor field changes (VendorObserver). Existing `MRFApprovalHistory` / `Activity` unchanged.
+
+### 14. Bulk MRF actions
+
+Same permission/business rules as individual stage approvals:
+
+| Method | Path | Body |
+|--------|------|------|
+| POST | `/api/mrfs/bulk-approve` | `{ "ids": ["…"], "remarks": "…" }` |
+| POST | `/api/mrfs/bulk-reject` | `{ "ids": ["…"], "reason": "…" }` (reason required) |
+| POST | `/api/mrfs/bulk-export` | `{ "ids": ["…"], "format": "json\|csv" }` |
+
+Response includes `data.succeeded[]` and `data.failed[]` (partial success = HTTP 200 with `success: false` only when zero succeeded for approve/reject).
+
+### 15. Vendor performance post-closure
+
+`VendorFulfilmentService::recordCycleCompleted` is idempotent via `m_r_f_s.vendor_fulfilment_recorded_at` (set on first GRN/close/force-close scoring).
+
+### 16. Approval reminders
+
+Scheduled: `scm:send-approval-reminders` hourly (`bootstrap/app.php`).  
+Database + mail notification only — **never** auto-approves/rejects/closes.  
+Manual: `php artisan scm:send-approval-reminders --hours=24 [--dry-run]`
+

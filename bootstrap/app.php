@@ -60,6 +60,11 @@ return Application::configure(basePath: dirname(__DIR__))
 
         $schedule->command('fleet:check-maintenance')->dailyAt('00:10')
             ->withoutOverlapping(10);
+
+        // Additive reminders only — never auto-approves/rejects/closes records.
+        $schedule->command('scm:send-approval-reminders')->hourly()
+            ->withoutOverlapping(30)
+            ->name('SCM Procurement Approval Reminders');
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         // Render JSON responses for API errors
