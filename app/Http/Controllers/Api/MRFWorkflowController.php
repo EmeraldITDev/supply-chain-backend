@@ -2875,7 +2875,8 @@ class MRFWorkflowController extends Controller
             }
         }
 
-        // Clear PO-related fields
+        // Clear PO-related fields and reset workflow so the MRF is ready for regeneration
+        // (PO and MRF share one row — deleting the PO must rewind MRF workflow state too).
         $updateData = [
             'po_number' => null,
             'unsigned_po_url' => null,
@@ -2888,7 +2889,20 @@ class MRFWorkflowController extends Controller
             'po_rejection_reason' => null,
             'status' => $newStatus,
             'current_stage' => $newStage,
+            'force_closed_at' => null,
+            'force_closed_by' => null,
+            'force_close_reason' => null,
+            'force_close_previous_status' => null,
+            'force_close_previous_workflow_state' => null,
         ];
+
+        // Rewind canonical workflow whenever deletion returns the MRF to an open procurement stage.
+        if (
+            strtolower((string) $newStatus) === 'procurement'
+            || strtolower((string) $newStage) === 'procurement'
+        ) {
+            $updateData['workflow_state'] = WorkflowStateService::STATE_VENDOR_SELECTED;
+        }
 
         try {
             $mrf->update($updateData);
@@ -2925,7 +2939,7 @@ class MRFWorkflowController extends Controller
 
             return response()->json([
                 'success' => true,
-                'message' => 'PO deleted successfully. MRF is now ready for PO regeneration.',
+                'message' => 'PO deleted successfully. Associated MRF was reset for PO regeneration.',
                 'data' => [
                     'mrf_id' => $mrf->mrf_id,
                     'mrfId' => $mrf->mrf_id,
@@ -2933,6 +2947,7 @@ class MRFWorkflowController extends Controller
                     'poNumber' => null,
                     'status' => $mrf->status,
                     'current_stage' => $mrf->current_stage,
+                    'workflow_state' => $mrf->workflow_state,
                     'previous_status' => $mrf->getOriginal('status'),
                     'previous_stage' => $mrf->getOriginal('current_stage'),
                     // Client cache keys to drop immediately (no full page refresh).
@@ -2941,6 +2956,7 @@ class MRFWorkflowController extends Controller
                         'mrfs',
                         'mrf_po',
                         'dashboard.po.summary_counts',
+                        'warehouse.inventory',
                     ],
                     'removedFromPoList' => true,
                 ]

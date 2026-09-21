@@ -419,12 +419,13 @@ class MRFController extends Controller
                 })->where(function ($active) {
                     $active->whereNull('workflow_state')
                         ->orWhere('workflow_state', '!=', \App\Services\WorkflowStateService::STATE_CLOSED);
-                });
+                })->whereNull('force_closed_at');
             });
         } elseif ($lifecycle === 'historical' || $lifecycle === 'completed' || $lifecycle === 'closed') {
             $query->where(function ($q) {
                 $q->whereRaw('LOWER(status) = ?', ['completed'])
                     ->orWhere('workflow_state', \App\Services\WorkflowStateService::STATE_CLOSED)
+                    ->orWhereNotNull('force_closed_at')
                     ->orWhereIn('workflow_state', MRF::poCompletedWorkflowStates());
             });
         }

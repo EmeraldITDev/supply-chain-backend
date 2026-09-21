@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api\Warehouse;
 
 use App\Http\Controllers\Controller;
+use App\Services\CompletedProcurementInventoryService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
@@ -123,10 +124,18 @@ class WarehouseInventoryController extends Controller
 
     public function inventory(Request $request): JsonResponse
     {
+        $search = $request->query('search');
+        $limit = (int) $request->query('per_page', $request->query('limit', 100));
+
+        $inventory = app(CompletedProcurementInventoryService::class)->listInventory(
+            is_string($search) ? $search : null,
+            $limit
+        );
+
         return $this->success([
-            'inventory' => [],
+            'inventory' => $inventory,
             'filters' => [
-                'search' => $request->query('search'),
+                'search' => $search,
                 'location_id' => $request->query('location_id'),
                 'category' => $request->query('category'),
                 'low_stock' => $request->query('low_stock'),

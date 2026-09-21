@@ -8,16 +8,22 @@ use App\Http\Requests\Procurement\StorePurchaseOrderRequest;
 use App\Http\Requests\Procurement\UnlockPurchaseOrderForEditRequest;
 use App\Http\Requests\Procurement\UpdatePurchaseOrderRequest;
 use App\Models\MRF;
+use App\Models\MRFApprovalHistory;
 use App\Models\ProcurementDocument;
 use App\Services\FinanceAp\ClosureReadinessService;
 use App\Services\ProcurementDocumentService;
 use App\Services\PurchaseOrderRevisionService;
 use App\Services\PurchaseOrderService;
+use App\Services\ScmAuditService;
+use App\Services\VendorFulfilmentService;
 use App\Services\WorkflowStateService;
 use App\Support\RequestLineItemParser;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\ValidationException;
 
 class PurchaseOrderController extends Controller
@@ -335,6 +341,10 @@ class PurchaseOrderController extends Controller
      * Exception path when Finance AP has not updated/closed the record.
      * Does not replace the normal close endpoint. Admin + Procurement Manager only.
      * Label for UI: "Force Close — Finance AP Status Not Updated"
+     *
+     * Accepts multipart: reason (required), waybill / waybill_file (optional).
+     * Close + history + metadata run in one DB transaction so a history failure
+     * cannot leave the MRF closed while the client sees an error.
      */
     public function forceClose(Request $request, string $id): JsonResponse
     {
@@ -363,7 +373,55 @@ class PurchaseOrderController extends Controller
             ], 404);
         }
 
+        $validator = Validator::make($request->all(), [
+            'reason' => 'nullable|string|min:10|max:5000',
+            'force_close_reason' => 'nullable|string|min:10|max:5000',
+            'waybill' => 'nullable|file|max:20480',
+            'waybill_file' => 'nullable|file|max:20480',
+            'document' => 'nullable|file|max:20480',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Invalid force-close payload',
+                'errors' => $validator->errors(),
+                'code' => 'VALIDATION_ERROR',
+            ], 422);
+        }
+
+        $reason = trim((string) ($request->input('reason') ?? $request->input('force_close_reason') ?? ''));
+        $waybillFile = $request->file('waybill')
+            ?? $request->file('waybill_file')
+            ?? $request->file('document');
+
+        // Already closed: optionally backfill force-close metadata / waybill (retry after partial failure).
         if (($mrf->workflow_state ?? null) === WorkflowStateService::STATE_CLOSED) {
+            if ($reason !== '' && empty($mrf->force_close_reason)) {
+                $mrf->forceFill([
+                    'force_closed_at' => $mrf->force_closed_at ?? now(),
+                    'force_closed_by' => $mrf->force_closed_by ?? $user->id,
+                    'force_close_reason' => $reason,
+                ])->save();
+            }
+
+            $waybillDoc = null;
+            if ($waybillFile instanceof UploadedFile) {
+                try {
+                    $waybillDoc = app(ProcurementDocumentService::class)->storeUpload(
+                        $mrf,
+                        $waybillFile,
+                        ProcurementDocument::TYPE_WAYBILL,
+                        $user
+                    );
+                } catch (\Throwable $e) {
+                    Log::warning('Waybill upload on already-closed force-close retry failed', [
+                        'mrf_id' => $mrf->mrf_id,
+                        'error' => $e->getMessage(),
+                    ]);
+                }
+            }
+
             return response()->json([
                 'success' => true,
                 'message' => 'Purchase order is already closed',
@@ -371,25 +429,21 @@ class PurchaseOrderController extends Controller
                     'mrfId' => $mrf->mrf_id,
                     'poNumber' => $mrf->po_number,
                     'workflowState' => $mrf->workflow_state,
+                    'status' => $mrf->status,
+                    'forceClosedAt' => optional($mrf->force_closed_at)?->toIso8601String(),
+                    'forceCloseReason' => $mrf->force_close_reason,
+                    'waybillDocumentId' => $waybillDoc?->id,
                 ],
             ]);
         }
 
-        $validator = \Illuminate\Support\Facades\Validator::make($request->all(), [
-            'reason' => 'required|string|min:10|max:5000',
-            'force_close_reason' => 'nullable|string|min:10|max:5000',
-        ]);
-
-        if ($validator->fails()) {
+        if ($reason === '' || strlen($reason) < 10) {
             return response()->json([
                 'success' => false,
-                'error' => 'A mandatory reason is required for force close',
-                'errors' => $validator->errors(),
+                'error' => 'A mandatory reason is required for force close (min 10 characters)',
                 'code' => 'VALIDATION_ERROR',
             ], 422);
         }
-
-        $reason = trim((string) ($request->input('reason') ?? $request->input('force_close_reason')));
 
         if (! $this->isForceCloseEligible($mrf)) {
             $readiness = $this->closureReadiness->evaluate($mrf);
@@ -406,74 +460,126 @@ class PurchaseOrderController extends Controller
         $previousStatus = $mrf->status;
         $previousWorkflow = $mrf->workflow_state;
 
-        if (! $this->workflowStateService->forceClose($mrf, $user)) {
+        try {
+            DB::transaction(function () use (
+                $request,
+                $mrf,
+                $user,
+                $reason,
+                $previousStatus,
+                $previousWorkflow
+            ) {
+                if (! $this->workflowStateService->forceClose($mrf, $user)) {
+                    throw ValidationException::withMessages([
+                        'workflow' => ['Unable to force-close purchase order'],
+                    ]);
+                }
+
+                $mrf->forceFill([
+                    'force_closed_at' => now(),
+                    'force_closed_by' => $user->id,
+                    'force_close_reason' => $reason,
+                    'force_close_previous_status' => $previousStatus,
+                    'force_close_previous_workflow_state' => $previousWorkflow,
+                ])->save();
+
+                // Same MRF row backs the PO — status/workflow already synced to completed/closed.
+                MRFApprovalHistory::record(
+                    $mrf,
+                    'force_closed',
+                    'finance_ap_bypass',
+                    $user,
+                    $reason
+                );
+
+                app(ScmAuditService::class)->record(
+                    'force_close',
+                    'MRF',
+                    $mrf->mrf_id,
+                    $user,
+                    'Force Close — Finance AP Status Not Updated',
+                    [
+                        'previous_status' => $previousStatus,
+                        'previous_workflow_state' => $previousWorkflow,
+                        'new_status' => $mrf->fresh()->status,
+                        'new_workflow_state' => WorkflowStateService::STATE_CLOSED,
+                        'reason' => $reason,
+                        'po_number' => $mrf->po_number,
+                    ],
+                    $request
+                );
+            });
+        } catch (ValidationException $e) {
             return response()->json([
                 'success' => false,
                 'error' => 'Unable to force-close purchase order',
                 'code' => 'TRANSITION_FAILED',
+                'errors' => $e->errors(),
             ], 422);
+        } catch (\Throwable $e) {
+            Log::error('Force close failed', [
+                'mrf_id' => $mrf->mrf_id,
+                'error' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'error' => 'Force close failed: '.$e->getMessage(),
+                'code' => 'FORCE_CLOSE_FAILED',
+            ], 500);
         }
-
-        $mrf->forceFill([
-            'force_closed_at' => now(),
-            'force_closed_by' => $user->id,
-            'force_close_reason' => $reason,
-            'force_close_previous_status' => $previousStatus,
-            'force_close_previous_workflow_state' => $previousWorkflow,
-        ])->save();
-
-        \App\Models\MRFApprovalHistory::record(
-            $mrf,
-            'force_closed',
-            'finance_ap_bypass',
-            $user,
-            $reason
-        );
-
-        app(\App\Services\ScmAuditService::class)->record(
-            'force_close',
-            'MRF',
-            $mrf->mrf_id,
-            $user,
-            'Force Close — Finance AP Status Not Updated',
-            [
-                'previous_status' => $previousStatus,
-                'previous_workflow_state' => $previousWorkflow,
-                'new_status' => $mrf->fresh()->status,
-                'new_workflow_state' => WorkflowStateService::STATE_CLOSED,
-                'reason' => $reason,
-                'po_number' => $mrf->po_number,
-            ],
-            $request
-        );
 
         $mrf->refresh();
 
+        $waybillDoc = null;
+        $waybillError = null;
+        if ($waybillFile instanceof UploadedFile) {
+            try {
+                $waybillDoc = app(ProcurementDocumentService::class)->storeUpload(
+                    $mrf,
+                    $waybillFile,
+                    ProcurementDocument::TYPE_WAYBILL,
+                    $user
+                );
+            } catch (\Throwable $e) {
+                $waybillError = $e->getMessage();
+                Log::warning('Waybill upload after force close failed', [
+                    'mrf_id' => $mrf->mrf_id,
+                    'error' => $waybillError,
+                ]);
+            }
+        }
+
         if (! $mrf->vendor_fulfilment_recorded_at && ! $mrf->grn_completed) {
             try {
-                app(\App\Services\VendorFulfilmentService::class)->recordCycleCompleted($mrf, false);
+                app(VendorFulfilmentService::class)->recordCycleCompleted($mrf, false);
             } catch (\Throwable $e) {
-                \Log::warning('Vendor fulfilment update on force close failed', [
+                Log::warning('Vendor fulfilment update on force close failed', [
                     'mrf_id' => $mrf->mrf_id,
                     'error' => $e->getMessage(),
                 ]);
             }
         } elseif (! $mrf->vendor_fulfilment_recorded_at && $mrf->grn_completed) {
-            // GRN path usually recorded fulfilment; stamp idempotency flag if missing.
             $mrf->forceFill(['vendor_fulfilment_recorded_at' => now()])->save();
         }
 
         return response()->json([
             'success' => true,
-            'message' => 'Purchase order force-closed (Finance AP status not updated)',
+            'message' => $waybillError
+                ? 'Purchase order and associated MRF force-closed, but waybill upload failed'
+                : 'Purchase order and associated MRF force-closed (Finance AP status not updated)',
             'data' => [
                 'mrfId' => $mrf->mrf_id,
                 'poNumber' => $mrf->po_number,
                 'workflowState' => $mrf->workflow_state,
+                'status' => $mrf->status,
                 'forceClosedAt' => optional($mrf->force_closed_at)?->toIso8601String(),
                 'forceCloseReason' => $mrf->force_close_reason,
                 'previousStatus' => $previousStatus,
                 'previousWorkflowState' => $previousWorkflow,
+                'waybillDocumentId' => $waybillDoc?->id,
+                'waybillError' => $waybillError,
+                'invalidate' => ['pos', 'mrfs', 'mrf_po', 'warehouse.inventory'],
             ],
         ]);
     }

@@ -74,7 +74,7 @@ class PurchaseOrderService
                 })->where(function ($active) {
                     $active->whereNull('workflow_state')
                         ->orWhereNotIn('workflow_state', MRF::poCompletedWorkflowStates());
-                });
+                })->whereNull('force_closed_at');
             });
         }
 
