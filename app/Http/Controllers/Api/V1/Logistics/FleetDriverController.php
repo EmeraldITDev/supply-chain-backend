@@ -41,7 +41,7 @@ class FleetDriverController extends ApiController
             'license_number' => $d->license_number,
             'department' => $d->department,
             'role' => $d->role,
-        ]);
+        ])->values()->all();
 
         $staffQuery = User::query()
             ->whereIn('supply_chain_role', [
@@ -74,16 +74,18 @@ class FleetDriverController extends ApiController
                 'license_number' => null,
                 'department' => $u->department,
                 'role' => $u->supply_chain_role,
-            ]);
+            ])->values()->all();
 
-        $drivers = $fleetDrivers->merge($staffDrivers)
-            ->sortBy('name')
-            ->values();
+        // Use Support\Collection — Eloquent\Collection::merge() calls getKey() on items
+        // and fatals when the mapped rows are plain arrays.
+        $drivers = collect($fleetDrivers)
+            ->merge($staffDrivers)
+            ->sortBy(fn (array $d) => strtolower((string) ($d['name'] ?? '')))
+            ->values()
+            ->all();
 
         return $this->success([
-            'drivers' => [
-                'data' => $drivers,
-            ],
+            'drivers' => $drivers,
         ]);
     }
 
