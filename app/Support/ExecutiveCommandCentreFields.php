@@ -16,7 +16,8 @@ class ExecutiveCommandCentreFields
     public static function apiFields(MRF $mrf): array
     {
         $poCreated = $mrf->po_generated_at?->toIso8601String();
-        $delivered = $mrf->grn_completed_at?->toIso8601String();
+        $delivered = $mrf->grn_completed_at?->toIso8601String()
+            ?? $mrf->force_closed_at?->toIso8601String();
         $scdAt = ($mrf->scd_approved_at ?? $mrf->director_approved_at ?? $mrf->supply_chain_approved_at ?? null);
         $scdIso = $scdAt?->toIso8601String();
         $poValue = $mrf->po_value !== null ? (float) $mrf->po_value : null;
@@ -26,11 +27,11 @@ class ExecutiveCommandCentreFields
             'po_created_at' => $poCreated,
             'poCreatedAt' => $poCreated,
 
-            // Actual delivery / goods received (alias of grn_completed_at)
+            // Actual delivery / goods received (GRN) or force-close completion timestamp
             'delivered_at' => $delivered,
             'deliveredAt' => $delivered,
-            'goods_received_at' => $delivered,
-            'goodsReceivedAt' => $delivered,
+            'goods_received_at' => $mrf->grn_completed_at?->toIso8601String(),
+            'goodsReceivedAt' => $mrf->grn_completed_at?->toIso8601String(),
 
             // PO value (actual spend)
             'po_value' => $poValue,

@@ -3,6 +3,7 @@
 namespace App\Support;
 
 use App\Models\MRF;
+use App\Services\WorkflowStateService;
 use Carbon\CarbonInterface;
 
 class ProcurementDeliveryStatus
@@ -12,6 +13,11 @@ class ProcurementDeliveryStatus
      */
     public static function calculate(MRF $mrf): string
     {
+        // Force-closed / workflow-closed POs must leave overdue & active buckets.
+        if (self::isClosedOrForceClosed($mrf)) {
+            return 'delivered';
+        }
+
         $actual = $mrf->grn_completed_at;
         $expected = $mrf->expected_delivery_date;
 
@@ -46,6 +52,22 @@ class ProcurementDeliveryStatus
         return 'pending';
     }
 
+    public static function isClosedOrForceClosed(MRF $mrf): bool
+    {
+        if ($mrf->force_closed_at !== null) {
+            return true;
+        }
+
+        $workflow = strtolower(trim((string) ($mrf->workflow_state ?? '')));
+        if ($workflow === WorkflowStateService::STATE_CLOSED || $workflow === 'closed') {
+            return true;
+        }
+
+        $status = strtolower(trim((string) ($mrf->status ?? '')));
+
+        return in_array($status, ['completed', 'closed', 'paid'], true);
+    }
+
     /**
      * Dual-case delivery intelligence fields for API responses.
      *
@@ -59,10 +81,12 @@ class ProcurementDeliveryStatus
                 : (string) $mrf->expected_delivery_date)
             : null;
 
-        $actual = $mrf->grn_completed_at?->toIso8601String();
+        $actual = $mrf->grn_completed_at?->toIso8601String()
+            ?? ($mrf->force_closed_at?->toIso8601String());
         $status = self::calculate($mrf);
         $rfqIssued = $mrf->rfq_issued_at?->toIso8601String();
         $quoteReceived = $mrf->quotation_received_at?->toIso8601String();
+        $forceClosedAt = $mrf->force_closed_at?->toIso8601String();
 
         return [
             'expected_delivery_date' => $expected,
@@ -71,8 +95,8 @@ class ProcurementDeliveryStatus
             'actualDeliveryDate' => $actual,
             'delivered_at' => $actual,
             'deliveredAt' => $actual,
-            'goods_received_at' => $actual,
-            'goodsReceivedAt' => $actual,
+            'goods_received_at' => $mrf->grn_completed_at?->toIso8601String(),
+            'goodsReceivedAt' => $mrf->grn_completed_at?->toIso8601String(),
             'delivery_status' => $status,
             'deliveryStatus' => $status,
             'rfq_issued_at' => $rfqIssued,
@@ -82,6 +106,10 @@ class ProcurementDeliveryStatus
             // Alias used by progress-tracker / some dashboard gap checks
             'quotes_received_at' => $quoteReceived,
             'quotesReceivedAt' => $quoteReceived,
+            'force_closed_at' => $forceClosedAt,
+            'forceClosedAt' => $forceClosedAt,
+            'force_closed' => $mrf->force_closed_at !== null,
+            'forceClosed' => $mrf->force_closed_at !== null,
         ];
     }
 }
