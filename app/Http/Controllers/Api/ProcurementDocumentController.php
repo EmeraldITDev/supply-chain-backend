@@ -285,8 +285,15 @@ class ProcurementDocumentController extends Controller
 
         $user = $request->user();
 
-        // Only procurement roles and upload author can delete
-        if (! $this->permissionService->userActsAsProcurement($user) && $document->uploaded_by !== $user->id) {
+        $canDelete =
+            $this->permissionService->userActsAsProcurement($user)
+            || $document->uploaded_by === $user->id
+            || (
+                $this->permissionService->isMRFClosed($mrf)
+                && $this->permissionService->canUploadHistoricalSupportingDocument($user, $mrf, (string) $document->type)
+            );
+
+        if (! $canDelete) {
             return response()->json([
                 'success' => false,
                 'error' => 'You do not have permission to delete this document.',

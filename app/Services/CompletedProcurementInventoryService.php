@@ -60,6 +60,8 @@ class CompletedProcurementInventoryService
         $poNumber = $mrf->effectivePoNumber() ?: ($mrf->po_number ?: $mrf->mrf_id);
         $closedAt = $mrf->force_closed_at ?? $mrf->updated_at;
 
+        $lineItems = $this->mapLineItems($mrf);
+
         return [
             'id' => 'po-'.$mrf->id,
             'item_id' => (string) $mrf->id,
@@ -87,14 +89,55 @@ class CompletedProcurementInventoryService
             'valuation_method' => null,
             'is_quarantined' => false,
             'last_movement_at' => optional($closedAt)?->toIso8601String(),
-            // Extra procurement context (ignored by strict UIs; useful for debugging)
+            // Procurement context for inventory detail sheet
             'mrf_id' => $mrf->mrf_id,
             'po_number' => $poNumber,
+            'title' => $mrf->title,
             'vendor_name' => $mrf->selectedVendor?->name,
             'force_closed' => $mrf->force_closed_at !== null,
+            'force_close_reason' => $mrf->force_close_reason,
             'workflow_state' => $mrf->workflow_state,
             'status' => $mrf->status,
+            'line_items' => $lineItems,
+            'line_item_count' => count($lineItems),
+            'source' => 'completed_procurement',
         ];
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    private function mapLineItems(MRF $mrf): array
+    {
+        if (! $mrf->relationLoaded('items') || $mrf->items->isEmpty()) {
+            $fallbackName = trim((string) ($mrf->title ?? ''));
+            $fallbackQty = $this->resolveQuantity($mrf);
+            if ($fallbackName === '' && $fallbackQty <= 0) {
+                return [];
+            }
+
+            return [[
+                'id' => null,
+                'item_name' => $fallbackName !== '' ? $fallbackName : 'Line item',
+                'description' => $mrf->justification ?? $mrf->remarks ?? null,
+                'quantity' => $fallbackQty > 0 ? $fallbackQty : 1,
+                'unit' => 'EA',
+                'unit_price' => $mrf->po_value !== null ? (float) $mrf->po_value : null,
+                'total_price' => $mrf->po_value !== null ? (float) $mrf->po_value : null,
+            ]];
+        }
+
+        return $mrf->items->map(static function ($item) {
+            return [
+                'id' => $item->id,
+                'item_name' => $item->item_name ?: ($item->description ?: 'Item'),
+                'description' => $item->description,
+                'quantity' => (float) ($item->quantity ?? 0),
+                'unit' => $item->unit ?: 'EA',
+                'unit_price' => $item->unit_price !== null ? (float) $item->unit_price : null,
+                'total_price' => $item->total_price !== null ? (float) $item->total_price : null,
+            ];
+        })->values()->all();
     }
 
     private function resolveQuantity(MRF $mrf): float
