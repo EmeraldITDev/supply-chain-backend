@@ -114,9 +114,9 @@ class VendorController extends Controller
             $query = Vendor::query()->where('status', $request->status);
         }
 
-        // Filter by category
-        if ($request->has('category')) {
-            $query->where('category', $request->category);
+        // Filter by category (exact or within comma-separated multi-category values)
+        if ($request->filled('category')) {
+            $this->applyVendorCategoryFilter($query, (string) $request->input('category'));
         }
 
         if ($request->filled('search')) {
@@ -192,7 +192,7 @@ class VendorController extends Controller
             $allowEmpty = $request->boolean('allow_empty') || $request->boolean('allowEmpty');
         }
 
-        $limit = (int) max(1, min(100, (int) $request->input('limit', 50)));
+        $limit = (int) max(1, min(100, (int) $request->input('limit', $request->input('per_page', 50))));
 
         // Default Active-only; pass include_inactive=1 to broaden.
         $activeOnly = ! ($request->boolean('include_inactive') || $request->boolean('includeInactive'));
@@ -207,7 +207,16 @@ class VendorController extends Controller
             ]);
         }
 
-        $itemsQuery = Vendor::query()->forDirectory(false)->select(['vendor_id', 'name', 'status']);
+        $itemsQuery = Vendor::query()->forDirectory(false)->select([
+            'vendor_id',
+            'name',
+            'status',
+            'category',
+            'category_other',
+            'email',
+            'rating',
+            'total_orders',
+        ]);
 
         if ($activeOnly) {
             $itemsQuery->whereRaw('LOWER(status) = ?', ['active']);
@@ -216,7 +225,7 @@ class VendorController extends Controller
         if ($search !== '') {
             // Sanitize search term and match across common fields (name, vendor_id, email, phone)
             $sanitized = str_replace(['%','\\'], ['', '\\'], $search);
-            $term = '%' . $sanitized . '%';
+            $term = '%'.$sanitized.'%';
 
             $itemsQuery->where(function ($q) use ($term) {
                 $q->where('name', 'like', $term)
@@ -224,6 +233,10 @@ class VendorController extends Controller
                     ->orWhere('email', 'like', $term)
                     ->orWhere('phone', 'like', $term);
             });
+        }
+
+        if ($request->filled('category')) {
+            $this->applyVendorCategoryFilter($itemsQuery, (string) $request->input('category'));
         }
 
         $items = $itemsQuery
@@ -234,6 +247,14 @@ class VendorController extends Controller
                 'id' => $vendor->vendor_id,
                 'name' => $vendor->name,
                 'status' => $vendor->status,
+                'category' => $vendor->category,
+                'categoryDisplay' => VendorCategoryDisplay::format($vendor->category, $vendor->category_other),
+                'categoryOther' => $vendor->category_other,
+                'category_other' => $vendor->category_other,
+                'email' => $vendor->email,
+                'rating' => $vendor->rating ? (float) $vendor->rating : 0,
+                'totalOrders' => (int) ($vendor->total_orders ?? 0),
+                'total_orders' => (int) ($vendor->total_orders ?? 0),
             ])
             ->values()
             ->all();
@@ -242,6 +263,29 @@ class VendorController extends Controller
             'success' => true,
             'data' => $items,
         ]);
+    }
+
+    /**
+     * Match exact category or a label within a comma-separated multi-category string.
+     */
+    private function applyVendorCategoryFilter($query, string $category): void
+    {
+        $cat = trim($category);
+        if ($cat === '') {
+            return;
+        }
+
+        $escaped = str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $cat);
+
+        $query->where(function ($q) use ($cat, $escaped) {
+            $q->where('category', $cat)
+                ->orWhereRaw('LOWER(TRIM(category)) = ?', [strtolower($cat)])
+                ->orWhere('category', 'ilike', $escaped.',%')
+                ->orWhere('category', 'ilike', '%, '.$escaped.',%')
+                ->orWhere('category', 'ilike', '%, '.$escaped)
+                ->orWhere('category', 'ilike', '%,'.$escaped.',%')
+                ->orWhere('category', 'ilike', '%,'.$escaped);
+        });
     }
 
     /**
