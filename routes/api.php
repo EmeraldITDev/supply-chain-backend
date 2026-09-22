@@ -374,6 +374,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/mrfs/contract-types', [ContractTypeController::class, 'index']);
     Route::post('/mrfs/bulk-approve', [\App\Http\Controllers\Api\MrfBulkActionController::class, 'approve']);
     Route::post('/mrfs/bulk-reject', [\App\Http\Controllers\Api\MrfBulkActionController::class, 'reject']);
+    Route::post('/mrfs/bulk-delete', [\App\Http\Controllers\Api\MrfBulkActionController::class, 'destroy']);
     Route::post('/mrfs/bulk-export', [\App\Http\Controllers\Api\MrfBulkActionController::class, 'export']);
     Route::get('/mrfs', [MRFController::class, 'index']);
     Route::get('/mrfs/{id}', [MRFController::class, 'show']);
@@ -403,6 +404,7 @@ Route::middleware('auth:sanctum')->group(function () {
     // Legacy routes (for backward compatible with existing MRFs)
     Route::post('/mrfs/{id}/executive-approve', [\App\Http\Controllers\Api\MRFWorkflowController::class, 'executiveApprove']);
     Route::post('/mrfs/{id}/chairman-approve', [\App\Http\Controllers\Api\MRFWorkflowController::class, 'chairmanApprove']);
+    Route::post('/mrfs/{id}/chairman-reject', [\App\Http\Controllers\Api\MRFWorkflowController::class, 'rejectMRF']);
 
     // Vendor selection workflow routes
     Route::post('/mrfs/{id}/send-vendor-for-approval', [\App\Http\Controllers\Api\MRFWorkflowController::class, 'sendVendorForApproval']);

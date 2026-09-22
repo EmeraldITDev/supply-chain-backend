@@ -69,6 +69,33 @@ class MrfBulkActionController extends Controller
         ], $succeeded > 0 ? 200 : 422);
     }
 
+    public function destroy(Request $request): JsonResponse
+    {
+        $validator = Validator::make($request->all(), [
+            'ids' => 'required|array|min:1|max:100',
+            'ids.*' => 'required',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Validation failed',
+                'errors' => $validator->errors(),
+                'code' => 'VALIDATION_ERROR',
+            ], 422);
+        }
+
+        $result = $this->bulkActionService->bulkDelete($request->user(), $request->input('ids'));
+        $succeeded = count($result['succeeded']);
+        $failed = count($result['failed']);
+
+        return response()->json([
+            'success' => $failed === 0,
+            'message' => "Bulk delete finished: {$succeeded} succeeded, {$failed} failed",
+            'data' => $result,
+        ], $succeeded > 0 ? 200 : 422);
+    }
+
     public function export(Request $request): JsonResponse|StreamedResponse
     {
         $validator = Validator::make($request->all(), [

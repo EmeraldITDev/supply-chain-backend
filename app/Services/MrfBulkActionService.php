@@ -38,6 +38,58 @@ class MrfBulkActionService
      * @param  list<string|int>  $ids
      * @return array{succeeded: list<array<string, mixed>>, failed: list<array<string, mixed>>}
      */
+    public function bulkDelete(User $user, array $ids): array
+    {
+        $succeeded = [];
+        $failed = [];
+        $legacy = app(MRFController::class);
+
+        foreach (array_values(array_unique($ids)) as $id) {
+            $mrf = $this->findMrf((string) $id);
+            if (! $mrf) {
+                $failed[] = [
+                    'id' => (string) $id,
+                    'error' => 'MRF not found',
+                    'code' => 'NOT_FOUND',
+                ];
+                continue;
+            }
+
+            try {
+                $request = $this->makeRequest($user, []);
+                $response = $legacy->destroy($request, $mrf->mrf_id);
+                $status = $response->getStatusCode();
+                $payload = json_decode($response->getContent(), true) ?: [];
+
+                if ($status >= 200 && $status < 300 && ($payload['success'] ?? false)) {
+                    $succeeded[] = [
+                        'id' => $mrf->mrf_id,
+                        'message' => $payload['message'] ?? 'Deleted',
+                    ];
+                } else {
+                    $failed[] = [
+                        'id' => $mrf->mrf_id,
+                        'error' => $payload['error'] ?? $payload['message'] ?? 'Delete failed',
+                        'code' => $payload['code'] ?? 'DELETE_FAILED',
+                        'httpStatus' => $status,
+                    ];
+                }
+            } catch (\Throwable $e) {
+                $failed[] = [
+                    'id' => $mrf->mrf_id,
+                    'error' => $e->getMessage(),
+                    'code' => 'SERVER_ERROR',
+                ];
+            }
+        }
+
+        return compact('succeeded', 'failed');
+    }
+
+    /**
+     * @param  list<string|int>  $ids
+     * @return array{succeeded: list<array<string, mixed>>, failed: list<array<string, mixed>>}
+     */
     private function runBulk(User $user, array $ids, string $action, ?string $remarks): array
     {
         $succeeded = [];
@@ -123,7 +175,7 @@ class MrfBulkActionService
             return $workflow->supplyChainDirectorApprove($request, $mrf->mrf_id);
         }
 
-        if (in_array($state, ['executive_review', 'pending'], true)
+        if (in_array($state, ['executive_review', 'parallel_first_approval', 'pending'], true)
             && in_array($user->scmRole(), ['executive', 'admin'], true)) {
             if ($action === 'reject') {
                 $request = $this->makeRequest($user, $payload);
@@ -133,6 +185,18 @@ class MrfBulkActionService
             $request = $this->makeRequest($user, $payload);
 
             return $workflow->executiveApprove($request, $mrf->mrf_id);
+        }
+
+        if (in_array($state, ['chairman_review'], true)
+            && in_array($user->scmRole(), ['chairman', 'admin'], true)) {
+            if ($action === 'reject') {
+                $request = $this->makeRequest($user, $payload);
+
+                return $workflow->rejectMRF($request, $mrf->mrf_id);
+            }
+            $request = $this->makeRequest($user, $payload);
+
+            return $workflow->chairmanApprove($request, $mrf->mrf_id);
         }
 
         if (in_array($state, [

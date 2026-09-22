@@ -49,6 +49,10 @@ class PermissionService
             return in_array($role, ['executive', 'supply_chain_director', 'supply_chain', 'admin'], true);
         }
 
+        if ($currentState === WorkflowStateService::STATE_CHAIRMAN_REVIEW) {
+            return in_array($role, ['chairman', 'admin'], true);
+        }
+
         $isEmeraldContract = strtolower(trim((string) $mrf->contract_type)) === 'emerald';
 
         if ($isEmeraldContract) {
