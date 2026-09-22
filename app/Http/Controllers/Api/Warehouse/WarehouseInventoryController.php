@@ -125,21 +125,26 @@ class WarehouseInventoryController extends Controller
     public function inventory(Request $request): JsonResponse
     {
         $search = $request->query('search');
-        $limit = (int) $request->query('per_page', $request->query('limit', 100));
+        $page = (int) $request->query('page', 1);
+        $perPage = (int) $request->query('per_page', $request->query('limit', 25));
 
-        $inventory = app(CompletedProcurementInventoryService::class)->listInventory(
+        $result = app(CompletedProcurementInventoryService::class)->paginateInventory(
             is_string($search) ? $search : null,
-            $limit
+            $page,
+            $perPage
         );
 
         return $this->success([
-            'inventory' => $inventory,
+            'inventory' => $result['inventory'],
+            'pagination' => $result['pagination'],
             'filters' => [
                 'search' => $search,
                 'location_id' => $request->query('location_id'),
                 'category' => $request->query('category'),
                 'low_stock' => $request->query('low_stock'),
                 'quarantined' => $request->query('quarantined'),
+                'page' => $result['pagination']['page'],
+                'per_page' => $result['pagination']['per_page'],
             ],
         ]);
     }

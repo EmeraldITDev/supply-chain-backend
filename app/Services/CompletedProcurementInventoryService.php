@@ -12,9 +12,57 @@ use App\Services\WorkflowStateService;
 class CompletedProcurementInventoryService
 {
     /**
+     * @return array{inventory: list<array<string, mixed>>, pagination: array<string, mixed>}
+     */
+    public function paginateInventory(?string $search = null, int $page = 1, int $perPage = 25): array
+    {
+        $page = max(1, $page);
+        $perPage = max(1, min(100, $perPage));
+
+        $query = $this->baseQuery($search);
+        $total = (clone $query)->count();
+        $totalPages = max(1, (int) ceil($total / $perPage));
+        if ($page > $totalPages) {
+            $page = $totalPages;
+        }
+
+        $items = $query
+            ->forPage($page, $perPage)
+            ->get()
+            ->map(fn (MRF $mrf) => $this->mapMrf($mrf))
+            ->values()
+            ->all();
+
+        $from = $total === 0 ? null : (($page - 1) * $perPage) + 1;
+        $to = $total === 0 ? null : min($total, $page * $perPage);
+
+        return [
+            'inventory' => $items,
+            'pagination' => [
+                'page' => $page,
+                'per_page' => $perPage,
+                'total' => $total,
+                'total_pages' => $totalPages,
+                'from' => $from,
+                'to' => $to,
+            ],
+        ];
+    }
+
+    /**
      * @return list<array<string, mixed>>
      */
     public function listInventory(?string $search = null, int $limit = 100): array
+    {
+        return $this->baseQuery($search)
+            ->limit(max(1, min(500, $limit)))
+            ->get()
+            ->map(fn (MRF $mrf) => $this->mapMrf($mrf))
+            ->values()
+            ->all();
+    }
+
+    private function baseQuery(?string $search = null)
     {
         $query = MRF::query()
             ->with(['selectedVendor:id,vendor_id,name', 'items'])
@@ -31,8 +79,7 @@ class CompletedProcurementInventoryService
                     });
             })
             ->orderByDesc('force_closed_at')
-            ->orderByDesc('updated_at')
-            ->limit(max(1, min(500, $limit)));
+            ->orderByDesc('updated_at');
 
         if ($search !== null && trim($search) !== '') {
             $term = '%'.str_replace(['%', '_'], ['\\%', '\\_'], trim($search)).'%';
@@ -45,7 +92,7 @@ class CompletedProcurementInventoryService
             });
         }
 
-        return $query->get()->map(fn (MRF $mrf) => $this->mapMrf($mrf))->values()->all();
+        return $query;
     }
 
     /**
