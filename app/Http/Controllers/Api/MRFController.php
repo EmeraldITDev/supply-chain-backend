@@ -467,9 +467,22 @@ class MRFController extends Controller
                         ->orWhere('po_number', 'ilike', $contains)
                         ->orWhere('linked_po_id', 'ilike', $contains)
                         ->orWhere('title', 'ilike', $contains)
-                        ->orWhere('requester_name', 'ilike', $contains);
+                        ->orWhere('requester_name', 'ilike', $contains)
+                        ->orWhereHas('selectedVendor', function ($vq) use ($contains) {
+                            $vq->where('name', 'ilike', $contains)
+                                ->orWhere('vendor_id', 'ilike', $contains);
+                        });
                 });
             }
+        }
+
+        // Exact vendor filter (preferred deep-link from Vendor Directory).
+        $vendorIdFilter = trim((string) ($request->input('vendor_id') ?? $request->input('vendorId') ?? ''));
+        if ($vendorIdFilter !== '') {
+            $query->whereHas('selectedVendor', function ($vq) use ($vendorIdFilter) {
+                $vq->where('vendor_id', $vendorIdFilter)
+                    ->orWhere('id', is_numeric($vendorIdFilter) ? (int) $vendorIdFilter : 0);
+            });
         }
 
         $defaultSort = $isPoList ? 'updated_at' : 'created_at';

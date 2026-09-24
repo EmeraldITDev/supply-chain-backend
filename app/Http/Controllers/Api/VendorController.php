@@ -492,9 +492,21 @@ class VendorController extends Controller
             'status'        => $vendor->status,
             'email'         => $vendor->email,
             'phone'         => $vendor->phone,
+            'alternate_phone' => $vendor->alternate_phone,
+            'alternatePhone' => $vendor->alternate_phone,
             'address'       => $vendor->address,
+            'city'          => $vendor->city,
+            'state'         => $vendor->state,
+            'postal_code'  => $vendor->postal_code,
+            'postalCode'   => $vendor->postal_code,
+            'country'       => $vendor->country_code,
+            'country_code'  => $vendor->country_code,
             'taxId'         => $vendor->tax_id,
+            'tax_id'        => $vendor->tax_id,
             'contactPerson' => $vendor->contact_person,
+            'contact_person' => $vendor->contact_person,
+            'contactPersonTitle' => $vendor->contact_person_title,
+            'contact_person_title' => $vendor->contact_person_title,
             'notes'         => $vendor->notes,
             'documents'     => $documents,
             'annual_revenue'      => $annualRevenue,
@@ -1531,46 +1543,168 @@ class VendorController extends Controller
     }
 
     /**
-     * Update vendor profile fields (admin-only endpoint)
-     * Allows procurement managers and supply chain directors to update specific vendor profile fields
+     * Update vendor profile (Procurement Manager / Supply Chain Director).
+     * Persists the full edit payload from VendorProfileEditDialog — including company name.
      */
     public function adminUpdate(Request $request, string $uuid)
     {
-        Cache::flush(); // Clear vendor list cache on any mutation
+        Cache::flush();
 
         $user = $request->user();
-
-        // Check permission - only procurement_manager and supply_chain_director
         $allowedRoles = [
             'procurement_manager',
             'supply_chain_director',
+            'supply_chain',
+            'admin',
         ];
 
-        if (!in_array($user->scmRole(), $allowedRoles)) {
+        if (! in_array($user->scmRole(), $allowedRoles, true)) {
             return response()->json([
                 'success' => false,
                 'error' => 'Insufficient permissions',
-                'code' => 'FORBIDDEN'
+                'code' => 'FORBIDDEN',
             ], 403);
         }
 
-        // Find vendor by vendor_id or primary key
         $vendor = $this->findVendor($uuid);
-
-        if (!$vendor) {
+        if (! $vendor) {
             return response()->json([
                 'success' => false,
                 'error' => 'Vendor not found',
-                'code' => 'NOT_FOUND'
+                'code' => 'NOT_FOUND',
             ], 404);
         }
 
-        // Validate input - accept only specified profile fields
-        $validator = Validator::make($request->all(), [
-            'annual_revenue' => 'nullable|string',
-            'number_of_employees' => 'nullable|string',
-            'year_established' => 'nullable|integer|min:1900|max:' . date('Y'),
-            'website' => 'nullable|url',
+        $pick = static function (Request $request, array $keys, bool $allowEmpty = false): mixed {
+            foreach ($keys as $key) {
+                if (! $request->exists($key)) {
+                    continue;
+                }
+                $value = $request->input($key);
+                if ($value === null) {
+                    return null;
+                }
+                if (is_string($value)) {
+                    $value = trim($value);
+                    if ($value === '' && ! $allowEmpty) {
+                        continue;
+                    }
+                }
+
+                return $value;
+            }
+
+            return new \stdClass(); // sentinel: not provided
+        };
+
+        $update = [];
+
+        $name = $pick($request, ['name', 'company_name', 'companyName']);
+        if (! $name instanceof \stdClass && $name !== null && $name !== '') {
+            $update['name'] = (string) $name;
+        }
+
+        $stringMap = [
+            'contact_person' => ['contact_person', 'contactPerson'],
+            'contact_person_title' => ['contact_person_title', 'contactPersonTitle'],
+            'email' => ['email'],
+            'phone' => ['phone'],
+            'alternate_phone' => ['alternate_phone', 'alternatePhone'],
+            'address' => ['address'],
+            'city' => ['city'],
+            'state' => ['state'],
+            'postal_code' => ['postal_code', 'postalCode'],
+            'tax_id' => ['tax_id', 'taxId'],
+            'status' => ['status'],
+            'annual_revenue' => ['annual_revenue', 'annualRevenue'],
+            'number_of_employees' => ['number_of_employees', 'numberOfEmployees'],
+            'bank_name' => ['bank_name', 'bankName'],
+            'account_name' => ['account_name', 'accountName'],
+            'account_number' => ['account_number', 'accountNumber'],
+            'category_other' => ['category_other', 'categoryOther'],
+            'notes' => ['notes'],
+        ];
+
+        foreach ($stringMap as $column => $aliases) {
+            // category_other may be cleared intentionally when "Others" is deselected
+            $allowEmpty = $column === 'category_other';
+            $value = $pick($request, $aliases, $allowEmpty);
+            if ($value instanceof \stdClass) {
+                continue;
+            }
+            $update[$column] = $value === '' ? null : $value;
+        }
+
+        $country = $pick($request, ['country_code', 'country', 'countryCode']);
+        if (! $country instanceof \stdClass) {
+            $update['country_code'] = $country === '' ? null : $country;
+        }
+
+        if ($request->has('categories') && is_array($request->input('categories'))) {
+            $labels = array_values(array_filter(array_map(
+                static fn ($c) => is_string($c) ? trim($c) : '',
+                $request->input('categories')
+            )));
+            $update['category'] = $labels === [] ? null : implode(', ', $labels);
+        } else {
+            $category = $pick($request, ['category']);
+            if (! $category instanceof \stdClass) {
+                $update['category'] = $category === '' ? null : $category;
+            }
+        }
+
+        $year = $pick($request, ['year_established', 'yearEstablished']);
+        if (! $year instanceof \stdClass) {
+            $update['year_established'] = $year === null || $year === ''
+                ? null
+                : (int) $year;
+        }
+
+        $website = $pick($request, ['website'], true);
+        if (! $website instanceof \stdClass) {
+            if ($website === null || $website === '') {
+                $update['website'] = null;
+            } else {
+                $w = (string) $website;
+                if (! preg_match('#^https?://#i', $w)) {
+                    $w = 'https://'.$w;
+                }
+                $update['website'] = $w;
+            }
+        }
+
+        if ($update === []) {
+            return response()->json([
+                'success' => false,
+                'error' => 'No valid fields provided to update',
+                'code' => 'VALIDATION_ERROR',
+            ], 422);
+        }
+
+        $validator = Validator::make($update, [
+            'name' => 'sometimes|string|max:255',
+            'contact_person' => 'nullable|string|max:255',
+            'contact_person_title' => 'nullable|string|max:255',
+            'email' => 'nullable|email|max:255',
+            'phone' => 'nullable|string|max:50',
+            'alternate_phone' => 'nullable|string|max:50',
+            'address' => 'nullable|string|max:1000',
+            'city' => 'nullable|string|max:120',
+            'state' => 'nullable|string|max:120',
+            'postal_code' => 'nullable|string|max:40',
+            'country_code' => 'nullable|string|max:10',
+            'tax_id' => 'nullable|string|max:100',
+            'status' => 'nullable|string|max:50',
+            'category' => 'nullable|string|max:1000',
+            'category_other' => 'nullable|string|max:255',
+            'annual_revenue' => 'nullable|string|max:100',
+            'number_of_employees' => 'nullable|string|max:100',
+            'year_established' => 'nullable|integer|min:1900|max:'.date('Y'),
+            'website' => 'nullable|string|max:255',
+            'bank_name' => 'nullable|string|max:255',
+            'account_name' => 'nullable|string|max:255',
+            'account_number' => 'nullable|string|max:100',
+            'notes' => 'nullable|string|max:5000',
         ]);
 
         if ($validator->fails()) {
@@ -1578,16 +1712,60 @@ class VendorController extends Controller
                 'success' => false,
                 'error' => 'Validation failed',
                 'errors' => $validator->errors(),
-                'code' => 'VALIDATION_ERROR'
+                'code' => 'VALIDATION_ERROR',
             ], 422);
         }
 
-        // Update only the allowed fields
         $vendor->update($validator->validated());
+
+        // Keep registration display name in sync when company name changes.
+        if (isset($update['name'])) {
+            $vendor->registrations()->update(['company_name' => $update['name']]);
+        }
+
+        // Reconcile denormalized order counter with live PO count.
+        $liveOrders = VendorPerformanceMetrics::countVendorPOs((int) $vendor->id);
+        if ((int) ($vendor->total_orders ?? 0) !== $liveOrders) {
+            $vendor->forceFill(['total_orders' => $liveOrders])->save();
+            Cache::forget("vendor_po_count_{$vendor->id}");
+        }
+
+        $fresh = $vendor->fresh();
 
         return response()->json([
             'success' => true,
-            'data' => $vendor->fresh(),
+            'message' => 'Vendor profile updated successfully',
+            'data' => [
+                'id' => $fresh->vendor_id,
+                'vendor_id' => $fresh->vendor_id,
+                'name' => $fresh->name,
+                'company_name' => $fresh->name,
+                'companyName' => $fresh->name,
+                'category' => $fresh->category,
+                'category_other' => $fresh->category_other,
+                'status' => $fresh->status,
+                'email' => $fresh->email,
+                'phone' => $fresh->phone,
+                'alternate_phone' => $fresh->alternate_phone,
+                'address' => $fresh->address,
+                'city' => $fresh->city,
+                'state' => $fresh->state,
+                'postal_code' => $fresh->postal_code,
+                'country' => $fresh->country_code,
+                'country_code' => $fresh->country_code,
+                'tax_id' => $fresh->tax_id,
+                'contact_person' => $fresh->contact_person,
+                'contact_person_title' => $fresh->contact_person_title,
+                'annual_revenue' => $fresh->annual_revenue,
+                'number_of_employees' => $fresh->number_of_employees,
+                'year_established' => $fresh->year_established,
+                'website' => $fresh->website,
+                'bank_name' => $fresh->bank_name,
+                'account_name' => $fresh->account_name,
+                'account_number' => $fresh->account_number,
+                'total_orders' => (int) ($fresh->total_orders ?? 0),
+                'performance' => VendorPerformanceMetrics::forVendor((int) $fresh->id),
+            ],
         ]);
     }
 
