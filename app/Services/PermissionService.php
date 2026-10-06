@@ -596,6 +596,31 @@ class PermissionService
         return $this->workflowStateAllowsProcurementDocuments($mrf);
     }
 
+    /**
+     * Manual delivery close-out (bypass document gate) for stuck
+     * delivery_confirmation_pending records with fulfilled signed POs.
+     */
+    public function canConfirmDelivery(User $user, MRF $mrf): bool
+    {
+        if ($this->isMRFClosed($mrf)) {
+            return false;
+        }
+
+        $allowedRoles = [
+            'procurement_manager',
+            'procurement',
+            'supply_chain_director',
+            'supply_chain',
+            'admin',
+        ];
+
+        if (! in_array($user->scmRole(), $allowedRoles, true)) {
+            return false;
+        }
+
+        return ($mrf->workflow_state ?? '') === WorkflowStateService::STATE_DELIVERY_CONFIRMATION_PENDING;
+    }
+
     public function showDeliveryConfirmationPanel(MRF $mrf): bool
     {
         if (! mrfUsesFinanceAp($mrf)) {
@@ -773,6 +798,7 @@ class PermissionService
                 'canViewGRN' => $this->canViewGRN($user, $mrf),
                 'showDeliveryConfirmationPanel' => false,
                 'canManageDeliveryConfirmation' => false,
+                'canConfirmDelivery' => false,
                 'canUploadWaybill' => $canHistoricalDocs,
                 'canUploadJcc' => $this->canUploadHistoricalSupportingDocument($user, $mrf, ProcurementDocument::TYPE_JCC),
                 'canUploadDeliveryConfirmation' => $this->canUploadHistoricalSupportingDocument(
@@ -825,6 +851,7 @@ class PermissionService
             'canViewGRN' => $this->canViewGRN($user, $mrf),
             'showDeliveryConfirmationPanel' => $showDeliveryConfirmationPanel,
             'canManageDeliveryConfirmation' => $canManageDeliveryConfirmation,
+            'canConfirmDelivery' => $this->canConfirmDelivery($user, $mrf),
             'canUploadWaybill' => $canManageDeliveryConfirmation && $this->canUploadProcurementDocument(
                 $user,
                 $mrf,
@@ -867,6 +894,7 @@ class PermissionService
         if ($actions['canViewGRN']) $availableActions[] = 'view_grn';
         if ($actions['showDeliveryConfirmationPanel']) $availableActions[] = 'view_delivery_confirmation';
         if ($actions['canManageDeliveryConfirmation']) $availableActions[] = 'manage_delivery_confirmation';
+        if ($actions['canConfirmDelivery']) $availableActions[] = 'confirm_delivery';
         if ($actions['canUploadWaybill']) $availableActions[] = 'upload_waybill';
         if ($actions['canUploadJcc']) $availableActions[] = 'upload_jcc';
         if ($actions['canUploadDeliveryConfirmation']) $availableActions[] = 'upload_delivery_confirmation';

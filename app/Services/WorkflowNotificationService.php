@@ -516,6 +516,36 @@ class WorkflowNotificationService
         }
     }
 
+    public function notifyFinanceDeliveryConfirmed(MRF $mrf, User $confirmedBy): void
+    {
+        $financeUsers = User::query()
+            ->whereIn('supply_chain_role', ['finance', 'finance_officer', 'admin'])
+            ->get();
+
+        $title = $mrf->title ?: ($mrf->formatted_id ?: $mrf->mrf_id);
+        $ref = $mrf->formatted_id ?: $mrf->mrf_id;
+
+        foreach ($financeUsers as $finance) {
+            try {
+                DatabaseNotifications::send($finance, new SystemAnnouncementNotification(
+                    'Delivery Confirmed — Payment Can Proceed',
+                    "Delivery for {$ref} ({$title}) has been confirmed by {$confirmedBy->name}. Payment processing can now proceed.",
+                    [
+                        'action_url' => "/procurement/{$mrf->mrf_id}",
+                        'mrf_id' => $mrf->mrf_id,
+                        'title' => $mrf->title,
+                    ]
+                ));
+            } catch (\Throwable $e) {
+                Log::error('Finance delivery-confirmed notification failed', [
+                    'mrf_id' => $mrf->mrf_id,
+                    'user_id' => $finance->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+    }
+
     private function getEmailsByRoles(array $roles): array
     {
         return User::whereIn('supply_chain_role', $roles)

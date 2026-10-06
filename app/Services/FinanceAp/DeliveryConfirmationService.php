@@ -3,12 +3,16 @@
 namespace App\Services\FinanceAp;
 
 use App\Models\MRF;
+use App\Models\MRFApprovalHistory;
 use App\Models\PaymentMilestone;
 use App\Models\ProcurementDocument;
 use App\Models\User;
 use App\Services\PaymentScheduleService;
 use App\Services\ProcurementDocumentService;
+use App\Services\WorkflowNotificationService;
 use App\Services\WorkflowStateService;
+use Carbon\Carbon;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
 class DeliveryConfirmationService
@@ -155,6 +159,96 @@ class DeliveryConfirmationService
             return false;
         }
 
+        return $this->completeAndHandoff($mrf, $user);
+    }
+
+    /**
+     * Manual close-out for Procurement / SCD / Admin when delivery is fulfilled
+     * but the document gate never auto-advanced (signed PO stuck at pending).
+     *
+     * Bypasses the required-documents checklist; still advances to finance handoff
+     * so payment can proceed and pending queues clear.
+     *
+     * @param  array{delivery_notes?: ?string, delivery_confirmed_at?: ?string}  $payload
+     */
+    public function confirmManually(MRF $mrf, User $user, array $payload = []): bool
+    {
+        $state = $mrf->workflow_state ?? WorkflowStateService::STATE_MRF_CREATED;
+
+        if ($state !== WorkflowStateService::STATE_DELIVERY_CONFIRMATION_PENDING) {
+            return false;
+        }
+
+        $notes = isset($payload['delivery_notes'])
+            ? trim((string) $payload['delivery_notes'])
+            : '';
+        $confirmedAt = null;
+        if (! empty($payload['delivery_confirmed_at'])) {
+            try {
+                $confirmedAt = Carbon::parse($payload['delivery_confirmed_at']);
+            } catch (\Throwable) {
+                $confirmedAt = null;
+            }
+        }
+
+        return (bool) DB::transaction(function () use ($mrf, $user, $notes, $confirmedAt) {
+            if (! $this->workflowStateService->transition(
+                $mrf,
+                WorkflowStateService::STATE_DELIVERY_CONFIRMATION_COMPLETE,
+                $user
+            )) {
+                return false;
+            }
+
+            $mrf->refresh();
+
+            $grnAttributes = [
+                'grn_completed' => true,
+                'grn_completed_at' => $confirmedAt ?? now(),
+                'grn_completed_by' => $user->id,
+            ];
+            if ($notes !== '') {
+                $grnAttributes['remarks'] = $notes;
+            }
+            $mrf->forceFill($grnAttributes)->save();
+
+            MRFApprovalHistory::record(
+                $mrf,
+                'delivery_confirmed',
+                'delivery_confirmation',
+                $user,
+                $notes !== '' ? $notes : 'Delivery confirmed and closed out.'
+            );
+
+            $mrf->refresh();
+
+            if (! $this->workflowStateService->transition(
+                $mrf,
+                WorkflowStateService::STATE_FINANCE_HANDOFF_PENDING,
+                $user
+            )) {
+                Log::warning('Manual delivery confirmation complete but finance handoff failed', [
+                    'mrf_id' => $mrf->mrf_id,
+                    'workflow_state' => $mrf->workflow_state,
+                ]);
+            } else {
+                app(FinanceApWorkflowOrchestrator::class)->attemptFinanceApPush($mrf->fresh(), $user);
+            }
+
+            app(WorkflowNotificationService::class)
+                ->notifyFinanceDeliveryConfirmed($mrf->fresh(), $user);
+
+            Log::info('Delivery confirmed manually; request closed out', [
+                'mrf_id' => $mrf->mrf_id,
+                'user_id' => $user->id,
+            ]);
+
+            return true;
+        });
+    }
+
+    private function completeAndHandoff(MRF $mrf, User $user): bool
+    {
         if (! $this->workflowStateService->transition($mrf, WorkflowStateService::STATE_DELIVERY_CONFIRMATION_COMPLETE, $user)) {
             return false;
         }
