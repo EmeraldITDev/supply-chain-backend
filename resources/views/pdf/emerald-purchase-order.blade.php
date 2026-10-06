@@ -58,17 +58,17 @@
         .totals-table .t-label { font-weight: bold; }
         .totals-table .t-val { text-align: right; }
         .totals-table tr.grand td { font-weight: bold; background: #e5e7eb; }
-        .approval-block { margin-top: 20px; font-size: 9px; width: 45%; }
+        .approval-block { margin-top: 20px; font-size: 9px; width: 45%; display: inline-block; }
         .approval-block .label { font-weight: bold; margin-bottom: 4px; }
         .approval-block .name { margin-bottom: 4px; }
         .signature-img {
-            width: 180px;
-            height: auto;
-            max-height: 90px;
+            width: 160px;
+            height: 50px;
             display: block;
-            margin-bottom: 0px;
-            position: relative;
-            bottom: -8px;
+            margin-top: 8px;
+            margin-bottom: 0;
+            object-fit: contain;
+            object-position: left bottom;
         }
         .signature-rule {
             border: none;
@@ -230,12 +230,10 @@
     <div class="approval-block">
         <div class="label">Approved By</div>
         <div class="name">{{ $approved_by_name }}</div>
-        <div style="margin-top: 24px; position: relative;">
-            {!! $signature_html !!}
-            <hr class="signature-rule" />
-        </div>
-        <div class="label" style="margin-top: 24px;">Date</div>
-        <div style="margin-top: 4px;">{{ $approved_by_date }}</div>
+        {!! $signature_html !!}
+        <hr class="signature-rule" />
+        <div class="label">Date</div>
+        <div style="margin-top: 2px;">{{ $approved_by_date }}</div>
         <hr class="signature-rule" />
     </div>
 
