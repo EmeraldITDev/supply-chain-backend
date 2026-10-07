@@ -1885,6 +1885,13 @@ class TripRequestWorkflowController extends ApiController
 
         $displayStatus = $this->resolveDisplayStatus($trip, $linkedTrip);
 
+        // Merge controller + model action matrices so reject/forward/convert stay aligned
+        // across availableActions / available_actions (frontend reads either key).
+        $availableActions = array_values(array_unique(array_merge(
+            $this->availableActionsForTrip($trip, $viewer),
+            $trip->availableActions($viewer?->scmRole() ?? 'admin'),
+        )));
+
         $payload = array_merge(
             $this->requesterEditService->metaForTrip($viewer, $trip),
             [
@@ -1916,7 +1923,7 @@ class TripRequestWorkflowController extends ApiController
             ],
             'canManage' => $canManage,
             'readOnly' => ! $canManage,
-            'availableActions' => $this->availableActionsForTrip($trip, $viewer),
+            'availableActions' => $availableActions,
             'bookingScope' => $scope,
             'booking_scope' => $scope,
             'bookingScopeLabel' => $scope ? TripBookingRules::label($scope) : null,
@@ -1941,8 +1948,7 @@ class TripRequestWorkflowController extends ApiController
             'display_status' => $displayStatus,
             'displayStatusLabel' => $this->displayStatusLabel($displayStatus),
             'display_status_label' => $this->displayStatusLabel($displayStatus),
-            'available_actions' => $trip->availableActions($viewer?->scmRole() ?? 'admin'),
-            'availableActions' => $trip->availableActions($viewer?->scmRole() ?? 'admin'),
+            'available_actions' => $availableActions,
             'accommodationRequired' => (bool) $trip->accommodation_required,
             'accommodation_required' => (bool) $trip->accommodation_required,
             'accommodationName' => $trip->accommodation_hotel_name ?? $trip->accommodation_name,
@@ -2136,7 +2142,11 @@ class TripRequestWorkflowController extends ApiController
         $stage = (string) $trip->workflow_stage;
         $actions = [];
 
-        if ($this->isLogisticsInternal($viewer) && in_array($stage, [Trip::WORKFLOW_TRIP_REQUEST, Trip::WORKFLOW_CHANGES_REQUESTED], true)) {
+        if ($this->isLogisticsInternal($viewer) && in_array($stage, [
+            Trip::WORKFLOW_TRIP_REQUEST,
+            Trip::WORKFLOW_CHANGES_REQUESTED,
+            Trip::WORKFLOW_SUBMITTED,
+        ], true)) {
             $actions = array_merge($actions, ['forward', 'reject', 'request_changes']);
         }
 
