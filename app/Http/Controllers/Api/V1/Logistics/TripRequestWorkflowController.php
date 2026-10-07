@@ -657,10 +657,7 @@ class TripRequestWorkflowController extends ApiController
             ], 403);
         }
 
-        $trip = Trip::query()
-            ->where('id', $id)
-            ->orWhere('trip_code', $id)
-            ->first();
+        $trip = $this->findTripByIdOrCode($id);
 
         if (! $trip) {
             return response()->json([
@@ -1556,7 +1553,7 @@ class TripRequestWorkflowController extends ApiController
             ], 403);
         }
 
-        $trip = Trip::query()->where('id', $id)->orWhere('trip_code', $id)->first();
+        $trip = $this->findTripByIdOrCode($id);
         if (! $trip) {
             return response()->json([
                 'success' => false,
@@ -2164,5 +2161,21 @@ class TripRequestWorkflowController extends ApiController
             'scopes' => TripBookingRules::scopesPayload(),
             'referenceDate' => now()->toDateString(),
         ];
+    }
+
+    /**
+     * Resolve a trip by numeric id or trip_code.
+     *
+     * trip_code is varchar — always compare it as a string so PostgreSQL does not
+     * raise "operator does not exist: character varying = integer".
+     */
+    private function findTripByIdOrCode(int|string $id): ?Trip
+    {
+        return Trip::query()
+            ->where(function ($q) use ($id): void {
+                $q->where('id', (int) $id)
+                    ->orWhere('trip_code', (string) $id);
+            })
+            ->first();
     }
 }
