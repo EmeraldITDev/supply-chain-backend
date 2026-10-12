@@ -1418,8 +1418,9 @@ class MRFController extends Controller
         $currentRole = strtolower(trim((string) $user->scmRole()));
 
         // 3. Drop the strict 'true' flag to prevent type mismatches
-        $isPrivilegedAuthor = in_array($currentRole, $privilegedAuthors);
-        $isDepartmentEmployee = in_array($currentRole, ['employee', 'staff', 'regular_staff']);
+        $isPrivilegedAuthor = in_array($currentRole, $privilegedAuthors, true)
+            || ($user->is_admin ?? false) === true;
+        $isDepartmentEmployee = in_array($currentRole, ['employee', 'staff', 'regular_staff'], true);
         $isExecutive = $currentRole === 'executive';
 
         if (!$isPrivilegedAuthor && !$isDepartmentEmployee && !$isExecutive) {

@@ -259,13 +259,13 @@ class ManualVendorOnboardingService
         $category = trim((string) ($vendor->category ?? ''));
         $address = trim((string) ($vendor->address ?? ''));
         $taxId = trim((string) ($vendor->tax_id ?? ''));
-        $website = trim((string) ($vendor->website ?? ''));
 
         if ($category === '' || $category === 'General') {
             return false;
         }
 
-        return $address !== '' && $taxId !== '' && $website !== '';
+        // Website and annual revenue are optional — do not block profile completion.
+        return $address !== '' && $taxId !== '';
     }
 
     public function refreshProfileCompleted(Vendor $vendor): Vendor

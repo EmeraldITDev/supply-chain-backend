@@ -24,7 +24,17 @@ class PermissionService
      */
     public function canCreateMRF(User $user): bool
     {
-        return in_array($user->scmRole(), ['employee', 'staff', 'regular_staff']);
+        return in_array($user->scmRole(), [
+            'employee',
+            'staff',
+            'regular_staff',
+            'logistics_manager',
+            'logistics_officer',
+            'procurement_manager',
+            'procurement',
+            'executive',
+            'admin',
+        ], true) || ($user->is_admin ?? false) === true;
     }
 
     /**

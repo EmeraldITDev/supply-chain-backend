@@ -376,13 +376,16 @@ class SRFController extends Controller
         }
 
         $logisticsAuthors = ['logistics_manager', 'logistics_officer'];
-        $isLogisticsAuthor = in_array($user->scmRole(), $logisticsAuthors, true);
-        $isDepartmentEmployee = in_array($user->scmRole(), ['employee', 'staff', 'regular_staff'], true);
+        $privilegedAuthors = array_merge($logisticsAuthors, ['admin', 'executive']);
+        $currentRole = strtolower(trim((string) $user->scmRole()));
+        $isPrivilegedAuthor = in_array($currentRole, $privilegedAuthors, true)
+            || ($user->is_admin ?? false) === true;
+        $isDepartmentEmployee = in_array($currentRole, ['employee', 'staff', 'regular_staff'], true);
 
-        if (!$isLogisticsAuthor && !$isDepartmentEmployee) {
+        if (!$isPrivilegedAuthor && !$isDepartmentEmployee) {
             return response()->json([
                 'success' => false,
-                'error' => 'Only designated staff or logistics managers can create Service Request Forms.',
+                'error' => 'Only designated staff, logistics managers, or admins can create Service Request Forms.',
             ], 403);
         }
 
