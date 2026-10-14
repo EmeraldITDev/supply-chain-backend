@@ -286,6 +286,52 @@ class QuickBooksService
     /**
      * @return list<array<string, mixed>>
      */
+    /**
+     * @return array{accounts: list<array<string, mixed>>, items: list<array<string, mixed>>}
+     */
+    public function inspectAccountsAndItems(int $limit = 25): array
+    {
+        $limit = max(1, min($limit, 25));
+        $accounts = array_merge(
+            $this->inspectAccountsOfType('Expense', $limit),
+            $this->inspectAccountsOfType('Accounts Payable', $limit),
+        );
+
+        $items = self::normalizeList(data_get($this->query(
+            "select Id, Name, Type from Item maxresults {$limit}",
+            null,
+            'inspect_items',
+        ), 'QueryResponse.Item'));
+
+        return [
+            'accounts' => array_slice($accounts, 0, $limit),
+            'items' => array_map(fn (array $row) => [
+                'Id' => isset($row['Id']) ? (string) $row['Id'] : null,
+                'Name' => $row['Name'] ?? null,
+                'Type' => $row['Type'] ?? null,
+            ], array_slice($items, 0, $limit)),
+        ];
+    }
+
+    /**
+     * @return list<array{Id: ?string, Name: mixed, AccountType: mixed}>
+     */
+    private function inspectAccountsOfType(string $accountType, int $limit): array
+    {
+        $literal = self::escapeQueryLiteral($accountType);
+        $rows = self::normalizeList(data_get($this->query(
+            "select Id, Name, AccountType from Account where AccountType = '{$literal}' maxresults {$limit}",
+            null,
+            'inspect_accounts',
+        ), 'QueryResponse.Account'));
+
+        return array_map(fn (array $row) => [
+            'Id' => isset($row['Id']) ? (string) $row['Id'] : null,
+            'Name' => $row['Name'] ?? null,
+            'AccountType' => $row['AccountType'] ?? null,
+        ], $rows);
+    }
+
     public function inspectPurchaseOrders(int $limit = 10): array
     {
         $limit = max(1, min($limit, 10));

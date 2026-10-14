@@ -145,6 +145,7 @@ class VendorController extends Controller
                     'contact_person', 'created_at', 'updated_at',
                     \Illuminate\Support\Facades\Schema::hasColumn('vendors', 'completed_orders') ? 'completed_orders' : null,
                     \Illuminate\Support\Facades\Schema::hasColumn('vendors', 'on_time_deliveries') ? 'on_time_deliveries' : null,
+                    \Illuminate\Support\Facades\Schema::hasColumn('vendors', 'quickbooks_vendor_id') ? 'quickbooks_vendor_id' : null,
                 ])))
                 ->orderBy($sortBy, $sortDirection)
                 ->paginate($perPage);
@@ -169,6 +170,7 @@ class VendorController extends Controller
                     'address' => $vendor->address,
                     'taxId' => $vendor->tax_id,
                     'contactPerson' => $vendor->contact_person,
+                    'quickbooks_vendor_id' => $vendor->quickbooks_vendor_id,
                     'performance' => VendorPerformanceMetrics::forVendor((int) $vendor->id),
                 ];
             })->values()->all();
@@ -216,6 +218,7 @@ class VendorController extends Controller
             'email',
             'rating',
             'total_orders',
+            'quickbooks_vendor_id',
         ]);
 
         if ($activeOnly) {
@@ -255,6 +258,7 @@ class VendorController extends Controller
                 'rating' => $vendor->rating ? (float) $vendor->rating : 0,
                 'totalOrders' => (int) ($vendor->total_orders ?? 0),
                 'total_orders' => (int) ($vendor->total_orders ?? 0),
+                'quickbooks_vendor_id' => $vendor->quickbooks_vendor_id,
             ])
             ->values()
             ->all();
@@ -523,6 +527,7 @@ class VendorController extends Controller
             'account_number'      => $accountNumber,
             'accountNumber'       => $this->maskAccountNumber($accountNumber),
             'created_at'          => $vendor->created_at,
+            'quickbooks_vendor_id' => $vendor->quickbooks_vendor_id,
         ]);
     }
 

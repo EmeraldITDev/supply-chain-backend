@@ -29,30 +29,34 @@ class QuickBooksPullService
         $matchedQuickBooks = [];
 
         foreach ($quickbooksVendors as $qb) {
-            $scm = $this->matchVendor($scmVendors, $qb, $usedScm);
-            if ($scm === null) {
+            $match = $this->matchVendor($scmVendors, $qb, $usedScm);
+            if ($match === null) {
                 continue;
             }
 
+            $scm = $match['vendor'];
             $usedScm[] = $scm->id;
             $matchedQuickBooks[] = $qb['id'];
+            $row = [
+                'scm_vendor_id' => $scm->id,
+                'scm_vendor_name' => $scm->name,
+                'quickbooks_vendor_id' => (string) ($scm->quickbooks_vendor_id ?: $qb['id']),
+                'quickbooks_name' => $qb['display_name'] ?? $qb['company_name'],
+                'match_method' => $match['method'],
+                'conflict' => false,
+            ];
             if ((string) $scm->quickbooks_vendor_id === '') {
                 $scm->quickbooks_vendor_id = $qb['id'];
                 $scm->save();
+                $row['quickbooks_vendor_id'] = $qb['id'];
             } elseif ((string) $scm->quickbooks_vendor_id !== $qb['id']) {
-                $matched[] = [
-                    'scm_vendor_id' => $scm->id,
-                    'quickbooks_vendor_id' => $scm->quickbooks_vendor_id,
-                    'conflict' => true,
-                ];
+                $row['quickbooks_vendor_id'] = (string) $scm->quickbooks_vendor_id;
+                $row['conflict'] = true;
+                $matched[] = $row;
                 continue;
             }
 
-            $matched[] = [
-                'scm_vendor_id' => $scm->id,
-                'quickbooks_vendor_id' => (string) $scm->quickbooks_vendor_id,
-                'conflict' => false,
-            ];
+            $matched[] = $row;
         }
 
         $unmatched = [];
@@ -193,8 +197,9 @@ class QuickBooksPullService
      * @param  \Illuminate\Support\Collection<int, Vendor>  $scmVendors
      * @param  array{id: string, display_name: ?string, company_name: ?string, email: ?string}  $qb
      * @param  list<int>  $usedScm
+     * @return array{vendor: Vendor, method: 'email'|'name'}|null
      */
-    private function matchVendor($scmVendors, array $qb, array $usedScm): ?Vendor
+    private function matchVendor($scmVendors, array $qb, array $usedScm): ?array
     {
         $email = Vendor::normalizeEmail($qb['email'] ?? null);
         if ($email !== '') {
@@ -207,7 +212,7 @@ class QuickBooksPullService
                     || Vendor::normalizeEmail($vendor->contact_person_email) === $email;
             });
             if ($byEmail instanceof Vendor) {
-                return $byEmail;
+                return ['vendor' => $byEmail, 'method' => 'email'];
             }
         }
 
@@ -221,7 +226,7 @@ class QuickBooksPullService
                     && Vendor::normalizeName($vendor->name) === $name;
             });
             if ($byName instanceof Vendor) {
-                return $byName;
+                return ['vendor' => $byName, 'method' => 'name'];
             }
         }
 

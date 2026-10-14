@@ -951,6 +951,7 @@ Route::middleware(['auth:sanctum', 'quickbooks.nocache'])->prefix('quickbooks')-
     Route::post('/sync-po/{mrfId}', [QuickBooksController::class, 'syncPo'])->middleware($quickBooksSyncRoles);
     Route::get('/inspect/vendors', [QuickBooksController::class, 'inspectVendors'])->middleware('role:admin');
     Route::get('/inspect/purchase-orders', [QuickBooksController::class, 'inspectPurchaseOrders'])->middleware('role:admin');
+    Route::get('/inspect/accounts-items', [QuickBooksController::class, 'inspectAccountsItems'])->middleware('role:admin');
     Route::post('/pull/vendors', [QuickBooksController::class, 'pullVendors'])->middleware($quickBooksSyncRoles);
     Route::post('/pull/purchase-orders', [QuickBooksController::class, 'pullPurchaseOrders'])->middleware($quickBooksSyncRoles);
 });

@@ -496,6 +496,18 @@ class MRF extends Model
      *
      * @return array{source: string, is_po_linked: bool, isPoLinked: bool, linked_po_id: ?string, linkedPoId: ?string}
      */
+    /**
+     * @return array{quickbooks_po_id: ?string, quickbooks_synced_at: ?string, quickbooks_sync_status: ?string}
+     */
+    public function quickbooksApiFields(): array
+    {
+        return [
+            'quickbooks_po_id' => filled($this->quickbooks_po_id) ? (string) $this->quickbooks_po_id : null,
+            'quickbooks_synced_at' => $this->quickbooks_synced_at?->toIso8601String(),
+            'quickbooks_sync_status' => filled($this->quickbooks_sync_status) ? (string) $this->quickbooks_sync_status : null,
+        ];
+    }
+
     public function poOriginApiFields(): array
     {
         $source = $this->source ?? 'standard';
@@ -975,6 +987,7 @@ class MRF extends Model
         'date', 'created_at', 'updated_at', 'status', 'current_stage', 'workflow_state', 'first_approval_by_role',
         'rejection_reason', 'is_resubmission', 'executive_approved', 'executive_approved_at',
         'po_number', 'po_draft_saved_at', 'unsigned_po_url', 'signed_po_url', 'po_generated_at', 'po_terms_mode',
+        'quickbooks_po_id', 'quickbooks_synced_at', 'quickbooks_sync_status',
         'expected_delivery_date', 'rfq_issued_at', 'quotation_received_at', 'grn_completed_at',
         'po_value', 'executive_approved_at', 'director_approved_at', 'scd_approved_at',
         'procurement_approved_at', 'finance_approved_at', 'payment_approved_at', 'procurement_review_started_at',
@@ -999,6 +1012,7 @@ class MRF extends Model
         'scd_remarks', 'director_remarks', 'supply_chain_remarks', 'remarks',
         'chairman_approved', 'chairman_approved_at', 'chairman_remarks',
         'po_number', 'unsigned_po_url', 'unsigned_po_share_url', 'signed_po_url', 'signed_po_share_url',
+        'quickbooks_po_id', 'quickbooks_synced_at', 'quickbooks_sync_status',
         'po_generated_at', 'po_terms_mode', 'po_type', 'source', 'is_po_linked', 'linked_po_id', 'po_draft_saved_at',
         'expected_delivery_date', 'rfq_issued_at', 'quotation_received_at', 'po_value',
         'procurement_approved_at', 'finance_approved_at', 'scd_approved_at',
@@ -1141,6 +1155,7 @@ class MRF extends Model
             \App\Support\ExecutiveCommandCentreFields::apiFields($this),
             $this->poOriginApiFields(),
             $this->poDraftApiFields(),
+            $this->quickbooksApiFields(),
         );
     }
 

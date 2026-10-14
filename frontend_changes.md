@@ -2337,7 +2337,7 @@ A dry run does not prove QuickBooks will accept the purchase order. Only a real 
 
 **Roles:** any authenticated user.
 
-Response `data` contains only `connected`, `needs_reconnect`, `connected_at`, `access_token_expires_at`, `refresh_token_expires_at`, `dry_run`, and `writes_enabled`. It never includes a realm id or token.
+Response `data` contains only `connected`, `needs_reconnect`, `connected_at`, `access_token_expires_at`, `refresh_token_expires_at`, `dry_run`, `writes_enabled`, and `default_line_ref_configured`. `default_line_ref_configured` is true when `QUICKBOOKS_DEFAULT_ITEM_ID` or `QUICKBOOKS_DEFAULT_EXPENSE_ACCOUNT_ID` is set. It never includes a realm id or token.
 
 ### POST /api/quickbooks/connect
 
@@ -2354,7 +2354,7 @@ Response:
 }
 ```
 
-Send the browser to `authorization_url`. The OAuth `state` value expires after 10 minutes.
+`apiRequest` unwraps `data`, so the client receives `{ authorization_url }`. Send the browser to that URL. The OAuth `state` value expires after 10 minutes. The callback lands on `/settings?tab=integrations` with `quickbooks=connected` or `error` set to `invalid_state`, `access_denied`, or `token_exchange_failed`.
 
 ### GET /api/quickbooks/callback
 
@@ -2394,7 +2394,15 @@ While `QUICKBOOKS_DRY_RUN=true`, the response is a pass/fail validation summary.
 }
 ```
 
-`422` means validation failed. `409` means writes are disabled while dry run is already false. A live success returns `quickbooks_po_id` and `quickbooks_sync_status`.
+`422` with `code` `QB_VALIDATION_FAILED` means validation failed. The body still includes `data.results`. `409` with `code` `QB_WRITES_DISABLED` means writes are disabled while dry run is already false. Other QuickBooks failures use `QB_NOT_CONNECTED`, `QB_NEEDS_RECONNECT`, or `QB_SYNC_FAILED`. Role denial stays `403` with `code` `FORBIDDEN`. A live success returns `quickbooks_po_id` and `quickbooks_sync_status`.
+
+MRF list and detail responses include `signed_po_url`, `quickbooks_po_id`, `quickbooks_synced_at`, and `quickbooks_sync_status`. Vendor list, dropdown, and detail responses include `quickbooks_vendor_id`.
+
+### GET /api/quickbooks/inspect/accounts-items
+
+**Roles:** admin.
+
+Read-only. At most 25 Expense or Accounts Payable accounts and 25 items. Each account is `Id`, `Name`, `AccountType`. Each item is `Id`, `Name`, `Type`. Not stored and not logged. Copy an ID into the server env var. The UI does not save it.
 
 ### GET /api/quickbooks/inspect/vendors
 
@@ -2411,7 +2419,11 @@ Purchase order rows: `id`, `doc_number`, `po_status`, `txn_date`, `total_amt`, `
 
 **Roles:** same as sync.
 
-Reads QuickBooks vendors and matches SCM vendors by email, then by normalised name. Stores only `vendors.quickbooks_vendor_id` for a match. Does not create SCM vendors. Unmatched QuickBooks vendors are returned in `data.unmatched` and are not stored.
+Reads QuickBooks vendors and matches SCM vendors by email, then by normalised name. Stores only `vendors.quickbooks_vendor_id` for a match. Does not create SCM vendors. Each matched row includes `scm_vendor_name`, `quickbooks_name`, and `match_method` (`email` or `name`). Unmatched QuickBooks vendors are returned in `data.unmatched` and are not stored.
+
+### Settings UI
+
+The Integrations tab is at `/settings?tab=integrations` for admin, procurement_manager, procurement, supply_chain_director, and supply_chain. Connect and Disconnect are admin only. Vendor pull and PO status pull are available to those procurement roles. The PO list and PO detail show Sync to QuickBooks for the same roles. A dry run shows the validation checks and does not display the payload.
 
 ### POST /api/quickbooks/pull/purchase-orders
 

@@ -710,6 +710,7 @@ class MRFController extends Controller
             $payload = array_merge(
                 $mrf->scmTransactionApiFields(),
                 $mrf->poFormApiFields(),
+                $mrf->quickbooksApiFields(),
                 [
                     'id' => $mrf->mrf_id,
                     'formattedId' => $mrf->formatted_id,
@@ -856,6 +857,7 @@ class MRFController extends Controller
             'unsignedPoShareUrl' => $freshPOUrls['unsigned_po_share_url'] ?? $mrf->unsigned_po_share_url,
             'signed_po_url' => $freshPOUrls['signed_po_url'] ?? $mrf->signed_po_url,
             'signedPoUrl' => $freshPOUrls['signed_po_url'] ?? $mrf->signed_po_url,
+            ...$mrf->quickbooksApiFields(),
             'signed_po_share_url' => $freshPOUrls['signed_po_share_url'] ?? $mrf->signed_po_share_url,
             'signedPoShareUrl' => $freshPOUrls['signed_po_share_url'] ?? $mrf->signed_po_share_url,
             'po_generated_at' => $mrf->po_generated_at?->toIso8601String(),

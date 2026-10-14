@@ -88,6 +88,10 @@ class QuickBooksIntegrationTest extends TestCase
 
     public function test_status_endpoint_does_not_leak_secrets(): void
     {
+        config([
+            'services.quickbooks.default_item_id' => null,
+            'services.quickbooks.default_expense_account_id' => null,
+        ]);
         $this->storeConnection();
         Sanctum::actingAs(User::factory()->create(['supply_chain_role' => 'admin']));
 
@@ -95,7 +99,7 @@ class QuickBooksIntegrationTest extends TestCase
 
         $response->assertOk();
         $this->assertSame(
-            ['connected', 'needs_reconnect', 'connected_at', 'access_token_expires_at', 'refresh_token_expires_at', 'dry_run', 'writes_enabled'],
+            ['connected', 'needs_reconnect', 'connected_at', 'access_token_expires_at', 'refresh_token_expires_at', 'dry_run', 'writes_enabled', 'default_line_ref_configured'],
             array_keys($response->json('data'))
         );
         $encoded = json_encode($response->json());
@@ -103,6 +107,101 @@ class QuickBooksIntegrationTest extends TestCase
         $this->assertStringNotContainsString($this->plainRefresh, (string) $encoded);
         $this->assertStringNotContainsString('realm-should-not-leak', (string) $encoded);
         $this->assertStringNotContainsString('test-client-secret', (string) $encoded);
+        $this->assertFalse($response->json('data.default_line_ref_configured'));
+    }
+
+    public function test_status_reports_when_a_default_line_reference_is_configured(): void
+    {
+        config(['services.quickbooks.default_item_id' => '88']);
+        Sanctum::actingAs(User::factory()->create(['supply_chain_role' => 'procurement']));
+
+        $this->getJson('/api/quickbooks/status')
+            ->assertOk()
+            ->assertJsonPath('data.default_line_ref_configured', true)
+            ->assertJsonMissingPath('data.realm_id');
+    }
+
+    public function test_inspect_accounts_items_is_admin_only_and_returns_trimmed_rows(): void
+    {
+        $this->storeConnection();
+        $this->fakeHttp(function (Request $request) {
+            $url = $request->url();
+            if (str_contains($url, '/query')) {
+                $params = [];
+                parse_str((string) parse_url($url, PHP_URL_QUERY), $params);
+                $query = (string) ($params['query'] ?? '');
+                if (str_contains($query, "AccountType = 'Expense'")) {
+                    return Http::response([
+                        'QueryResponse' => ['Account' => [
+                            'Id' => '41',
+                            'Name' => 'Office',
+                            'AccountType' => 'Expense',
+                            'AcctNum' => 'SHOULD_NOT_LEAK',
+                        ]],
+                    ]);
+                }
+                if (str_contains($query, 'Accounts Payable')) {
+                    return Http::response(['QueryResponse' => ['Account' => []]]);
+                }
+                if (str_contains($query, 'from Item')) {
+                    return Http::response([
+                        'QueryResponse' => ['Item' => [
+                            'Id' => '88',
+                            'Name' => 'Services',
+                            'Type' => 'Service',
+                            'Description' => 'SHOULD_NOT_LEAK',
+                        ]],
+                    ]);
+                }
+            }
+
+            return $this->discoveryResponse($request);
+        });
+
+        Sanctum::actingAs(User::factory()->create(['supply_chain_role' => 'employee']));
+        $this->getJson('/api/quickbooks/inspect/accounts-items')->assertForbidden();
+
+        Sanctum::actingAs(User::factory()->create(['supply_chain_role' => 'admin']));
+        $response = $this->getJson('/api/quickbooks/inspect/accounts-items');
+        $response->assertOk()
+            ->assertJsonPath('data.accounts.0.Id', '41')
+            ->assertJsonPath('data.accounts.0.Name', 'Office')
+            ->assertJsonPath('data.accounts.0.AccountType', 'Expense')
+            ->assertJsonPath('data.items.0.Id', '88')
+            ->assertJsonPath('data.items.0.Type', 'Service');
+        $encoded = json_encode($response->json());
+        $this->assertStringNotContainsString('SHOULD_NOT_LEAK', (string) $encoded);
+        $this->assertStringNotContainsString($this->plainAccess, (string) $encoded);
+        Http::assertNotSent(fn (Request $request) => $request->method() === 'POST');
+    }
+
+    public function test_mrf_and_vendor_responses_include_quickbooks_fields(): void
+    {
+        $mrf = $this->makeSignedPo();
+        $mrf->quickbooks_po_id = 'PO-9';
+        $mrf->quickbooks_sync_status = 'Open';
+        $mrf->quickbooks_synced_at = now();
+        $mrf->save();
+        $mrf->selectedVendor->quickbooks_vendor_id = 'V-77';
+        $mrf->selectedVendor->save();
+
+        Sanctum::actingAs(User::factory()->create(['supply_chain_role' => 'procurement_manager']));
+
+        $this->getJson('/api/mrfs/'.$mrf->formatted_id.'?for_po=1')
+            ->assertOk()
+            ->assertJsonPath('quickbooks_po_id', 'PO-9')
+            ->assertJsonPath('quickbooks_sync_status', 'Open')
+            ->assertJsonPath('signed_po_url', 'https://s3.example/signed.pdf');
+
+        $listRow = $mrf->fresh()->toListApiArray();
+        $this->assertSame('PO-9', $listRow['quickbooks_po_id']);
+        $this->assertSame('Open', $listRow['quickbooks_sync_status']);
+        $this->assertNotEmpty($listRow['quickbooks_synced_at']);
+        $this->assertSame('https://s3.example/signed.pdf', $listRow['signed_po_url']);
+
+        $this->getJson('/api/vendors?dropdown=1&search='.$mrf->selectedVendor->vendor_id)
+            ->assertOk()
+            ->assertJsonPath('data.0.quickbooks_vendor_id', 'V-77');
     }
 
     public function test_callback_always_redirects_and_has_no_auth_middleware(): void

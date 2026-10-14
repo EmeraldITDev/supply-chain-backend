@@ -84,6 +84,8 @@ class QuickBooksController extends Controller
             'data' => array_merge($this->tokens->getConnectionStatus(), [
                 'dry_run' => config('services.quickbooks.dry_run') === true,
                 'writes_enabled' => config('services.quickbooks.writes_enabled') === true,
+                'default_line_ref_configured' => filled(config('services.quickbooks.default_item_id'))
+                    || filled(config('services.quickbooks.default_expense_account_id')),
             ]),
         ]);
     }
@@ -113,25 +115,31 @@ class QuickBooksController extends Controller
         try {
             $result = $this->syncService->sync($mrf);
         } catch (QuickBooksException $e) {
-            return response()->json([
-                'success' => false,
-                'message' => $e->getMessage(),
-                'fault_code' => $e->faultCode,
-            ], $e->status);
+            return $this->quickBooksError($e);
         }
 
         unset($result['payload']);
-        $status = match ($result['blocked_reason'] ?? null) {
+        $blocked = $result['blocked_reason'] ?? null;
+        $status = match ($blocked) {
             'validation_failed' => 422,
             'writes_disabled' => 409,
             default => 200,
         };
+        $code = match ($blocked) {
+            'validation_failed' => 'QB_VALIDATION_FAILED',
+            'writes_disabled' => 'QB_WRITES_DISABLED',
+            default => null,
+        };
 
-        return response()->json([
+        return response()->json(array_filter([
             'success' => (bool) $result['passed'],
+            'code' => $code,
+            'message' => $code === 'QB_VALIDATION_FAILED'
+                ? 'This purchase order did not pass QuickBooks validation.'
+                : ($code === 'QB_WRITES_DISABLED' ? 'QuickBooks writes are disabled.' : null),
             'dry_run' => (bool) $result['dry_run'],
             'data' => $result,
-        ], $status);
+        ], fn ($value) => $value !== null), $status);
     }
 
     public function inspectVendors(): JsonResponse
@@ -142,6 +150,11 @@ class QuickBooksController extends Controller
     public function inspectPurchaseOrders(): JsonResponse
     {
         return $this->inspected(fn () => $this->quickBooks->inspectPurchaseOrders(10));
+    }
+
+    public function inspectAccountsItems(): JsonResponse
+    {
+        return $this->inspected(fn () => $this->quickBooks->inspectAccountsAndItems(25));
     }
 
     public function pullVendors(): JsonResponse
@@ -162,12 +175,34 @@ class QuickBooksController extends Controller
                 'data' => $callback(),
             ]);
         } catch (QuickBooksException $e) {
-            return response()->json([
-                'success' => false,
-                'message' => $e->getMessage(),
-                'fault_code' => $e->faultCode,
-            ], $e->status);
+            return $this->quickBooksError($e);
         }
+    }
+
+    private function quickBooksError(QuickBooksException $e): JsonResponse
+    {
+        return response()->json([
+            'success' => false,
+            'code' => $this->quickBooksErrorCode($e),
+            'message' => $e->getMessage(),
+            'fault_code' => $e->faultCode,
+        ], $e->status);
+    }
+
+    private function quickBooksErrorCode(QuickBooksException $e): string
+    {
+        $message = $e->getMessage();
+        if (str_contains($message, 'not connected')) {
+            return 'QB_NOT_CONNECTED';
+        }
+        if (str_contains($message, 'expired') || str_contains($message, 'Reconnect')) {
+            return 'QB_NEEDS_RECONNECT';
+        }
+        if (str_contains($message, 'writes are disabled')) {
+            return 'QB_WRITES_DISABLED';
+        }
+
+        return 'QB_SYNC_FAILED';
     }
 
     private function findMrf(string $mrfId): ?MRF
