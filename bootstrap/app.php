@@ -35,6 +35,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'permission' => \App\Http\Middleware\EnsurePermission::class,
             'finance_ap.integration' => \App\Http\Middleware\VerifyFinanceApIntegrationKey::class,
             'quickbooks.nocache' => \App\Http\Middleware\QuickBooksNoCache::class,
+            'quickbooks.connection' => \App\Http\Middleware\EnsureQuickBooksConnectionRole::class,
         ]);
 
         $middleware->append(\App\Http\Middleware\SecurityHeaders::class);

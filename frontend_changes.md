@@ -2341,7 +2341,7 @@ Response `data` contains only `connected`, `needs_reconnect`, `connected_at`, `a
 
 ### POST /api/quickbooks/connect
 
-**Roles:** admin.
+**Roles:** `admin`, `procurement_manager`, `supply_chain_director`, `supply_chain` (`QuickBooksRoles::CONNECTION_ROLES`).
 
 Response:
 
@@ -2354,7 +2354,7 @@ Response:
 }
 ```
 
-`apiRequest` unwraps `data`, so the client receives `{ authorization_url }`. Send the browser to that URL. The OAuth `state` value expires after 10 minutes. The callback lands on `/settings?tab=integrations` with `quickbooks=connected` or `error` set to `invalid_state`, `access_denied`, or `token_exchange_failed`.
+`apiRequest` unwraps `data`, so the client receives `{ authorization_url }`. Send the browser to that URL. The OAuth `state` value expires after 10 minutes. The callback lands on `/settings?tab=integrations` with `quickbooks=connected` or `error` set to `invalid_state`, `access_denied`, or `token_exchange_failed`. Sign in to QuickBooks with a company-file administrator.
 
 ### GET /api/quickbooks/callback
 
@@ -2364,9 +2364,9 @@ Every outcome is a 302 to `{FRONTEND_URL}/settings?tab=integrations`. Success ad
 
 ### POST /api/quickbooks/disconnect
 
-**Roles:** admin.
+**Roles:** `admin`, `procurement_manager`, `supply_chain_director`, `supply_chain`.
 
-Revokes the refresh token at Intuit, then deletes the local QuickBooks settings even if revocation fails.
+Revokes the refresh token at Intuit, then deletes the local QuickBooks settings even if revocation fails. Writes an audit log (`quickbooks_disconnect`) with user id, role, and timestamp. No tokens or QuickBooks data are stored in the audit payload.
 
 ```json
 { "success": true, "data": { "connected": false } }
@@ -2400,7 +2400,7 @@ MRF list and detail responses include `signed_po_url`, `quickbooks_po_id`, `quic
 
 ### GET /api/quickbooks/inspect/accounts-items
 
-**Roles:** admin.
+**Roles:** `admin`, `procurement_manager`, `supply_chain_director`, `supply_chain`.
 
 Read-only. At most 25 Expense or Accounts Payable accounts and 25 items. Each account is `Id`, `Name`, `AccountType`. Each item is `Id`, `Name`, `Type`. Not stored and not logged. Copy an ID into the server env var. The UI does not save it.
 
@@ -2408,7 +2408,7 @@ Read-only. At most 25 Expense or Accounts Payable accounts and 25 items. Each ac
 
 ### GET /api/quickbooks/inspect/purchase-orders
 
-**Roles:** admin.
+**Roles:** `admin`, `procurement_manager`, `supply_chain_director`, `supply_chain`.
 
 Read-only, at most 10 rows, trimmed fields, not stored. Use these, or `php artisan quickbooks:inspect`, to choose `QUICKBOOKS_DEFAULT_ITEM_ID` or `QUICKBOOKS_DEFAULT_EXPENSE_ACCOUNT_ID`.
 
@@ -2423,7 +2423,17 @@ Reads QuickBooks vendors and matches SCM vendors by email, then by normalised na
 
 ### Settings UI
 
-The Integrations tab is at `/settings?tab=integrations` for admin, procurement_manager, procurement, supply_chain_director, and supply_chain. Connect and Disconnect are admin only. Vendor pull and PO status pull are available to those procurement roles. The PO list and PO detail show Sync to QuickBooks for the same roles. A dry run shows the validation checks and does not display the payload.
+The Integrations tab is at `/settings?tab=integrations` for admin, procurement_manager, procurement, supply_chain_director, and supply_chain.
+
+| Action | admin | procurement_manager | supply_chain_director / supply_chain | procurement | other |
+|---|---|---|---|---|---|
+| Connect | yes | yes | yes | no | no |
+| Disconnect | yes | yes | yes | no | no |
+| Inspect (accounts/items/vendors/POs) | yes | yes | yes | no | no |
+| Sync PO | yes | yes | yes | yes | no |
+| Pull vendors / PO status | yes | yes | yes | yes | no |
+
+A dry run shows the validation checks and does not display the payload. Disconnect confirms that access is revoked for everyone; synced PO links are kept.
 
 ### POST /api/quickbooks/pull/purchase-orders
 

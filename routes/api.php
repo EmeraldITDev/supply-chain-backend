@@ -940,18 +940,18 @@ Route::prefix('logistics')->group(function () {
     });
 });
 
-$quickBooksSyncRoles = 'role:procurement_manager,procurement,supply_chain_director,supply_chain,admin';
+$quickBooksSyncRoles = \App\Support\QuickBooksRoles::syncMiddleware();
 
 Route::get('/quickbooks/callback', [QuickBooksController::class, 'callback']);
 
 Route::middleware(['auth:sanctum', 'quickbooks.nocache'])->prefix('quickbooks')->group(function () use ($quickBooksSyncRoles) {
     Route::get('/status', [QuickBooksController::class, 'status']);
-    Route::post('/connect', [QuickBooksController::class, 'connect'])->middleware('role:admin');
-    Route::post('/disconnect', [QuickBooksController::class, 'disconnect'])->middleware('role:admin');
+    Route::post('/connect', [QuickBooksController::class, 'connect'])->middleware('quickbooks.connection');
+    Route::post('/disconnect', [QuickBooksController::class, 'disconnect'])->middleware('quickbooks.connection');
     Route::post('/sync-po/{mrfId}', [QuickBooksController::class, 'syncPo'])->middleware($quickBooksSyncRoles);
-    Route::get('/inspect/vendors', [QuickBooksController::class, 'inspectVendors'])->middleware('role:admin');
-    Route::get('/inspect/purchase-orders', [QuickBooksController::class, 'inspectPurchaseOrders'])->middleware('role:admin');
-    Route::get('/inspect/accounts-items', [QuickBooksController::class, 'inspectAccountsItems'])->middleware('role:admin');
+    Route::get('/inspect/vendors', [QuickBooksController::class, 'inspectVendors'])->middleware('quickbooks.connection');
+    Route::get('/inspect/purchase-orders', [QuickBooksController::class, 'inspectPurchaseOrders'])->middleware('quickbooks.connection');
+    Route::get('/inspect/accounts-items', [QuickBooksController::class, 'inspectAccountsItems'])->middleware('quickbooks.connection');
     Route::post('/pull/vendors', [QuickBooksController::class, 'pullVendors'])->middleware($quickBooksSyncRoles);
     Route::post('/pull/purchase-orders', [QuickBooksController::class, 'pullPurchaseOrders'])->middleware($quickBooksSyncRoles);
 });

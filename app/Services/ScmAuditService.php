@@ -7,6 +7,7 @@ use App\Models\User;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Schema;
 
 /**
  * Additive SCM audit writer for MRF / PO / Vendor changes.
@@ -24,9 +25,8 @@ class ScmAuditService
         ?Request $request = null,
     ): ?AuditLog {
         try {
-            return AuditLog::create([
+            $attributes = [
                 'action' => $action,
-                'description' => $description,
                 'actor_id' => $actor?->id,
                 'actor_type' => $actor ? User::class : null,
                 'entity_type' => $entityType,
@@ -34,7 +34,12 @@ class ScmAuditService
                 'payload' => $payload === [] ? null : $payload,
                 'ip_address' => $request?->ip(),
                 'user_agent' => $request?->userAgent(),
-            ]);
+            ];
+            if (Schema::hasColumn('audit_logs', 'description')) {
+                $attributes['description'] = $description;
+            }
+
+            return AuditLog::create($attributes);
         } catch (\Throwable $e) {
             Log::warning('SCM audit write failed', [
                 'action' => $action,

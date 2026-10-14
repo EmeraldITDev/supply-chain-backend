@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Exceptions\QuickBooksException;
 use App\Http\Controllers\Api\QuickBooksController;
+use App\Models\AuditLog;
 use App\Models\MRF;
 use App\Models\MRFItem;
 use App\Models\SystemSetting;
@@ -12,6 +13,7 @@ use App\Models\Vendor;
 use App\Services\QuickBooksService;
 use App\Services\QuickBooksTokenService;
 use App\Services\WorkflowStateService;
+use App\Support\QuickBooksRoles;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request;
 use Illuminate\Log\Events\MessageLogged;
@@ -121,7 +123,7 @@ class QuickBooksIntegrationTest extends TestCase
             ->assertJsonMissingPath('data.realm_id');
     }
 
-    public function test_inspect_accounts_items_is_admin_only_and_returns_trimmed_rows(): void
+    public function test_inspect_accounts_items_returns_trimmed_rows_for_connection_roles(): void
     {
         $this->storeConnection();
         $this->fakeHttp(function (Request $request) {
@@ -158,10 +160,7 @@ class QuickBooksIntegrationTest extends TestCase
             return $this->discoveryResponse($request);
         });
 
-        Sanctum::actingAs(User::factory()->create(['supply_chain_role' => 'employee']));
-        $this->getJson('/api/quickbooks/inspect/accounts-items')->assertForbidden();
-
-        Sanctum::actingAs(User::factory()->create(['supply_chain_role' => 'admin']));
+        Sanctum::actingAs(User::factory()->create(['supply_chain_role' => 'procurement_manager']));
         $response = $this->getJson('/api/quickbooks/inspect/accounts-items');
         $response->assertOk()
             ->assertJsonPath('data.accounts.0.Id', '41')
@@ -173,6 +172,89 @@ class QuickBooksIntegrationTest extends TestCase
         $this->assertStringNotContainsString('SHOULD_NOT_LEAK', (string) $encoded);
         $this->assertStringNotContainsString($this->plainAccess, (string) $encoded);
         Http::assertNotSent(fn (Request $request) => $request->method() === 'POST');
+    }
+
+    public function test_connection_management_roles_are_allowed_and_others_are_forbidden(): void
+    {
+        $this->storeConnection();
+        $this->fakeHttp(function (Request $request) {
+            if (str_contains($request->url(), 'tokens/revoke')) {
+                return Http::response('', 200);
+            }
+            if (str_contains($request->url(), '/query')) {
+                return Http::response(['QueryResponse' => [
+                    'Vendor' => [['Id' => '1', 'DisplayName' => 'V']],
+                    'PurchaseOrder' => [['Id' => '2', 'DocNumber' => '1']],
+                    'Account' => [['Id' => '3', 'Name' => 'Expense', 'AccountType' => 'Expense']],
+                    'Item' => [['Id' => '4', 'Name' => 'Service', 'Type' => 'Service']],
+                ]]);
+            }
+
+            return $this->discoveryResponse($request);
+        });
+
+        $allowed = QuickBooksRoles::CONNECTION_ROLES;
+        $denied = ['procurement', 'logistics_manager', 'finance', 'employee'];
+        $endpoints = [
+            ['POST', '/api/quickbooks/connect'],
+            ['POST', '/api/quickbooks/disconnect'],
+            ['GET', '/api/quickbooks/inspect/accounts-items'],
+            ['GET', '/api/quickbooks/inspect/vendors'],
+            ['GET', '/api/quickbooks/inspect/purchase-orders'],
+        ];
+
+        foreach ($allowed as $role) {
+            Sanctum::actingAs(User::factory()->create(['supply_chain_role' => $role]));
+            foreach ($endpoints as [$method, $uri]) {
+                if (! str_contains($uri, '/connect')) {
+                    $this->storeConnection();
+                }
+                $response = $this->json($method, $uri);
+                $this->assertSame(
+                    200,
+                    $response->status(),
+                    "Expected 200 for {$role} on {$method} {$uri}, got {$response->status()}",
+                );
+            }
+        }
+
+        foreach ($denied as $role) {
+            Sanctum::actingAs(User::factory()->create(['supply_chain_role' => $role]));
+            foreach ($endpoints as [$method, $uri]) {
+                $this->json($method, $uri)->assertForbidden();
+            }
+        }
+    }
+
+    public function test_disconnect_endpoint_writes_audit_entry_and_revokes_at_intuit(): void
+    {
+        $this->storeConnection();
+        $this->fakeHttp(function (Request $request) {
+            if (str_contains($request->url(), 'tokens/revoke')) {
+                return Http::response('', 200);
+            }
+
+            return $this->discoveryResponse($request);
+        });
+
+        $user = User::factory()->create(['supply_chain_role' => 'procurement_manager']);
+        Sanctum::actingAs($user);
+
+        $this->postJson('/api/quickbooks/disconnect')->assertOk();
+
+        Http::assertSent(fn (Request $request) => $request->method() === 'POST' && str_contains($request->url(), 'tokens/revoke'));
+        $this->assertSame(0, SystemSetting::query()->where('category', SystemSetting::CATEGORY_QUICKBOOKS)->count());
+
+        $audit = AuditLog::query()->where('action', 'quickbooks_disconnect')->latest('id')->first();
+        $this->assertNotNull($audit);
+        $this->assertSame($user->id, $audit->actor_id);
+        $this->assertSame('procurement_manager', $audit->payload['role'] ?? null);
+        $this->assertSame('quickbooks_disconnect', $audit->payload['action'] ?? null);
+        $this->assertArrayHasKey('timestamp', $audit->payload ?? []);
+        $encoded = json_encode($audit->toArray());
+        $this->assertStringNotContainsString($this->plainAccess, (string) $encoded);
+        $this->assertStringNotContainsString($this->plainRefresh, (string) $encoded);
+        $this->assertStringNotContainsString('realm-should-not-leak', (string) $encoded);
     }
 
     public function test_mrf_and_vendor_responses_include_quickbooks_fields(): void
@@ -522,13 +604,13 @@ class QuickBooksIntegrationTest extends TestCase
         }
     }
 
-    public function test_callback_route_is_public_and_connect_is_admin_only(): void
+    public function test_callback_route_is_public_and_connect_uses_connection_roles(): void
     {
         $this->fakeDiscovery();
         Sanctum::actingAs(User::factory()->create(['supply_chain_role' => 'employee']));
         $this->postJson('/api/quickbooks/connect')->assertForbidden();
 
-        Sanctum::actingAs(User::factory()->create(['supply_chain_role' => 'admin']));
+        Sanctum::actingAs(User::factory()->create(['supply_chain_role' => 'supply_chain_director']));
         $response = $this->postJson('/api/quickbooks/connect');
         $response->assertOk();
         $url = (string) $response->json('data.authorization_url');

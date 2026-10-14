@@ -10,6 +10,8 @@ use App\Services\QuickBooksPOSyncService;
 use App\Services\QuickBooksPullService;
 use App\Services\QuickBooksService;
 use App\Services\QuickBooksTokenService;
+use App\Services\ScmAuditService;
+use App\Support\UserRoleNormalizer;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -90,9 +92,25 @@ class QuickBooksController extends Controller
         ]);
     }
 
-    public function disconnect(): JsonResponse
+    public function disconnect(Request $request, ScmAuditService $audit): JsonResponse
     {
         $this->tokens->disconnect($this->discovery);
+
+        $actor = $request->user();
+        $audit->record(
+            'quickbooks_disconnect',
+            'QuickBooks',
+            null,
+            $actor,
+            'QuickBooks connection revoked for the company.',
+            [
+                'user_id' => $actor?->id,
+                'role' => $actor ? UserRoleNormalizer::supplyChainRole($actor) : null,
+                'timestamp' => now()->toIso8601String(),
+                'action' => 'quickbooks_disconnect',
+            ],
+            $request,
+        );
 
         return response()->json([
             'success' => true,
