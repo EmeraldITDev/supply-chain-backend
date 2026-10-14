@@ -613,6 +613,9 @@ class MRF extends Model
         'chairman_remarks',
         // PO information
         'po_number',
+        'quickbooks_po_id',
+        'quickbooks_synced_at',
+        'quickbooks_sync_status',
         'po_terms_mode',
         'payment_milestones',
         'unsigned_po_url',
@@ -701,6 +704,7 @@ class MRF extends Model
         'finance_approved_at' => 'datetime',
         'rejected_at' => 'datetime',
         'po_generated_at' => 'datetime',
+        'quickbooks_synced_at' => 'datetime',
         'po_signed_at' => 'datetime',
         'po_draft_saved_at' => 'datetime',
         'rfq_issued_at' => 'datetime',

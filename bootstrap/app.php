@@ -34,7 +34,10 @@ return Application::configure(basePath: dirname(__DIR__))
             'role' => \App\Http\Middleware\EnsureRole::class,
             'permission' => \App\Http\Middleware\EnsurePermission::class,
             'finance_ap.integration' => \App\Http\Middleware\VerifyFinanceApIntegrationKey::class,
+            'quickbooks.nocache' => \App\Http\Middleware\QuickBooksNoCache::class,
         ]);
+
+        $middleware->append(\App\Http\Middleware\SecurityHeaders::class);
 
         $middleware->api(prepend: [
             \Laravel\Sanctum\Http\Middleware\EnsureFrontendRequestsAreStateful::class,

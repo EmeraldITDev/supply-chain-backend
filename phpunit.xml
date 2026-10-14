@@ -31,5 +31,9 @@
         <env name="PULSE_ENABLED" value="false"/>
         <env name="TELESCOPE_ENABLED" value="false"/>
         <env name="NIGHTWATCH_ENABLED" value="false"/>
+        <env name="QUICKBOOKS_DRY_RUN" value="true"/>
+        <env name="QUICKBOOKS_WRITES_ENABLED" value="false"/>
+        <env name="QUICKBOOKS_ENVIRONMENT" value="production"/>
+        <env name="FRONTEND_URL" value="https://scm.emeraldcfze.com"/>
     </php>
 </phpunit>

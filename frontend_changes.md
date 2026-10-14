@@ -2288,3 +2288,134 @@ Scheduled: `scm:send-approval-reminders` hourly (`bootstrap/app.php`).
 Database + mail notification only — **never** auto-approves/rejects/closes.  
 Manual: `php artisan scm:send-approval-reminders --hours=24 [--dry-run]`
 
+---
+
+## QuickBooks Integration
+
+Connect SCM to QuickBooks Online so a signed purchase order can be pushed, vendors can be matched, and PO status can be pulled back. There is no sandbox. Verification is a read-only dry run against the production company. Nothing is posted to QuickBooks unless both write flags are turned off their safe defaults.
+
+**Base URL:** `/api`  
+**Auth:** Bearer token on every route except `GET /api/quickbooks/callback`.  
+**Frontend return:** `https://scm.emeraldcfze.com/settings?tab=integrations`
+
+### Environment variables
+
+Set these on Render. Client id and client secret stay in the environment only. They are never written to the database.
+
+| Variable | Purpose |
+|---|---|
+| `QUICKBOOKS_CLIENT_ID` | Intuit app client id |
+| `QUICKBOOKS_CLIENT_SECRET` | Intuit app client secret |
+| `QUICKBOOKS_REDIRECT_URI` | `https://supply-chain-backend-hwh6.onrender.com/api/quickbooks/callback` |
+| `QUICKBOOKS_ENVIRONMENT` | `production` or `sandbox` |
+| `QUICKBOOKS_SCOPES` | `com.intuit.quickbooks.accounting` |
+| `QUICKBOOKS_ENCRYPTION_KEY` | Dedicated AES-256 key from `php artisan quickbooks:generate-key`. Not `APP_KEY`. |
+| `QUICKBOOKS_DRY_RUN` | Default `true`. No purchase-order or vendor POST while this is true. |
+| `QUICKBOOKS_WRITES_ENABLED` | Default `false`. POST also requires this to be `true`. |
+| `QUICKBOOKS_BASE_URL` | Optional fallback API host if discovery cannot choose one |
+| `QUICKBOOKS_AUTH_URL` | Optional fallback authorization URL |
+| `QUICKBOOKS_TOKEN_URL` | Optional fallback token URL |
+| `QUICKBOOKS_DEFAULT_ITEM_ID` | Item used on each PO line. Chosen from `quickbooks:inspect`. |
+| `QUICKBOOKS_DEFAULT_EXPENSE_ACCOUNT_ID` | Used only when no default item id is set |
+| `QUICKBOOKS_AP_ACCOUNT_ID` | Required only when the company has more than one Accounts Payable account |
+| `FRONTEND_URL` | `https://scm.emeraldcfze.com` |
+
+Run `php artisan quickbooks:generate-key` and save the output as `QUICKBOOKS_ENCRYPTION_KEY` before anyone clicks Connect. If the deploy caches Laravel config, rebuild that cache after the key is set. Then run `php artisan quickbooks:preflight`. It should pass except “QuickBooks connected: no”. After connecting, run `php artisan quickbooks:inspect` and set the item or expense-account id from that output. Then run `php artisan quickbooks:dry-run {mrfId}` for a real signed PO.
+
+### First live push
+
+A dry run does not prove QuickBooks will accept the purchase order. Only a real POST can.
+
+1. Confirm `quickbooks:dry-run` passed for one clearly labelled test PO.
+2. Set `QUICKBOOKS_DRY_RUN=false` and `QUICKBOOKS_WRITES_ENABLED=true`.
+3. Push that one PO from the UI (`POST /api/quickbooks/sync-po/{mrfId}`).
+4. Open the purchase order in QuickBooks and confirm the vendor, amounts, and private note.
+5. Delete it in QuickBooks with `POST /v3/company/{realmId}/purchaseorder?operation=delete` and body `{ "Id": "...", "SyncToken": "..." }`. SyncToken must be the current value from a fresh read.
+6. Put both flags back to `QUICKBOOKS_DRY_RUN=true` and `QUICKBOOKS_WRITES_ENABLED=false` until the next intentional push.
+
+### GET /api/quickbooks/status
+
+**Roles:** any authenticated user.
+
+Response `data` contains only `connected`, `needs_reconnect`, `connected_at`, `access_token_expires_at`, `refresh_token_expires_at`, `dry_run`, and `writes_enabled`. It never includes a realm id or token.
+
+### POST /api/quickbooks/connect
+
+**Roles:** admin.
+
+Response:
+
+```json
+{
+  "success": true,
+  "data": {
+    "authorization_url": "https://appcenter.intuit.com/connect/oauth2?..."
+  }
+}
+```
+
+Send the browser to `authorization_url`. The OAuth `state` value expires after 10 minutes.
+
+### GET /api/quickbooks/callback
+
+**Roles:** none. Intuit redirects the browser here. There is no auth middleware.
+
+Every outcome is a 302 to `{FRONTEND_URL}/settings?tab=integrations`. Success adds `&quickbooks=connected`. Failure adds one of `&error=invalid_state`, `&error=access_denied`, or `&error=token_exchange_failed`. The redirect never echoes the OAuth code, realm id, or state. Show a settings message from those fixed codes only.
+
+### POST /api/quickbooks/disconnect
+
+**Roles:** admin.
+
+Revokes the refresh token at Intuit, then deletes the local QuickBooks settings even if revocation fails.
+
+```json
+{ "success": true, "data": { "connected": false } }
+```
+
+### POST /api/quickbooks/sync-po/{mrfId}
+
+**Roles:** `procurement_manager`, `procurement`, `supply_chain_director`, `supply_chain`, `admin`.
+
+`mrfId` may be the numeric id, `mrf_id`, or `formatted_id`. The PO must have `signed_po_url` set.
+
+While `QUICKBOOKS_DRY_RUN=true`, the response is a pass/fail validation summary. It does not include the JSON payload, it does not post to QuickBooks, and it does not update the MRF.
+
+```json
+{
+  "success": true,
+  "dry_run": true,
+  "data": {
+    "passed": true,
+    "dry_run": true,
+    "results": [{ "check": "total", "passed": true, "detail": "..." }],
+    "assumptions": ["Line amounts are tax-exclusive. QuickBooks tax codes are not sent."],
+    "blocked_reason": null
+  }
+}
+```
+
+`422` means validation failed. `409` means writes are disabled while dry run is already false. A live success returns `quickbooks_po_id` and `quickbooks_sync_status`.
+
+### GET /api/quickbooks/inspect/vendors
+
+### GET /api/quickbooks/inspect/purchase-orders
+
+**Roles:** admin.
+
+Read-only, at most 10 rows, trimmed fields, not stored. Use these, or `php artisan quickbooks:inspect`, to choose `QUICKBOOKS_DEFAULT_ITEM_ID` or `QUICKBOOKS_DEFAULT_EXPENSE_ACCOUNT_ID`.
+
+Vendor rows: `id`, `display_name`, `company_name`, `email`, `active`.  
+Purchase order rows: `id`, `doc_number`, `po_status`, `txn_date`, `total_amt`, `vendor_ref`, `currency`.
+
+### POST /api/quickbooks/pull/vendors
+
+**Roles:** same as sync.
+
+Reads QuickBooks vendors and matches SCM vendors by email, then by normalised name. Stores only `vendors.quickbooks_vendor_id` for a match. Does not create SCM vendors. Unmatched QuickBooks vendors are returned in `data.unmatched` and are not stored.
+
+### POST /api/quickbooks/pull/purchase-orders
+
+**Roles:** same as sync.
+
+For MRFs that already have `quickbooks_po_id`, refreshes `quickbooks_sync_status` from QuickBooks `POStatus` (`Open` or `Closed`) and `quickbooks_synced_at`. QuickBooks purchase orders that are not linked to an MRF are returned in `data.unlinked` and are not stored.
+

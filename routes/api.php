@@ -19,6 +19,7 @@ use App\Http\Controllers\Api\SRFController;
 use App\Http\Controllers\Api\RFQController;
 use App\Http\Controllers\Api\QuotationController;
 use App\Http\Controllers\Api\VendorController;
+use App\Http\Controllers\Api\QuickBooksController;
 use App\Http\Controllers\Api\NotificationController;
 use App\Http\Controllers\Api\SearchController;
 use App\Http\Controllers\Api\AIChatController;
@@ -937,4 +938,19 @@ Route::prefix('logistics')->group(function () {
 
         Route::get('/uploads/templates', [LogisticsUploadController::class, 'templates'])->middleware($logisticsInternalRoles);
     });
+});
+
+$quickBooksSyncRoles = 'role:procurement_manager,procurement,supply_chain_director,supply_chain,admin';
+
+Route::get('/quickbooks/callback', [QuickBooksController::class, 'callback']);
+
+Route::middleware(['auth:sanctum', 'quickbooks.nocache'])->prefix('quickbooks')->group(function () use ($quickBooksSyncRoles) {
+    Route::get('/status', [QuickBooksController::class, 'status']);
+    Route::post('/connect', [QuickBooksController::class, 'connect'])->middleware('role:admin');
+    Route::post('/disconnect', [QuickBooksController::class, 'disconnect'])->middleware('role:admin');
+    Route::post('/sync-po/{mrfId}', [QuickBooksController::class, 'syncPo'])->middleware($quickBooksSyncRoles);
+    Route::get('/inspect/vendors', [QuickBooksController::class, 'inspectVendors'])->middleware('role:admin');
+    Route::get('/inspect/purchase-orders', [QuickBooksController::class, 'inspectPurchaseOrders'])->middleware('role:admin');
+    Route::post('/pull/vendors', [QuickBooksController::class, 'pullVendors'])->middleware($quickBooksSyncRoles);
+    Route::post('/pull/purchase-orders', [QuickBooksController::class, 'pullPurchaseOrders'])->middleware($quickBooksSyncRoles);
 });

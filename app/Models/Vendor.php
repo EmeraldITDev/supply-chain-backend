@@ -58,6 +58,7 @@ class Vendor extends Model
         'profile_completed',
         'onboarding_source',
         'onboarding_email_sent_at',
+        'quickbooks_vendor_id',
     ];
 
     protected $casts = [

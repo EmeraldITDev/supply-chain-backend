@@ -55,6 +55,8 @@ RUN { \
         echo "Timeout 300"; \
         echo "KeepAliveTimeout 30"; \
         echo "LimitRequestBody 209715200"; \
+        echo "TraceEnable Off"; \
+        echo "ServerTokens Prod"; \
     } > /etc/apache2/conf-available/zz-supply-chain.conf \
     && a2enconf zz-supply-chain
 

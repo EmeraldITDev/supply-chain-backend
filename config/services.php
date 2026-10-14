@@ -41,4 +41,29 @@ return [
         'model' => env('GEMINI_MODEL', 'gemini-2.5-flash'),
     ],
 
+    'frontend_url' => env('FRONTEND_URL', 'https://scm.emeraldcfze.com'),
+
+    'quickbooks' => [
+        'client_id' => env('QUICKBOOKS_CLIENT_ID'),
+        'client_secret' => env('QUICKBOOKS_CLIENT_SECRET'),
+        'redirect_uri' => env('QUICKBOOKS_REDIRECT_URI', 'https://supply-chain-backend-hwh6.onrender.com/api/quickbooks/callback'),
+        'environment' => env('QUICKBOOKS_ENVIRONMENT', 'production'),
+        'base_url' => env('QUICKBOOKS_BASE_URL'),
+        'auth_url' => env('QUICKBOOKS_AUTH_URL'),
+        'token_url' => env('QUICKBOOKS_TOKEN_URL'),
+        'scopes' => env('QUICKBOOKS_SCOPES', 'com.intuit.quickbooks.accounting'),
+        'encryption_key' => env('QUICKBOOKS_ENCRYPTION_KEY'),
+        'dry_run' => env('QUICKBOOKS_DRY_RUN') === null
+            ? true
+            : filter_var(env('QUICKBOOKS_DRY_RUN'), FILTER_VALIDATE_BOOLEAN),
+        'writes_enabled' => env('QUICKBOOKS_WRITES_ENABLED') === null
+            ? false
+            : filter_var(env('QUICKBOOKS_WRITES_ENABLED'), FILTER_VALIDATE_BOOLEAN),
+        'default_item_id' => env('QUICKBOOKS_DEFAULT_ITEM_ID'),
+        'default_expense_account_id' => env('QUICKBOOKS_DEFAULT_EXPENSE_ACCOUNT_ID'),
+        'ap_account_id' => env('QUICKBOOKS_AP_ACCOUNT_ID'),
+        'minor_version' => (int) env('QUICKBOOKS_MINOR_VERSION', 75),
+        'doc_number_max_length' => 21,
+    ],
+
 ];
