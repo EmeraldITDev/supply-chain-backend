@@ -39,6 +39,12 @@ class StorePurchaseOrderRequest extends FormRequest
             'shipToAddress' => 'nullable|string|max:1000',
             'taxRate' => 'nullable|numeric|min:0|max:100',
             'taxAmount' => 'nullable|numeric|min:0',
+            'taxMode' => 'nullable|in:per_line',
+            'discountType' => 'nullable|in:percentage,amount',
+            'discountValue' => ['nullable', 'numeric', 'min:0', \Illuminate\Validation\Rule::when(
+                fn ($input) => ($input['discountType'] ?? null) === 'percentage',
+                'lt:100',
+            )],
             'documents' => 'nullable|array',
             'documents.*.file' => 'nullable|file|mimes:pdf,jpg,jpeg,png,doc,docx|max:20480',
             'documents.*.type' => 'nullable|string|max:50',

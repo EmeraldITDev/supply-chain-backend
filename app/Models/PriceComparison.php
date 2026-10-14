@@ -16,6 +16,7 @@ class PriceComparison extends Model
         'total_price',
         'is_selected',
         'selection_reason',
+        'tax_rate',
     ];
 
     protected $casts = [
@@ -23,6 +24,7 @@ class PriceComparison extends Model
         'quantity' => 'decimal:2',
         'total_price' => 'decimal:2',
         'is_selected' => 'boolean',
+        'tax_rate' => 'decimal:2',
     ];
 
     public function purchaseOrder(): BelongsTo

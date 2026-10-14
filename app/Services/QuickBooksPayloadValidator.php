@@ -119,11 +119,15 @@ class QuickBooksPayloadValidator
             );
 
             $amount = $line['Amount'] ?? null;
-            $badAmount = ! is_numeric($amount) || (float) $amount < 0;
+            // Only the PO discount line may be negative.
+            $isDiscountLine = ($meta['discount_line_index'] ?? null) === $index;
+            $badAmount = ! is_numeric($amount) || ($isDiscountLine ? (float) $amount >= 0 : (float) $amount < 0);
             $results[] = $this->result(
                 'line_'.($index + 1).'_amount',
                 ! $badAmount,
-                $badAmount ? 'Line amount is null or negative.' : 'Line amount is present.',
+                $badAmount
+                    ? ($isDiscountLine ? 'Discount line amount must be negative.' : 'Line amount is null or negative.')
+                    : 'Line amount is present.',
             );
 
             if ($lineMode === 'item') {
@@ -164,7 +168,7 @@ class QuickBooksPayloadValidator
                 );
             }
 
-            if (is_numeric($amount) && (float) $amount >= 0) {
+            if (is_numeric($amount) && ((float) $amount >= 0 || $isDiscountLine)) {
                 $sum += round((float) $amount, 2);
             }
         }

@@ -17,6 +17,7 @@ use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
+use App\Support\PoTaxCalculator;
 
 class ProcessPurchaseOrderGenerationJob implements ShouldQueue
 {
@@ -124,12 +125,22 @@ class ProcessPurchaseOrderGenerationJob implements ShouldQueue
 
         $dbStarted = microtime(true);
         $wasFirstPo = empty($mrf->po_generated_at);
-        $poTotal = $subtotal + $taxAmount;
-        if ($poTotal <= 0) {
+        $discountAmount = (float) ($this->context['discount_amount'] ?? 0);
+        $poTotal = $subtotal - $discountAmount + $taxAmount;
+        if ($subtotal <= 0 && $poTotal <= 0) {
             $poTotal = (float) ($mrf->estimated_cost ?? 0);
         }
 
-        $mrf->update([
+        // Per-line VAT: keep tax_amount in step with po_value (QuickBooks reads
+        // po_value - tax_amount as the pre-VAT total).
+        $taxFields = PoTaxCalculator::isPerLine($this->context['tax_mode'] ?? null)
+            ? ['tax_amount' => $taxAmount, 'tax_mode' => PoTaxCalculator::MODE_PER_LINE]
+            : [];
+        if (array_key_exists('discount_amount', $this->context) && $mrf->discount_type) {
+            $taxFields['discount_amount'] = $discountAmount;
+        }
+
+        $mrf->update($taxFields + [
             'po_number' => $poNumber,
             'unsigned_po_url' => $poUrl,
             'unsigned_po_share_url' => $poUrl,

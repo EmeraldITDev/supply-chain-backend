@@ -12,6 +12,7 @@ use App\Models\Vendor;
 use App\Services\PaymentScheduleService;
 use App\Services\ProcurementDocumentService;
 use Illuminate\Support\Facades\Storage;
+use App\Support\PoTaxCalculator;
 
 class FinancePackageBuilder
 {
@@ -265,6 +266,12 @@ class FinancePackageBuilder
 
     private function resolvePoTotal(MRF $mrf, ?PaymentSchedule $schedule): float
     {
+        // Per-line VAT POs store the VAT-inclusive total in po_value. Legacy POs keep
+        // the original (pre-tax quotation) resolution below.
+        if (PoTaxCalculator::isPerLine($mrf->tax_mode) && (float) ($mrf->po_value ?? 0) > 0) {
+            return (float) $mrf->po_value;
+        }
+
         $quotation = $mrf->selectedQuotation();
 
         if ($quotation && (float) $quotation->total_amount > 0) {

@@ -149,6 +149,12 @@
         </tbody>
     </table>
 
+    @if (!empty($discount_note))
+        <div class="footer-block" style="margin-top: 6px;">
+            <span class="footer-label">{{ $discount_note }}</span>
+        </div>
+    @endif
+
     <hr class="dashed-sep" />
 
     <table class="footer-table">
@@ -214,6 +220,12 @@
                         <td class="t-label">SUBTOTAL</td>
                         <td class="t-val">{{ $subtotal }}</td>
                     </tr>
+                    @if (!empty($discount))
+                        <tr>
+                            <td class="t-label">DISCOUNT</td>
+                            <td class="t-val">-{{ $discount }}</td>
+                        </tr>
+                    @endif
                     <tr>
                         <td class="t-label">TAX</td>
                         <td class="t-val">{{ $tax }}</td>

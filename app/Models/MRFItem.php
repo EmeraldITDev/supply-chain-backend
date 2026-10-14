@@ -23,6 +23,7 @@ class MRFItem extends Model
         'budget_amount',
         'quoted_amount',
         'specifications',
+        'tax_rate',
     ];
 
     protected $casts = [
@@ -31,6 +32,7 @@ class MRFItem extends Model
         'total_price' => 'decimal:2',
         'budget_amount' => 'decimal:2',
         'quoted_amount' => 'decimal:2',
+        'tax_rate' => 'decimal:2',
     ];
 
     /**

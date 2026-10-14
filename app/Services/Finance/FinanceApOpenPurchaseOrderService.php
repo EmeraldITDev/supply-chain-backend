@@ -9,6 +9,7 @@ use App\Models\Vendor;
 use App\Services\WorkflowStateService;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Collection;
+use App\Support\PoTaxCalculator;
 
 /**
  * Lists SCM purchase orders that are open for Finance AP payment initiation.
@@ -50,7 +51,7 @@ class FinanceApOpenPurchaseOrderService
         $query = MRF::query()
             ->select([
                 'id', 'mrf_id', 'formatted_id', 'scm_transaction_id', 'title', 'workflow_state',
-                'selected_vendor_id', 'po_number', 'po_signed_at', 'currency', 'estimated_cost',
+                'selected_vendor_id', 'po_number', 'po_signed_at', 'currency', 'estimated_cost', 'po_value', 'tax_mode',
                 'finance_ap_case_id',
             ])
             ->with([
@@ -131,6 +132,12 @@ class FinanceApOpenPurchaseOrderService
 
     private function resolvePoTotal(MRF $mrf, $schedule): float
     {
+        // Per-line VAT POs store the VAT-inclusive total in po_value. Legacy POs keep
+        // the original (pre-tax quotation) resolution below.
+        if (PoTaxCalculator::isPerLine($mrf->tax_mode) && (float) ($mrf->po_value ?? 0) > 0) {
+            return (float) $mrf->po_value;
+        }
+
         $quotation = $this->resolveSelectedQuotation($mrf);
 
         if ($quotation && (float) $quotation->total_amount > 0) {

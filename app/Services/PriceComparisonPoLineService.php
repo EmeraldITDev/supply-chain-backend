@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\MRF;
 use App\Models\PriceComparison;
 use App\Models\Vendor;
+use App\Support\PoTaxCalculator;
 use Illuminate\Support\Collection;
 
 class PriceComparisonPoLineService
@@ -68,7 +69,7 @@ class PriceComparisonPoLineService
     }
 
     /**
-     * @return Collection<int, object{item_name: string, description: string, quantity: float, unit: string, unit_price: float, total_price: float, specifications: string}>
+     * @return Collection<int, object{item_name: string, description: string, quantity: float, unit: string, unit_price: float, total_price: float, specifications: string, tax_rate: float|null}>
      */
     public function rowsToPoLineObjects(Collection $rows): Collection
     {
@@ -93,6 +94,7 @@ class PriceComparisonPoLineService
                 'unit_price' => $unit,
                 'total_price' => $total,
                 'specifications' => '',
+                'tax_rate' => PoTaxCalculator::parseRate($row->tax_rate ?? null),
             ];
         });
     }
@@ -112,6 +114,7 @@ class PriceComparisonPoLineService
                 'unit_price' => $item->unit_price,
                 'total_price' => $item->total_price,
                 'specifications' => $item->specifications,
+                'tax_rate' => $item->tax_rate,
             ];
         })->values()->all();
     }

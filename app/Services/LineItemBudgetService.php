@@ -145,6 +145,7 @@ class LineItemBudgetService
                 'total_price' => $unitPrice !== null ? $unitPrice * $qty : null,
                 'budget_amount' => $normalized['budget_amount'],
                 'specifications' => $normalized['specifications'] ?? null,
+                'tax_rate' => $normalized['tax_rate'] ?? null,
             ]);
         }
     }

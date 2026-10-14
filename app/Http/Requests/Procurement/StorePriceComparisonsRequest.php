@@ -64,6 +64,8 @@ class StorePriceComparisonsRequest extends FormRequest
             'rows.*.quantity' => 'required|numeric|gt:0',
             'rows.*.is_selected' => 'nullable|boolean',
             'rows.*.selection_reason' => 'nullable|string|max:1000',
+            // Per-line VAT %. Blank/null = default (7.5%), 0 = not taxed.
+            'rows.*.tax_rate' => 'nullable|numeric|min:0|max:100',
         ];
     }
 

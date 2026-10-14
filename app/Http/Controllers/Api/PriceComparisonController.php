@@ -10,6 +10,7 @@ use App\Models\Vendor;
 use App\Services\ManualVendorOnboardingService;
 use App\Services\PaymentScheduleService;
 use App\Services\PurchaseOrderRevisionService;
+use App\Support\PoTaxCalculator;
 use App\Support\ProcurementOverviewAccess;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -205,6 +206,7 @@ class PriceComparisonController extends Controller
                         'total_price' => round($unitPrice * $quantity, 2),
                         'is_selected' => $isSelected,
                         'selection_reason' => $row['selection_reason'] ?? null,
+                        'tax_rate' => PoTaxCalculator::parseRate($row['tax_rate'] ?? null),
                         'created_at' => $now,
                         'updated_at' => $now,
                     ];
@@ -283,6 +285,7 @@ class PriceComparisonController extends Controller
             'total_price' => (float) $row->total_price,
             'is_selected' => (bool) $row->is_selected,
             'selection_reason' => $row->selection_reason,
+            'tax_rate' => $row->tax_rate !== null ? (float) $row->tax_rate : null,
             'paymentTerms' => $scheduleSummary,
             'payment_terms' => $scheduleSummary,
             'paymentScheduleSummary' => $scheduleSummary,

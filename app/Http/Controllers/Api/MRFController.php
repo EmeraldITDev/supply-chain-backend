@@ -15,6 +15,7 @@ use App\Support\LogisticsMrfRouting;
 use App\Services\LineItemBudgetService;
 use App\Services\AttachmentService;
 use App\Support\PaymentMilestoneRequest;
+use App\Support\PoTaxCalculator;
 use App\Support\PurchaseOrderCurrency;
 use App\Support\RequestLineItemParser;
 use Illuminate\Validation\ValidationException;
@@ -704,6 +705,7 @@ class MRFController extends Controller
                     'total_price' => (float) $row->total_price,
                     'is_selected' => (bool) $row->is_selected,
                     'selection_reason' => $row->selection_reason,
+                    'tax_rate' => $row->tax_rate !== null ? (float) $row->tax_rate : null,
                 ];
             })->values();
 
@@ -882,6 +884,7 @@ class MRFController extends Controller
                     'total_price' => (float) $row->total_price,
                     'is_selected' => (bool) $row->is_selected,
                     'selection_reason' => $row->selection_reason,
+                    'tax_rate' => $row->tax_rate !== null ? (float) $row->tax_rate : null,
                 ];
             })->values(),
             // Supporting attachment
@@ -1341,6 +1344,7 @@ class MRFController extends Controller
                         'total_price' => (float) $row->total_price,
                         'is_selected' => (bool) $row->is_selected,
                         'selection_reason' => $row->selection_reason,
+                        'tax_rate' => $row->tax_rate !== null ? (float) $row->tax_rate : null,
                     ];
                 })->values(),
                 'linkedFleetSrfs' => $linkedFleetSrfsPayload,
@@ -3036,9 +3040,9 @@ class MRFController extends Controller
     {
         $mrf->load([
             'requester:id,name,email',
-            'items:id,mrf_id,item_name,description,quantity,unit,unit_price,total_price',
+            'items:id,mrf_id,item_name,description,quantity,unit,unit_price,total_price,tax_rate',
             'selectedVendor:id,vendor_id,name,email,phone,address,contact_person,contact_person_email',
-            'priceComparisons:id,purchase_order_id,vendor_id,item_description,unit_price,quantity,total_price,is_selected',
+            'priceComparisons:id,purchase_order_id,vendor_id,item_description,unit_price,quantity,total_price,is_selected,tax_rate',
             'priceComparisons.vendor:id,vendor_id,name,email,phone,address,contact_person',
             'paymentSchedule.milestones',
         ]);
@@ -3069,10 +3073,16 @@ class MRFController extends Controller
         $poDate = $mrf->po_generated_at ? \Carbon\Carbon::parse($mrf->po_generated_at)->format('d/m/Y') : now()->format('d/m/Y');
 
         $subtotal = 0;
+        $taxLines = [];
         foreach ($items as $item) {
             $unitPrice = $item->unit_price ?? ($item->total_price ?? 0) / ($item->quantity ?? 1);
             $itemTotal = ($unitPrice * ($item->quantity ?? 1));
             $subtotal += $itemTotal;
+            $taxLines[] = [
+                'quantity' => $item->quantity ?? 1,
+                'unit_price' => $unitPrice,
+                'tax_rate' => $item->tax_rate ?? null,
+            ];
         }
 
         $taxRate = $mrf->tax_rate ?? 0;
@@ -3082,7 +3092,17 @@ class MRFController extends Controller
             $tax = ($subtotal * $taxRate) / 100;
         }
 
-        $total = $subtotal + $tax;
+        $discount = PoTaxCalculator::discountFromModel($mrf);
+        $discountAmount = PoTaxCalculator::discountAmount((float) $subtotal, $discount);
+        $total = $subtotal - $discountAmount + $tax;
+
+        if (PoTaxCalculator::isPerLine($mrf->tax_mode)) {
+            $calc = PoTaxCalculator::forLines($taxLines, PoTaxCalculator::MODE_PER_LINE, discount: $discount);
+            $subtotal = $calc['subtotal'];
+            $discountAmount = $calc['discount'];
+            $tax = $calc['tax'];
+            $total = $calc['total'];
+        }
 
         $paymentTerms = $mrf->po_payment_terms
             ?: $paymentTerms
@@ -3098,6 +3118,10 @@ class MRFController extends Controller
             'subtotal' => $subtotal,
             'tax' => $tax,
             'tax_rate' => $taxRate,
+            'tax_mode' => $mrf->tax_mode,
+            'discount' => $discountAmount,
+            'discount_type' => $discount['type'] ?? null,
+            'discount_value' => $discount['value'] ?? null,
             'total' => $total,
             'currency' => $currency,
             'payment_terms' => $paymentTerms,
@@ -3239,6 +3263,7 @@ class MRFController extends Controller
                     'unit_price' => (float) ($it->unit_price ?? 0),
                     'total_price' => (float) ($it->total_price ?? (($it->unit_price ?? 0) * max(1, $it->quantity ?? 1))),
                     'specifications' => $it->specifications ?? '',
+                    'tax_rate' => $it->tax_rate ?? null,
                 ]);
             }
         }

@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Support\PoTaxCalculator;
 use App\Support\PurchaseOrderCurrency;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\View;
@@ -184,6 +185,7 @@ class PurchaseOrderPdfService
         $po_terms_mode = $data['po_terms_mode'] ?? [];
         $poType = (string) ($data['po_type'] ?? 'goods');
         $categoryLine = $this->resolvePoCategoryLabel($poType);
+        $perLineTax = PoTaxCalculator::isPerLine($data['tax_mode'] ?? null);
 
         $poDateRaw = (string) $data['po_date'];
 
@@ -219,12 +221,24 @@ class PurchaseOrderPdfService
             $unitPrice = (float) ($item->unit_price ?? (($item->total_price ?? 0) / max($quantity, 1)));
             $lineTotal = $unitPrice * $quantity;
 
+            $lineTaxLabel = $this->fmtTaxLabel($taxRate);
+            if ($perLineTax) {
+                $lineRate = PoTaxCalculator::parseRate($item->tax_rate ?? null) ?? PoTaxCalculator::DEFAULT_RATE;
+                $lineTaxLabel = PoTaxCalculator::label($lineRate);
+                $lineCalc = PoTaxCalculator::forLines([[
+                    'quantity' => $quantity,
+                    'unit_price' => $unitPrice,
+                    'tax_rate' => $lineRate,
+                ]], PoTaxCalculator::MODE_PER_LINE);
+                $lineTotal = $lineCalc['lines'][0]['amount'];
+            }
+
             $lineItems[] = [
                 'category' => $categoryLine,
                 'description' => $description,
                 'qty' => $this->fmtQty($quantity),
                 'rate' => $this->fmtMoney($unitPrice),
-                'tax_label' => $this->fmtTaxLabel($taxRate),
+                'tax_label' => $lineTaxLabel,
                 'amount' => $this->fmtMoney($lineTotal),
             ];
         }
@@ -258,6 +272,11 @@ class PurchaseOrderPdfService
             paymentTermsRaw: (string) ($data['payment_terms'] ?? ''),
             contractType: (string) ($data['contract_type'] ?? ''),
             paymentMilestones: $paymentMilestones,
+            discount: (float) ($data['discount'] ?? 0),
+            discountNote: PoTaxCalculator::discountNote(
+                PoTaxCalculator::discount($data['discount_type'] ?? null, $data['discount_value'] ?? null),
+                $currency.' '.$this->fmtMoney((float) ($data['discount'] ?? 0)),
+            ),
         ));
     }
 
@@ -321,6 +340,27 @@ class PurchaseOrderPdfService
             $tax = ($subtotal * $taxRate) / 100;
         }
         $total = $subtotal + $tax;
+
+        // Per-line VAT: each line carries its own rate and a VAT-inclusive amount.
+        $discount = PoTaxCalculator::discount(
+            array_key_exists('discount_type', $data) ? $data['discount_type'] : ($mrf['discount_type'] ?? null),
+            array_key_exists('discount_type', $data) ? ($data['discount_value'] ?? null) : ($mrf['discount_value'] ?? null),
+        );
+        $discountAmount = 0.0;
+        if (PoTaxCalculator::isPerLine($data['tax_mode'] ?? $mrf['tax_mode'] ?? null)) {
+            $calc = PoTaxCalculator::forLines(array_values($items), PoTaxCalculator::MODE_PER_LINE, discount: $discount);
+            $discountAmount = $calc['discount'];
+            foreach ($calc['lines'] as $i => $line) {
+                $lineItems[$i]['tax_label'] = $line['tax_label'];
+                $lineItems[$i]['amount'] = $this->fmtMoney($line['amount']);
+            }
+            $subtotal = $calc['subtotal'];
+            $tax = $calc['tax'];
+            $total = $calc['total'];
+        } elseif ($discount !== null) {
+            $discountAmount = PoTaxCalculator::discountAmount($subtotal, $discount);
+            $total = $subtotal - $discountAmount + $tax;
+        }
         $paymentMilestones = $data['payment_milestones'] ?? [];
         $currency = PurchaseOrderCurrency::normalize($mrf['currency'] ?? $quotation['currency'] ?? 'NGN');
 
@@ -349,6 +389,8 @@ class PurchaseOrderPdfService
             paymentTermsRaw: (string) ($mrf['po_payment_terms'] ?? $quotation['payment_terms'] ?? ''),
             contractType: (string) ($mrf['contract_type'] ?? ''),
             paymentMilestones: $paymentMilestones,
+            discount: $discountAmount,
+            discountNote: PoTaxCalculator::discountNote($discount, $currency.' '.$this->fmtMoney($discountAmount)),
         ));
     }
 
@@ -382,6 +424,8 @@ class PurchaseOrderPdfService
         string $paymentTermsRaw = '',
         string $contractType = '',
         array $paymentMilestones = [],
+        float $discount = 0.0,
+        ?string $discountNote = null,
     ): array {
         $company = $this->normalizeCompany($company);
 
@@ -403,6 +447,8 @@ class PurchaseOrderPdfService
             'payment_milestones' => $paymentMilestones,
             'has_payment_milestones' => $paymentMilestones !== [],
             'subtotal' => $this->fmtMoney($subtotal),
+            'discount' => $discount > 0 ? $this->fmtMoney($discount) : null,
+            'discount_note' => $discount > 0 ? $discountNote : null,
             'tax' => $this->fmtMoney($tax),
             'total' => $this->fmtMoney($total),
             'currency' => $currency,

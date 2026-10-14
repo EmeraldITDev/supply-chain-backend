@@ -29,10 +29,12 @@ use App\Services\PaymentScheduleService;
 use App\Services\PriceComparisonPoLineService;
 use App\Services\ProcurementDocumentService;
 use App\Services\QuotationAttachmentService;
+use App\Support\PoTaxCalculator;
 use App\Support\PurchaseOrderCurrency;
 use App\Support\PurchaseOrderInvoiceCc;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Validation\Rule;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Log;
 use Carbon\Carbon;
@@ -1615,6 +1617,18 @@ class MRFWorkflowController extends Controller
             'taxRate' => 'nullable|numeric|min:0|max:100',
             'tax_amount' => 'nullable|numeric|min:0',
             'taxAmount' => 'nullable|numeric|min:0',
+            'tax_mode' => 'nullable|in:per_line',
+            'taxMode' => 'nullable|in:per_line',
+            'discount_type' => 'nullable|in:percentage,amount',
+            'discountType' => 'nullable|in:percentage,amount',
+            'discount_value' => ['nullable', 'numeric', 'min:0', Rule::when(
+                fn ($input) => ($input['discount_type'] ?? $input['discountType'] ?? null) === 'percentage',
+                'lt:100',
+            )],
+            'discountValue' => ['nullable', 'numeric', 'min:0', Rule::when(
+                fn ($input) => ($input['discount_type'] ?? $input['discountType'] ?? null) === 'percentage',
+                'lt:100',
+            )],
             'delivery_date' => 'nullable|date|after:today',
             'deliveryDate' => 'nullable|date|after:today',
             'expected_delivery_date' => 'nullable|date|after:today',
@@ -1652,6 +1666,18 @@ class MRFWorkflowController extends Controller
             'taxRate' => 'nullable|numeric|min:0|max:100',
             'tax_amount' => 'nullable|numeric|min:0',
             'taxAmount' => 'nullable|numeric|min:0',
+            'tax_mode' => 'nullable|in:per_line',
+            'taxMode' => 'nullable|in:per_line',
+            'discount_type' => 'nullable|in:percentage,amount',
+            'discountType' => 'nullable|in:percentage,amount',
+            'discount_value' => ['nullable', 'numeric', 'min:0', Rule::when(
+                fn ($input) => ($input['discount_type'] ?? $input['discountType'] ?? null) === 'percentage',
+                'lt:100',
+            )],
+            'discountValue' => ['nullable', 'numeric', 'min:0', Rule::when(
+                fn ($input) => ($input['discount_type'] ?? $input['discountType'] ?? null) === 'percentage',
+                'lt:100',
+            )],
             'delivery_date' => 'nullable|date|after:today',
             'deliveryDate' => 'nullable|date|after:today',
             'expected_delivery_date' => 'nullable|date|after:today',
@@ -1787,21 +1813,10 @@ class MRFWorkflowController extends Controller
                 $poNumber = $this->generatePONumber($mrf, $resolvedVendor ?? null);
             }
 
-            $taxRate = (float) ($request->input('tax_rate', $request->input('taxRate', 0)));
-            $subtotal = 0;
-            if (isset($poData['data']['items']) && is_array($poData['data']['items'])) {
-                foreach ($poData['data']['items'] as $item) {
-                    $unitPrice = $item['unit_price'] ?? (($item['total_price'] ?? 0) / max(1, $item['quantity'] ?? 1));
-                    $subtotal += ($unitPrice * ($item['quantity'] ?? 1));
-                }
-            }
-
-            $taxAmount = 0;
-            if ($taxRate > 0) {
-                $taxAmount = ($subtotal * $taxRate) / 100;
-            } elseif ($request->has('tax_amount') || $request->has('taxAmount')) {
-                $taxAmount = (float) ($request->input('tax_amount', $request->input('taxAmount', 0)));
-            }
+            $poItems = isset($poData['data']['items']) && is_array($poData['data']['items'])
+                ? array_values($poData['data']['items'])
+                : [];
+            [$taxMode, $taxRate, $taxAmount, $subtotal, $discount, $discountAmount] = $this->resolvePoTax($request, $mrf, $poItems);
 
             $poType = strtolower((string) ($request->input('po_type') ?: $mrf->po_type ?: 'goods'));
             $standardTerms = POTermsTemplate::query()
@@ -1830,6 +1845,10 @@ class MRFWorkflowController extends Controller
                 'ship_to_address' => $request->input('ship_to_address', $request->input('shipToAddress')),
                 'tax_rate' => $taxRate,
                 'tax_amount' => $taxAmount,
+                'tax_mode' => $taxMode,
+                'discount_type' => $discount['type'] ?? null,
+                'discount_value' => $discount['value'] ?? null,
+                'discount_amount' => $discount ? $discountAmount : null,
                 'po_special_terms' => $mergedTerms !== '' ? $mergedTerms : ($request->po_special_terms ?? null),
                 'custom_terms' => $customTerms,
                 'po_terms_mode' => $termsMode,
@@ -1877,6 +1896,20 @@ class MRFWorkflowController extends Controller
 
             $mrf->update($draftUpdate);
 
+            // The PDF payload was resolved before the fields above were saved; refresh its
+            // MRF block and tax figures so the PDF never shows a stale tax rate / amount.
+            $poData['data']['mrf'] = $this->mrfBlockForPoPdf(
+                $mrf->fresh() ?? $mrf,
+                $poData['data']['mrf']['currency'] ?? null,
+            );
+            $poData['data']['tax_rate'] = $taxRate;
+            $poData['data']['tax_amount'] = $taxAmount;
+            $poData['data']['tax_mode'] = $taxMode;
+            $poData['data']['discount_type'] = $discount['type'] ?? null;
+            $poData['data']['discount_value'] = $discount['value'] ?? null;
+            $poData['data']['discount_amount'] = $discountAmount;
+            $poData['data'] = $this->enrichPoPayloadWithPaymentSchedule($mrf, $poData['data']);
+
             ProcessPurchaseOrderGenerationJob::dispatch(
                 $mrf->id,
                 $user->id,
@@ -1885,6 +1918,8 @@ class MRFWorkflowController extends Controller
                     'po_data' => $poData['data'],
                     'tax_rate' => $taxRate,
                     'tax_amount' => $taxAmount,
+                    'tax_mode' => $taxMode,
+                    'discount_amount' => $discountAmount,
                     'subtotal' => $subtotal,
                     'fast_track' => $fastTrack,
                     'is_regeneration' => $isRegeneration,
@@ -1921,24 +1956,28 @@ class MRFWorkflowController extends Controller
             ], 202);
         }
 
-        // Calculate tax if tax_rate is provided (file upload path only)
-        $taxRate = (float) ($request->input('tax_rate', $request->input('taxRate', 0)));
-        $taxAmount = 0;
-
-        // Calculate subtotal from MRF line items (file upload path).
-        $subtotal = 0;
+        // Tax + subtotal (file upload path): MRF line items are the source of truth here.
         $mrf->loadMissing('items');
-        foreach ($mrf->items as $item) {
-            $unitPrice = $item->unit_price ?? (($item->total_price ?? 0) / max(1, $item->quantity ?? 1));
-            $subtotal += ($unitPrice * ($item->quantity ?? 1));
-        }
+        $uploadLines = $mrf->items->map(function ($item) {
+            $qty = $item->quantity ?? 1;
 
-        // Calculate tax amount if tax_rate is provided
-        if ($taxRate > 0) {
-            $taxAmount = ($subtotal * $taxRate) / 100;
-        } elseif ($request->has('tax_amount') || $request->has('taxAmount')) {
-            $taxAmount = (float) ($request->input('tax_amount', $request->input('taxAmount', 0)));
+            return [
+                'quantity' => $qty,
+                'unit_price' => $item->unit_price ?? (($item->total_price ?? 0) / max(1, $qty)),
+                'tax_rate' => $item->tax_rate ?? null,
+            ];
+        })->all();
+        // Per-line VAT is entered on the selected supplier's comparison rows, so prefer
+        // those lines when they exist (same source as the auto-generated PO).
+        $poLineService = app(PriceComparisonPoLineService::class);
+        $selectedComparisonLines = $poLineService->rowsToPoLineArrays($poLineService->selectedSupplierRows($mrf));
+        $perLineRequested = PoTaxCalculator::isPerLine($request->input('tax_mode', $request->input('taxMode')))
+            || (! $request->hasAny(['tax_mode', 'taxMode', 'tax_rate', 'taxRate', 'tax_amount', 'taxAmount'])
+                && PoTaxCalculator::isPerLine($mrf->tax_mode));
+        if ($perLineRequested && $selectedComparisonLines !== []) {
+            $uploadLines = $selectedComparisonLines;
         }
+        [$taxMode, $taxRate, $taxAmount, $subtotal, $discount, $discountAmount] = $this->resolvePoTax($request, $mrf, $uploadLines);
 
         $poType = strtolower((string) ($request->input('po_type') ?: 'goods'));
         $standardTerms = POTermsTemplate::query()
@@ -1962,8 +2001,8 @@ class MRFWorkflowController extends Controller
             }
         }
 
-        $poTotalForSchedule = $subtotal + $taxAmount;
-        if ($poTotalForSchedule <= 0) {
+        $poTotalForSchedule = $subtotal - $discountAmount + $taxAmount;
+        if ($subtotal <= 0 && $poTotalForSchedule <= 0) {
             $poTotalForSchedule = (float) ($mrf->estimated_cost ?? 0);
         }
 
@@ -1982,6 +2021,10 @@ class MRFWorkflowController extends Controller
             'ship_to_address' => $request->ship_to_address ?? null,
             'tax_rate' => $taxRate,
             'tax_amount' => $taxAmount,
+            'tax_mode' => $taxMode,
+            'discount_type' => $discount['type'] ?? null,
+            'discount_value' => $discount['value'] ?? null,
+            'discount_amount' => $discount ? $discountAmount : null,
             'po_special_terms' => $mergedTerms !== '' ? $mergedTerms : ($request->po_special_terms ?? null),
             'custom_terms' => $customTerms,
             'po_terms_mode' => $termsMode,
@@ -3022,6 +3065,18 @@ class MRFWorkflowController extends Controller
             'taxRate' => 'nullable|numeric|min:0|max:100',
             'tax_amount' => 'nullable|numeric|min:0',
             'taxAmount' => 'nullable|numeric|min:0',
+            'tax_mode' => 'nullable|in:per_line',
+            'taxMode' => 'nullable|in:per_line',
+            'discount_type' => 'nullable|in:percentage,amount',
+            'discountType' => 'nullable|in:percentage,amount',
+            'discount_value' => ['nullable', 'numeric', 'min:0', Rule::when(
+                fn ($input) => ($input['discount_type'] ?? $input['discountType'] ?? null) === 'percentage',
+                'lt:100',
+            )],
+            'discountValue' => ['nullable', 'numeric', 'min:0', Rule::when(
+                fn ($input) => ($input['discount_type'] ?? $input['discountType'] ?? null) === 'percentage',
+                'lt:100',
+            )],
             'invoice_submission_email' => 'nullable|string|max:255',
             'invoiceSubmissionEmail' => 'nullable|string|max:255',
             'invoice_submission_cc' => 'nullable|string|max:500',
@@ -3117,6 +3172,25 @@ class MRFWorkflowController extends Controller
             ? (float) $request->input('tax_amount', $request->input('taxAmount'))
             : ($mrf->tax_amount ?? 0);
 
+        // Per-line VAT: tax_amount is the sum of the selected supplier's line VAT.
+        // The global tax_rate is kept as-is (legacy only).
+        $taxMode = $request->exists('tax_mode') || $request->exists('taxMode')
+            ? PoTaxCalculator::normaliseMode($request->input('tax_mode', $request->input('taxMode')))
+            : PoTaxCalculator::normaliseMode($mrf->tax_mode);
+        // PO discount (before VAT) reduces the VAT base on per-line POs.
+        $discount = $this->resolvePoDiscount($request, $mrf);
+        $discountAmount = 0.0;
+        if (PoTaxCalculator::isPerLine($taxMode) || $discount !== null) {
+            $poLineService = app(PriceComparisonPoLineService::class);
+            $selectedLines = $poLineService->rowsToPoLineArrays($poLineService->selectedSupplierRows($mrf));
+            $draftCalc = PoTaxCalculator::forLines($selectedLines, $taxMode, discount: $discount);
+            $discountAmount = $draftCalc['discount'];
+            if (PoTaxCalculator::isPerLine($taxMode)) {
+                $taxRate = $mrf->tax_rate ?? 0;
+                $taxAmount = $draftCalc['tax'];
+            }
+        }
+
         $shipTo = $request->input(
             'ship_to_address',
             $request->input('shipToAddress', $mrf->ship_to_address)
@@ -3166,6 +3240,10 @@ class MRFWorkflowController extends Controller
             'ship_to_address' => $shipTo,
             'tax_rate' => $taxRate,
             'tax_amount' => $taxAmount,
+            'tax_mode' => $taxMode,
+            'discount_type' => $discount['type'] ?? null,
+            'discount_value' => $discount['value'] ?? null,
+            'discount_amount' => $discount ? $discountAmount : null,
             'po_special_terms' => $mergedTerms !== '' && $mergedTerms !== null
                 ? $mergedTerms
                 : ($request->input('po_special_terms') ?? $mrf->po_special_terms),
@@ -3259,6 +3337,26 @@ class MRFWorkflowController extends Controller
                         $subtotalForJob += ($unit * ($it['quantity'] ?? 1));
                     }
                 }
+                $jobDiscountAmount = 0.0;
+                if (PoTaxCalculator::isPerLine($taxMode)) {
+                    $jobCalc = PoTaxCalculator::forLines(
+                        array_values($poDataForJob['items'] ?? []),
+                        PoTaxCalculator::MODE_PER_LINE,
+                        discount: $discount,
+                    );
+                    $subtotalForJob = $jobCalc['subtotal'];
+                    $jobDiscountAmount = $jobCalc['discount'];
+                    $draftUpdate['tax_amount'] = $jobCalc['tax'];
+                } elseif ($discount !== null) {
+                    $jobDiscountAmount = PoTaxCalculator::discountAmount((float) $subtotalForJob, $discount);
+                }
+                $poDataForJob['discount_type'] = $discount['type'] ?? null;
+                $poDataForJob['discount_value'] = $discount['value'] ?? null;
+                $poDataForJob['discount_amount'] = $jobDiscountAmount;
+                $poDataForJob['tax_rate'] = (float) ($draftUpdate['tax_rate'] ?? 0);
+                $poDataForJob['tax_amount'] = (float) ($draftUpdate['tax_amount'] ?? 0);
+                $poDataForJob['tax_mode'] = $taxMode;
+                $poDataForJob = $this->enrichPoPayloadWithPaymentSchedule($mrf, $poDataForJob);
 
                 ProcessPurchaseOrderGenerationJob::dispatch(
                     $mrf->id,
@@ -3268,6 +3366,8 @@ class MRFWorkflowController extends Controller
                         'po_data' => $poDataForJob,
                         'tax_rate' => (float) ($draftUpdate['tax_rate'] ?? 0),
                         'tax_amount' => (float) ($draftUpdate['tax_amount'] ?? 0),
+                        'tax_mode' => $taxMode,
+                        'discount_amount' => $jobDiscountAmount,
                         'subtotal' => $subtotalForJob,
                         'fast_track' => $fastTrack,
                         'is_regeneration' => false,
@@ -3486,6 +3586,7 @@ class MRFWorkflowController extends Controller
                     'unit_price' => (float) ($it->unit_price ?? 0),
                     'total_price' => (float) ($it->total_price ?? (($it->unit_price ?? 0) * max(1, $it->quantity ?? 1))),
                     'specifications' => $it->specifications ?? '',
+                    'tax_rate' => $it->tax_rate ?? null,
                 ]);
             }
         }
@@ -3564,6 +3665,7 @@ class MRFWorkflowController extends Controller
                 'unit_price' => (float) ($item->unit_price ?? 0),
                 'total_price' => (float) ($item->total_price ?? 0),
                 'specifications' => $item->specifications ?? '',
+                'tax_rate' => $item->tax_rate ?? null,
             ];
         });
 
@@ -3738,6 +3840,7 @@ class MRFWorkflowController extends Controller
                             'unit_price' => $unitPrice,
                             'total_price' => $unitPrice * ($item->quantity ?? 1),
                             'specifications' => $item->specifications ?? '',
+                            'tax_rate' => $item->tax_rate ?? null,
                         ];
                     });
                     \Log::info('PO Generation: Using MRF items', ['count' => $items->count()]);
@@ -3844,6 +3947,7 @@ class MRFWorkflowController extends Controller
                 'unit_price' => (float) ($item->unit_price ?? 0),
                 'total_price' => (float) ($item->total_price ?? 0),
                 'specifications' => $item->specifications ?? '',
+                'tax_rate' => $item->tax_rate ?? null,
             ];
         });
 
@@ -3897,6 +4001,81 @@ class MRFWorkflowController extends Controller
     }
 
     /**
+     * Resolve the PO tax for a generate / draft request.
+     *
+     * - tax_mode=per_line (current frontend): each line's own tax_rate (blank → 7.5%).
+     *   The stored global tax_rate is left untouched (legacy only).
+     * - legacy (old clients sending tax_rate): rate wins, else an explicit tax_amount, else 0.
+     * - no tax_mode sent and no legacy tax fields: keep the MRF's stored mode.
+     *
+     * The PO discount (taken before VAT) comes from the request when sent, else the MRF.
+     *
+     * @param  list<array<string, mixed>>  $lines
+     * @return array{0: string|null, 1: float, 2: float, 3: float, 4: array{type: string, value: float}|null, 5: float}
+     *         [taxMode, taxRate, taxAmount, subtotal, discount, discountAmount]
+     */
+    private function resolvePoTax(Request $request, MRF $mrf, array $lines): array
+    {
+        $discount = $this->resolvePoDiscount($request, $mrf);
+
+        $requestedMode = $request->input('tax_mode', $request->input('taxMode'));
+        $sentLegacyTax = $request->has('tax_rate') || $request->has('taxRate')
+            || $request->has('tax_amount') || $request->has('taxAmount');
+        $taxMode = $requestedMode !== null
+            ? PoTaxCalculator::normaliseMode($requestedMode)
+            : ($sentLegacyTax ? null : PoTaxCalculator::normaliseMode($mrf->tax_mode));
+
+        if (PoTaxCalculator::isPerLine($taxMode)) {
+            $calc = PoTaxCalculator::forLines($lines, PoTaxCalculator::MODE_PER_LINE, discount: $discount);
+
+            return [$taxMode, (float) ($mrf->tax_rate ?? 0), $calc['tax'], $calc['subtotal'], $discount, $calc['discount']];
+        }
+
+        // Unchanged legacy semantics: nothing sent → 0.
+        $taxRate = (float) ($request->input('tax_rate', $request->input('taxRate', 0)));
+        $legacyAmount = $taxRate > 0
+            ? null
+            : (float) ($request->input('tax_amount', $request->input('taxAmount', 0)));
+        $calc = PoTaxCalculator::forLines($lines, null, $taxRate, $legacyAmount, $discount);
+
+        return [null, $taxRate, $calc['tax'], $calc['subtotal'], $discount, $calc['discount']];
+    }
+
+    /**
+     * PO discount from the request (discount_type + discount_value; an empty type clears it),
+     * falling back to the discount already stored on the MRF.
+     *
+     * @return array{type: string, value: float}|null
+     */
+    private function resolvePoDiscount(Request $request, MRF $mrf): ?array
+    {
+        if ($request->exists('discount_type') || $request->exists('discountType')) {
+            return PoTaxCalculator::discount(
+                $request->input('discount_type', $request->input('discountType')),
+                $request->input('discount_value', $request->input('discountValue')),
+            );
+        }
+
+        return PoTaxCalculator::discountFromModel($mrf);
+    }
+
+    /**
+     * Discount for a PDF payload: explicit payload keys win (fresh from this request),
+     * else the MRF's stored discount.
+     *
+     * @param  array<string, mixed>  $data
+     * @return array{type: string, value: float}|null
+     */
+    private function discountForPayload(MRF $mrf, array $data): ?array
+    {
+        if (array_key_exists('discount_type', $data)) {
+            return PoTaxCalculator::discount($data['discount_type'], $data['discount_value'] ?? null);
+        }
+
+        return PoTaxCalculator::discountFromModel($mrf);
+    }
+
+    /**
      * MRF fields required by {@see PurchaseOrderPdfService::htmlFromWorkflow()}.
      *
      * @return array<string, mixed>
@@ -3925,6 +4104,10 @@ class MRFWorkflowController extends Controller
             'invoice_submission_email' => $mrf->invoice_submission_email,
             'invoice_submission_cc' => $mrf->invoice_submission_cc,
             'tax_rate' => $mrf->tax_rate,
+            'tax_amount' => $mrf->tax_amount,
+            'tax_mode' => $mrf->tax_mode,
+            'discount_type' => $mrf->discount_type,
+            'discount_value' => $mrf->discount_value,
         ];
     }
 
@@ -4115,6 +4298,14 @@ class MRFWorkflowController extends Controller
             foreach ($items as $item) {
                 $poTotal += (float) ($item['total_price'] ?? 0);
             }
+        }
+        // Per-line VAT POs: milestones are a share of the VAT-inclusive total.
+        if (PoTaxCalculator::isPerLine($data['tax_mode'] ?? $mrf->tax_mode) && $items !== []) {
+            $poTotal = PoTaxCalculator::forLines(
+                array_values($items),
+                PoTaxCalculator::MODE_PER_LINE,
+                discount: $this->discountForPayload($mrf, $data),
+            )['total'];
         }
         if ($poTotal <= 0) {
             $poTotal = (float) ($mrf->estimated_cost ?? 0);

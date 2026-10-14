@@ -6,6 +6,7 @@ use App\Models\MRF;
 use App\Models\User;
 use App\Models\Vendor;
 use App\Services\FormattedIdGenerator;
+use App\Support\PoTaxCalculator;
 use App\Support\PurchaseOrderCurrency;
 use App\Support\RequestLineItemParser;
 use Illuminate\Database\Eloquent\Builder;
@@ -29,7 +30,7 @@ class PurchaseOrderService
     public const EDIT_SELECT = [
         'id', 'mrf_id', 'formatted_id', 'po_number', 'title', 'category', 'contract_type',
         'status', 'workflow_state', 'current_stage', 'estimated_cost', 'currency',
-        'ship_to_address', 'tax_rate', 'tax_amount', 'custom_terms', 'po_terms_mode',
+        'ship_to_address', 'tax_rate', 'tax_amount', 'tax_mode', 'discount_type', 'discount_value', 'discount_amount', 'custom_terms', 'po_terms_mode',
         'po_special_terms', 'invoice_submission_email', 'invoice_submission_cc',
         'selected_vendor_id', 'requester_id', 'requester_name', 'department',
         'po_draft_saved_at', 'po_generated_at', 'unsigned_po_url', 'signed_po_url',
@@ -167,8 +168,8 @@ class PurchaseOrderService
                 }
             })
             ->with([
-                'items:id,mrf_id,item_name,description,quantity,unit,unit_price,total_price,budget_amount,quoted_amount',
-                'priceComparisons:id,purchase_order_id,vendor_id,item_description,unit_price,quantity,total_price,is_selected,selection_reason',
+                'items:id,mrf_id,item_name,description,quantity,unit,unit_price,total_price,budget_amount,quoted_amount,tax_rate',
+                'priceComparisons:id,purchase_order_id,vendor_id,item_description,unit_price,quantity,total_price,is_selected,selection_reason,tax_rate',
                 'priceComparisons.vendor:id,vendor_id,name,email,phone,address,contact_person',
                 'selectedVendor:id,vendor_id,name,email,phone,address,contact_person,contact_person_email',
                 'paymentSchedule.milestones',
@@ -202,6 +203,10 @@ class PurchaseOrderService
             'shipToAddress' => $mrf->ship_to_address,
             'taxRate' => $mrf->tax_rate !== null ? (float) $mrf->tax_rate : 0,
             'taxAmount' => $mrf->tax_amount !== null ? (float) $mrf->tax_amount : 0,
+            'taxMode' => $mrf->tax_mode,
+            'discountType' => $mrf->discount_type,
+            'discountValue' => $mrf->discount_value !== null ? (float) $mrf->discount_value : null,
+            'discountAmount' => $mrf->discount_amount !== null ? (float) $mrf->discount_amount : null,
             'customTerms' => $mrf->custom_terms,
             'poTermsMode' => $mrf->po_terms_mode,
             'poSpecialTerms' => $mrf->po_special_terms,
@@ -226,6 +231,7 @@ class PurchaseOrderService
                 'totalPrice' => $item->total_price !== null ? (float) $item->total_price : null,
                 'budgetAmount' => $item->budget_amount !== null ? (float) $item->budget_amount : null,
                 'quotedAmount' => $item->quoted_amount !== null ? (float) $item->quoted_amount : null,
+                'taxRate' => $item->tax_rate !== null ? (float) $item->tax_rate : null,
             ])->values(),
             'suppliers' => $mrf->priceComparisons->map(fn ($row) => [
                 'id' => $row->id,
@@ -237,6 +243,7 @@ class PurchaseOrderService
                 'totalPrice' => (float) $row->total_price,
                 'isSelected' => (bool) $row->is_selected,
                 'selectionReason' => $row->selection_reason,
+                'taxRate' => $row->tax_rate !== null ? (float) $row->tax_rate : null,
             ])->values(),
             'paymentMilestones' => $paymentMilestones,
             'expectedDeliveryDate' => $mrf->expected_delivery_date?->format('Y-m-d'),
@@ -292,6 +299,9 @@ class PurchaseOrderService
                 'po_draft_saved_at' => now(),
                 'tax_rate' => $validated['taxRate'] ?? 0,
                 'tax_amount' => $validated['taxAmount'] ?? 0,
+                'tax_mode' => PoTaxCalculator::normaliseMode($validated['taxMode'] ?? null),
+                'discount_type' => PoTaxCalculator::discount($validated['discountType'] ?? null, $validated['discountValue'] ?? null)['type'] ?? null,
+                'discount_value' => PoTaxCalculator::discount($validated['discountType'] ?? null, $validated['discountValue'] ?? null)['value'] ?? null,
                 'ship_to_address' => $validated['shipToAddress'] ?? null,
                 'procurement_manager_id' => $user->id,
             ]);
@@ -300,6 +310,18 @@ class PurchaseOrderService
 
             if (! empty($validated['items'])) {
                 $this->lineItemBudgetService->syncMrfItems($mrf, $validated['items']);
+                if (PoTaxCalculator::isPerLine($mrf->tax_mode)) {
+                    $mrf->load('items');
+                    $calc = PoTaxCalculator::forLines(
+                        $mrf->items->toArray(),
+                        PoTaxCalculator::MODE_PER_LINE,
+                        discount: PoTaxCalculator::discountFromModel($mrf),
+                    );
+                    $mrf->update([
+                        'tax_amount' => $calc['tax'],
+                        'discount_amount' => $calc['discount_type'] ? $calc['discount'] : null,
+                    ]);
+                }
             }
 
             return $mrf->fresh();
@@ -352,6 +374,20 @@ class PurchaseOrderService
             $update['tax_amount'] = $validated['taxAmount'];
         }
 
+        if (array_key_exists('taxMode', $validated)) {
+            $update['tax_mode'] = PoTaxCalculator::normaliseMode($validated['taxMode']);
+        }
+
+        // PO discount (before VAT). An empty discountType clears it.
+        if (array_key_exists('discountType', $validated)) {
+            $discount = PoTaxCalculator::discount($validated['discountType'], $validated['discountValue'] ?? null);
+            $update['discount_type'] = $discount['type'] ?? null;
+            $update['discount_value'] = $discount['value'] ?? null;
+            if ($discount === null) {
+                $update['discount_amount'] = null;
+            }
+        }
+
         if (array_key_exists('selectedVendorId', $validated) && filled($validated['selectedVendorId'])) {
             $vendorId = $validated['selectedVendorId'];
             $vendor = Vendor::query()
@@ -388,12 +424,21 @@ class PurchaseOrderService
                 return (float) ($item->unit_price ?? 0) * (float) ($item->quantity ?? 0);
             });
             $tax = (float) ($mrf->tax_amount ?? 0);
-            $total = $itemTotal + $tax;
+            $discount = PoTaxCalculator::discountFromModel($mrf);
+            $discountAmount = PoTaxCalculator::discountAmount($itemTotal, $discount);
+            $total = $itemTotal - $discountAmount + $tax;
+            $taxUpdate = ['discount_amount' => $discount ? $discountAmount : null];
+            if (PoTaxCalculator::isPerLine($mrf->tax_mode)) {
+                $calc = PoTaxCalculator::forLines($mrf->items->toArray(), PoTaxCalculator::MODE_PER_LINE, discount: $discount);
+                $total = $calc['total'];
+                $taxUpdate['tax_amount'] = $calc['tax'];
+                $taxUpdate['discount_amount'] = $discount ? $calc['discount'] : null;
+            }
             if ($total > 0) {
-                $mrf->update([
+                $mrf->update(array_merge($taxUpdate, [
                     'estimated_cost' => $total,
                     'po_value' => $total,
-                ]);
+                ]));
             }
         }
 

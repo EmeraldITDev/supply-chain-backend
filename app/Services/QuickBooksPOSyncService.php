@@ -139,6 +139,39 @@ class QuickBooksPOSyncService
             ];
         }
 
+        // PO discount (taken before VAT): QuickBooks purchase orders have no discount
+        // line type, so it is sent as one negative line against the same item/account.
+        $discountLineIndex = null;
+        $discountAmount = is_numeric($mrf->discount_amount) ? round((float) $mrf->discount_amount, 2) : 0.0;
+        if ($discountAmount > 0) {
+            $lineNum++;
+            $line = [
+                'DetailType' => $lineMode === 'account' ? 'AccountBasedExpenseLineDetail' : 'ItemBasedExpenseLineDetail',
+                'Amount' => -$discountAmount,
+                'Description' => 'Discount',
+                'LineNum' => $lineNum,
+            ];
+            if ($lineMode === 'item') {
+                $line['ItemBasedExpenseLineDetail'] = [
+                    'ItemRef' => ['value' => $itemId],
+                    'Qty' => 1,
+                    'UnitPrice' => -$discountAmount,
+                ];
+            } elseif ($lineMode === 'account') {
+                $line['AccountBasedExpenseLineDetail'] = [
+                    'AccountRef' => ['value' => $accountId],
+                ];
+            }
+            $payload['Line'][] = $line;
+            $discountLineIndex = count($payload['Line']) - 1;
+            $sourceLines[] = [
+                'qty' => 1,
+                'unit_price' => -$discountAmount,
+                'amount' => -$discountAmount,
+            ];
+            $assumptions[] = 'The PO discount is sent as one negative "Discount" line.';
+        }
+
         $tax = is_numeric($mrf->tax_amount) ? round((float) $mrf->tax_amount, 2) : 0.0;
         if (is_numeric($mrf->po_value)) {
             $expected = round((float) $mrf->po_value - $tax, 2);
@@ -160,6 +193,7 @@ class QuickBooksPOSyncService
                 'ap_accounts' => $apAccounts,
                 'line_mode' => $lineMode,
                 'source_lines' => $sourceLines,
+                'discount_line_index' => $discountLineIndex,
                 'assumptions' => $assumptions,
             ],
         ];

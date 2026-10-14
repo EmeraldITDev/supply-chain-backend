@@ -39,4 +39,20 @@ class RequestLineItemParserTest extends TestCase
         $request = Request::create('/mrfs', 'POST', ['items' => '[object Object]']);
         $this->assertSame([], RequestLineItemParser::resolve($request));
     }
+
+    public function test_keeps_per_line_tax_rate(): void
+    {
+        $request = Request::create('/pos', 'PUT', [
+            'items' => [
+                ['itemName' => 'Pump', 'unitPrice' => 100, 'taxRate' => 0],
+                ['item_name' => 'Valve', 'unit_price' => 50, 'tax_rate' => '10'],
+                ['item_name' => 'Hose', 'unit_price' => 20],
+            ],
+        ]);
+
+        $resolved = RequestLineItemParser::resolve($request);
+        $this->assertSame(0.0, $resolved[0]['tax_rate']);
+        $this->assertSame(10.0, $resolved[1]['taxRate']);
+        $this->assertNull($resolved[2]['tax_rate']);
+    }
 }

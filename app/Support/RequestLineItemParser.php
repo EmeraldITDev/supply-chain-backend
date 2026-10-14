@@ -69,6 +69,9 @@ class RequestLineItemParser
             'items.*.unit' => 'nullable|string|max:50',
             'items.*.budget_amount' => 'nullable|numeric|min:0',
             'items.*.budgetAmount' => 'nullable|numeric|min:0',
+            // Per-line VAT % (PO line items). Blank = default rate, 0 = not taxed.
+            'items.*.tax_rate' => 'nullable|numeric|min:0|max:100',
+            'items.*.taxRate' => 'nullable|numeric|min:0|max:100',
         ];
     }
 
@@ -116,6 +119,8 @@ class RequestLineItemParser
             $budget = (float) $row['budgetAmount'];
         }
 
+        $taxRate = PoTaxCalculator::lineRate($row);
+
         return [
             'item_name' => trim((string) ($row['item_name'] ?? $row['itemName'] ?? 'Item')),
             'itemName' => trim((string) ($row['item_name'] ?? $row['itemName'] ?? 'Item')),
@@ -127,6 +132,8 @@ class RequestLineItemParser
             'budget_amount' => $budget,
             'budgetAmount' => $budget,
             'specifications' => $row['specifications'] ?? null,
+            'tax_rate' => $taxRate,
+            'taxRate' => $taxRate,
         ];
     }
 }

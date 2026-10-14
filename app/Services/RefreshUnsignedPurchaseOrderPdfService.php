@@ -8,6 +8,7 @@ use App\Models\RFQ;
 use App\Models\User;
 use App\Models\Vendor;
 use App\Services\WorkflowStateService;
+use App\Support\PoTaxCalculator;
 use App\Support\PurchaseOrderCurrency;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
@@ -137,7 +138,11 @@ class RefreshUnsignedPurchaseOrderPdfService
             'payment_terms' => $mrf->po_payment_terms,
         ];
 
-        if ($rfq) {
+        $perLineTax = PoTaxCalculator::isPerLine($mrf->tax_mode);
+
+        // Per-line VAT lives on the selected supplier's comparison rows, so for those POs
+        // the comparison rows (not quotation items) are the line source.
+        if ($rfq && ! ($perLineTax && $this->poLineService->selectedSupplierRows($mrf)->isNotEmpty())) {
             $selected = $rfq->quotations->firstWhere('status', 'Approved')
                 ?? $rfq->quotations->firstWhere('is_selected', true)
                 ?? $rfq->quotations->first();
@@ -183,6 +188,7 @@ class RefreshUnsignedPurchaseOrderPdfService
                     'unit_price' => (float) ($o->unit_price ?? 0),
                     'total_price' => (float) ($o->total_price ?? 0),
                     'specifications' => $o->specifications ?? '',
+                    'tax_rate' => $o->tax_rate ?? null,
                 ]);
             }
         }
@@ -198,6 +204,7 @@ class RefreshUnsignedPurchaseOrderPdfService
                     'unit_price' => (float) ($it->unit_price ?? 0),
                     'total_price' => (float) ($it->total_price ?? 0),
                     'specifications' => $it->specifications ?? '',
+                    'tax_rate' => $it->tax_rate ?? null,
                 ]);
             }
         }
@@ -224,7 +231,13 @@ class RefreshUnsignedPurchaseOrderPdfService
         if ($taxAmount <= 0 && $taxRate > 0) {
             $taxAmount = ($subtotal * $taxRate) / 100;
         }
-        $poTotal = $subtotal + $taxAmount;
+        $discount = PoTaxCalculator::discountFromModel($mrf);
+        $poTotal = $subtotal - PoTaxCalculator::discountAmount($subtotal, $discount) + $taxAmount;
+        if ($perLineTax) {
+            $calc = PoTaxCalculator::forLines($items->values()->all(), PoTaxCalculator::MODE_PER_LINE, discount: $discount);
+            $taxAmount = $calc['tax'];
+            $poTotal = $calc['total'];
+        }
 
         $schedule = $mrf->paymentSchedule;
         $milestones = $schedule
@@ -271,6 +284,7 @@ class RefreshUnsignedPurchaseOrderPdfService
                 'invoice_submission_email' => $mrf->invoice_submission_email,
                 'invoice_submission_cc' => $mrf->invoice_submission_cc,
                 'tax_rate' => $taxRate,
+                'tax_mode' => $mrf->tax_mode,
             ],
             'rfq' => [
                 'id' => $rfq?->rfq_id ?? ($mrf->mrf_id.'-RFQ'),
@@ -289,6 +303,9 @@ class RefreshUnsignedPurchaseOrderPdfService
             'items' => $items->values()->all(),
             'tax_rate' => $taxRate,
             'tax_amount' => $taxAmount,
+            'tax_mode' => $mrf->tax_mode,
+            'discount_type' => $discount['type'] ?? null,
+            'discount_value' => $discount['value'] ?? null,
             'ship_to' => (string) ($mrf->ship_to_address ?? env('COMPANY_ADDRESS', '')),
             'invoice_submission_email' => (string) ($mrf->invoice_submission_email ?? ''),
             'invoice_submission_cc' => (string) ($mrf->invoice_submission_cc ?? ''),
