@@ -1,105 +1,79 @@
-# Supply Chain Management - Backend API
+# Emerald Supply Chain — Backend API
 
-Laravel backend API for the Emerald Supply Chain Management system.
+Laravel REST API for Emerald's Supply Chain Management (SCM) platform: procurement, vendors, logistics, warehouse, reporting and the Finance AP integration.
 
-## Setup
+Frontend: [`emerald-supply-chain`](../../Frontend/emerald-supply-chain) (React).
 
-1. **Install Dependencies**
-   ```bash
-   composer install
-   ```
+## Tech stack
 
-2. **Configure Environment**
-   ```bash
-   cp .env.example .env
-   php artisan key:generate
-   ```
+PHP 8.2 · Laravel 11 · Sanctum (token auth) · PostgreSQL · AWS S3 (documents) · Resend (email)
 
-3. **Configure Database**
-   Edit `.env` file with your PostgreSQL credentials (same as HRIS):
-   ```env
-   DB_CONNECTION=pgsql
-   DB_HOST=your-postgres-host
-   DB_PORT=5432
-   DB_DATABASE=your-database-name
-   DB_USERNAME=your-username
-   DB_PASSWORD=your-password
-   ```
+## Getting started
 
-4. **Run Migrations**
-   ```bash
-   php artisan migrate
-   ```
-
-5. **Start Server**
-   ```bash
-   php artisan serve
-   ```
-
-## API Endpoints
-
-### Authentication
-- `POST /api/auth/login` - Login user
-- `POST /api/auth/logout` - Logout user (requires auth)
-- `GET /api/auth/me` - Get current user (requires auth)
-
-### MRF (Material Requisition Forms)
-- `GET /api/mrfs` - List all MRFs
-- `GET /api/mrfs/{id}` - Get single MRF
-- `POST /api/mrfs` - Create MRF
-- `PUT /api/mrfs/{id}` - Update MRF
-- `POST /api/mrfs/{id}/approve` - Approve MRF
-- `POST /api/mrfs/{id}/reject` - Reject MRF
-- `DELETE /api/mrfs/{id}` - Delete MRF
-
-### SRF (Service Requisition Forms)
-- `GET /api/srfs` - List all SRFs
-- `POST /api/srfs` - Create SRF
-- `PUT /api/srfs/{id}` - Update SRF
-
-### RFQ (Request for Quotations)
-- `GET /api/rfqs` - List all RFQs
-- `POST /api/rfqs` - Create RFQ
-- `PUT /api/rfqs/{id}` - Update RFQ
-
-### Quotations
-- `GET /api/quotations` - List all quotations
-- `POST /api/quotations` - Submit quotation
-- `POST /api/quotations/{id}/approve` - Approve quotation
-- `POST /api/quotations/{id}/reject` - Reject quotation
-
-### Vendors
-- `GET /api/vendors` - List all vendors
-- `GET /api/vendors/{id}` - Get vendor details
-- `POST /api/vendors/register` - Register new vendor (public)
-- `GET /api/vendors/registrations` - Get vendor registrations (procurement only)
-- `POST /api/vendors/registrations/{id}/approve` - Approve vendor registration
-
-## Authentication
-
-All protected endpoints require a Bearer token in the Authorization header:
-```
-Authorization: Bearer {token}
+```bash
+composer install
+cp .env.example .env
+php artisan key:generate
+php artisan migrate --seed
+php artisan serve        # http://localhost:8000
 ```
 
-## Deployment to Render
+`composer setup` runs the same steps in one command.
 
-See `RENDER_DEPLOYMENT.md` in the frontend repository for complete deployment instructions.
+### Key environment variables
 
-Key environment variables needed:
-- Database credentials (same as HRIS)
-- `APP_KEY` (generate using `php artisan key:generate`)
-- `APP_URL` (your Render service URL)
-- CORS settings
+| Variable | Description |
+|---|---|
+| `DB_*` | Database connection (PostgreSQL in production) |
+| `APP_URL` / `FRONTEND_URL` | API and frontend URLs (used for links and CORS) |
+| `AWS_*` | S3 bucket for MRF, PO and vendor documents |
+| `MAIL_*`, `RESEND_API_KEY` | Outgoing email |
+| `PO_*` | Recipients for PO and invoice emails |
+| `FINANCE_AP_*` | Finance AP integration: URL, shared keys, cutover date |
+| `GEMINI_API_KEY` | AI assistant chat |
 
-## Development
+`.env.example` explains each variable. Never commit real keys.
 
-The backend uses Laravel Sanctum for API authentication. Controllers are in `app/Http/Controllers/Api/`.
+## API overview
 
-## Next Steps
+All routes are under `/api`. Protected routes need a header in the form `Authorization: Bearer {token}`, using the token from `POST /api/auth/login`.
 
-1. Complete migrations for all entities (MRF, SRF, RFQ, Quotations, Vendors)
-2. Implement all controller methods
-3. Add validation and authorization
-4. Set up CORS for frontend access
-5. Deploy to Render
+| Area | Main routes |
+|---|---|
+| Auth | `/auth/login`, `/auth/logout`, `/auth/me` |
+| Requisitions | `/mrfs`, `/srfs` |
+| Sourcing | `/rfqs`, `/quotations`, `/mrfs/{id}/price-comparisons` |
+| Purchase orders | `/mrfs/{id}/generate-po`, `/pos/{id}`, `/mrfs/{id}/grn/*` |
+| Vendors | `/vendors`, `/vendors/register`, `/vendor-portal/*` |
+| Logistics | `/trip-requests`, `/trips`, `/fleet/*`, `/journeys` |
+| Warehouse | `/warehouse/*` |
+| Dashboards and reports | `/dashboard/*`, `/reports/*` |
+| Finance AP | `/mrfs/{id}/payment-schedule`, `/mrfs/{id}/finance-sync`, `/webhooks/finance-ap` |
+
+Run `php artisan route:list --path=api` for the full list.
+
+## Tests
+
+```bash
+composer test            # or: php artisan test
+```
+
+## Project structure
+
+```
+app/Http/Controllers/Api/   API controllers (logistics under V1/Logistics)
+app/Services/               Business logic (workflows, PO, Finance AP, reports)
+app/Console/Commands/       Artisan maintenance commands
+database/migrations/        Schema history
+docs/                       Schema, specs and integration docs
+```
+
+Further reading:
+- [docs/DATABASE_SCHEMA.md](docs/DATABASE_SCHEMA.md): database tables
+- [docs/LOGISTICS_MODULE_OVERVIEW.md](docs/LOGISTICS_MODULE_OVERVIEW.md): logistics module
+- [docs/FINANCE_AP_SIDE_SCM_INTEGRATION.md](docs/FINANCE_AP_SIDE_SCM_INTEGRATION.md): Finance AP integration
+- [frontend_changes.md](frontend_changes.md): API changes the frontend needs to know about
+
+## Deployment
+
+Deployed on **Render** (`render.yaml`, `Dockerfile`). Each build runs `composer install` and `php artisan migrate --force`. Set secrets (database, `APP_KEY`, AWS, mail, Finance AP keys) in the Render dashboard.
