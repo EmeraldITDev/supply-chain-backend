@@ -72,8 +72,10 @@ class AuthController extends Controller
         $tokenName = $rememberMe ? 'remember-token' : 'session-token';
         $token = $user->createToken($tokenName, ['*'], $expiresAt)->plainTextToken;
 
-        // SCM permissions use supply_chain_role exclusively
-        $scmRole = $user->getRoleNames()->first() ?? $user->scmRole() ?? 'employee';
+        // SCM permissions use supply_chain_role exclusively.
+        // Never prefer Spatie here — HRIS syncRoles() overwrites the shared
+        // model_has_roles table with HRIS roles (e.g. general_employee).
+        $scmRole = $user->scmRole() ?? 'employee';
 
         // Get department from employee or user
         $department = $user->employee->department ?? $user->department ?? null;
@@ -115,8 +117,8 @@ class AuthController extends Controller
         $user = $request->user()->load('employee');
         $token = $request->user()->currentAccessToken();
 
-        // SCM permissions use supply_chain_role exclusively
-        $scmRole = $user->getRoleNames()->first() ?? $user->scmRole() ?? 'employee';
+        // SCM permissions use supply_chain_role exclusively (not Spatie / HRIS).
+        $scmRole = $user->scmRole() ?? 'employee';
 
         // Get department from employee or user
         $department = $user->employee->department ?? $user->department ?? null;

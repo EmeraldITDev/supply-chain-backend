@@ -63,6 +63,14 @@ class UserRoleNormalizer
         'hr_admin',
         'hr_specialist',
         'people_operations',
+        // HRIS system roles written to users.role / Spatie by hris-backend.
+        // Must never be treated as supply_chain_role via the legacy role fallback.
+        'general_employee',
+        'line_manager',
+        'it_power_user',
+        'corporate_user',
+        'contract_staff',
+        'contract_hr',
     ];
 
     /** @var list<string> */
@@ -435,8 +443,10 @@ class UserRoleNormalizer
         try {
             Role::firstOrCreate(['name' => $canonical, 'guard_name' => 'web']);
 
-            if (method_exists($user, 'syncRoles') && ! $user->hasRole($canonical)) {
-                $user->syncRoles([$canonical]);
+            // assignRole — never syncRoles. syncRoles would wipe HRIS Spatie roles
+            // on the shared model_has_roles table (and HRIS does the reverse).
+            if (method_exists($user, 'assignRole') && ! $user->hasRole($canonical)) {
+                $user->assignRole($canonical);
             }
         } catch (\Throwable $e) {
             Log::warning('Could not sync Spatie role for user', [
