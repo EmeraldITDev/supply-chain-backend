@@ -328,7 +328,9 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/auth/signature', [AuthController::class, 'uploadOwnSignature']);
     Route::get('/auth/signature', [AuthController::class, 'getOwnSignature']);
     Route::delete('/auth/signature', [AuthController::class, 'deleteOwnSignature']);
+    // Stable image stream for SPA fetch → data URL (also aliased as /signature).
     Route::get('/users/{user}/signature-file', [UserSignatureFileController::class, 'show']);
+    Route::get('/users/{user}/signature', [UserSignatureFileController::class, 'show'])->whereNumber('user');
 
     // Session management - keep-alive and status check
     Route::post('/auth/keep-alive', function () {

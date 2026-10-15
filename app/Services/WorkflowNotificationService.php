@@ -32,16 +32,20 @@ class WorkflowNotificationService
 {
     public function notifyMRFSubmitted(MRF $mrf): void
     {
-        // Temporary debug routing: only send new MRF notifications to Viva and Lateef.
-        // Intentionally misspelled emails for controlled debugging.
-        $emails = collect([
-            'viva.musa@emeraldcfze.com',
-            'lateef.olanrewaju@emeraldcfze.com',
-        ]);
+        // Parallel first-approval recipients: executives + supply chain directors.
+        $emails = collect($this->getEmailsByRoles([
+            'executive',
+            'admin',
+            'supply_chain_director',
+            'supply_chain',
+        ]))
+            ->push('bunmi.babajide@emeraldcfze.com')
+            ->merge(collect(config('scm.logistics_notification_cc_emails', [])))
+            ->filter()
+            ->unique(fn ($e) => strtolower((string) $e))
+            ->values();
 
-        $emails = $emails->merge(collect(config('scm.logistics_notification_cc_emails', [])));
-
-        foreach ($emails->filter()->unique(fn ($e) => strtolower((string) $e))->values() as $email) {
+        foreach ($emails as $email) {
             $this->deliverMailable(
                 event: 'mrf_created',
                 recipient: (string) $email,

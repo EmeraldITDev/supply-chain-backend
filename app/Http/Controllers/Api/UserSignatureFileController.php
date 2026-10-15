@@ -35,16 +35,19 @@ class UserSignatureFileController extends Controller
                 return response()->json(['success' => false, 'error' => 'No signature on file'], 404);
             }
 
-            $diskName = config('filesystems.signatures_disk', env('SIGNATURES_DISK', 'public'));
+            $diskName = config('filesystems.signatures_disk', env('SIGNATURES_DISK', 's3'));
             $path = $this->normalizeSignatureStoragePath((string) $user->signature_image_path);
 
             if ($path === '') {
                 return response()->json(['success' => false, 'error' => 'Invalid signature path'], 404);
             }
 
+            // Prefer configured disk (S3 in production), then fall back to legacy local disks
+            // so signatures uploaded before the S3 cutover still resolve.
             $diskCandidates = array_values(array_unique(array_filter([
                 $diskName,
-                $diskName !== 'public' ? 'public' : null,
+                $diskName !== 's3' ? 's3' : null,
+                'public',
                 'local',
             ])));
 

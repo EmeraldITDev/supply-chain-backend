@@ -46,13 +46,13 @@ return [
     |--------------------------------------------------------------------------
     |
     | Disk used to persist digital signature images (PNG/JPG uploaded by
-    | Supply Chain Director and other signatories). Defaults to the public
-    | disk so the Settings page can render an immediate preview via the
-    | `/storage` symlink.
+    | Supply Chain Director and other signatories). Defaults to S3 so
+    | signatures survive ephemeral hosts (e.g. Render). Set SIGNATURES_DISK=public
+    | for local development without AWS credentials.
     |
     */
 
-    'signatures_disk' => env('SIGNATURES_DISK', 'public'),
+    'signatures_disk' => env('SIGNATURES_DISK', 's3'),
 
     /*
     |--------------------------------------------------------------------------

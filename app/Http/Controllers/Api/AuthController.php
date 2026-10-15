@@ -303,12 +303,12 @@ class AuthController extends Controller
     }
 
     /**
-     * Disk used for signature uploads. Falls back to the local disk so a
-     * fresh install works without S3 credentials.
+     * Disk used for signature uploads. Defaults to S3 in production; set
+     * SIGNATURES_DISK=public for local development without AWS credentials.
      */
     private function signatureDisk(): string
     {
-        return config('filesystems.signatures_disk', env('SIGNATURES_DISK', 'public'));
+        return config('filesystems.signatures_disk', env('SIGNATURES_DISK', 's3'));
     }
 
     /**

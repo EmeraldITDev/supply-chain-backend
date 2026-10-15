@@ -21,14 +21,24 @@ services:
         value: database
       - key: CACHE_DRIVER
         value: database
+      # Must be "resend" (not "log") or notification emails are written to logs only.
       - key: MAIL_MAILER
-        value: log
+        value: resend
+      - key: MAIL_FROM_ADDRESS
+        value: noreply@emeraldcfze.com
+      - key: MAIL_FROM_NAME
+        value: Emerald Supply Chain
+      # Set the real Resend API key in the Render dashboard (do not commit secrets).
+      - key: RESEND_API_KEY
+        sync: false
       - key: QUEUE_CONNECTION
         value: sync
       - key: FRONTEND_URL
-        value: https://emerald-supply-chain.vercel.app
+        value: https://scm.emeraldcfze.com
       - key: DOCUMENTS_DISK
-        value: public
+        value: s3
+      - key: SIGNATURES_DISK
+        value: s3
       - key: QUOTATION_ATTACHMENTS_DISK
         value: s3
       # Required for AI Assistant — set the real key in the Render dashboard (do not commit secrets).

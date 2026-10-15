@@ -610,9 +610,8 @@ class UserManagementController extends Controller
             ], 422);
         }
 
-        // Persist to the signatures disk (defaults to the `public` disk so
-        // the Settings page can render a preview without an admin grant).
-        $disk = config('filesystems.signatures_disk', env('SIGNATURES_DISK', 'public'));
+        // Persist to the signatures disk (S3 in production; public/local for dev).
+        $disk = config('filesystems.signatures_disk', env('SIGNATURES_DISK', 's3'));
         $path = null;
 
         if ($request->hasFile('signature')) {
@@ -678,7 +677,7 @@ class UserManagementController extends Controller
             return response()->json(['success' => false, 'error' => 'User not found'], 404);
         }
 
-        $disk = config('filesystems.signatures_disk', env('SIGNATURES_DISK', 'public'));
+        $disk = config('filesystems.signatures_disk', env('SIGNATURES_DISK', 's3'));
         $path = $target->signature_image_path;
         if ($path) {
             try {

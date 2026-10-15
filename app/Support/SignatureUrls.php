@@ -28,7 +28,7 @@ final class SignatureUrls
             return null;
         }
 
-        $disk = config('filesystems.signatures_disk', env('SIGNATURES_DISK', 'public'));
+        $disk = config('filesystems.signatures_disk', env('SIGNATURES_DISK', 's3'));
 
         try {
             if ($disk === 's3') {

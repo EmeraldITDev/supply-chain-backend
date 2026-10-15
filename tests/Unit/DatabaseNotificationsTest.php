@@ -3,6 +3,7 @@
 namespace Tests\Unit;
 
 use App\Models\User;
+use App\Notifications\MRFSubmittedNotification;
 use App\Notifications\SystemAnnouncementNotification;
 use App\Support\DatabaseNotifications;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
@@ -37,5 +38,27 @@ class DatabaseNotificationsTest extends TestCase
         $this->assertSame('Test title', $notification->data['title']);
         $this->assertSame('Test message body', $notification->data['message']);
         $this->assertNull($notification->read_at);
+    }
+
+    public function test_mrf_submitted_notification_declares_mail_and_database_channels(): void
+    {
+        $user = new User([
+            'name' => 'Director',
+            'email' => 'director@example.com',
+            'supply_chain_role' => 'supply_chain_director',
+        ]);
+
+        $mrf = new \App\Models\MRF([
+            'mrf_id' => 'MRF-TEST-1',
+            'title' => 'Test',
+            'requester_name' => 'Requester',
+            'category' => 'Goods',
+            'urgency' => 'Normal',
+        ]);
+
+        $channels = (new MRFSubmittedNotification($mrf))->via($user);
+
+        $this->assertContains('mail', $channels);
+        $this->assertContains('database', $channels);
     }
 }
