@@ -111,7 +111,8 @@ class PurchaseOrderPdfService
     }
 
     /**
-     * Inline signature image for Dompdf (no remote HTTP). Accepts data URI or local storage path.
+     * Inline signature image for Dompdf (no remote HTTP). Accepts data URI,
+     * absolute local path, or a relative key on the signatures disk (S3/public).
      */
     public function signatureHtml(?string $signatureImageUrl): string
     {
@@ -128,10 +129,21 @@ class PurchaseOrderPdfService
         $localPath = $this->resolveLocalImagePath($value);
         if ($localPath !== null && is_readable($localPath)) {
             $imageData = file_get_contents($localPath);
+            if ($imageData === false || $imageData === '') {
+                return '';
+            }
             $imageInfo = @getimagesize($localPath);
             $mimeType = is_array($imageInfo) && isset($imageInfo['mime']) ? $imageInfo['mime'] : 'image/png';
 
             return '<img src="data:'.$mimeType.';base64,'.base64_encode($imageData).'" alt="Signature" class="signature-img" />';
+        }
+
+        // S3 (and other remote disks): path() is unavailable — read bytes directly.
+        $binary = $this->readSignatureBytesFromDisk($value);
+        if ($binary !== null) {
+            $mimeType = $this->guessImageMimeFromPath($value);
+
+            return '<img src="data:'.$mimeType.';base64,'.base64_encode($binary).'" alt="Signature" class="signature-img" />';
         }
 
         return '';
@@ -148,16 +160,63 @@ class PurchaseOrderPdfService
             return $publicPath;
         }
 
-        $signaturesDisk = config('filesystems.signatures_disk', env('SIGNATURES_DISK', 'public'));
+        $signaturesDisk = config('filesystems.signatures_disk', env('SIGNATURES_DISK', 's3'));
         try {
-            if (\Illuminate\Support\Facades\Storage::disk($signaturesDisk)->exists($value)) {
-                return \Illuminate\Support\Facades\Storage::disk($signaturesDisk)->path($value);
+            $disk = \Illuminate\Support\Facades\Storage::disk($signaturesDisk);
+            // Local disks expose path(); S3 throws / returns unusable paths.
+            if (method_exists($disk, 'providesTemporaryUrls') && $disk->providesTemporaryUrls()) {
+                return null;
+            }
+            if ($disk->exists($value)) {
+                $path = $disk->path($value);
+
+                return is_string($path) && is_file($path) ? $path : null;
             }
         } catch (\Throwable) {
             // Fall through
         }
 
         return null;
+    }
+
+    private function readSignatureBytesFromDisk(string $value): ?string
+    {
+        $diskCandidates = array_values(array_unique(array_filter([
+            config('filesystems.signatures_disk', env('SIGNATURES_DISK', 's3')),
+            's3',
+            'public',
+            'local',
+        ])));
+
+        foreach ($diskCandidates as $diskName) {
+            if (! config("filesystems.disks.{$diskName}")) {
+                continue;
+            }
+            try {
+                $disk = \Illuminate\Support\Facades\Storage::disk($diskName);
+                if (! $disk->exists($value)) {
+                    continue;
+                }
+                $contents = $disk->get($value);
+                if (is_string($contents) && $contents !== '') {
+                    return $contents;
+                }
+            } catch (\Throwable) {
+                continue;
+            }
+        }
+
+        return null;
+    }
+
+    private function guessImageMimeFromPath(string $path): string
+    {
+        return match (strtolower((string) pathinfo($path, PATHINFO_EXTENSION))) {
+            'jpg', 'jpeg' => 'image/jpeg',
+            'gif' => 'image/gif',
+            'webp' => 'image/webp',
+            default => 'image/png',
+        };
     }
 
     /**

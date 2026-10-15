@@ -2352,13 +2352,34 @@ class MRFWorkflowController extends Controller
         if (! $poData['success']) {
             return response()->json(['success' => false, 'error' => $poData['error'] ?? 'Unable to prepare PO data'], $poData['status'] ?? 422);
         }
-        $sigDiskName = config('filesystems.signatures_disk', env('SIGNATURES_DISK', 'public'));
-        $sigDisk = Storage::disk($sigDiskName);
+        $preferredDisk = config('filesystems.signatures_disk', env('SIGNATURES_DISK', 's3'));
         $sigPath = $user->signature_image_path;
-        if (!$sigDisk->exists($sigPath)) {
+        $sigDiskName = null;
+        $sigDisk = null;
+        foreach (array_values(array_unique(array_filter([
+            $preferredDisk,
+            's3',
+            'public',
+            'local',
+        ]))) as $tryDisk) {
+            if (! config("filesystems.disks.{$tryDisk}")) {
+                continue;
+            }
+            try {
+                $disk = Storage::disk($tryDisk);
+                if ($disk->exists($sigPath)) {
+                    $sigDiskName = $tryDisk;
+                    $sigDisk = $disk;
+                    break;
+                }
+            } catch (\Throwable) {
+                continue;
+            }
+        }
+        if (! $sigDisk || ! $sigDiskName) {
             return response()->json([
                 'success' => false,
-                'error' => 'Signature file not found on storage.',
+                'error' => 'Signature file not found on storage. Re-upload it from Settings → Digital Signature.',
                 'code' => 'VALIDATION_ERROR',
             ], 422);
         }
