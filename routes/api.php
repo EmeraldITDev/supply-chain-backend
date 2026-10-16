@@ -588,6 +588,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/reports/finance-ap/cycle-times', [FinanceApReportController::class, 'cycleTimes']);
     Route::get('/reports/finance-ap/sync-events', [FinanceApReportController::class, 'syncEvents']);
     Route::get('/config/finance-routing', [AppConfigController::class, 'financeRouting']);
+    Route::get('/settings/lazarus-notifications', [\App\Http\Controllers\Api\LazarusNotificationSettingsController::class, 'show']);
+    Route::put('/settings/lazarus-notifications', [\App\Http\Controllers\Api\LazarusNotificationSettingsController::class, 'update']);
 
     // Global search (supports formatted_id + legacy ids)
     Route::get('/search', [SearchController::class, 'search']);

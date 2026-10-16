@@ -30,6 +30,7 @@ use App\Models\SRF;
 use App\Models\User;
 use App\Notifications\SRFSubmittedNotification;
 use App\Support\DatabaseNotifications;
+use App\Support\LazarusNotificationSettings;
 use App\Support\PurchaseOrderInvoiceCc;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Log;
@@ -37,7 +38,7 @@ use Illuminate\Support\Facades\Storage;
 
 class WorkflowNotificationService
 {
-    public const LAZARUS_EMAIL = 'lazarus.angbazo@emeraldcfze.com';
+    public const LAZARUS_EMAIL = LazarusNotificationSettings::EMAIL;
     public function notifyMRFSubmitted(MRF $mrf): void
     {
         // Parallel first-approval recipients: executives + supply chain directors.
@@ -469,7 +470,8 @@ class WorkflowNotificationService
             ->merge(config('scm.po_cc_recipients', []))
             ->push(PurchaseOrderInvoiceCc::PROCUREMENT_EMAIL)
             ->filter()
-            ->reject(fn ($email) => $this->isLazarusEmail($email))
+            ->reject(fn ($email) => $this->isLazarusEmail($email)
+                && ! LazarusNotificationSettings::enabled('po_signed'))
             ->unique(fn ($email) => strtolower((string) $email))
             ->values()
             ->all();

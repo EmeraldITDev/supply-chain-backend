@@ -2,12 +2,15 @@
 
 namespace App\Providers;
 
+use App\Listeners\SuppressLazarusMailUnlessEnabled;
 use App\Models\Vendor;
 use App\Models\MRF;
 use App\Observers\VendorObserver;
 use App\Observers\MrfObserver;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
+use Illuminate\Mail\Events\MessageSending;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\URL;
 use Illuminate\Support\ServiceProvider;
@@ -46,6 +49,7 @@ class AppServiceProvider extends ServiceProvider
 
         Vendor::observe(VendorObserver::class);
         MRF::observe(MrfObserver::class);
+        Event::listen(MessageSending::class, SuppressLazarusMailUnlessEnabled::class);
 
         // Render (and most hosts) terminate TLS at the edge; APP_URL must match.
         // If APP_URL is still http:// while the SPA is https://, absolute URLs from
