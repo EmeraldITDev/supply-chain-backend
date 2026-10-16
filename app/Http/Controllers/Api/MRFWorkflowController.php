@@ -2451,6 +2451,82 @@ class MRFWorkflowController extends Controller
     }
 
     /**
+     * Supply Chain chooses to email the signed PO to the vendor.
+     * Procurement is copied. This is separate from the internal signed-PO notice.
+     */
+    public function forwardSignedPurchaseOrderToVendor(Request $request, string $po)
+    {
+        $user = $request->user();
+        if (! $user || ! in_array($user->scmRole(), ['supply_chain_director', 'supply_chain', 'admin'], true)) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Only Supply Chain Director can forward a signed purchase order to the vendor.',
+                'code' => 'FORBIDDEN',
+            ], 403);
+        }
+
+        $mrf = $this->findMrfByAnyId($po);
+        if (! $mrf) {
+            return response()->json(['success' => false, 'error' => 'PO not found', 'code' => 'NOT_FOUND'], 404);
+        }
+
+        if (! WorkflowStateService::hasRecordedSignature($mrf->signed_po_url, $mrf->po_signed_at)) {
+            return response()->json([
+                'success' => false,
+                'error' => 'This purchase order must be signed before it can be forwarded to the vendor.',
+                'code' => 'NOT_SIGNED',
+            ], 422);
+        }
+
+        $mrf->loadMissing('selectedVendor');
+        $vendorEmail = trim((string) ($mrf->selectedVendor?->email ?? ''));
+        if (! filter_var($vendorEmail, FILTER_VALIDATE_EMAIL)) {
+            return response()->json([
+                'success' => false,
+                'error' => 'The selected vendor has no email address, so the signed PO cannot be forwarded.',
+                'code' => 'VALIDATION_ERROR',
+            ], 422);
+        }
+
+        try {
+            app(WorkflowNotificationService::class)->forwardSignedPoToVendor($mrf);
+        } catch (\Throwable $e) {
+            Log::error('Failed to forward signed PO to vendor', [
+                'mrf_id' => $mrf->mrf_id,
+                'error' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'error' => 'The signed purchase order could not be emailed to the vendor.',
+                'code' => 'MAIL_FAILED',
+            ], 500);
+        }
+
+        $forwardedAt = now();
+        $mrf->update(['po_forwarded_to_vendor_at' => $forwardedAt]);
+        MRFApprovalHistory::record(
+            $mrf,
+            'po_forwarded_to_vendor',
+            'supply_chain',
+            $user,
+            'Signed PO forwarded to '.$vendorEmail,
+        );
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Signed purchase order forwarded to the vendor. Procurement was copied.',
+            'data' => [
+                'mrf_id' => $mrf->mrf_id,
+                'po_number' => $mrf->po_number,
+                'vendor_email' => $vendorEmail,
+                'po_forwarded_to_vendor_at' => $forwardedAt->toIso8601String(),
+                'poForwardedToVendorAt' => $forwardedAt->toIso8601String(),
+            ],
+        ]);
+    }
+
+    /**
      * Reject PO (Supply Chain Director returns to procurement for revision)
      */
     public function rejectPO(Request $request, $id)

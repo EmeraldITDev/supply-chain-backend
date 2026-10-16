@@ -423,6 +423,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::delete('/mrfs/{id}/po', [\App\Http\Controllers\Api\MRFWorkflowController::class, 'deletePO']); // Delete/clear PO
     Route::post('/mrfs/{id}/upload-signed-po', [\App\Http\Controllers\Api\MRFWorkflowController::class, 'uploadSignedPO']);
     Route::post('/purchase-orders/{po}/sign', [\App\Http\Controllers\Api\MRFWorkflowController::class, 'signPurchaseOrder']);
+    Route::post('/purchase-orders/{po}/forward-to-vendor', [\App\Http\Controllers\Api\MRFWorkflowController::class, 'forwardSignedPurchaseOrderToVendor']);
     Route::get('/pos', [\App\Http\Controllers\Api\PurchaseOrderController::class, 'index']);
     Route::post('/pos', [\App\Http\Controllers\Api\PurchaseOrderController::class, 'store']);
     Route::get('/pos/{id}', [\App\Http\Controllers\Api\PurchaseOrderController::class, 'show']);

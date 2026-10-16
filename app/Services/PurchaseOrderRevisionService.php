@@ -105,6 +105,7 @@ class PurchaseOrderRevisionService
             'signed_po_url' => null,
             'signed_po_share_url' => null,
             'po_signed_at' => null,
+            'po_forwarded_to_vendor_at' => null,
             'status' => WorkflowStateService::STATE_PENDING_REVISION,
             'workflow_state' => WorkflowStateService::STATE_PENDING_REVISION,
             'current_stage' => 'procurement',
@@ -184,6 +185,7 @@ class PurchaseOrderRevisionService
             'signed_po_url' => null,
             'signed_po_share_url' => null,
             'po_signed_at' => null,
+            'po_forwarded_to_vendor_at' => null,
         ]);
         $mrf->save();
 

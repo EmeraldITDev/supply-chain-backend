@@ -660,7 +660,7 @@ class MRFController extends Controller
 
         $with = $forPo
             ? ['priceComparisons.vendor:id,vendor_id,name', 'selectedVendor:id,vendor_id,name,email,phone,address,contact_person']
-            : ['requester', 'directorApprover', 'executiveApprover', 'priceComparisons.vendor:id,vendor_id,name', 'items', 'attachments.uploader:id,name,email'];
+            : ['requester', 'directorApprover', 'executiveApprover', 'selectedVendor:id,vendor_id,name,email', 'priceComparisons.vendor:id,vendor_id,name', 'items', 'attachments.uploader:id,name,email'];
 
         $mrf = MRF::where(function ($query) use ($id) {
             $query->where('formatted_id', $id)
@@ -866,6 +866,12 @@ class MRFController extends Controller
             'poGeneratedAt' => $mrf->po_generated_at?->toIso8601String(),
             'po_signed_at' => $mrf->po_signed_at?->toIso8601String(),
             'poSignedAt' => $mrf->po_signed_at?->toIso8601String(),
+            'po_forwarded_to_vendor_at' => $mrf->po_forwarded_to_vendor_at?->toIso8601String(),
+            'poForwardedToVendorAt' => $mrf->po_forwarded_to_vendor_at?->toIso8601String(),
+            'vendor_name' => $mrf->selectedVendor?->name,
+            'vendorName' => $mrf->selectedVendor?->name,
+            'vendor_email' => $mrf->selectedVendor?->email,
+            'vendorEmail' => $mrf->selectedVendor?->email,
             ...\App\Support\ExecutiveCommandCentreFields::apiFields($mrf),
             'custom_terms' => $mrf->custom_terms,
             'customTerms' => $mrf->custom_terms,

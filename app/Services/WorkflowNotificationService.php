@@ -7,6 +7,7 @@ use App\Mail\MRFApprovedMail;
 use App\Mail\MRFRejectedMail;
 use App\Mail\POGeneratedMail;
 use App\Mail\POReadyForSignatureMail;
+use App\Mail\POForwardedToVendorMail;
 use App\Mail\POSignedMail;
 use App\Mail\VendorSelectionApprovedMail;
 use App\Mail\QuotationSubmittedMail;
@@ -22,17 +23,21 @@ use App\Notifications\SystemAnnouncementNotification;
 use App\Models\Logistics\Trip;
 use App\Models\Logistics\TripRfq;
 use App\Models\MRF;
+use App\Models\ProcurementDocument;
 use App\Models\Quotation;
 use App\Models\RFQ;
 use App\Models\SRF;
 use App\Models\User;
 use App\Notifications\SRFSubmittedNotification;
 use App\Support\DatabaseNotifications;
+use App\Support\PurchaseOrderInvoiceCc;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
 
 class WorkflowNotificationService
 {
+    public const LAZARUS_EMAIL = 'lazarus.angbazo@emeraldcfze.com';
     public function notifyMRFSubmitted(MRF $mrf): void
     {
         // Parallel first-approval recipients: executives + supply chain directors.
@@ -450,20 +455,21 @@ class WorkflowNotificationService
     }
 
     /**
-     * Email finance, the requester, and the vendor after a purchase order is signed.
+     * Email finance and the requester after a purchase order is signed.
+     * The vendor is not included. Supply Chain forwards that copy separately.
      */
     public function notifyPOSigned(MRF $mrf): void
     {
-        $mrf->loadMissing(['requester', 'selectedVendor']);
+        $mrf->loadMissing(['requester']);
 
         $emails = collect([
             $mrf->requester?->email ?? null,
-            $mrf->selectedVendor?->email ?? null,
         ])
             ->merge($this->getEmailsByRoles(['finance', 'finance_officer', 'admin']))
             ->merge(config('scm.po_cc_recipients', []))
-            ->push(\App\Support\PurchaseOrderInvoiceCc::PROCUREMENT_EMAIL)
+            ->push(PurchaseOrderInvoiceCc::PROCUREMENT_EMAIL)
             ->filter()
+            ->reject(fn ($email) => $this->isLazarusEmail($email))
             ->unique(fn ($email) => strtolower((string) $email))
             ->values()
             ->all();
@@ -476,6 +482,36 @@ class WorkflowNotificationService
                 mailableFactory: static fn () => new POSignedMail($mrf)
             );
         }
+    }
+
+    /**
+     * Email the selected vendor a copy of the signed purchase order.
+     * Procurement is copied. This is only sent when Supply Chain chooses to forward it.
+     */
+    public function forwardSignedPoToVendor(MRF $mrf): void
+    {
+        $mrf->loadMissing(['selectedVendor']);
+        $vendorEmail = trim((string) ($mrf->selectedVendor?->email ?? ''));
+        if (! filter_var($vendorEmail, FILTER_VALIDATE_EMAIL)) {
+            throw new \InvalidArgumentException('The selected vendor has no email address.');
+        }
+
+        $attachment = $this->signedPurchaseOrderPdf($mrf);
+        $mailable = new POForwardedToVendorMail($mrf, $attachment !== null);
+        if ($attachment !== null) {
+            $mailable->attachData($attachment['bytes'], $attachment['name'], [
+                'mime' => 'application/pdf',
+            ]);
+        }
+
+        $mail = Mail::to($vendorEmail);
+        $procurement = PurchaseOrderInvoiceCc::PROCUREMENT_EMAIL;
+        if (strcasecmp($vendorEmail, $procurement) !== 0) {
+            $mail->cc($procurement);
+        }
+
+        // Send now so the signed PDF is attached on this request.
+        $mail->send($mailable);
     }
 
     /**
@@ -626,6 +662,65 @@ class WorkflowNotificationService
                     'error' => $e->getMessage(),
                 ]);
             }
+        }
+    }
+
+    private function isLazarusEmail(mixed $email): bool
+    {
+        return strcasecmp(trim((string) $email), self::LAZARUS_EMAIL) === 0;
+    }
+
+    /**
+     * @return array{bytes: string, name: string}|null
+     */
+    private function signedPurchaseOrderPdf(MRF $mrf): ?array
+    {
+        $diskName = (string) config('filesystems.documents_disk', 's3');
+        if (! config("filesystems.disks.{$diskName}")) {
+            return null;
+        }
+
+        $document = ProcurementDocument::query()
+            ->where('type', ProcurementDocument::TYPE_SIGNED_PO)
+            ->where('is_active', true)
+            ->where(function ($query) use ($mrf) {
+                $query->where('mrf_id', $mrf->id);
+                if (filled($mrf->mrf_id)) {
+                    $query->orWhere('mrf_id', $mrf->mrf_id);
+                }
+            })
+            ->latest('id')
+            ->first();
+
+        $path = trim((string) ($document?->file_path ?? ''));
+        if ($path === '' || str_contains($path, '://')) {
+            return null;
+        }
+
+        try {
+            $disk = Storage::disk($diskName);
+            if (! $disk->exists($path)) {
+                return null;
+            }
+
+            $bytes = $disk->get($path);
+            if (! is_string($bytes) || $bytes === '') {
+                return null;
+            }
+
+            $poNumber = $mrf->po_number ?: ($mrf->formatted_id ?: $mrf->mrf_id);
+
+            return [
+                'bytes' => $bytes,
+                'name' => 'PO-'.$poNumber.'-signed.pdf',
+            ];
+        } catch (\Throwable $e) {
+            Log::warning('Signed PO could not be attached to the vendor email', [
+                'mrf_id' => $mrf->mrf_id,
+                'error' => $e->getMessage(),
+            ]);
+
+            return null;
         }
     }
 

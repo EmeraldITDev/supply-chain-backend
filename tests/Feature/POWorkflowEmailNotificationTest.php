@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Jobs\ProcessPurchaseOrderNotificationsJob;
+use App\Mail\POForwardedToVendorMail;
 use App\Mail\POGeneratedMail;
 use App\Mail\POReadyForSignatureMail;
 use App\Mail\POSignedMail;
@@ -14,6 +15,7 @@ use App\Services\NotificationService;
 use App\Services\WorkflowNotificationService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Mail;
+use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
 class POWorkflowEmailNotificationTest extends TestCase
@@ -72,13 +74,17 @@ class POWorkflowEmailNotificationTest extends TestCase
         });
     }
 
-    public function test_signed_po_emails_finance_requester_and_vendor(): void
+    public function test_signed_po_emails_finance_and_requester_but_not_the_vendor_or_lazarus(): void
     {
         Mail::fake();
 
         $finance = User::factory()->create([
             'email' => 'finance@example.com',
             'supply_chain_role' => 'finance',
+        ]);
+        $lazarus = User::factory()->create([
+            'email' => 'lazarus.angbazo@emeraldcfze.com',
+            'supply_chain_role' => 'admin',
         ]);
         $requester = User::factory()->create([
             'email' => 'requester-signed@example.com',
@@ -103,11 +109,55 @@ class POWorkflowEmailNotificationTest extends TestCase
 
         app(NotificationService::class)->notifyPOSignedToFinance($mrf);
 
-        foreach ([$finance->email, $requester->email, $vendor->email] as $email) {
+        foreach ([$finance->email, $requester->email] as $email) {
             Mail::assertSent(POSignedMail::class, function (POSignedMail $mail) use ($email) {
                 return $mail->hasTo($email);
             });
         }
+
+        Mail::assertNotSent(POSignedMail::class, function (POSignedMail $mail) use ($vendor, $lazarus) {
+            return $mail->hasTo($vendor->email) || $mail->hasTo($lazarus->email);
+        });
+    }
+
+    public function test_signed_po_is_emailed_to_the_vendor_only_when_supply_chain_forwards_it(): void
+    {
+        Mail::fake();
+
+        $director = User::factory()->create([
+            'supply_chain_role' => 'supply_chain_director',
+        ]);
+        $vendor = \App\Models\Vendor::create([
+            'name' => 'Forward Vendor',
+            'email' => 'vendor-forward@example.com',
+            'status' => 'Active',
+        ]);
+        $mrf = MRF::create([
+            'mrf_id' => 'MRF-PO-FORWARD-001',
+            'formatted_id' => 'MRF-EMERALD-FORWARD-001',
+            'requester_name' => 'Requester',
+            'title' => 'Forwarded PO',
+            'status' => 'signed',
+            'workflow_state' => 'po_signed',
+            'po_number' => 'PO-FORWARD-001',
+            'selected_vendor_id' => $vendor->id,
+            'signed_po_url' => 'https://s3.example/signed.pdf',
+            'po_signed_at' => now(),
+        ]);
+
+        Sanctum::actingAs($director);
+
+        $this->postJson('/api/purchase-orders/'.rawurlencode($mrf->formatted_id).'/forward-to-vendor')
+            ->assertOk()
+            ->assertJsonPath('success', true);
+
+        Mail::assertSent(POForwardedToVendorMail::class, function (POForwardedToVendorMail $mail) use ($vendor) {
+            return $mail->hasTo($vendor->email)
+                && $mail->hasCc('procurement@emeraldcfze.com');
+        });
+
+        $mrf->refresh();
+        $this->assertNotNull($mrf->po_forwarded_to_vendor_at);
     }
 
     public function test_vendor_selection_approval_emails_procurement(): void
