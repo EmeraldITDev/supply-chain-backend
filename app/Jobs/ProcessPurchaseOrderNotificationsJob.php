@@ -91,16 +91,16 @@ class ProcessPurchaseOrderNotificationsJob implements ShouldQueue
 
         $notificationService->notifyPOReadyForSignature($mrf->fresh());
 
-        if (! $this->fastTrack) {
-            try {
-                $mrf->loadMissing(['requester', 'selectedVendor']);
-                $workflowNotificationService->notifyPOGenerated($mrf);
-            } catch (\Throwable $e) {
-                Log::error('Failed to queue PO generated emails', [
-                    'mrf_id' => $mrf->mrf_id,
-                    'error' => $e->getMessage(),
-                ]);
-            }
+        // Fast-track only bypasses executive review. Signers, the requester, and
+        // the vendor still need the generated / ready-for-signature emails.
+        try {
+            $mrf->loadMissing(['requester', 'selectedVendor']);
+            $workflowNotificationService->notifyPOGenerated($mrf);
+        } catch (\Throwable $e) {
+            Log::error('Failed to queue PO generated emails', [
+                'mrf_id' => $mrf->mrf_id,
+                'error' => $e->getMessage(),
+            ]);
         }
 
         $manualVendorOnboarding->finalizeVendorsForPoGeneration($mrf->fresh(), $this->isRegeneration);

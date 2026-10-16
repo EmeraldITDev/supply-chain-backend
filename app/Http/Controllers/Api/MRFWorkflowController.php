@@ -1023,6 +1023,15 @@ class MRFWorkflowController extends Controller
             Log::warning('Failed to send vendor approval notification', ['error' => $e->getMessage()]);
         }
 
+        try {
+            app(WorkflowNotificationService::class)->notifyVendorSelectionApproved($mrf->fresh(), $user);
+        } catch (\Exception $e) {
+            Log::warning('Failed to send vendor selection approved email', [
+                'mrf_id' => $mrf->mrf_id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
         return response()->json([
             'success' => true,
             'message' => 'Vendor selection approved. MRF is now pending PO upload.',

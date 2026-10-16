@@ -661,6 +661,15 @@ class NotificationService
                 'error' => $e->getMessage()
             ]);
         }
+
+        try {
+            app(WorkflowNotificationService::class)->notifyPOReadyForSignature($mrf);
+        } catch (\Throwable $e) {
+            Log::error('Failed to send PO ready-for-signature email', [
+                'mrf_id' => $mrf->mrf_id,
+                'error' => $e->getMessage(),
+            ]);
+        }
     }
 
     /**
@@ -685,6 +694,15 @@ class NotificationService
             Log::error('Failed to send PO signed notification', [
                 'mrf_id' => $mrf->mrf_id,
                 'error' => $e->getMessage()
+            ]);
+        }
+
+        try {
+            app(WorkflowNotificationService::class)->notifyPOSigned($mrf);
+        } catch (\Throwable $e) {
+            Log::error('Failed to send PO signed email', [
+                'mrf_id' => $mrf->mrf_id,
+                'error' => $e->getMessage(),
             ]);
         }
     }

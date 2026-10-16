@@ -6,6 +6,9 @@ use App\Mail\MRFCreatedMail;
 use App\Mail\MRFApprovedMail;
 use App\Mail\MRFRejectedMail;
 use App\Mail\POGeneratedMail;
+use App\Mail\POReadyForSignatureMail;
+use App\Mail\POSignedMail;
+use App\Mail\VendorSelectionApprovedMail;
 use App\Mail\QuotationSubmittedMail;
 use App\Mail\RFQSentMail;
 use App\Mail\SRFCreatedMail;
@@ -417,6 +420,82 @@ class WorkflowNotificationService
                 recipient: $email,
                 modelId: $mrf->formatted_id ?: $mrf->mrf_id,
                 mailableFactory: static fn () => new POGeneratedMail($mrf)
+            );
+        }
+    }
+
+    /**
+     * Email the people who must sign a newly generated purchase order.
+     */
+    public function notifyPOReadyForSignature(MRF $mrf): void
+    {
+        $mrf->loadMissing(['requester', 'selectedVendor']);
+
+        $emails = collect($this->getEmailsByRoles(['supply_chain_director', 'supply_chain']))
+            ->merge(config('scm.po_generated_to_recipients', []))
+            ->merge(config('scm.po_cc_recipients', []))
+            ->filter()
+            ->unique(fn ($email) => strtolower((string) $email))
+            ->values()
+            ->all();
+
+        foreach ($emails as $email) {
+            $this->deliverMailable(
+                event: 'po_ready_for_signature',
+                recipient: (string) $email,
+                modelId: $mrf->formatted_id ?: $mrf->mrf_id,
+                mailableFactory: static fn () => new POReadyForSignatureMail($mrf)
+            );
+        }
+    }
+
+    /**
+     * Email finance, the requester, and the vendor after a purchase order is signed.
+     */
+    public function notifyPOSigned(MRF $mrf): void
+    {
+        $mrf->loadMissing(['requester', 'selectedVendor']);
+
+        $emails = collect([
+            $mrf->requester?->email ?? null,
+            $mrf->selectedVendor?->email ?? null,
+        ])
+            ->merge($this->getEmailsByRoles(['finance', 'finance_officer', 'admin']))
+            ->merge(config('scm.po_cc_recipients', []))
+            ->push(\App\Support\PurchaseOrderInvoiceCc::PROCUREMENT_EMAIL)
+            ->filter()
+            ->unique(fn ($email) => strtolower((string) $email))
+            ->values()
+            ->all();
+
+        foreach ($emails as $email) {
+            $this->deliverMailable(
+                event: 'po_signed',
+                recipient: (string) $email,
+                modelId: $mrf->formatted_id ?: $mrf->mrf_id,
+                mailableFactory: static fn () => new POSignedMail($mrf)
+            );
+        }
+    }
+
+    /**
+     * Email procurement after SCD approves the vendor and a PO must be generated.
+     */
+    public function notifyVendorSelectionApproved(MRF $mrf, User $approver): void
+    {
+        $emails = collect($this->getEmailsByRoles(['procurement', 'procurement_manager', 'admin']))
+            ->merge(config('scm.po_cc_recipients', []))
+            ->filter()
+            ->unique(fn ($email) => strtolower((string) $email))
+            ->values()
+            ->all();
+
+        foreach ($emails as $email) {
+            $this->deliverMailable(
+                event: 'vendor_selection_approved',
+                recipient: (string) $email,
+                modelId: $mrf->formatted_id ?: $mrf->mrf_id,
+                mailableFactory: static fn () => new VendorSelectionApprovedMail($mrf, $approver)
             );
         }
     }

@@ -5,6 +5,7 @@ namespace App\Jobs;
 use App\Models\MRF;
 use App\Models\User;
 use App\Models\ProcurementDocument;
+use App\Services\NotificationService;
 use App\Services\PurchaseOrderPdfService;
 use App\Services\WorkflowStateService;
 use App\Services\FinanceAp\FinanceApWorkflowOrchestrator;
@@ -94,6 +95,15 @@ class ProcessPoSignatureJob implements ShouldQueue
             );
 
             app(FinanceApWorkflowOrchestrator::class)->afterPoSigned($mrf, $user);
+
+            try {
+                app(NotificationService::class)->notifyPOSignedToFinance($mrf->fresh());
+            } catch (\Throwable $notifyError) {
+                Log::error('ProcessPoSignatureJob: signed PO notification failed', [
+                    'mrf_id' => $mrf->mrf_id,
+                    'error' => $notifyError->getMessage(),
+                ]);
+            }
 
             Log::info('ProcessPoSignatureJob: completed', [
                 'mrf_id'    => $mrf->mrf_id,
