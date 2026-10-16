@@ -2351,7 +2351,9 @@ class MRFWorkflowController extends Controller
             ], 403);
         }
 
-        $mrf = MRF::where('mrf_id', $po)->orWhere('po_number', $po)->first();
+        // The dashboard signs with formatted_id (the id shown on the card).
+        // Looking up only mrf_id / po_number returned "PO not found" for every PO.
+        $mrf = $this->findMrfByAnyId($po);
         if (!$mrf) {
             return response()->json(['success' => false, 'error' => 'PO not found', 'code' => 'NOT_FOUND'], 404);
         }
