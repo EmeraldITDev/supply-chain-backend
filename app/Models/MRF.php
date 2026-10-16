@@ -185,7 +185,11 @@ class MRF extends Model
                     $unsigned->whereNull('unsigned_po_url')
                         ->orWhere('unsigned_po_url', '=', '');
                 }),
-            'signed' => $query->whereNotNull('signed_po_url')->where('signed_po_url', '!=', ''),
+            'signed' => $query->where(function ($signed) {
+                $signed->where(function ($url) {
+                    $url->whereNotNull('signed_po_url')->where('signed_po_url', '!=', '');
+                })->orWhereNotNull('po_signed_at');
+            }),
             'rejected' => $query->where(function ($q) {
                 $q->where('status', 'rejected')
                     ->orWhereIn('workflow_state', self::poRejectedWorkflowStates())
@@ -200,7 +204,8 @@ class MRF extends Model
                 ->where('unsigned_po_url', '!=', '')
                 ->where(function ($signed) {
                     $signed->whereNull('signed_po_url')->orWhere('signed_po_url', '=', '');
-                }),
+                })
+                ->whereNull('po_signed_at'),
             default => $query,
         };
     }
@@ -328,7 +333,8 @@ class MRF extends Model
                     ->where('unsigned_po_url', '!=', '')
                     ->where(function ($signed) {
                         $signed->whereNull('signed_po_url')->orWhere('signed_po_url', '=', '');
-                    });
+                    })
+                    ->whereNull('po_signed_at');
                 });
             });
 
@@ -1002,7 +1008,7 @@ class MRF extends Model
         'urgency', 'quantity', 'estimated_cost', 'currency', 'requester_id', 'requester_name', 'department',
         'date', 'created_at', 'updated_at', 'status', 'current_stage', 'workflow_state', 'first_approval_by_role',
         'rejection_reason', 'is_resubmission', 'executive_approved', 'executive_approved_at',
-        'po_number', 'po_draft_saved_at', 'unsigned_po_url', 'signed_po_url', 'po_generated_at', 'po_terms_mode',
+        'po_number', 'po_draft_saved_at', 'unsigned_po_url', 'signed_po_url', 'po_generated_at', 'po_signed_at', 'po_terms_mode',
         'quickbooks_po_id', 'quickbooks_synced_at', 'quickbooks_sync_status',
         'expected_delivery_date', 'rfq_issued_at', 'quotation_received_at', 'grn_completed_at',
         'po_value', 'executive_approved_at', 'director_approved_at', 'scd_approved_at',
@@ -1027,7 +1033,7 @@ class MRF extends Model
         'scd_approved_at', 'director_approved_at', 'supply_chain_approved_at',
         'scd_remarks', 'director_remarks', 'supply_chain_remarks', 'remarks',
         'chairman_approved', 'chairman_approved_at', 'chairman_remarks',
-        'po_number', 'unsigned_po_url', 'unsigned_po_share_url', 'signed_po_url', 'signed_po_share_url',
+        'po_number', 'unsigned_po_url', 'unsigned_po_share_url', 'signed_po_url', 'signed_po_share_url', 'po_signed_at',
         'quickbooks_po_id', 'quickbooks_synced_at', 'quickbooks_sync_status',
         'po_generated_at', 'po_terms_mode', 'po_type', 'source', 'is_po_linked', 'linked_po_id', 'po_draft_saved_at',
         'expected_delivery_date', 'rfq_issued_at', 'quotation_received_at', 'po_value',
@@ -1098,6 +1104,14 @@ class MRF extends Model
      */
     public function toListApiArray(): array
     {
+        $presented = WorkflowStateService::presentedSignatureState(
+            $this->status,
+            $this->workflow_state,
+            $this->signed_po_url,
+            $this->po_signed_at,
+        );
+        $unsignedPoUrl = $this->freshUnsignedPoStreamUrl() ?? $this->unsigned_po_url;
+
         return array_merge(
             $this->scmTransactionApiFields(),
             [
@@ -1124,9 +1138,10 @@ class MRF extends Model
                 'created_at' => $this->created_at?->toIso8601String(),
                 'updatedAt' => $this->updated_at?->toIso8601String(),
                 'updated_at' => $this->updated_at?->toIso8601String(),
-                'status' => $this->status,
+                'status' => $presented['status'],
                 'currentStage' => $this->current_stage,
-                'workflowState' => $this->workflow_state,
+                'workflowState' => $presented['workflow_state'],
+                'workflow_state' => $presented['workflow_state'],
                 ...app(\App\Services\MrfParallelFirstApprovalService::class)->apiFields($this),
                 'approvalHistory' => [],
                 'rejectionReason' => $this->rejection_reason,
@@ -1156,10 +1171,10 @@ class MRF extends Model
                 'chairman_remarks' => $this->chairman_remarks,
                 'po_number' => $this->po_number,
                 'poNumber' => $this->po_number,
-                'unsigned_po_url' => $this->unsigned_po_url,
-                'unsignedPOUrl' => $this->unsigned_po_url,
-                'unsigned_po_share_url' => $this->unsigned_po_share_url,
-                'unsignedPOShareUrl' => $this->unsigned_po_share_url,
+                'unsigned_po_url' => $unsignedPoUrl,
+                'unsignedPOUrl' => $unsignedPoUrl,
+                'unsigned_po_share_url' => $unsignedPoUrl,
+                'unsignedPOShareUrl' => $unsignedPoUrl,
                 'signed_po_url' => $this->signed_po_url,
                 'signedPOUrl' => $this->signed_po_url,
                 'po_generated_at' => $this->po_generated_at?->toIso8601String(),

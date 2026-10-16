@@ -18,7 +18,7 @@ class PurchaseOrderService
     public const LIST_SELECT = [
         'id', 'mrf_id', 'formatted_id', 'po_number', 'title', 'status', 'workflow_state',
         'current_stage', 'estimated_cost', 'currency', 'selected_vendor_id', 'requester_name',
-        'department',         'po_draft_saved_at', 'po_generated_at', 'unsigned_po_url', 'signed_po_url',
+        'department',         'po_draft_saved_at', 'po_generated_at', 'po_signed_at', 'unsigned_po_url', 'signed_po_url',
         'expected_delivery_date', 'grn_completed_at', 'rfq_issued_at', 'quotation_received_at',
         'po_value', 'executive_approved_at', 'director_approved_at', 'scd_approved_at',
         'procurement_approved_at', 'finance_approved_at', 'payment_approved_at', 'procurement_review_started_at',
@@ -33,7 +33,7 @@ class PurchaseOrderService
         'ship_to_address', 'tax_rate', 'tax_amount', 'tax_mode', 'discount_type', 'discount_value', 'discount_amount', 'custom_terms', 'po_terms_mode',
         'po_special_terms', 'invoice_submission_email', 'invoice_submission_cc',
         'selected_vendor_id', 'requester_id', 'requester_name', 'department',
-        'po_draft_saved_at', 'po_generated_at', 'unsigned_po_url', 'signed_po_url',
+        'po_draft_saved_at', 'po_generated_at', 'po_signed_at', 'unsigned_po_url', 'signed_po_url',
         'expected_delivery_date', 'grn_completed_at', 'rfq_issued_at', 'quotation_received_at',
         'po_value', 'executive_approved_at', 'director_approved_at', 'scd_approved_at',
         'procurement_approved_at', 'finance_approved_at', 'payment_approved_at', 'procurement_review_started_at',
@@ -128,6 +128,12 @@ class PurchaseOrderService
     {
         $vendor = $mrf->relationLoaded('selectedVendor') ? $mrf->selectedVendor : null;
         $poNumber = $mrf->effectivePoNumber();
+        $presented = WorkflowStateService::presentedSignatureState(
+            $mrf->status,
+            $mrf->workflow_state,
+            $mrf->signed_po_url,
+            $mrf->po_signed_at,
+        );
 
         return array_merge($mrf->poOriginApiFields(), $mrf->poDraftApiFields(), $mrf->poRevisionApiFields(), [
             'id' => $mrf->mrf_id,
@@ -136,8 +142,13 @@ class PurchaseOrderService
             'po_number' => $poNumber,
             'poNumber' => $poNumber,
             'title' => $mrf->title,
-            'status' => $mrf->status,
-            'workflowState' => $mrf->workflow_state,
+            'status' => $presented['status'],
+            'workflowState' => $presented['workflow_state'],
+            'workflow_state' => $presented['workflow_state'],
+            'signedPoUrl' => $mrf->signed_po_url,
+            'signed_po_url' => $mrf->signed_po_url,
+            'poSignedAt' => $mrf->po_signed_at?->toIso8601String(),
+            'po_signed_at' => $mrf->po_signed_at?->toIso8601String(),
             'currentStage' => $mrf->current_stage,
             'estimatedCost' => $mrf->estimated_cost !== null ? (float) $mrf->estimated_cost : null,
             'currency' => PurchaseOrderCurrency::normalize($mrf->currency),
@@ -185,6 +196,12 @@ class PurchaseOrderService
         $paymentMilestones = $this->paymentScheduleService->paymentMilestonesForMrf($mrf);
 
         $poNumber = $mrf->effectivePoNumber();
+        $presented = WorkflowStateService::presentedSignatureState(
+            $mrf->status,
+            $mrf->workflow_state,
+            $mrf->signed_po_url,
+            $mrf->po_signed_at,
+        );
 
         return array_merge($mrf->poOriginApiFields(), $mrf->poDraftApiFields(), $mrf->poRevisionApiFields(), $mrf->currencyApiFields(), [
             'id' => $mrf->mrf_id,
@@ -195,9 +212,9 @@ class PurchaseOrderService
             'title' => $mrf->title,
             'category' => $mrf->category,
             'contractType' => $mrf->contract_type,
-            'status' => $mrf->status,
-            'workflowState' => $mrf->workflow_state,
-            'workflow_state' => $mrf->workflow_state,
+            'status' => $presented['status'],
+            'workflowState' => $presented['workflow_state'],
+            'workflow_state' => $presented['workflow_state'],
             'currentStage' => $mrf->current_stage,
             'estimatedCost' => $mrf->estimated_cost !== null ? (float) $mrf->estimated_cost : null,
             'shipToAddress' => $mrf->ship_to_address,

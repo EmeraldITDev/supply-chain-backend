@@ -140,16 +140,20 @@ class ProcessPurchaseOrderGenerationJob implements ShouldQueue
             $taxFields['discount_amount'] = $discountAmount;
         }
 
-        $mrf->update($taxFields + [
+        $preserveSignedState = WorkflowStateService::hasRecordedSignature($mrf->signed_po_url, $mrf->po_signed_at);
+        $workflowFields = $preserveSignedState ? [] : [
+            'workflow_state' => WorkflowStateService::STATE_PO_GENERATED,
+            'status' => 'awaiting_scd_signature',
+            'current_stage' => 'supply_chain',
+        ];
+
+        $mrf->update($taxFields + $workflowFields + [
             'po_number' => $poNumber,
             'unsigned_po_url' => $poUrl,
             'unsigned_po_share_url' => $poUrl,
             'po_generated_at' => now(),
             'po_draft_saved_at' => null,
             'po_value' => $poTotal > 0 ? $poTotal : null,
-            'workflow_state' => WorkflowStateService::STATE_PO_GENERATED,
-            'status' => 'awaiting_scd_signature',
-            'current_stage' => 'supply_chain',
             'rejection_reason' => null,
             'currency' => PurchaseOrderCurrency::normalize($mrf->currency),
             'po_generation_error' => null,

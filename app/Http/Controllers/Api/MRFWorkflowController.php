@@ -2015,15 +2015,19 @@ class MRFWorkflowController extends Controller
             $poTotalForSchedule = (float) ($mrf->estimated_cost ?? 0);
         }
 
-        $updateData = [
+        $preserveSignedState = WorkflowStateService::hasRecordedSignature($mrf->signed_po_url, $mrf->po_signed_at);
+        $signatureQueueFields = $preserveSignedState ? [] : [
+            'workflow_state' => WorkflowStateService::STATE_PO_GENERATED,
+            'status' => 'awaiting_scd_signature',
+            'current_stage' => 'supply_chain',
+        ];
+
+        $updateData = $signatureQueueFields + [
             'po_number' => $poNumber,
             'unsigned_po_url' => $poUrl,
             'po_generated_at' => now(),
             'po_draft_saved_at' => null,
             'po_value' => $poTotalForSchedule > 0 ? $poTotalForSchedule : null,
-            'workflow_state' => WorkflowStateService::STATE_PO_GENERATED,
-            'status' => 'awaiting_scd_signature',
-            'current_stage' => 'supply_chain',
             'procurement_manager_id' => $user->id,
             'rejection_reason' => null, // Clear rejection reason if regenerating
             // PO Details
@@ -2199,6 +2203,16 @@ class MRFWorkflowController extends Controller
             'user_id' => $user->id,
         ]);
 
+        if (WorkflowStateService::hasRecordedSignature($mrf->signed_po_url, $mrf->po_signed_at)) {
+            return response()->json([
+                'success' => false,
+                'error' => 'This purchase order is already signed.',
+                'code' => 'ALREADY_SIGNED',
+                'current_status' => $mrf->status,
+                'current_workflow_state' => $mrf->workflow_state,
+            ], 422);
+        }
+
         $statusLower = strtolower(trim((string) ($mrf->status ?? '')));
         $workflowStateLower = strtolower(trim((string) ($mrf->workflow_state ?? '')));
         $allowedStatuses = WorkflowStateService::awaitingScdSignatureStatuses();
@@ -2215,8 +2229,8 @@ class MRFWorkflowController extends Controller
 
         $poDocument = app(ProcurementDocumentService::class)->findActiveDocument($mrf, ProcurementDocument::TYPE_PO_PDF);
         $hasRegistryPo = $poDocument !== null
-            && trim((string) ($poDocument->file_path ?? '')) !== ''
-            || trim((string) ($poDocument->file_url ?? '')) !== '';
+            && (trim((string) ($poDocument->file_path ?? '')) !== ''
+                || trim((string) ($poDocument->file_url ?? '')) !== '');
 
         if (empty($mrf->unsigned_po_url) && ! $hasRegistryPo) {
             return response()->json([
@@ -2341,7 +2355,14 @@ class MRFWorkflowController extends Controller
         if (!$mrf) {
             return response()->json(['success' => false, 'error' => 'PO not found', 'code' => 'NOT_FOUND'], 404);
         }
-        if (! WorkflowStateService::isAwaitingScdSignature($mrf->status, $mrf->workflow_state)) {
+        if (WorkflowStateService::hasRecordedSignature($mrf->signed_po_url, $mrf->po_signed_at)) {
+            return response()->json([
+                'success' => false,
+                'error' => 'This purchase order is already signed.',
+                'code' => 'ALREADY_SIGNED',
+            ], 422);
+        }
+        if (! WorkflowStateService::isAwaitingScdSignature($mrf->status, $mrf->workflow_state, $mrf->signed_po_url, $mrf->po_signed_at)) {
             return response()->json([
                 'success' => false,
                 'error' => 'PO is not awaiting SCD signature.',
@@ -2454,7 +2475,14 @@ class MRFWorkflowController extends Controller
         }
 
         // Check if MRF is in SCD signature stage
-        if (! WorkflowStateService::isAwaitingScdSignature($mrf->status, $mrf->workflow_state)) {
+        if (WorkflowStateService::hasRecordedSignature($mrf->signed_po_url, $mrf->po_signed_at)) {
+            return response()->json([
+                'success' => false,
+                'error' => 'This purchase order is already signed.',
+                'code' => 'ALREADY_SIGNED',
+            ], 422);
+        }
+        if (! WorkflowStateService::isAwaitingScdSignature($mrf->status, $mrf->workflow_state, $mrf->signed_po_url, $mrf->po_signed_at)) {
             return response()->json([
                 'success' => false,
                 'error' => 'MRF is not pending PO signature',

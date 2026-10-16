@@ -9,6 +9,26 @@ use Tests\TestCase;
 
 class WorkflowStateServiceTest extends TestCase
 {
+    public function test_recorded_signature_is_not_awaiting_scd_signature(): void
+    {
+        $this->assertFalse(WorkflowStateService::isAwaitingScdSignature(
+            'awaiting_scd_signature',
+            'po_generated',
+            'https://files.example/signed.pdf',
+            now(),
+        ));
+
+        $presented = WorkflowStateService::presentedSignatureState(
+            'awaiting_scd_signature',
+            'po_generated',
+            'https://files.example/signed.pdf',
+            now(),
+        );
+
+        $this->assertSame('signed', $presented['status']);
+        $this->assertSame(WorkflowStateService::STATE_PO_SIGNED, $presented['workflow_state']);
+    }
+
     public function test_po_signed_can_transition_to_finance_handoff_pending(): void
     {
         $service = app(WorkflowStateService::class);

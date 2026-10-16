@@ -377,13 +377,72 @@ class WorkflowStateService
         return [self::STATE_PO_GENERATED, self::STATE_PENDING_SCD_SIGNATURE];
     }
 
-    public static function isAwaitingScdSignature(?string $status, ?string $workflowState): bool
+    /**
+     * A PO is signed once a signed PDF or a signature timestamp has been stored.
+     * Status text alone must not put that PO back in the signature queue.
+     */
+    public static function hasRecordedSignature(?string $signedPoUrl, mixed $poSignedAt): bool
     {
+        return filled($poSignedAt) || trim((string) $signedPoUrl) !== '';
+    }
+
+    public static function isAwaitingScdSignature(
+        ?string $status,
+        ?string $workflowState,
+        ?string $signedPoUrl = null,
+        mixed $poSignedAt = null,
+    ): bool {
+        if (self::hasRecordedSignature($signedPoUrl, $poSignedAt)) {
+            return false;
+        }
+
         $status = strtolower(trim((string) $status));
         $state = strtolower(trim((string) $workflowState));
 
         return in_array($status, self::awaitingScdSignatureStatuses(), true)
             || in_array($state, self::awaitingScdSignatureStates(), true);
+    }
+
+    /**
+     * Status and workflow the API should show. A recorded signature wins over a
+     * stale "awaiting SCD signature" label.
+     *
+     * @return array{status: ?string, workflow_state: ?string}
+     */
+    public static function presentedSignatureState(
+        ?string $status,
+        ?string $workflowState,
+        ?string $signedPoUrl,
+        mixed $poSignedAt,
+    ): array {
+        if (! self::hasRecordedSignature($signedPoUrl, $poSignedAt)) {
+            return ['status' => $status, 'workflow_state' => $workflowState];
+        }
+
+        $statusLower = strtolower(trim((string) $status));
+        $stateLower = strtolower(trim((string) $workflowState));
+        $awaitingStatus = in_array($statusLower, self::awaitingScdSignatureStatuses(), true);
+        $awaitingState = in_array($stateLower, self::awaitingScdSignatureStates(), true);
+
+        if (! $awaitingStatus && ! $awaitingState) {
+            return ['status' => $status, 'workflow_state' => $workflowState];
+        }
+
+        if ($awaitingState || $workflowState === null || $workflowState === '') {
+            $legacy = app(WorkflowStateMapper::class)->legacyFieldsFor(self::STATE_PO_SIGNED);
+
+            return [
+                'status' => $legacy['status'] ?? 'signed',
+                'workflow_state' => self::STATE_PO_SIGNED,
+            ];
+        }
+
+        $legacy = app(WorkflowStateMapper::class)->legacyFieldsFor((string) $workflowState);
+
+        return [
+            'status' => $legacy['status'] ?? ($awaitingStatus ? 'signed' : $status),
+            'workflow_state' => $workflowState,
+        ];
     }
 
     /**

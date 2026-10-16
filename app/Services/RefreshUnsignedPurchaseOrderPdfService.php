@@ -112,8 +112,13 @@ class RefreshUnsignedPurchaseOrderPdfService
     public function isAwaitingScdSignature(MRF $mrf): bool
     {
         $hasUnsigned = filled($mrf->unsigned_po_url);
-        $notSigned = blank($mrf->signed_po_url);
-        $awaiting = WorkflowStateService::isAwaitingScdSignature($mrf->status, $mrf->workflow_state)
+        $notSigned = ! WorkflowStateService::hasRecordedSignature($mrf->signed_po_url, $mrf->po_signed_at);
+        $awaiting = WorkflowStateService::isAwaitingScdSignature(
+            $mrf->status,
+            $mrf->workflow_state,
+            $mrf->signed_po_url,
+            $mrf->po_signed_at,
+        )
             || strtolower((string) $mrf->status) === WorkflowStateService::STATE_PENDING_REVISION
             || ($mrf->workflow_state ?? null) === WorkflowStateService::STATE_PENDING_REVISION;
 

@@ -215,7 +215,7 @@ class PermissionService
             return false;
         }
 
-        if (trim((string) ($mrf->signed_po_url ?? '')) !== '') {
+        if (WorkflowStateService::hasRecordedSignature($mrf->signed_po_url, $mrf->po_signed_at)) {
             return false;
         }
 
@@ -285,7 +285,7 @@ class PermissionService
             return false;
         }
 
-        if (trim((string) ($mrf->signed_po_url ?? '')) !== '') {
+        if (WorkflowStateService::hasRecordedSignature($mrf->signed_po_url, $mrf->po_signed_at)) {
             return false;
         }
 
@@ -312,7 +312,7 @@ class PermissionService
             return false;
         }
 
-        if ($mrf->isPoDraft() && trim((string) ($mrf->signed_po_url ?? '')) === '') {
+        if ($mrf->isPoDraft() && ! WorkflowStateService::hasRecordedSignature($mrf->signed_po_url, $mrf->po_signed_at)) {
             return true;
         }
 
@@ -321,7 +321,7 @@ class PermissionService
             return false;
         }
 
-        if (trim((string) ($mrf->signed_po_url ?? '')) !== '') {
+        if (WorkflowStateService::hasRecordedSignature($mrf->signed_po_url, $mrf->po_signed_at)) {
             return false;
         }
 

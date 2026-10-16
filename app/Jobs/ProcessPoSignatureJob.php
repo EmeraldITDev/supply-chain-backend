@@ -121,8 +121,15 @@ class ProcessPoSignatureJob implements ShouldQueue
                 'error'  => $e->getMessage(),
             ]);
 
-            // Reset so SCD can retry
-            $mrf->update(['status' => 'awaiting_scd_signature']);
+            // Only rewind when the signature was never stored. A later step
+            // (document registry, finance routing) must not put a signed PO
+            // back into the SCD signature queue.
+            $mrf->refresh();
+            $alreadySigned = WorkflowStateService::hasRecordedSignature($mrf->signed_po_url, $mrf->po_signed_at)
+                || ($mrf->workflow_state ?? null) === WorkflowStateService::STATE_PO_SIGNED;
+            if (! $alreadySigned) {
+                $mrf->update(['status' => 'awaiting_scd_signature']);
+            }
 
             throw $e;
         }
