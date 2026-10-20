@@ -7,6 +7,7 @@ use App\Http\Controllers\Api\VendorAuthController;
 use App\Http\Controllers\Api\ContractTypeController;
 use App\Http\Controllers\Api\DashboardController;
 use App\Http\Controllers\Api\DashboardKpiController;
+use App\Http\Controllers\Api\AnalyticsController;
 use App\Http\Controllers\Api\EligiblePassengersController;
 use App\Http\Controllers\Api\AppConfigController;
 use App\Http\Controllers\Api\FinanceApReportController;
@@ -549,6 +550,12 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/vendors/registrations/{id}/reject', [VendorController::class, 'rejectRegistration']);
     Route::put('/vendors/{id}/credentials', [VendorController::class, 'updateVendorCredentials']);
     Route::put('/vendors/{uuid}', [VendorController::class, 'adminUpdate'])->middleware('role:procurement_manager,supply_chain_director');
+
+    // Analytics baseline + unified KPIs + reconciliation
+    Route::get('/analytics/baseline', [AnalyticsController::class, 'baseline']);
+    Route::get('/analytics/kpis', [AnalyticsController::class, 'kpis']);
+    Route::get('/analytics/legacy', [AnalyticsController::class, 'legacyList']);
+    Route::put('/analytics/legacy/{mrf_id}', [AnalyticsController::class, 'classifyMrf']);
 
     // Dashboard routes
     Route::get('/dashboard/kpis', [DashboardKpiController::class, 'index']);

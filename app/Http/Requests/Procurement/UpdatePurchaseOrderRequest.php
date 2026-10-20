@@ -82,7 +82,7 @@ class UpdatePurchaseOrderRequest extends FormRequest
             'invoiceSubmissionCc' => 'nullable|string|max:500',
             'selectedVendorId' => 'nullable|string|max:50',
             'expectedDeliveryDate' => 'nullable|date',
-            'paymentTerms' => 'nullable|string|max:1000',
+            'paymentTerms' => 'nullable|string|max:5000',
             'remarks' => 'nullable|string',
             'notes' => 'nullable|string',
             'documents' => 'nullable|array',

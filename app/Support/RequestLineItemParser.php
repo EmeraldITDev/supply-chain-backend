@@ -7,7 +7,12 @@ use Illuminate\Http\Request;
 class RequestLineItemParser
 {
     /**
-     * Decode items / line_items from JSON or multipart strings and merge into the request.
+     * Decode items / line_items from JSON or multipart strings, normalize each row
+     * (ensuring both `item_name` and `itemName` are always present), and merge into the request.
+     *
+     * Normalization happens here — not only in resolve() — so that FormRequest validation
+     * rules can rely on both snake_case and camelCase keys being present, regardless of
+     * which naming convention the API client used.
      */
     public static function mergeIntoRequest(Request $request): void
     {
@@ -25,9 +30,18 @@ class RequestLineItemParser
         }
 
         if ($parsed !== null) {
+            // Normalize every row so both `item_name` (snake) and `itemName` (camel)
+            // are present. Without this, `required_without:items.*.itemName` in
+            // validation rules does not work reliably because Laravel does not expand
+            // wildcard `*` characters inside rule parameters.
+            $normalized = array_map(
+                static fn (mixed $row) => is_array($row) ? self::normalizeRow($row) : $row,
+                $parsed,
+            );
+
             $request->merge([
-                'items' => $parsed,
-                'line_items' => $parsed,
+                'items' => $normalized,
+                'line_items' => $normalized,
             ]);
         }
     }
@@ -63,9 +77,17 @@ class RequestLineItemParser
         return [
             'items' => 'nullable|array',
             'line_items' => 'nullable|array',
-            'items.*.item_name' => 'required_without:items.*.itemName|nullable|string|max:255',
-            'items.*.itemName' => 'required_without:items.*.item_name|nullable|string|max:255',
-            'items.*.quantity' => 'nullable|integer|min:1',
+            // Both snake_case and camelCase names are accepted; mergeIntoRequest() normalises
+            // them so both are always present before validation runs. Using `required_without`
+            // with a wildcard parameter (e.g. `required_without:items.*.itemName`) is NOT
+            // reliable in Laravel because the `*` in the parameter is never expanded — use
+            // plain `nullable` instead and rely on normalizeRow() to supply a fallback value.
+            'items.*.item_name' => 'nullable|string|max:255',
+            'items.*.itemName' => 'nullable|string|max:255',
+            // Accept numeric quantities (not integer-only) so fractional amounts such as
+            // "2.5 months" or "0.5 units" are valid.  normalizeRow() casts to int when
+            // persisting to the DB, so nothing downstream breaks.
+            'items.*.quantity' => 'nullable|numeric|min:0',
             'items.*.unit' => 'nullable|string|max:50',
             'items.*.budget_amount' => 'nullable|numeric|min:0',
             'items.*.budgetAmount' => 'nullable|numeric|min:0',
