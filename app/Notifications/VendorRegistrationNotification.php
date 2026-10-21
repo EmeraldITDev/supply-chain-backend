@@ -34,7 +34,8 @@ class VendorRegistrationNotification extends Notification implements ShouldQueue
     {
         $company = $this->registration->company_name;
         $frontend = rtrim((string) config('app.frontend_url', env('FRONTEND_URL', config('app.url'))), '/');
-        $reviewUrl = $frontend . '/vendors/registrations/' . $this->registration->id;
+        // Must match SPA route `/vendors/registration/:id` (singular) — plural 404s.
+        $reviewUrl = $frontend . '/vendors/registration/' . $this->registration->id;
 
         return (new MailMessage)
             ->subject('New vendor registration: ' . $company)
@@ -62,7 +63,7 @@ class VendorRegistrationNotification extends Notification implements ShouldQueue
             'vendor_name' => $company,
             'email' => $this->registration->email,
             'category' => $this->registration->category,
-            'action_url' => "/vendors/registrations/{$this->registration->id}",
+            'action_url' => "/vendors/registration/{$this->registration->id}",
             'icon' => 'user-add',
             'color' => 'blue',
             'priority' => 'normal',
