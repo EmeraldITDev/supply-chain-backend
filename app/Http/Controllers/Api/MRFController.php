@@ -18,6 +18,7 @@ use App\Support\PaymentMilestoneRequest;
 use App\Support\PoTaxCalculator;
 use App\Support\PurchaseOrderCurrency;
 use App\Support\RequestLineItemParser;
+use App\Support\SqlDialect;
 use Illuminate\Validation\ValidationException;
 use App\Services\NotificationService;
 use App\Services\FormattedIdGenerator;
@@ -356,11 +357,11 @@ class MRFController extends Controller
         $items = MRF::query()
             ->select(['id', 'mrf_id', 'formatted_id', 'title', 'po_number', 'linked_po_id'])
             ->where(function ($q) use ($like) {
-                $q->where('mrf_id', 'ilike', $like)
-                    ->orWhere('formatted_id', 'ilike', $like)
-                    ->orWhere('po_number', 'ilike', $like)
-                    ->orWhere('linked_po_id', 'ilike', $like)
-                    ->orWhere('title', 'ilike', $like);
+                $q->where('mrf_id', SqlDialect::like(), $like)
+                    ->orWhere('formatted_id', SqlDialect::like(), $like)
+                    ->orWhere('po_number', SqlDialect::like(), $like)
+                    ->orWhere('linked_po_id', SqlDialect::like(), $like)
+                    ->orWhere('title', SqlDialect::like(), $like);
             })
             ->orderByDesc('updated_at')
             ->limit(20)
@@ -463,15 +464,15 @@ class MRFController extends Controller
                 $escaped = str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $search);
                 $contains = '%'.$escaped.'%';
                 $query->where(function ($q) use ($contains) {
-                    $q->where('mrf_id', 'ilike', $contains)
-                        ->orWhere('formatted_id', 'ilike', $contains)
-                        ->orWhere('po_number', 'ilike', $contains)
-                        ->orWhere('linked_po_id', 'ilike', $contains)
-                        ->orWhere('title', 'ilike', $contains)
-                        ->orWhere('requester_name', 'ilike', $contains)
+                    $q->where('mrf_id', SqlDialect::like(), $contains)
+                        ->orWhere('formatted_id', SqlDialect::like(), $contains)
+                        ->orWhere('po_number', SqlDialect::like(), $contains)
+                        ->orWhere('linked_po_id', SqlDialect::like(), $contains)
+                        ->orWhere('title', SqlDialect::like(), $contains)
+                        ->orWhere('requester_name', SqlDialect::like(), $contains)
                         ->orWhereHas('selectedVendor', function ($vq) use ($contains) {
-                            $vq->where('name', 'ilike', $contains)
-                                ->orWhere('vendor_id', 'ilike', $contains);
+                            $vq->where('name', SqlDialect::like(), $contains)
+                                ->orWhere('vendor_id', SqlDialect::like(), $contains);
                         });
                 });
             }

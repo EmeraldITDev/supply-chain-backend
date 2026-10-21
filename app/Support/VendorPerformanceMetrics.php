@@ -86,7 +86,7 @@ class VendorPerformanceMetrics
                 ->where('selected_vendor_id', $vendorId)
                 ->whereNotNull('po_generated_at')
                 ->whereNotNull('grn_completed_at')
-                ->selectRaw('AVG(EXTRACT(EPOCH FROM (grn_completed_at - po_generated_at)) / 86400.0) as avg_days')
+                ->selectRaw('AVG('.SqlDialect::daysBetween('po_generated_at', 'grn_completed_at').') as avg_days')
                 ->first();
 
             return $row?->avg_days;

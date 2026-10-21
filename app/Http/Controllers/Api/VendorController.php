@@ -16,6 +16,7 @@ use App\Services\VendorApprovalService;
 use App\Services\VendorDirectoryExportService;
 use App\Services\VendorDocumentService;
 use App\Services\QuotationAttachmentService;
+use App\Support\SqlDialect;
 use App\Support\VendorCategoryDisplay;
 use App\Support\VendorPerformanceMetrics;
 use Illuminate\Http\Request;
@@ -284,11 +285,11 @@ class VendorController extends Controller
         $query->where(function ($q) use ($cat, $escaped) {
             $q->where('category', $cat)
                 ->orWhereRaw('LOWER(TRIM(category)) = ?', [strtolower($cat)])
-                ->orWhere('category', 'ilike', $escaped.',%')
-                ->orWhere('category', 'ilike', '%, '.$escaped.',%')
-                ->orWhere('category', 'ilike', '%, '.$escaped)
-                ->orWhere('category', 'ilike', '%,'.$escaped.',%')
-                ->orWhere('category', 'ilike', '%,'.$escaped);
+                ->orWhere('category', SqlDialect::like(), $escaped.',%')
+                ->orWhere('category', SqlDialect::like(), '%, '.$escaped.',%')
+                ->orWhere('category', SqlDialect::like(), '%, '.$escaped)
+                ->orWhere('category', SqlDialect::like(), '%,'.$escaped.',%')
+                ->orWhere('category', SqlDialect::like(), '%,'.$escaped);
         });
     }
 

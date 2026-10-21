@@ -273,7 +273,8 @@ class ProcurementReportService
                         ORDER BY
                             CASE WHEN m.selected_vendor_id IS NOT NULL AND qu.vendor_id = m.selected_vendor_id THEN 0 ELSE 1 END,
                             CASE WHEN qu.status = 'Approved' THEN 0 ELSE 1 END,
-                            COALESCE(qu.total_amount, qu.price) ASC NULLS LAST
+                            COALESCE(qu.total_amount, qu.price) IS NULL,
+                            COALESCE(qu.total_amount, qu.price) ASC
                         LIMIT 1
                     ), 0) AS quoted
                 FROM m_r_f_s m
