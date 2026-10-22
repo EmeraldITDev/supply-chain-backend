@@ -9,6 +9,7 @@ use App\Services\FormattedIdGenerator;
 use App\Support\PoTaxCalculator;
 use App\Support\PurchaseOrderCurrency;
 use App\Support\RequestLineItemParser;
+use App\Support\SqlDialect;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
 
@@ -85,15 +86,15 @@ class PurchaseOrderService
                 $escaped = str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $search);
                 $contains = '%'.$escaped.'%';
                 $query->where(function ($q) use ($contains) {
-                    $q->where('mrf_id', 'ilike', $contains)
-                        ->orWhere('formatted_id', 'ilike', $contains)
-                        ->orWhere('po_number', 'ilike', $contains)
-                        ->orWhere('linked_po_id', 'ilike', $contains)
-                        ->orWhere('title', 'ilike', $contains)
-                        ->orWhere('requester_name', 'ilike', $contains)
+                    $q->where('mrf_id', SqlDialect::like(), $contains)
+                        ->orWhere('formatted_id', SqlDialect::like(), $contains)
+                        ->orWhere('po_number', SqlDialect::like(), $contains)
+                        ->orWhere('linked_po_id', SqlDialect::like(), $contains)
+                        ->orWhere('title', SqlDialect::like(), $contains)
+                        ->orWhere('requester_name', SqlDialect::like(), $contains)
                         ->orWhereHas('selectedVendor', function ($vq) use ($contains) {
-                            $vq->where('name', 'ilike', $contains)
-                                ->orWhere('vendor_id', 'ilike', $contains);
+                            $vq->where('name', SqlDialect::like(), $contains)
+                                ->orWhere('vendor_id', SqlDialect::like(), $contains);
                         });
                 });
             }

@@ -7,7 +7,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class ScheduledReport extends Model
 {
-    protected $table = 'scm_scheduled_reports';
+    protected $table = 'scheduled_reports';
 
     protected $fillable = [
         'name',

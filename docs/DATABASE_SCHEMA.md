@@ -43,7 +43,6 @@ Child tables use the **acronym as a prefix**, not the parent table name:
 |---|---|---|
 | *(none)* | Procurement core | `m_r_f_s`, `vendors`, `quotations` |
 | `logistics_` | Fleet, trips, warehouse materials | `logistics_trips`, `logistics_vehicles` |
-| `scm_` | SCM reporting (avoid colliding with HRIS) | `scm_generated_reports` |
 | `finance_` | Finance AP integration | `finance_sync_events` |
 | `po_` | Purchase-order helpers | `po_terms_templates`, `po_number_sequences` |
 
@@ -471,8 +470,8 @@ erDiagram
     users ||--o{ notifications : notifiable
     users ||--o{ activities : actor
     users ||--o{ audit_logs : actor_id
-    users ||--o{ scm_generated_reports : created_by
-    users ||--o{ scm_scheduled_reports : created_by
+    users ||--o{ generated_reports : created_by
+    users ||--o{ scheduled_reports : created_by
     users ||--o{ attachments : uploaded_by
 ```
 
@@ -497,8 +496,8 @@ erDiagram
 | `department_codes` | — | Reference |
 | `category_codes` | — | Reference |
 | `id_sequences` | — | Reference |
-| `scm_generated_reports` | `GeneratedReport` | Reporting |
-| `scm_scheduled_reports` | `ScheduledReport` | Reporting |
+| `generated_reports` | `GeneratedReport` | Reporting |
+| `scheduled_reports` | `ScheduledReport` | Reporting |
 | `m_r_f_s` | `MRF` | Procurement / PO |
 | `mrf_line_items` | `MRFItem` | Procurement |
 | `mrf_approval_history` | `MRFApprovalHistory` | Procurement |
@@ -653,9 +652,9 @@ Polymorphic files for MRF, SRF, and accommodation bookings.
 
 ### Reporting
 
-**`scm_generated_reports`** (`GeneratedReport`): `id`, `name`, `report_type` string(64), `format` string(16) default `csv`, `status` string(32) default `completed`, `file_size_bytes`, `storage_path`, `filters` json, `created_by` FK → `users` SET NULL, `completed_at`, timestamps.
+**`generated_reports`** (`GeneratedReport`): `id`, `name`, `report_type` string(64), `format` string(16) default `csv`, `status` string(32) default `completed`, `file_size_bytes`, `storage_path`, `filters` json, `created_by` FK → `users` SET NULL, `completed_at`, timestamps.
 
-**`scm_scheduled_reports`** (`ScheduledReport`): `id`, `name`, `report_type`, `format`, `frequency` string(32), `filters` json, `recipient_user_ids` json, `is_active` boolean default true, `next_run_at`, `last_run_at`, `created_by` FK → `users`, timestamps.
+**`scheduled_reports`** (`ScheduledReport`): `id`, `name`, `report_type`, `format`, `frequency` string(32), `filters` json, `recipient_user_ids` json, `is_active` boolean default true, `next_run_at`, `last_run_at`, `created_by` FK → `users`, timestamps.
 
 ---
 

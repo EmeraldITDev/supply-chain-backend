@@ -9,6 +9,7 @@ use App\Models\RFQ;
 use App\Models\Vendor;
 use App\Models\VendorRegistration;
 use App\Support\ProcurementOverviewAccess;
+use App\Support\SqlDialect;
 use App\Support\UserRoleNormalizer;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
@@ -274,7 +275,7 @@ class ProcurementDashboardController extends Controller
         $row = DB::table('m_r_f_s')
             ->whereNotNull('grn_completed_at')
             ->whereBetween('grn_completed_at', [$from, $to])
-            ->selectRaw('AVG(EXTRACT(EPOCH FROM (grn_completed_at - created_at)) / 86400.0) as avg_days')
+            ->selectRaw('AVG('.SqlDialect::daysBetween('created_at', 'grn_completed_at').') as avg_days')
             ->first();
 
         return $row?->avg_days !== null ? round((float) $row->avg_days, 1) : null;

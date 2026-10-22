@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\MRF;
 use App\Services\WorkflowStateService;
+use App\Support\SqlDialect;
 
 /**
  * Maps closed / force-closed purchase orders (MRF-backed) into warehouse inventory rows
@@ -84,11 +85,11 @@ class CompletedProcurementInventoryService
         if ($search !== null && trim($search) !== '') {
             $term = '%'.str_replace(['%', '_'], ['\\%', '\\_'], trim($search)).'%';
             $query->where(function ($q) use ($term) {
-                $q->where('po_number', 'ilike', $term)
-                    ->orWhere('mrf_id', 'ilike', $term)
-                    ->orWhere('formatted_id', 'ilike', $term)
-                    ->orWhere('title', 'ilike', $term)
-                    ->orWhere('linked_po_id', 'ilike', $term);
+                $q->where('po_number', SqlDialect::like(), $term)
+                    ->orWhere('mrf_id', SqlDialect::like(), $term)
+                    ->orWhere('formatted_id', SqlDialect::like(), $term)
+                    ->orWhere('title', SqlDialect::like(), $term)
+                    ->orWhere('linked_po_id', SqlDialect::like(), $term);
             });
         }
 

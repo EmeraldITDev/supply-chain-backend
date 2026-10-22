@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands;
 
+use App\Support\SqlDialect;
 use Illuminate\Console\Command;
 use App\Models\MRF;
 use App\Models\MRFApprovalHistory;
@@ -50,8 +51,8 @@ class ClearTestMRFs extends Command
         if (!empty($titles)) {
             $query->where(function($q) use ($titles) {
                 foreach ($titles as $title) {
-                    $q->orWhere('title', 'ilike', "%{$title}%");
-                    $q->orWhere('description', 'ilike', "%{$title}%");
+                    $q->orWhere('title', SqlDialect::like(), "%{$title}%");
+                    $q->orWhere('description', SqlDialect::like(), "%{$title}%");
                 }
             });
         }

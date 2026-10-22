@@ -1,0 +1,34 @@
+Options -Indexes
+
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+
+    # Keep the bearer token: some Apache/PHP-FPM setups drop this header.
+    RewriteCond %{HTTP:Authorization} .
+    RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
+
+    # Leave AutoSSL's domain-validation files alone.
+    RewriteRule ^\.well-known/ - [L]
+
+    # Refuse any other dotfile or dot-folder (.env, .git, ...), anywhere.
+    RewriteRule (^|/)\. - [F,L]
+
+    # Drop trailing slashes here, so the redirect never exposes /public/.
+    RewriteCond %{REQUEST_FILENAME} !-d
+    RewriteCond %{REQUEST_URI} (.+)/$
+    RewriteRule ^ %1 [L,R=301]
+
+    # Everything else is served by Laravel from public/.
+    RewriteCond %{REQUEST_URI} !^/public/
+    RewriteRule ^(.*)$ public/$1 [L]
+</IfModule>
+
+# Dotfiles inside public/ too (.htaccess, .user.ini); applies to every subfolder.
+<FilesMatch "^\.">
+    Require all denied
+</FilesMatch>
+
+# If mod_rewrite is unavailable, refuse everything rather than expose files.
+<IfModule !mod_rewrite.c>
+    Require all denied
+</IfModule>

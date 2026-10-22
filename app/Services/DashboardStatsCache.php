@@ -61,29 +61,29 @@ class DashboardStatsCache
 
             $sql = "
                 SELECT
-                    COUNT(*)::int AS total,
-                    COUNT(*) FILTER (
-                        WHERE po_draft_saved_at IS NOT NULL
+                    COUNT(*) AS total,
+                    SUM(CASE
+                        WHEN po_draft_saved_at IS NOT NULL
                           AND (unsigned_po_url IS NULL OR unsigned_po_url = '')
-                    )::int AS draft,
-                    COUNT(*) FILTER (
-                        WHERE unsigned_po_url IS NOT NULL
+                        THEN 1 ELSE 0 END) AS draft,
+                    SUM(CASE
+                        WHEN unsigned_po_url IS NOT NULL
                           AND unsigned_po_url != ''
                           AND (signed_po_url IS NULL OR signed_po_url = '')
-                    )::int AS pending,
-                    COUNT(*) FILTER (
-                        WHERE signed_po_url IS NOT NULL AND signed_po_url != ''
-                    )::int AS signed,
-                    COUNT(*) FILTER (
-                        WHERE status = 'rejected'
+                        THEN 1 ELSE 0 END) AS pending,
+                    SUM(CASE
+                        WHEN signed_po_url IS NOT NULL AND signed_po_url != ''
+                        THEN 1 ELSE 0 END) AS signed,
+                    SUM(CASE
+                        WHEN status = 'rejected'
                            OR rejected_at IS NOT NULL
                            OR workflow_state IN ({$rejectedPlaceholders})
-                    )::int AS rejected,
-                    COUNT(*) FILTER (
-                        WHERE grn_completed = true
+                        THEN 1 ELSE 0 END) AS rejected,
+                    SUM(CASE
+                        WHEN grn_completed = true
                            OR status = 'completed'
                            OR workflow_state IN ({$completedPlaceholders})
-                    )::int AS completed
+                        THEN 1 ELSE 0 END) AS completed
                 FROM m_r_f_s
                 WHERE (
                     (po_number IS NOT NULL AND po_number != '')

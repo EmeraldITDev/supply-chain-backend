@@ -58,6 +58,11 @@ final class TableColumnCache
         ));
     }
 
+    public static function hasColumn(string $table, string $column): bool
+    {
+        return in_array($column, self::columnsFor($table), true);
+    }
+
     public static function hasTable(string $table): bool
     {
         $memoKey = 'table:'.$table;

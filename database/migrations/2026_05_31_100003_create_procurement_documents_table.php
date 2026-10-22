@@ -26,12 +26,29 @@ return new class extends Migration
             $table->index(['mrf_id', 'type', 'is_active']);
         });
 
-        if (Schema::getConnection()->getDriverName() === 'pgsql') {
+        $driver = Schema::getConnection()->getDriverName();
+
+        if ($driver === 'pgsql') {
             DB::statement("
                 CREATE UNIQUE INDEX procurement_documents_one_active_vendor_invoice
                 ON procurement_documents (mrf_id, vendor_id)
                 WHERE type = 'vendor_invoice' AND is_active = true AND vendor_id IS NOT NULL
             ");
+        } elseif (in_array($driver, ['mysql', 'mariadb'], true)) {
+            // No partial indexes here: a hidden generated column is 1 only for an
+            // active vendor invoice (NULL otherwise), and NULLs never collide in a
+            // unique key - including a NULL vendor_id, which cannot appear in the
+            // expression because of its ON DELETE SET NULL foreign key.
+            DB::statement("
+                ALTER TABLE procurement_documents
+                ADD COLUMN active_vendor_invoice_key TINYINT
+                    AS (CASE WHEN type = 'vendor_invoice' AND is_active = 1 THEN 1 END)
+                    STORED INVISIBLE
+            ");
+            DB::statement('
+                CREATE UNIQUE INDEX procurement_documents_one_active_vendor_invoice
+                ON procurement_documents (mrf_id, vendor_id, active_vendor_invoice_key)
+            ');
         }
     }
 

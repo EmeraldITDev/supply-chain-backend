@@ -7,7 +7,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class GeneratedReport extends Model
 {
-    protected $table = 'scm_generated_reports';
+    protected $table = 'generated_reports';
 
     public const STATUS_PROCESSING = 'processing';
     public const STATUS_COMPLETED = 'completed';
