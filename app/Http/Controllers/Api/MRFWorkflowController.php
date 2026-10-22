@@ -207,16 +207,9 @@ class MRFWorkflowController extends Controller
 
 
 
-            $parallelService->persistPartialApproval(
-                $locked,
-                MrfParallelFirstApprovalService::ROLE_SUPPLY_CHAIN_DIRECTOR,
-                $approvalAttributes,
-                $user,
-                $request->remarks,
-            );
-
-            $locked->fill($approvalAttributes);
-            $locked->save();
+            // One save and one history row (below). persistPartialApproval() would add a
+            // second "approved" row, even when the director rejects.
+            $locked->forceFill($approvalAttributes)->save();
 
             // FIX: Pass the actual stage string, not the hardcoded role!
             $approvalRecord = MRFApprovalHistory::record(
@@ -275,7 +268,7 @@ class MRFWorkflowController extends Controller
             } elseif ($approvalData['isApproved']) {
                 $this->notificationService->notifyMRFApproved($mrfModel, $user, $request->remarks);
             }
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             \Log::error('Failed to send MRF approved notification', [
                 'mrf_id' => $approvalData['locked']->mrf_id,
                 'error' => $e->getMessage(),
@@ -1187,7 +1180,9 @@ class MRFWorkflowController extends Controller
 
         $parallelService = app(MrfParallelFirstApprovalService::class);
 
-        return DB::transaction(function () use ($request, $user, $mrf, $parallelService) {
+        $approvedMrf = null;
+
+        $response = DB::transaction(function () use ($request, $user, $mrf, $parallelService, &$approvedMrf) {
             $locked = MRF::where('id', $mrf->id)->lockForUpdate()->first();
 
             if (! $locked) {
@@ -1259,73 +1254,27 @@ class MRFWorkflowController extends Controller
                 'status' => $transitionData['status'],
                 'current_stage' => $transitionData['current_stage'],
                 'workflow_state' => $transitionData['workflow_state'],
-                'procurement_review_started_at' => $isParallel && $transitionData['workflow_state'] === WorkflowStateService::STATE_PROCUREMENT_REVIEW ? now() : null,
+                'procurement_review_started_at' => $transitionData['workflow_state'] === WorkflowStateService::STATE_PROCUREMENT_REVIEW ? now() : null,
                 'last_action_by_role' => in_array($user->scmRole(), ['admin']) ? 'admin' : 'executive',
                 'first_approval_by_role' => $isParallel
                     ? ($locked->first_approval_by_role ?: MrfParallelFirstApprovalService::ROLE_EXECUTIVE)
                     : $locked->first_approval_by_role,
             ];
-            $parallelService->persistPartialApproval(
-                $locked,
-                MrfParallelFirstApprovalService::ROLE_EXECUTIVE,
-                $approvalAttributes,
-                $user,
-                $request->remarks,
-            );
-
-            try {
-                $locked->load('requester');
-                $this->notificationService->notifyMRFApproved($locked, $user, $request->remarks);
-            } catch (\Exception $e) {
-                \Log::error('Failed to send MRF approved notification', [
-                    'mrf_id' => $locked->mrf_id,
-                    'error' => $e->getMessage(),
-                ]);
-            }
-
-            if (! $isParallel) {
-                $transitionSuccess1 = $this->workflowService->transition($locked, WorkflowStateService::STATE_EXECUTIVE_APPROVED, $user);
-
-                if (! $transitionSuccess1) {
-                    Log::error('Failed to transition MRF to executive_approved', [
-                        'mrf_id' => $locked->mrf_id,
-                        'current_state' => $locked->workflow_state,
-                        'user_id' => $user->id,
-                    ]);
-
-                    return response()->json([
-                        'success' => false,
-                        'error' => 'Failed to transition MRF state',
-                        'code' => 'TRANSITION_FAILED',
-                    ], 500);
-                }
-
-                $locked->refresh();
-
-                $transitionSuccess2 = $this->workflowService->transition($locked, WorkflowStateService::STATE_PROCUREMENT_REVIEW, $user);
-
-                if (! $transitionSuccess2) {
-                    Log::error('Failed to transition MRF to procurement_review', [
-                        'mrf_id' => $locked->mrf_id,
-                        'current_state' => $locked->workflow_state,
-                        'user_id' => $user->id,
-                    ]);
-
-                    return response()->json([
-                        'success' => false,
-                        'error' => 'Failed to transition MRF to procurement review',
-                        'code' => 'TRANSITION_FAILED',
-                    ], 500);
-                }
-
-                $locked->refresh();
-
-                $locked->update([
-                    'status' => 'procurement_review',
-                    'current_stage' => 'procurement',
-                    'procurement_review_started_at' => now(),
-                    'last_action_by_role' => in_array($user->scmRole(), ['admin']) ? 'admin' : 'executive',
-                ]);
+            if ($isParallel) {
+                $parallelService->persistPartialApproval(
+                    $locked,
+                    MrfParallelFirstApprovalService::ROLE_EXECUTIVE,
+                    $approvalAttributes,
+                    $user,
+                    $request->remarks,
+                );
+            } else {
+                // Single-approver MRF: the attributes above already move it to
+                // procurement_review (status/stage included). It used to be saved here and
+                // then pushed through executive_review -> executive_approved, which failed
+                // because the state had already moved on; the half-done approval was
+                // committed and the retry said "already approved".
+                $locked->forceFill($approvalAttributes)->save();
             }
 
             if (! $isParallel) {
@@ -1347,11 +1296,7 @@ class MRFWorkflowController extends Controller
                 Log::warning('Failed to log MRF approval activity', ['error' => $e->getMessage()]);
             }
 
-            try {
-                $this->notificationService->notifyMRFPendingProcurement($locked);
-            } catch (\Exception $e) {
-                Log::warning('Failed to send procurement notification', ['error' => $e->getMessage()]);
-            }
+            $approvedMrf = $locked;
 
             return response()->json([
                 'success' => true,
@@ -1367,6 +1312,32 @@ class MRFWorkflowController extends Controller
                 ],
             ]);
         });
+
+        if (! $response) {
+            return response()->json(['success' => false, 'error' => 'MRF not found', 'code' => 'NOT_FOUND'], 404);
+        }
+
+        // Emails go out after the commit so a slow or failing mailer cannot hold the row
+        // lock or turn a saved approval into an error response.
+        if ($approvedMrf) {
+            try {
+                $approvedMrf->load('requester');
+                $this->notificationService->notifyMRFApproved($approvedMrf, $user, $request->remarks);
+            } catch (\Throwable $e) {
+                Log::error('Failed to send MRF approved notification', [
+                    'mrf_id' => $approvedMrf->mrf_id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+
+            try {
+                $this->notificationService->notifyMRFPendingProcurement($approvedMrf);
+            } catch (\Throwable $e) {
+                Log::warning('Failed to send procurement notification', ['error' => $e->getMessage()]);
+            }
+        }
+
+        return $response;
     }
 
     /**
