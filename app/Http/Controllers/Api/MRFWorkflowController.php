@@ -156,7 +156,15 @@ class MRFWorkflowController extends Controller
                     return ['error' => 'ALREADY_APPROVED', 'message' => 'This MRF has already been approved.', 'workflow_state' => $locked->workflow_state];
                 }
                 return ['error' => 'INVALID_WORKFLOW_STATE', 'message' => 'MRF is not awaiting Supply Chain Director review', 'workflow_state' => $locked->workflow_state];
-                }
+            }
+
+            // Still sitting on the parallel gate, but this director (or an admin
+            // acting as them) already recorded the approval. Do not write a
+            // second history row.
+            if ($parallelService->isParallelPending($locked)
+                && ! $parallelService->canConsumeFirstApproval($locked, MrfParallelFirstApprovalService::ROLE_SUPPLY_CHAIN_DIRECTOR)) {
+                return ['error' => 'ALREADY_APPROVED', 'message' => 'This MRF has already been approved.', 'workflow_state' => $locked->workflow_state];
+            }
 
             $isApproved = $request->action === 'approve';
             $isParallel = $parallelService->isParallelPending($locked);

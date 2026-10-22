@@ -254,95 +254,133 @@ class MRF extends Model
 
     /**
      * MRFs awaiting action on role-specific approval dashboards.
+     *
+     * Membership is based on workflow_state (the field the approve endpoints
+     * check). A stale current_stage such as parallel_first_approval must not
+     * keep an MRF in this queue after workflow_state has moved to
+     * supply_chain_director_approved or procurement_review. The dashboard asks
+     * for pending_for_role=scd, so role aliases are matched against the
+     * canonical performer_role stored on approval history.
      */
     public function scopePendingForRole($query, string $role)
     {
         $role = strtolower(trim($role));
 
-        $excludeApproverApproval = function ($q) use ($role): void {
-            $q->whereNotExists(function ($subquery) use ($role): void {
-                $subquery->select(
-                    \DB::raw(1)
-                )
+        $canonical = match ($role) {
+            'scd', 'supply_chain_director', 'supply_chain', 'director' => 'supply_chain_director',
+            'executive' => 'executive',
+            'chairman' => 'chairman',
+            default => $role,
+        };
+
+        $historyRoles = match ($canonical) {
+            'supply_chain_director' => ['supply_chain_director', 'supply_chain', 'director', 'scd'],
+            'executive' => ['executive'],
+            default => array_values(array_unique([$canonical, $role])),
+        };
+
+        $notYetApprovedByRole = function ($q) use ($canonical, $historyRoles): void {
+            $q->whereNotExists(function ($subquery) use ($historyRoles): void {
+                $subquery->select(\DB::raw(1))
                     ->from('mrf_approval_history')
                     ->whereColumn('mrf_approval_history.mrf_id', 'm_r_f_s.id')
                     ->where('mrf_approval_history.action', 'approved')
                     ->where('mrf_approval_history.stage', 'parallel_first_approval')
-                    ->where(function ($roleQuery) use ($role): void {
-                        $roleQuery->where('mrf_approval_history.performer_role', $role)
-                            ->orWhere('mrf_approval_history.performer_role', match ($role) {
-                                'scd', 'supply_chain_director', 'supply_chain' => 'supply_chain_director',
-                                default => $role,
-                            });
-                    });
+                    ->whereIn('mrf_approval_history.performer_role', $historyRoles);
             });
+
+            if ($canonical === 'supply_chain_director') {
+                $q->whereNull('director_approved_at')
+                    ->whereNull('scd_approved_at')
+                    ->where(function ($flag): void {
+                        $flag->whereNull('first_approval_by_role')
+                            ->orWhereNotIn('first_approval_by_role', [
+                                'supply_chain_director',
+                                'supply_chain',
+                                'director',
+                                'scd',
+                            ]);
+                    });
+            }
+
+            if ($canonical === 'executive') {
+                $q->where(function ($flag): void {
+                    $flag->whereNull('executive_approved')
+                        ->orWhere('executive_approved', false);
+                })->where(function ($flag): void {
+                    $flag->whereNull('first_approval_by_role')
+                        ->orWhere('first_approval_by_role', '!=', 'executive');
+                });
+            }
         };
 
-        return match ($role) {
-            'executive' => $query->where(function ($q) {
-                $q->whereIn('workflow_state', ['parallel_first_approval', 'executive_review'])
-                    ->orWhereIn('current_stage', ['parallel_first_approval', 'executive_review', 'executive']);
-            })->where(function ($pendingQuery) use ($excludeApproverApproval): void {
-                $pendingQuery->where('workflow_state', '!=', MrfParallelFirstApprovalService::STATE)
-                    ->orWhere(function ($parallelQuery) use ($excludeApproverApproval): void {
-                        $parallelQuery->where('workflow_state', MrfParallelFirstApprovalService::STATE)
-                            ->where($excludeApproverApproval);
+        return match ($canonical) {
+            'executive' => $query->where(function ($q) use ($notYetApprovedByRole): void {
+                $q->where('workflow_state', 'executive_review')
+                    ->orWhere(function ($parallel) use ($notYetApprovedByRole): void {
+                        $parallel->where('workflow_state', MrfParallelFirstApprovalService::STATE)
+                            ->where($notYetApprovedByRole);
+                    })
+                    ->orWhere(function ($legacy) use ($notYetApprovedByRole): void {
+                        $legacy->where(function ($empty): void {
+                            $empty->whereNull('workflow_state')->orWhere('workflow_state', '');
+                        })->where(function ($stages) use ($notYetApprovedByRole): void {
+                            $stages->whereIn('current_stage', ['executive_review', 'executive'])
+                                ->orWhere(function ($parallel) use ($notYetApprovedByRole): void {
+                                    $parallel->where('current_stage', 'parallel_first_approval')
+                                        ->where($notYetApprovedByRole);
+                                });
+                        });
                     });
             }),
-            'scd', 'supply_chain_director', 'supply_chain' => $query->where(function ($q) {
-                $q->where(function ($inner) use ($role) {
-                // 1. Standard sequential states & stages (REMOVED 'parallel_first_approval' from both lists!)
-                $inner->whereIn('workflow_state', [
+            'supply_chain_director' => $query->where(function ($q) use ($notYetApprovedByRole): void {
+                $q->whereIn('workflow_state', [
                     'supply_chain_director_review',
                     'vendor_selected',
                     'invoice_received',
                 ])
-                ->orWhereIn('current_stage', [
-                    'supply_chain_director_review',
-                    'director_review',
-                    'final_approval',
-                ]);
-
-                // 2. PARALLEL WORKFLOW ISOLATION:
-                // Check both workflow_state and current_stage, but STRICTLY require that this role has not approved it yet!
-                $inner->orWhere(function ($parallel) use ($role) {
-                    $parallel->where(function ($stateOrStage) {
-                        $stateOrStage->where('workflow_state', 'parallel_first_approval')
-                                    ->orWhere('current_stage', 'parallel_first_approval');
+                    ->orWhere(function ($parallel) use ($notYetApprovedByRole): void {
+                        // workflow_state only. A leftover current_stage of
+                        // parallel_first_approval must not resurrect an MRF
+                        // whose workflow has already moved on.
+                        $parallel->where('workflow_state', MrfParallelFirstApprovalService::STATE)
+                            ->where($notYetApprovedByRole);
                     })
-                    // Must NOT exist in the approval history table for this role
-                    ->whereNotExists(function ($history) use ($role) {
-                        $history->select(DB::raw(1))
-                                ->from('mrf_approval_history')
-                                ->whereColumn('mrf_approval_history.mrf_id', 'm_r_f_s.id')
-                                ->where('mrf_approval_history.stage', 'parallel_first_approval')
-                                ->where('mrf_approval_history.performer_role', $role)
-                                ->where('mrf_approval_history.action', 'approved');
+                    ->orWhere(function ($legacy) use ($notYetApprovedByRole): void {
+                        $legacy->where(function ($empty): void {
+                            $empty->whereNull('workflow_state')->orWhere('workflow_state', '');
+                        })->where(function ($stages) use ($notYetApprovedByRole): void {
+                            $stages->whereIn('current_stage', [
+                                'supply_chain_director_review',
+                                'director_review',
+                                'final_approval',
+                            ])->orWhere(function ($parallel) use ($notYetApprovedByRole): void {
+                                $parallel->where('current_stage', 'parallel_first_approval')
+                                    ->where($notYetApprovedByRole);
+                            });
+                        });
                     })
-                    // AND must NOT have this role already stamped on the parent model flag
-                    ->where(function ($flag) use ($role) {
-                        $flag->whereNull('first_approval_by_role')
-                            ->orWhere('first_approval_by_role', '!=', $role);
-                    });
-                });
-
-                // 3. Your clean PO signature logic
-                $inner->orWhere(function ($po) {
-                    $po->whereIn('workflow_state', ['po_generated', 'pending_scd_signature'])
-                    ->whereNotNull('unsigned_po_url')
-                    ->where('unsigned_po_url', '!=', '')
-                    ->where(function ($signed) {
-                        $signed->whereNull('signed_po_url')->orWhere('signed_po_url', '=', '');
+                    ->orWhere(function ($stagePending): void {
+                        $stagePending->whereIn('current_stage', [
+                            'supply_chain_director_review',
+                            'director_review',
+                            'final_approval',
+                        ])->whereIn('workflow_state', [
+                            'supply_chain_director_review',
+                            'director_review',
+                            'final_approval',
+                            'vendor_selected',
+                            'invoice_received',
+                        ]);
                     })
-                    ->whereNull('po_signed_at');
-                });
-            });
-
-            })->where(function ($pendingQuery) use ($excludeApproverApproval): void {
-                $pendingQuery->where('workflow_state', '!=', MrfParallelFirstApprovalService::STATE)
-                    ->orWhere(function ($parallelQuery) use ($excludeApproverApproval): void {
-                        $parallelQuery->where('workflow_state', MrfParallelFirstApprovalService::STATE)
-                            ->where($excludeApproverApproval);
+                    ->orWhere(function ($po): void {
+                        $po->whereIn('workflow_state', ['po_generated', 'pending_scd_signature'])
+                            ->whereNotNull('unsigned_po_url')
+                            ->where('unsigned_po_url', '!=', '')
+                            ->where(function ($signed): void {
+                                $signed->whereNull('signed_po_url')->orWhere('signed_po_url', '=', '');
+                            })
+                            ->whereNull('po_signed_at');
                     });
             }),
             'chairman' => $query->where(function ($q) {
