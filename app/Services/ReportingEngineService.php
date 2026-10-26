@@ -328,6 +328,15 @@ class ReportingEngineService
         if ($request->filled('vendor_id')) {
             $query->where('selected_vendor_id', (int) $request->query('vendor_id'));
         }
+        if ($request->filled('vendor')) {
+            $vendor = trim((string) $request->query('vendor'));
+            if ($vendor !== '') {
+                $query->whereHas('selectedVendor', function ($q) use ($vendor): void {
+                    $q->where('name', 'like', '%'.$vendor.'%')
+                        ->orWhere('vendor_code', 'like', '%'.$vendor.'%');
+                });
+            }
+        }
         if ($request->filled('contract_type')) {
             $query->where('contract_type', $request->query('contract_type'));
         }
@@ -336,6 +345,15 @@ class ReportingEngineService
         }
         if ($request->filled('procurement_manager_id')) {
             $query->where('procurement_manager_id', (int) $request->query('procurement_manager_id'));
+        }
+        if ($request->filled('procurement_manager')) {
+            $manager = trim((string) $request->query('procurement_manager'));
+            if ($manager !== '') {
+                $query->whereHas('procurementManager', function ($q) use ($manager): void {
+                    $q->where('name', 'like', '%'.$manager.'%')
+                        ->orWhere('email', 'like', '%'.$manager.'%');
+                });
+            }
         }
         if ($request->filled('payment_status')) {
             $query->where('payment_status', $request->query('payment_status'));
