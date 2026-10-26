@@ -152,7 +152,17 @@ class ReportExportService
             if ($headers !== []) {
                 $sheet->freezePane('A2');
                 $sheet->getStyle('A1:'.$sheet->getHighestColumn().'1')->getFont()->setBold(true);
+                $sheet->getStyle('A1:'.$sheet->getHighestColumn().'1')
+                    ->getFill()
+                    ->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)
+                    ->getStartColor()
+                    ->setARGB('FF047857');
+                $sheet->getStyle('A1:'.$sheet->getHighestColumn().'1')
+                    ->getFont()
+                    ->getColor()
+                    ->setARGB('FFFFFFFF');
                 $sheet->getStyle('A1:'.$sheet->getHighestColumn().$sheet->getHighestRow())->getAlignment()->setWrapText(true);
+                $sheet->setAutoFilter('A1:'.$sheet->getHighestColumn().$sheet->getHighestRow());
             }
 
             foreach (range('A', $sheet->getHighestColumn()) as $column) {

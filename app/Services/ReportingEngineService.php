@@ -5,9 +5,11 @@ namespace App\Services;
 use App\Models\GeneratedReport;
 use App\Models\MRF;
 use App\Models\MRFItem;
+use App\Support\ExportLimit;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class ReportingEngineService
@@ -127,12 +129,13 @@ class ReportingEngineService
 
         $query = $this->basePoRegisterQuery();
         $this->applyPoRegisterFilters($query, $request, $dateField, $periodStart, $periodEnd);
+        $summary = $this->poRegisterSummary(clone $query);
 
         $paginator = $query->orderBy($sortBy, $sortDirection)->paginate($perPage);
 
         return [
             'period' => ['from' => $periodStart->toDateString(), 'to' => $periodEnd->toDateString()],
-            'summary' => $this->poRegisterSummary($this->basePoRegisterQuery(), $request, $dateField, $periodStart, $periodEnd),
+            'summary' => $summary,
             'items' => collect($paginator->items())->map(fn (MRF $mrf) => $this->mapPoRegisterRow($mrf))->values()->all(),
             'pagination' => [
                 'page' => $paginator->currentPage(),
@@ -145,14 +148,28 @@ class ReportingEngineService
         ];
     }
 
-    public function exportPoRegister(Request $request, string $format): StreamedResponse
+    public function exportPoRegister(Request $request, string $format): StreamedResponse|JsonResponse
     {
-        $request->merge(['per_page' => 10000, 'page' => 1]);
-        $payload = $this->poRegister($request);
-        $items = $payload['items'];
-        $summary = $payload['summary'];
+        $limit = ExportLimit::fromRequest($request);
+        [$periodStart, $periodEnd, $dateField] = $this->parsePoRegisterPeriod($request);
+        $query = $this->basePoRegisterQuery();
+        $this->applyPoRegisterFilters($query, $request, $dateField, $periodStart, $periodEnd);
+        $matchingCount = (clone $query)->count();
+        if ($matchingCount > $limit) {
+            return response()->json([
+                'success' => false,
+                'error' => "The filtered export contains {$matchingCount} records, exceeding the {$limit}-record export limit. Add filters and retry.",
+            ], 422);
+        }
+
+        $items = (clone $query)
+            ->orderBy('po_generated_at', 'desc')
+            ->get()
+            ->map(fn (MRF $mrf) => $this->mapPoRegisterRow($mrf))
+            ->all();
+        $summary = $this->poRegisterSummary(clone $query);
         $filename = 'po-register-'.now()->format('Y-m-d');
-        $headers = ['PO Number', 'PO Version', 'Linked MRF', 'PO Title', 'Vendor', 'Department', 'Contract Type', 'Currency', 'PO Value', 'Tax Amount', 'Total Amount', 'PO Generation Date', 'Signing Date', 'Approval Status', 'Signing Status', 'Payment Status', 'GRN Status', 'Expected Delivery'];
+        $headers = ['PO Number', 'PO Version', 'Linked MRF', 'PO Title', 'Vendor', 'Department', 'Contract Type', 'Currency', 'PO Value', 'Tax Amount', 'PO Generation Date', 'Signing Date', 'Approval Status', 'Signing Status', 'Payment Status', 'GRN Status', 'Expected Delivery'];
         $poRows = array_map(fn (array $row) => [
             $row['poNumber'] ?? '',
             $row['poVersion'] ?? '',
@@ -164,7 +181,6 @@ class ReportingEngineService
             $row['currency'] ?? '',
             $row['poValue'] ?? 0,
             $row['taxAmount'] ?? 0,
-            $row['totalAmount'] ?? 0,
             $row['poGenerationDate'] ?? '',
             $row['poSigningDate'] ?? '',
             $row['approvalStatus'] ?? '',
@@ -175,6 +191,8 @@ class ReportingEngineService
         ], $items);
 
         $filters = $this->formatPoRegisterFiltersForExport($request);
+        $filters['From'] = $periodStart->toDateString();
+        $filters['To'] = $periodEnd->toDateString();
         $userId = $request->user()?->id;
         $generated = GeneratedReport::create([
             'name' => 'Purchase Order Register export',
@@ -207,13 +225,13 @@ class ReportingEngineService
                 ],
                 [
                     'title' => 'PO Line Items',
-                    'headers' => ['PO Number', 'MRF Number', 'Item Name', 'Quantity', 'Unit', 'Unit Price', 'Line Total', 'Category'],
-                    'rows' => $this->buildPoLineItemRows($request),
+                    'headers' => ['PO Number', 'MRF Number', 'Item Name', 'Quantity', 'Unit', 'Unit Price', 'Line Total', 'Tax Rate (%)'],
+                    'rows' => $this->buildPoLineItemRows(array_column($items, 'id')),
                 ],
                 [
                     'title' => 'Applied Filters & Metadata',
                     'headers' => ['Field', 'Value'],
-                    'rows' => $this->buildFilterMetadataRows($filters, $request),
+                    'rows' => $this->buildFilterMetadataRows($filters),
                 ],
             ]),
             default => $this->exportService->streamMultiSheetXlsx($filename, [
@@ -229,13 +247,13 @@ class ReportingEngineService
                 ],
                 [
                     'title' => 'PO Line Items',
-                    'headers' => ['PO Number', 'MRF Number', 'Item Name', 'Quantity', 'Unit', 'Unit Price', 'Line Total', 'Category'],
-                    'rows' => $this->buildPoLineItemRows($request),
+                    'headers' => ['PO Number', 'MRF Number', 'Item Name', 'Quantity', 'Unit', 'Unit Price', 'Line Total', 'Tax Rate (%)'],
+                    'rows' => $this->buildPoLineItemRows(array_column($items, 'id')),
                 ],
                 [
                     'title' => 'Applied Filters & Metadata',
                     'headers' => ['Field', 'Value'],
-                    'rows' => $this->buildFilterMetadataRows($filters, $request),
+                    'rows' => $this->buildFilterMetadataRows($filters),
                 ],
             ]),
         };
@@ -296,7 +314,7 @@ class ReportingEngineService
     private function basePoRegisterQuery(): \Illuminate\Database\Eloquent\Builder
     {
         return MRF::query()
-            ->with(['selectedVendor:id,name,vendor_code', 'procurementManager:id,name', 'items'])
+            ->with(['selectedVendor:id,name,vendor_code', 'procurementManager:id,name'])
             ->whereNotNull('po_number')
             ->where('po_number', '!=', '');
     }
@@ -323,7 +341,10 @@ class ReportingEngineService
             ->where($dateField, '<=', $periodEnd);
 
         if ($request->filled('department')) {
-            $query->where('department', $request->query('department'));
+            $department = trim((string) $request->query('department'));
+            if ($department !== '') {
+                $query->whereRaw('LOWER(department) LIKE ?', ['%'.mb_strtolower($department).'%']);
+            }
         }
         if ($request->filled('vendor_id')) {
             $query->where('selected_vendor_id', (int) $request->query('vendor_id'));
@@ -332,16 +353,17 @@ class ReportingEngineService
             $vendor = trim((string) $request->query('vendor'));
             if ($vendor !== '') {
                 $query->whereHas('selectedVendor', function ($q) use ($vendor): void {
-                    $q->where('name', 'like', '%'.$vendor.'%')
-                        ->orWhere('vendor_code', 'like', '%'.$vendor.'%');
+                    $like = '%'.mb_strtolower($vendor).'%';
+                    $q->whereRaw('LOWER(name) LIKE ?', [$like])
+                        ->orWhereRaw('LOWER(vendor_code) LIKE ?', [$like]);
                 });
             }
         }
         if ($request->filled('contract_type')) {
-            $query->where('contract_type', $request->query('contract_type'));
+            $query->whereRaw('LOWER(contract_type) = ?', [mb_strtolower(trim((string) $request->query('contract_type')))]);
         }
         if ($request->filled('currency')) {
-            $query->where('currency', $request->query('currency'));
+            $query->whereRaw('UPPER(currency) = ?', [strtoupper(trim((string) $request->query('currency')))]);
         }
         if ($request->filled('procurement_manager_id')) {
             $query->where('procurement_manager_id', (int) $request->query('procurement_manager_id'));
@@ -350,8 +372,9 @@ class ReportingEngineService
             $manager = trim((string) $request->query('procurement_manager'));
             if ($manager !== '') {
                 $query->whereHas('procurementManager', function ($q) use ($manager): void {
-                    $q->where('name', 'like', '%'.$manager.'%')
-                        ->orWhere('email', 'like', '%'.$manager.'%');
+                    $like = '%'.mb_strtolower($manager).'%';
+                    $q->whereRaw('LOWER(name) LIKE ?', [$like])
+                        ->orWhereRaw('LOWER(email) LIKE ?', [$like]);
                 });
             }
         }
@@ -412,39 +435,38 @@ class ReportingEngineService
             }
         }
         if ($request->filled('po_value_min')) {
-            $query->where('estimated_cost', '>=', (float) $request->query('po_value_min'));
+            $query->whereRaw('COALESCE(po_value, estimated_cost) >= ?', [(float) $request->query('po_value_min')]);
         }
         if ($request->filled('po_value_max')) {
-            $query->where('estimated_cost', '<=', (float) $request->query('po_value_max'));
+            $query->whereRaw('COALESCE(po_value, estimated_cost) <= ?', [(float) $request->query('po_value_max')]);
         }
         if ($request->filled('po_number')) {
-            $query->where('po_number', 'like', '%'.trim((string) $request->query('po_number')).'%');
+            $query->whereRaw('LOWER(po_number) LIKE ?', ['%'.mb_strtolower(trim((string) $request->query('po_number'))).'%']);
         }
         if ($request->filled('mrf_number')) {
             $mrfNumber = trim((string) $request->query('mrf_number'));
             $query->where(function ($q) use ($mrfNumber): void {
-                $q->where('mrf_id', 'like', '%'.$mrfNumber.'%')
-                    ->orWhere('formatted_id', 'like', '%'.$mrfNumber.'%');
+                $like = '%'.mb_strtolower($mrfNumber).'%';
+                $q->whereRaw('LOWER(mrf_id) LIKE ?', [$like])
+                    ->orWhereRaw('LOWER(formatted_id) LIKE ?', [$like]);
             });
         }
         if ($request->filled('search')) {
             $term = trim((string) $request->query('search'));
             $query->where(function ($q) use ($term): void {
-                $q->where('po_number', 'like', '%'.$term.'%')
-                    ->orWhere('mrf_id', 'like', '%'.$term.'%')
-                    ->orWhere('formatted_id', 'like', '%'.$term.'%')
-                    ->orWhere('title', 'like', '%'.$term.'%');
+                $like = '%'.mb_strtolower($term).'%';
+                $q->whereRaw('LOWER(po_number) LIKE ?', [$like])
+                    ->orWhereRaw('LOWER(mrf_id) LIKE ?', [$like])
+                    ->orWhereRaw('LOWER(formatted_id) LIKE ?', [$like])
+                    ->orWhereRaw('LOWER(title) LIKE ?', [$like]);
             });
         }
     }
 
-    private function poRegisterSummary(\Illuminate\Database\Eloquent\Builder $query, Request $request, string $dateField, Carbon $periodStart, Carbon $periodEnd): array
+    private function poRegisterSummary(\Illuminate\Database\Eloquent\Builder $query): array
     {
         $baseQuery = clone $query;
         $totalPos = $baseQuery->count();
-        $financialSummary = (clone $baseQuery)
-            ->selectRaw('COUNT(*) as total_rows, COALESCE(SUM(COALESCE(estimated_cost, 0)), 0) as total_value, COALESCE(SUM(COALESCE(tax_amount, 0)), 0) as total_tax, AVG(COALESCE(estimated_cost, 0)) as average_value')
-            ->first();
         $signedPos = (clone $baseQuery)->where(function ($q): void {
             $q->whereNotNull('signed_po_url')->where('signed_po_url', '!=', '')
                 ->orWhereNotNull('po_signed_at');
@@ -461,28 +483,46 @@ class ReportingEngineService
         $completedGrn = (clone $baseQuery)->where('grn_completed', true)->count();
 
         $currencyRows = (clone $baseQuery)
-            ->select(['currency', DB::raw('COUNT(*) as po_count'), DB::raw('SUM(COALESCE(estimated_cost, 0)) as total_value')])
-            ->whereNotNull('currency')
+            ->select(['currency', DB::raw('COUNT(*) as po_count'), DB::raw('SUM(COALESCE(po_value, estimated_cost, 0)) as total_value'), DB::raw('SUM(COALESCE(tax_amount, 0)) as total_tax'), DB::raw('AVG(COALESCE(po_value, estimated_cost, 0)) as average_value')])
             ->groupBy('currency')
             ->orderByDesc('total_value')
             ->get();
 
-        $currencies = $currencyRows->pluck('currency')->filter()->unique()->values()->all();
+        $currencies = $currencyRows->map(fn ($row) => trim((string) $row->currency) !== '' ? (string) $row->currency : 'Unknown')
+            ->unique()
+            ->values()
+            ->all();
         $totalPoValue = null;
         if (count($currencies) === 1 && $currencyRows->isNotEmpty()) {
             $totalPoValue = (float) $currencyRows->sum('total_value');
         }
+        $totalPoValueCurrency = count($currencies) === 1 ? $currencies[0] : null;
+        $totalTaxAmount = count($currencies) === 1 && $currencyRows->isNotEmpty()
+            ? (float) $currencyRows->sum('total_tax')
+            : null;
+        $averagePoValue = count($currencies) === 1 && $currencyRows->isNotEmpty()
+            ? (float) $currencyRows->first()->average_value
+            : null;
 
-        $topVendors = (clone $baseQuery)
+        $vendorCurrencyRows = (clone $baseQuery)
             ->join('vendors', 'vendors.id', '=', 'm_r_f_s.selected_vendor_id')
-            ->select(['vendors.name as vendor_name', DB::raw('COUNT(*) as po_count'), DB::raw('SUM(COALESCE(m_r_f_s.estimated_cost, 0)) as total_po_value')])
-            ->groupBy('vendors.id', 'vendors.name')
+            ->select(['vendors.name as vendor_name', 'm_r_f_s.currency', DB::raw('COUNT(*) as po_count'), DB::raw('SUM(COALESCE(m_r_f_s.po_value, m_r_f_s.estimated_cost, 0)) as total_po_value')])
+            ->groupBy('vendors.id', 'vendors.name', 'm_r_f_s.currency')
             ->orderByDesc('total_po_value')
-            ->limit(5)
             ->get();
+        $topVendorsByCurrency = $vendorCurrencyRows
+            ->groupBy(fn ($row) => trim((string) $row->currency) !== '' ? (string) $row->currency : 'Unknown')
+            ->map(fn ($vendors, $currency) => [
+                'currency' => (string) $currency,
+                'vendors' => $vendors->sortByDesc('total_po_value')->take(5)->map(fn ($row) => [
+                    'name' => $row->vendor_name,
+                    'poCount' => (int) $row->po_count,
+                    'totalPoValue' => (float) $row->total_po_value,
+                ])->values()->all(),
+            ])->values()->all();
 
         $monthlyTrend = (clone $baseQuery)
-            ->select(['po_generated_at', 'estimated_cost', 'currency'])
+            ->select(['po_generated_at', 'po_value', 'estimated_cost', 'currency'])
             ->whereNotNull('po_generated_at')
             ->get()
             ->groupBy(fn ($row) => Carbon::parse($row->po_generated_at)->format('Y-m'))
@@ -490,7 +530,12 @@ class ReportingEngineService
                 return [
                     'month' => $month,
                     'count' => $entries->count(),
-                    'value' => (float) $entries->sum('estimated_cost'),
+                    'valueByCurrency' => $entries
+                        ->groupBy(fn ($row) => trim((string) $row->currency) !== '' ? (string) $row->currency : 'Unknown')
+                        ->map(fn ($currencyRows, $currency) => [
+                            'currency' => (string) $currency,
+                            'totalValue' => (float) $currencyRows->sum(fn ($row) => $row->po_value ?? $row->estimated_cost ?? 0),
+                        ])->values()->all(),
                 ];
             })
             ->values()
@@ -499,23 +544,22 @@ class ReportingEngineService
         return [
             'totalGeneratedPos' => $totalPos,
             'totalPoValue' => $totalPoValue,
+            'totalPoValueCurrency' => $totalPoValueCurrency,
             'totalPoValueByCurrency' => $currencyRows->map(fn ($row) => [
-                'currency' => (string) ($row->currency ?? 'Unknown'),
+                'currency' => trim((string) $row->currency) !== '' ? (string) $row->currency : 'Unknown',
                 'count' => (int) ($row->po_count ?? 0),
                 'totalValue' => (float) ($row->total_value ?? 0),
+                'totalTaxAmount' => (float) ($row->total_tax ?? 0),
+                'averagePoValue' => (float) ($row->average_value ?? 0),
             ])->values()->all(),
             'signedPos' => $signedPos,
             'unsignedPos' => $unsignedPos,
             'awaitingGrn' => $awaitingGrn,
             'completedGrn' => $completedGrn,
-            'averagePoValue' => $financialSummary->total_rows > 0 ? (float) $financialSummary->average_value : 0.0,
-            'totalTaxAmount' => $financialSummary->total_tax ?? 0,
+            'averagePoValue' => $averagePoValue,
+            'totalTaxAmount' => $totalTaxAmount,
             'monthlyTrend' => $monthlyTrend,
-            'topVendors' => $topVendors->map(fn ($row) => [
-                'name' => $row->vendor_name,
-                'poCount' => (int) ($row->po_count ?? 0),
-                'totalPoValue' => (float) ($row->total_po_value ?? 0),
-            ])->values()->all(),
+            'topVendorsByCurrency' => $topVendorsByCurrency,
         ];
     }
 
@@ -523,16 +567,26 @@ class ReportingEngineService
     {
         $rows = [
             ['Total Generated POs', $summary['totalGeneratedPos'] ?? 0],
-            ['Total PO Value', $this->formatCurrencyForSummary($summary['totalPoValue'] ?? null, null)],
+            ['Total PO Value', $summary['totalGeneratedPos'] === 0
+                ? 'No matching POs'
+                : ($summary['totalPoValue'] === null
+                    ? 'Multiple currencies; see currency breakdown'
+                    : $this->formatCurrencyForSummary((float) $summary['totalPoValue'], $summary['totalPoValueCurrency'] ?? null))],
             ['Signed POs', $summary['signedPos'] ?? 0],
             ['Unsigned POs', $summary['unsignedPos'] ?? 0],
             ['Awaiting GRN', $summary['awaitingGrn'] ?? 0],
             ['Completed GRN', $summary['completedGrn'] ?? 0],
-            ['Average PO Value', $this->formatCurrencyForSummary($summary['averagePoValue'] ?? 0, null)],
+            ['Average PO Value', $summary['totalGeneratedPos'] === 0
+                ? 'No matching POs'
+                : ($summary['averagePoValue'] === null
+                    ? 'Multiple currencies; see currency breakdown'
+                    : $this->formatCurrencyForSummary((float) $summary['averagePoValue'], $summary['totalPoValueCurrency'] ?? null))],
         ];
 
         foreach (($summary['totalPoValueByCurrency'] ?? []) as $entry) {
             $rows[] = ['Currency Total ('.$entry['currency'].')', $this->formatCurrencyForSummary((float) $entry['totalValue'], (string) $entry['currency'])];
+            $rows[] = ['Tax Total ('.$entry['currency'].')', $this->formatCurrencyForSummary((float) $entry['totalTaxAmount'], (string) $entry['currency'])];
+            $rows[] = ['Average PO Value ('.$entry['currency'].')', $this->formatCurrencyForSummary((float) $entry['averagePoValue'], (string) $entry['currency'])];
         }
 
         return $rows;
@@ -542,16 +596,27 @@ class ReportingEngineService
     {
         $labels = [
             'Total Generated POs' => $summary['totalGeneratedPos'] ?? 0,
-            'Total PO Value' => $this->formatCurrencyForSummary($summary['totalPoValue'] ?? null, null),
+            'Total PO Value' => $summary['totalGeneratedPos'] === 0
+                ? 'No matching POs'
+                : ($summary['totalPoValue'] === null
+                    ? 'Multiple currencies; see currency breakdown'
+                    : $this->formatCurrencyForSummary((float) $summary['totalPoValue'], $summary['totalPoValueCurrency'] ?? null)),
             'Signed POs' => $summary['signedPos'] ?? 0,
             'Unsigned POs' => $summary['unsignedPos'] ?? 0,
             'Awaiting GRN' => $summary['awaitingGrn'] ?? 0,
             'Completed GRN' => $summary['completedGrn'] ?? 0,
-            'Average PO Value' => $this->formatCurrencyForSummary($summary['averagePoValue'] ?? 0, null),
+            'Average PO Value' => $summary['totalGeneratedPos'] === 0
+                ? 'No matching POs'
+                : ($summary['averagePoValue'] === null
+                    ? 'Multiple currencies; see currency breakdown'
+                    : $this->formatCurrencyForSummary((float) $summary['averagePoValue'], $summary['totalPoValueCurrency'] ?? null)),
         ];
 
         foreach (($summary['totalPoValueByCurrency'] ?? []) as $entry) {
-            $labels[(string) $entry['currency'].' Total'] = $this->formatCurrencyForSummary((float) $entry['totalValue'], (string) $entry['currency']);
+            $currency = (string) $entry['currency'];
+            $labels[$currency.' Total'] = $this->formatCurrencyForSummary((float) $entry['totalValue'], $currency);
+            $labels[$currency.' Tax'] = $this->formatCurrencyForSummary((float) $entry['totalTaxAmount'], $currency);
+            $labels[$currency.' Average PO'] = $this->formatCurrencyForSummary((float) $entry['averagePoValue'], $currency);
         }
 
         return $labels;
@@ -566,14 +631,16 @@ class ReportingEngineService
             'From' => $request->query('from'),
             'To' => $request->query('to'),
             'Department' => $request->query('department'),
-            'Vendor' => $request->query('vendor_id'),
+            'Vendor' => $request->query('vendor') ?? $request->query('vendor_id'),
             'Contract Type' => $request->query('contract_type'),
             'Currency' => $request->query('currency'),
-            'Procurement Manager' => $request->query('procurement_manager_id'),
+            'Procurement Manager' => $request->query('procurement_manager') ?? $request->query('procurement_manager_id'),
             'PO Status' => $request->query('po_status'),
             'Signing Status' => $request->query('signing_status'),
             'Payment Status' => $request->query('payment_status'),
             'GRN Status' => $request->query('grn_status'),
+            'Minimum PO Value' => $request->query('po_value_min'),
+            'Maximum PO Value' => $request->query('po_value_max'),
             'PO Number' => $request->query('po_number'),
             'MRF Number' => $request->query('mrf_number'),
             'Search' => $request->query('search'),
@@ -582,9 +649,9 @@ class ReportingEngineService
         return array_filter($filterMap, fn ($value) => $value !== null && $value !== '');
     }
 
-    private function buildFilterMetadataRows(array $filters, Request $request): array
+    private function buildFilterMetadataRows(array $filters): array
     {
-        $rows = [['Field', 'Value']];
+        $rows = [];
         foreach ($filters as $field => $value) {
             $rows[] = [(string) $field, (string) $value];
         }
@@ -595,13 +662,8 @@ class ReportingEngineService
         return $rows;
     }
 
-    private function buildPoLineItemRows(Request $request): array
+    private function buildPoLineItemRows(array $poIds): array
     {
-        [$periodStart, $periodEnd, $dateField] = $this->parsePoRegisterPeriod($request);
-        $poQuery = $this->basePoRegisterQuery();
-        $this->applyPoRegisterFilters($poQuery, $request, $dateField, $periodStart, $periodEnd);
-        $poIds = $poQuery->pluck('id')->all();
-
         if ($poIds === []) {
             return [];
         }
@@ -630,10 +692,11 @@ class ReportingEngineService
         }
 
         $symbol = match (strtoupper((string) $currency)) {
+            'NGN' => '₦',
             'USD' => '$',
             'EUR' => '€',
             'GBP' => '£',
-            default => '₦',
+            default => strtoupper((string) $currency).' ',
         };
 
         return $symbol.number_format((float) $value, 2);
@@ -647,8 +710,7 @@ class ReportingEngineService
         }
 
         $taxAmount = (float) ($mrf->tax_amount ?? 0);
-        $poValue = (float) ($mrf->estimated_cost ?? 0);
-        $totalAmount = $poValue + $taxAmount;
+        $poValue = (float) ($mrf->po_value ?? $mrf->estimated_cost ?? 0);
 
         return [
             'id' => $mrf->id,
@@ -664,9 +726,8 @@ class ReportingEngineService
             'currency' => $mrf->currency ?: 'NGN',
             'poValue' => $poValue,
             'taxAmount' => $taxAmount,
-            'totalAmount' => $totalAmount,
             'poGenerationDate' => $mrf->po_generated_at?->toDateString() ?? 'Not Available',
-            'poSigningDate' => $mrf->po_signed_at?->toDateString() ?? ($mrf->signed_po_url ? 'Signed' : 'Not Available'),
+            'poSigningDate' => $mrf->po_signed_at?->toDateString(),
             'approvalStatus' => $mrf->status ?? $mrf->workflow_state ?? 'Not Available',
             'signingStatus' => $signedStatus,
             'paymentStatus' => $mrf->payment_status ?? 'Not Recorded',

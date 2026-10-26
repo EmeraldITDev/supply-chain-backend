@@ -10,14 +10,14 @@
             margin: 18px;
         }
         .header {
-            border-bottom: 2px solid #0f172a;
+            border-bottom: 3px solid #047857;
             padding-bottom: 12px;
             margin-bottom: 16px;
         }
         .brand {
             font-size: 18px;
             font-weight: 700;
-            color: #0f172a;
+            color: #047857;
         }
         .subhead {
             color: #475569;
@@ -66,9 +66,15 @@
             border-collapse: collapse;
             table-layout: fixed;
         }
+        thead {
+            display: table-header-group;
+        }
+        tr {
+            page-break-inside: avoid;
+        }
         th, td {
             border: 1px solid #dbe4ef;
-            padding: 6px 7px;
+            padding: 4px 5px;
             text-align: left;
             vertical-align: top;
             word-wrap: break-word;
@@ -76,24 +82,27 @@
         th {
             background: #e2e8f0;
             color: #0f172a;
-            font-size: 10px;
+            font-size: 8px;
             font-weight: 700;
         }
         td {
-            font-size: 9px;
+            font-size: 8px;
             color: #1f2937;
         }
         .page-number {
-            position: running(pageNumber);
+            position: fixed;
+            bottom: -10mm;
+            right: 0;
             font-size: 9px;
             color: #475569;
+            text-align: right;
+        }
+        .page-number:after {
+            content: "Page " counter(page) " of " counter(pages);
         }
         @page {
             size: A4 landscape;
             margin: 18mm 12mm;
-            @bottom-right {
-                content: element(pageNumber);
-            }
         }
     </style>
 </head>
@@ -147,5 +156,6 @@
             @endforeach
         </tbody>
     </table>
+    <div class="page-number"></div>
 </body>
 </html>
