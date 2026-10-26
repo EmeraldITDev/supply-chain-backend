@@ -314,7 +314,7 @@ class ReportingEngineService
     private function basePoRegisterQuery(): \Illuminate\Database\Eloquent\Builder
     {
         return MRF::query()
-            ->with(['selectedVendor:id,name,vendor_code', 'procurementManager:id,name'])
+            ->with(['selectedVendor:id,name,vendor_id', 'procurementManager:id,name'])
             ->whereNotNull('po_number')
             ->where('po_number', '!=', '');
     }
@@ -355,7 +355,7 @@ class ReportingEngineService
                 $query->whereHas('selectedVendor', function ($q) use ($vendor): void {
                     $like = '%'.mb_strtolower($vendor).'%';
                     $q->whereRaw('LOWER(name) LIKE ?', [$like])
-                        ->orWhereRaw('LOWER(vendor_code) LIKE ?', [$like]);
+                        ->orWhereRaw('LOWER(vendor_id) LIKE ?', [$like]);
                 });
             }
         }
@@ -720,7 +720,7 @@ class ReportingEngineService
             'mrfId' => $mrf->mrf_id,
             'title' => $mrf->title,
             'vendorName' => $mrf->selectedVendor?->name ?? 'Not Available',
-            'vendorCode' => $mrf->selectedVendor?->vendor_code ?? 'Not Available',
+            'vendorCode' => $mrf->selectedVendor?->vendor_id ?? 'Not Available',
             'department' => $mrf->department ?? 'Not Available',
             'contractType' => $mrf->contract_type ?? 'Not Available',
             'currency' => $mrf->currency ?: 'NGN',
