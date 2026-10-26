@@ -589,6 +589,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/reports/procurement/records', [ReportingEngineController::class, 'procurementRecords']);
     Route::get('/reports/procurement/records/export', [ReportingEngineController::class, 'exportProcurementRecords']);
     Route::get('/reports/procurement/records/{id}', [ReportingEngineController::class, 'procurementRecordDetail']);
+    Route::get('/reports/po-register', [ReportingEngineController::class, 'poRegister']);
+    Route::get('/reports/po-register/export', [ReportingEngineController::class, 'exportPoRegister']);
     Route::get('/reports/finance-ap/summary', [FinanceApReportController::class, 'summary']);
     Route::get('/reports/finance-ap/outstanding-milestones', [FinanceApReportController::class, 'outstandingMilestones']);
     Route::get('/reports/finance-ap/advance-delivery-risk', [FinanceApReportController::class, 'advanceDeliveryRisk']);

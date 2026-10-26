@@ -39,6 +39,18 @@ class ReportingEngineController extends Controller
         ]);
     }
 
+    public function poRegister(Request $request): JsonResponse
+    {
+        if ($response = $this->authorizeReport($request)) {
+            return $response;
+        }
+
+        return response()->json([
+            'success' => true,
+            'data' => $this->engine->poRegister($request),
+        ]);
+    }
+
     public function exportProcurementRecords(Request $request): StreamedResponse|JsonResponse
     {
         if ($response = $this->authorizeReport($request)) {
@@ -54,6 +66,23 @@ class ReportingEngineController extends Controller
         }
 
         return $this->engine->exportProcurementRecords($request, $format);
+    }
+
+    public function exportPoRegister(Request $request): StreamedResponse|JsonResponse
+    {
+        if ($response = $this->authorizeReport($request)) {
+            return $response;
+        }
+
+        $format = strtolower((string) $request->query('format', 'xlsx'));
+        if (! in_array($format, ['xlsx', 'pdf'], true)) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Invalid export format. Use xlsx or pdf.',
+            ], 422);
+        }
+
+        return $this->engine->exportPoRegister($request, $format);
     }
 
     private function authorizeReport(Request $request): ?JsonResponse

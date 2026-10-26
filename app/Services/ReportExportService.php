@@ -125,6 +125,86 @@ class ReportExportService
     }
 
     /**
+     * @param  array<int, array{title: string, headers: list<string>, rows: list<list<mixed>>}>  $sheets
+     */
+    public function streamMultiSheetXlsx(string $filename, array $sheets): StreamedResponse
+    {
+        $spreadsheet = new Spreadsheet();
+
+        foreach ($sheets as $sheetIndex => $sheetConfig) {
+            $sheet = $sheetIndex === 0 ? $spreadsheet->getActiveSheet() : $spreadsheet->createSheet($sheetIndex);
+            $title = (string) ($sheetConfig['title'] ?? ('Sheet '.($sheetIndex + 1)));
+            $sheet->setTitle(substr($title, 0, 31));
+
+            $headers = $sheetConfig['headers'] ?? [];
+            $rows = $sheetConfig['rows'] ?? [];
+
+            foreach ($headers as $colIndex => $header) {
+                $sheet->setCellValue([$colIndex + 1, 1], $header);
+            }
+
+            foreach ($rows as $rowIndex => $row) {
+                foreach ($row as $colIndex => $cell) {
+                    $sheet->setCellValue([$colIndex + 1, $rowIndex + 2], $cell === null ? '' : $cell);
+                }
+            }
+
+            if ($headers !== []) {
+                $sheet->freezePane('A2');
+                $sheet->getStyle('A1:'.$sheet->getHighestColumn().'1')->getFont()->setBold(true);
+                $sheet->getStyle('A1:'.$sheet->getHighestColumn().$sheet->getHighestRow())->getAlignment()->setWrapText(true);
+            }
+
+            foreach (range('A', $sheet->getHighestColumn()) as $column) {
+                $sheet->getColumnDimension($column)->setAutoSize(true);
+            }
+        }
+
+        return response()->streamDownload(function () use ($spreadsheet): void {
+            $writer = new \PhpOffice\PhpSpreadsheet\Writer\Xlsx($spreadsheet);
+            $writer->save('php://output');
+            $spreadsheet->disconnectWorksheets();
+        }, $filename.'.xlsx', [
+            'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            'Content-Disposition' => 'attachment; filename="'.$filename.'.xlsx"',
+        ]);
+    }
+
+    /**
+     * @param  array<string, mixed>  $summary
+     * @param  array<string, mixed>  $filters
+     * @param  list<string>  $headers
+     * @param  list<list<mixed>>  $rows
+     */
+    public function streamManagementPdf(string $filename, string $title, array $summary, array $filters, array $headers, array $rows): StreamedResponse
+    {
+        $html = view('reports.po-register-export', [
+            'title' => $title,
+            'summary' => $summary,
+            'filters' => $filters,
+            'headers' => $headers,
+            'rows' => $rows,
+            'generatedAt' => now()->toDateTimeString(),
+        ])->render();
+
+        $options = new \Dompdf\Options();
+        $options->set('isHtml5ParserEnabled', true);
+        $options->set('defaultFont', 'DejaVu Sans');
+        $dompdf = new \Dompdf\Dompdf($options);
+        $dompdf->loadHtml($html);
+        $dompdf->setPaper('A4', 'landscape');
+        $dompdf->render();
+        $binary = $dompdf->output();
+
+        return response()->streamDownload(static function () use ($binary): void {
+            echo $binary;
+        }, $filename.'.pdf', [
+            'Content-Type' => 'application/pdf',
+            'Content-Disposition' => 'attachment; filename="'.$filename.'.pdf"',
+        ]);
+    }
+
+    /**
      * @param  list<string>  $headers
      * @param  list<list<string|int|float|null>>  $rows
      */
