@@ -82,9 +82,11 @@ class VendorInvoiceSubmissionService
             $this->financeIntegrationService->pushDelta($mrf, 'vendor_invoice_submitted');
         }
 
-        Log::info('Vendor invoice submitted via portal', [
+        // Also used when procurement uploads the invoice on the vendor's behalf.
+        Log::info('Vendor invoice submitted', [
             'mrf_id' => $mrf->mrf_id,
             'vendor_id' => $vendor->id,
+            'submitted_by' => $user->id,
             'document_id' => $document->id,
         ]);
 

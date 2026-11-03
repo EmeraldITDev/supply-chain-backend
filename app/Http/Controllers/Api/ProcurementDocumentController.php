@@ -5,7 +5,9 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\MRF;
 use App\Models\ProcurementDocument;
+use App\Models\Vendor;
 use App\Services\FinanceAp\FinanceApWorkflowOrchestrator;
+use App\Services\FinanceAp\VendorInvoiceSubmissionService;
 use App\Services\PermissionService;
 use App\Services\ProcurementDocumentService;
 use Illuminate\Http\Request;
@@ -20,6 +22,7 @@ class ProcurementDocumentController extends Controller
         ProcurementDocument::TYPE_WAYBILL,
         ProcurementDocument::TYPE_JCC,
         ProcurementDocument::TYPE_PFI,
+        ProcurementDocument::TYPE_VENDOR_INVOICE,
         ProcurementDocument::TYPE_DELIVERY_CONFIRMATION,
         ProcurementDocument::TYPE_OTHER,
     ];
@@ -27,7 +30,14 @@ class ProcurementDocumentController extends Controller
     public function __construct(
         private ProcurementDocumentService $documentService,
         private PermissionService $permissionService,
+        private VendorInvoiceSubmissionService $vendorInvoices,
     ) {
+    }
+
+    private function selectedVendor(MRF $mrf): Vendor
+    {
+        return Vendor::query()->find($mrf->selected_vendor_id)
+            ?? throw new \RuntimeException('No vendor has been selected for this MRF.');
     }
 
     public function index(Request $request, string $id)
@@ -198,13 +208,17 @@ class ProcurementDocumentController extends Controller
             }
 
             try {
-                $document = $this->documentService->storeUpload(
-                    $mrf,
-                    $file,
-                    $type,
-                    $user,
-                    $vendorId,
-                );
+                // An invoice uploaded by procurement stands in for the vendor's own submission,
+                // so it follows the same gate, one-per-vendor rule and Finance AP update.
+                $document = $type === ProcurementDocument::TYPE_VENDOR_INVOICE
+                    ? $this->vendorInvoices->submit($mrf, $this->selectedVendor($mrf), $user, $file)
+                    : $this->documentService->storeUpload(
+                        $mrf,
+                        $file,
+                        $type,
+                        $user,
+                        $vendorId,
+                    );
 
                 if ($type === ProcurementDocument::TYPE_GRN) {
                     $this->documentService->syncGrnLegacyFields($mrf, $document);
