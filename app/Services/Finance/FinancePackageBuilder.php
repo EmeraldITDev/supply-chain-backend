@@ -205,6 +205,50 @@ class FinancePackageBuilder
      */
     private function buildDocumentManifest(MRF $mrf): array
     {
+        return $this->activeDocuments($mrf)
+            ->map(fn (ProcurementDocument $doc) => [
+                'documentId' => (string) $doc->id,
+                'type' => $this->mapFinanceApDocumentType($doc->type),
+                'scmDocumentType' => $doc->type,
+                'fileName' => $doc->file_name,
+                // Stored URLs are 7-day S3 links; Finance AP downloads on receipt, so sign afresh.
+                'fileUrl' => $this->documentService->freshUrlForDocument($doc),
+                'version' => (int) $doc->version,
+                'uploadedAt' => $doc->uploaded_at?->toIso8601String(),
+                'sha256' => $this->documentChecksum($doc),
+            ])
+            ->values()
+            ->all();
+    }
+
+    /**
+     * The MRF's documents as Finance AP lists them for a PO, without download links:
+     * Finance AP fetches a file through the document refresh endpoint when it is used.
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function buildDocumentList(MRF $mrf): array
+    {
+        return $this->activeDocuments($mrf)
+            ->map(fn (ProcurementDocument $doc) => [
+                'documentId' => (string) $doc->id,
+                'type' => $this->mapFinanceApDocumentType($doc->type),
+                'scmDocumentType' => $doc->type,
+                'fileName' => $doc->file_name,
+                'version' => (int) $doc->version,
+                'uploadedAt' => $doc->uploaded_at?->toIso8601String(),
+            ])
+            ->values()
+            ->all();
+    }
+
+    /**
+     * Active documents for the MRF and its selected vendor.
+     *
+     * @return \Illuminate\Database\Eloquent\Collection<int, ProcurementDocument>
+     */
+    private function activeDocuments(MRF $mrf)
+    {
         $vendorId = $this->documentService->resolveVendorId($mrf);
 
         return ProcurementDocument::query()
@@ -214,19 +258,7 @@ class FinancePackageBuilder
                 $query->whereNull('vendor_id')->orWhere('vendor_id', $vendorId);
             }))
             ->orderBy('type')
-            ->get()
-            ->map(fn (ProcurementDocument $doc) => [
-                'documentId' => (string) $doc->id,
-                'type' => $this->mapFinanceApDocumentType($doc->type),
-                'scmDocumentType' => $doc->type,
-                'fileName' => $doc->file_name,
-                'fileUrl' => $doc->file_url,
-                'version' => (int) $doc->version,
-                'uploadedAt' => $doc->uploaded_at?->toIso8601String(),
-                'sha256' => $this->documentChecksum($doc),
-            ])
-            ->values()
-            ->all();
+            ->get();
     }
 
     public function mapFinanceApDocumentType(string $scmType): string
