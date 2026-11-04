@@ -47,9 +47,101 @@ class FinanceIntegrationService
     /**
      * @return array<string, mixed>
      */
-    public function buildPackage(MRF $mrf, ?int $requestedMilestoneId = null, ?string $deltaReason = null): array
+    public function buildPackage(
+        MRF $mrf,
+        ?int $requestedMilestoneId = null,
+        ?string $deltaReason = null,
+        ?int $packageVersion = null,
+        bool $recalculateAmounts = true,
+    ): array
     {
-        return $this->packageBuilder->build($mrf, $requestedMilestoneId, $deltaReason);
+        if ($packageVersion === null && $recalculateAmounts) {
+            return $this->packageBuilder->build($mrf, $requestedMilestoneId, $deltaReason);
+        }
+
+        return $this->packageBuilder->build(
+            $mrf,
+            $requestedMilestoneId,
+            $deltaReason,
+            $packageVersion,
+            $recalculateAmounts,
+        );
+    }
+
+    /**
+     * Push an explicitly versioned refresh without changing SCM workflow state.
+     * The caller must obtain the current Finance AP version out-of-band until
+     * Finance AP exposes a package-version lookup endpoint.
+     */
+    public function pushPackageAtVersion(MRF $mrf, int $packageVersion): bool
+    {
+        if (! mrfUsesFinanceAp($mrf) || ! $this->isConfigured() || $packageVersion < 1) {
+            return false;
+        }
+
+        $package = $this->buildPackage($mrf, null, 'authorized_refresh', $packageVersion, false);
+        $idempotencyKey = sprintf('%s:package_refresh:v%d', $mrf->scm_transaction_id, $packageVersion);
+        $payloadHash = hash('sha256', json_encode($package));
+        $event = FinanceSyncEvent::query()->where('idempotency_key', $idempotencyKey)->first();
+
+        if ($event?->status === FinanceSyncEvent::STATUS_SUCCESS) {
+            return true;
+        }
+
+        if ($event?->status === FinanceSyncEvent::STATUS_PENDING
+            || ($event && $event->payload_hash !== $payloadHash)) {
+            return false;
+        }
+
+        if (! $event) {
+            $event = $this->logOutboundEvent($mrf, 'package_refresh', $idempotencyKey, $package);
+        } else {
+            $event->update([
+                'request_payload' => $package,
+                'payload_hash' => $payloadHash,
+                'status' => FinanceSyncEvent::STATUS_PENDING,
+                'error_message' => null,
+            ]);
+        }
+
+        try {
+            $response = Http::baseUrl(config('finance_ap.base_url'))
+                ->timeout(config('finance_ap.http_timeout', 30))
+                ->withHeaders([
+                    'X-Api-Key' => config('finance_ap.api_key'),
+                    'Accept' => 'application/json',
+                    'Idempotency-Key' => $idempotencyKey,
+                ])
+                ->post(config('finance_ap.paths.package'), $package);
+
+            $body = $response->json();
+            $event->update([
+                'http_status' => $response->status(),
+                'response_payload' => is_array($body) ? $body : ['raw' => $response->body()],
+                'status' => $response->successful() ? FinanceSyncEvent::STATUS_SUCCESS : FinanceSyncEvent::STATUS_FAILED,
+                'error_message' => $response->successful() ? null : ($body['message'] ?? $response->body()),
+                'processed_at' => now(),
+            ]);
+
+            if (! $response->successful()) {
+                return false;
+            }
+
+            $data = $body['data'] ?? $body;
+            if (! empty($data['status'] ?? $data['finance_ap_status'] ?? null)) {
+                $mrf->update(['finance_ap_status' => (string) ($data['status'] ?? $data['finance_ap_status'])]);
+            }
+
+            return true;
+        } catch (\Throwable $e) {
+            $event->update([
+                'status' => FinanceSyncEvent::STATUS_FAILED,
+                'error_message' => $e->getMessage(),
+                'processed_at' => now(),
+            ]);
+
+            return false;
+        }
     }
 
     public function pushPackage(MRF $mrf, ?int $requestedMilestoneId = null, ?User $actor = null): bool

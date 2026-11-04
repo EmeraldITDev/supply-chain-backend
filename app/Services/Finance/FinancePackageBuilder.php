@@ -42,7 +42,13 @@ class FinancePackageBuilder
     /**
      * @return array<string, mixed>
      */
-    public function build(MRF $mrf, ?int $requestedMilestoneId = null, ?string $deltaReason = null): array
+    public function build(
+        MRF $mrf,
+        ?int $requestedMilestoneId = null,
+        ?string $deltaReason = null,
+        ?int $packageVersion = null,
+        bool $recalculateAmounts = true,
+    ): array
     {
         $mrf->loadMissing([
             'requester:id,name,email,department',
@@ -58,13 +64,13 @@ class FinancePackageBuilder
         $paymentTerms = $this->resolvePaymentTerms($mrf, $schedule);
         $paymentType = $this->paymentTypeMapper->map($paymentTerms, $schedule, $documentManifest);
 
-        if ($schedule) {
+        if ($schedule && $recalculateAmounts) {
             $this->paymentScheduleService->recalculateAmounts($schedule, $poTotal);
             $schedule->load('milestones');
         }
 
         return [
-            'packageVersion' => $this->nextPackageVersion($mrf),
+            'packageVersion' => $packageVersion ?? $this->nextPackageVersion($mrf),
             'deltaReason' => $deltaReason,
             'header' => $this->buildHeader($mrf, $vendor, $poTotal, $paymentTerms, $paymentType),
             'paymentSchedule' => $schedule ? $this->buildPaymentScheduleSection($schedule) : null,
