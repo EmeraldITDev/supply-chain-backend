@@ -37,6 +37,7 @@ class FinanceApIntegrationDocumentController extends Controller
             'success' => true,
             'data' => [
                 'scm_transaction_id' => $scmTransactionId,
+                'po_number' => $mrf->po_number,
                 'documents' => $packageBuilder->buildDocumentList($mrf),
             ],
         ]);

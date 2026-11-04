@@ -488,18 +488,25 @@ class FinanceIntegrationService
      */
     public function refreshDocument(MRF $mrf, int $documentId): ?array
     {
+        $documentService = app(ProcurementDocumentService::class);
+        $vendorId = $documentService->resolveVendorId($mrf);
         $document = ProcurementDocument::query()
             ->where('mrf_id', $mrf->id)
             ->where('id', $documentId)
             ->where('is_active', true)
+            ->where(function ($query) use ($vendorId) {
+                $query->whereNull('vendor_id');
+                if ($vendorId) {
+                    $query->orWhere('vendor_id', $vendorId);
+                }
+            })
             ->first();
 
-        if (! $document || ! $document->file_path) {
+        if (! $document || ! $documentService->isAvailableForFinanceAp($document)) {
             return null;
         }
 
-        $disk = config('filesystems.documents_disk', env('DOCUMENTS_DISK', 's3'));
-        $freshUrl = app(ProcurementDocumentService::class)->refreshFileUrl($document->file_path, $disk);
+        $freshUrl = $documentService->freshAuthorizedUrlForDocument($document);
 
         $document->update(['file_url' => $freshUrl]);
 
@@ -512,6 +519,17 @@ class FinanceIntegrationService
             'fileUrl' => $freshUrl,
             'version' => (int) $document->version,
             'uploadedAt' => $document->uploaded_at?->toIso8601String(),
+            'isLatest' => true,
+            'available' => true,
+            'poNumber' => $mrf->po_number,
+            'remarks' => $document->metadata['remarks'] ?? null,
+            'invoiceStatus' => match ($document->type) {
+                ProcurementDocument::TYPE_VENDOR_INVOICE => 'submitted',
+                ProcurementDocument::TYPE_SUPPORTING_VENDOR_INVOICE => 'supporting',
+                default => null,
+            },
+            'isSubmitted' => $document->type === ProcurementDocument::TYPE_VENDOR_INVOICE,
+            'isVerified' => false,
             'refreshedAt' => now()->toIso8601String(),
         ];
     }

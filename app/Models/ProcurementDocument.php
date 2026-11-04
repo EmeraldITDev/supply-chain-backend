@@ -9,6 +9,8 @@ class ProcurementDocument extends Model
 {
     public const TYPE_VENDOR_INVOICE = 'vendor_invoice';
 
+    public const TYPE_SUPPORTING_VENDOR_INVOICE = 'supporting_vendor_invoice';
+
     public const TYPE_GRN = 'grn';
 
     public const TYPE_WAYBILL = 'waybill';
@@ -27,6 +29,7 @@ class ProcurementDocument extends Model
 
     public const TYPES = [
         self::TYPE_VENDOR_INVOICE,
+        self::TYPE_SUPPORTING_VENDOR_INVOICE,
         self::TYPE_GRN,
         self::TYPE_WAYBILL,
         self::TYPE_JCC,

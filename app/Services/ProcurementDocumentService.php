@@ -245,6 +245,7 @@ class ProcurementDocumentService
         User $user,
         ?int $vendorId = null,
         ?string $storageDirectory = null,
+        ?array $metadata = null,
     ): ProcurementDocument {
         if (! in_array($type, ProcurementDocument::TYPES, true)) {
             throw new \InvalidArgumentException("Invalid procurement document type: {$type}");
@@ -266,6 +267,7 @@ class ProcurementDocumentService
             $url,
             $user,
             $vendorId,
+            $metadata,
         );
     }
 
@@ -326,7 +328,36 @@ class ProcurementDocumentService
             'version' => $document->version,
             'isActive' => $document->is_active,
             'metadata' => $document->metadata,
+            'remarks' => $document->metadata['remarks'] ?? null,
         ]);
+    }
+
+    public function isAvailableForFinanceAp(ProcurementDocument $document): bool
+    {
+        $path = trim((string) $document->file_path);
+        if ($path === '' || str_contains($path, '://')) {
+            return false;
+        }
+
+        $disk = config('filesystems.documents_disk', env('DOCUMENTS_DISK', 's3'));
+
+        return Storage::disk($disk)->exists($path);
+    }
+
+    /**
+     * Generate a short-lived URL for the authenticated Finance AP integration.
+     * Legacy external URLs are intentionally not returned by this method.
+     */
+    public function freshAuthorizedUrlForDocument(ProcurementDocument $document): string
+    {
+        $path = trim((string) $document->file_path);
+        if ($path === '' || str_contains($path, '://')) {
+            throw new \RuntimeException('A secure storage path is unavailable for this document.');
+        }
+
+        $disk = config('filesystems.documents_disk', env('DOCUMENTS_DISK', 's3'));
+
+        return Storage::disk($disk)->temporaryUrl($path, now()->addMinutes(15));
     }
 
     /**
@@ -340,15 +371,7 @@ class ProcurementDocumentService
         $storedUrl = trim((string) ($document->file_url ?? ''));
 
         if ($path !== '' && ! str_contains($path, '://')) {
-            try {
-                return $this->refreshFileUrl($path);
-            } catch (\Throwable $e) {
-                Log::warning('Failed to refresh procurement document URL', [
-                    'document_id' => $document->id,
-                    'path' => $path,
-                    'error' => $e->getMessage(),
-                ]);
-            }
+            return $this->refreshFileUrl($path);
         }
 
         return $storedUrl !== '' ? $storedUrl : $path;
@@ -372,7 +395,7 @@ class ProcurementDocumentService
                     'error' => $e->getMessage(),
                 ]);
 
-                return Storage::disk($disk)->url($filePath);
+                throw new \RuntimeException('Unable to generate a secure procurement document URL.', 0, $e);
             }
         }
 

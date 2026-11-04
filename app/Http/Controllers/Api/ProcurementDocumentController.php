@@ -20,6 +20,7 @@ class ProcurementDocumentController extends Controller
         ProcurementDocument::TYPE_WAYBILL,
         ProcurementDocument::TYPE_JCC,
         ProcurementDocument::TYPE_PFI,
+        ProcurementDocument::TYPE_SUPPORTING_VENDOR_INVOICE,
         ProcurementDocument::TYPE_DELIVERY_CONFIRMATION,
         ProcurementDocument::TYPE_OTHER,
     ];
@@ -204,6 +205,7 @@ class ProcurementDocumentController extends Controller
                     $type,
                     $user,
                     $vendorId,
+                    metadata: filled($remarks) ? ['remarks' => $remarks] : null,
                 );
 
                 if ($type === ProcurementDocument::TYPE_GRN) {

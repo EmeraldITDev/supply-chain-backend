@@ -205,18 +205,33 @@ class FinancePackageBuilder
      */
     private function buildDocumentManifest(MRF $mrf): array
     {
-        return $this->activeDocuments($mrf)
-            ->map(fn (ProcurementDocument $doc) => [
-                'documentId' => (string) $doc->id,
-                'type' => $this->mapFinanceApDocumentType($doc->type),
-                'scmDocumentType' => $doc->type,
-                'fileName' => $doc->file_name,
-                // Stored URLs are 7-day S3 links; Finance AP downloads on receipt, so sign afresh.
-                'fileUrl' => $this->documentService->freshUrlForDocument($doc),
-                'version' => (int) $doc->version,
-                'uploadedAt' => $doc->uploaded_at?->toIso8601String(),
-                'sha256' => $this->documentChecksum($doc),
-            ])
+        $documents = $this->activeDocuments($mrf);
+        $availability = $this->documentAvailability($documents);
+        $primaryPoId = $this->primaryPurchaseOrderId($documents, $availability);
+
+        return $documents
+            ->map(function (ProcurementDocument $doc) use ($availability, $primaryPoId) {
+                $isAvailable = $availability[$doc->id];
+
+                return [
+                    'documentId' => (string) $doc->id,
+                    'type' => $this->mapFinanceApDocumentType($doc->type),
+                    'scmDocumentType' => $doc->type,
+                    'fileName' => $doc->file_name,
+                    'fileUrl' => $isAvailable
+                        ? $this->documentService->freshAuthorizedUrlForDocument($doc)
+                        : null,
+                    'version' => (int) $doc->version,
+                    'uploadedAt' => $doc->uploaded_at?->toIso8601String(),
+                    'isLatest' => true,
+                    'available' => $isAvailable,
+                    'isPrimary' => $primaryPoId === $doc->id,
+                    'poNumber' => $mrf->po_number,
+                    'remarks' => $doc->metadata['remarks'] ?? null,
+                    ...$this->invoiceClassification($doc),
+                    'sha256' => $this->documentChecksum($doc),
+                ];
+            })
             ->values()
             ->all();
     }
@@ -229,7 +244,11 @@ class FinancePackageBuilder
      */
     public function buildDocumentList(MRF $mrf): array
     {
-        return $this->activeDocuments($mrf)
+        $documents = $this->activeDocuments($mrf);
+        $availability = $this->documentAvailability($documents);
+        $primaryPoId = $this->primaryPurchaseOrderId($documents, $availability);
+
+        return $documents
             ->map(fn (ProcurementDocument $doc) => [
                 'documentId' => (string) $doc->id,
                 'type' => $this->mapFinanceApDocumentType($doc->type),
@@ -237,6 +256,12 @@ class FinancePackageBuilder
                 'fileName' => $doc->file_name,
                 'version' => (int) $doc->version,
                 'uploadedAt' => $doc->uploaded_at?->toIso8601String(),
+                'isLatest' => true,
+                'available' => $availability[$doc->id],
+                'isPrimary' => $primaryPoId === $doc->id,
+                'poNumber' => $mrf->po_number,
+                'remarks' => $doc->metadata['remarks'] ?? null,
+                ...$this->invoiceClassification($doc),
             ])
             ->values()
             ->all();
@@ -245,20 +270,87 @@ class FinancePackageBuilder
     /**
      * Active documents for the MRF and its selected vendor.
      *
-     * @return \Illuminate\Database\Eloquent\Collection<int, ProcurementDocument>
+     * @return \Illuminate\Support\Collection<int, ProcurementDocument>
      */
     private function activeDocuments(MRF $mrf)
     {
         $vendorId = $this->documentService->resolveVendorId($mrf);
 
-        return ProcurementDocument::query()
+        $documents = ProcurementDocument::query()
             ->where('mrf_id', $mrf->id)
             ->where('is_active', true)
-            ->when($vendorId, fn ($q) => $q->where(function ($query) use ($vendorId) {
-                $query->whereNull('vendor_id')->orWhere('vendor_id', $vendorId);
-            }))
+            ->where(function ($query) use ($vendorId) {
+                $query->whereNull('vendor_id');
+                if ($vendorId) {
+                    $query->orWhere('vendor_id', $vendorId);
+                }
+            })
             ->orderBy('type')
+            ->orderBy('version')
+            ->orderBy('uploaded_at')
+            ->orderBy('id')
             ->get();
+
+        return $documents
+            ->groupBy('type')
+            ->map(fn ($versions) => $versions->last())
+            ->values()
+            ->sortBy(fn (ProcurementDocument $doc) => match ($doc->type) {
+                ProcurementDocument::TYPE_SIGNED_PO => 0,
+                ProcurementDocument::TYPE_PO_PDF => 1,
+                default => 2,
+            })
+            ->values();
+    }
+
+    /**
+     * @param  \Illuminate\Support\Collection<int, ProcurementDocument>  $documents
+     * @return array<int, bool>
+     */
+    private function documentAvailability($documents): array
+    {
+        return $documents
+            ->mapWithKeys(fn (ProcurementDocument $doc) => [
+                $doc->id => $this->documentService->isAvailableForFinanceAp($doc),
+            ])
+            ->all();
+    }
+
+    /**
+     * @param  \Illuminate\Support\Collection<int, ProcurementDocument>  $documents
+     * @param  array<int, bool>  $availability
+     */
+    private function primaryPurchaseOrderId($documents, array $availability): ?int
+    {
+        $primary = $documents->first(fn (ProcurementDocument $doc) =>
+            in_array($doc->type, [
+                ProcurementDocument::TYPE_SIGNED_PO,
+                ProcurementDocument::TYPE_PO_PDF,
+            ], true)
+            && ($availability[$doc->id] ?? false)
+        );
+
+        return $primary?->id;
+    }
+
+    /**
+     * @return array{invoiceStatus?: string, isSubmitted?: bool, isVerified?: bool}
+     */
+    private function invoiceClassification(ProcurementDocument $document): array
+    {
+        return match ($document->type) {
+            ProcurementDocument::TYPE_VENDOR_INVOICE => [
+                'invoiceStatus' => 'submitted',
+                'isSubmitted' => true,
+                'isVerified' => false,
+            ],
+            ProcurementDocument::TYPE_SUPPORTING_VENDOR_INVOICE => [
+                'invoiceStatus' => 'supporting',
+                'isSubmitted' => false,
+                'isVerified' => false,
+            ],
+            default => [],
+        };
     }
 
     public function mapFinanceApDocumentType(string $scmType): string
@@ -267,6 +359,7 @@ class FinancePackageBuilder
             ProcurementDocument::TYPE_SIGNED_PO,
             ProcurementDocument::TYPE_PO_PDF => 'purchase_order',
             ProcurementDocument::TYPE_VENDOR_INVOICE => 'invoice',
+            ProcurementDocument::TYPE_SUPPORTING_VENDOR_INVOICE => 'supporting_invoice',
             ProcurementDocument::TYPE_PFI => 'pfi',
             ProcurementDocument::TYPE_GRN => 'grn',
             ProcurementDocument::TYPE_WAYBILL => 'waybill',
