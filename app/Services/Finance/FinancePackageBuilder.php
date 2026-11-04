@@ -68,6 +68,7 @@ class FinancePackageBuilder
             'deltaReason' => $deltaReason,
             'header' => $this->buildHeader($mrf, $vendor, $poTotal, $paymentTerms, $paymentType),
             'paymentSchedule' => $schedule ? $this->buildPaymentScheduleSection($schedule) : null,
+            'paymentPlan' => $this->buildStructuredPaymentPlan($mrf, $schedule, $paymentTerms, $poTotal),
             'lineItems' => $this->buildLineItems($mrf),
             'approvalsSummary' => $this->buildApprovalsSummary($mrf),
             'documentManifest' => $documentManifest,
@@ -112,6 +113,10 @@ class FinancePackageBuilder
 
     private function resolvePaymentTerms(MRF $mrf, ?PaymentSchedule $schedule): ?string
     {
+        if (filled($mrf->po_payment_terms)) {
+            return (string) $mrf->po_payment_terms;
+        }
+
         $quotation = $mrf->selectedQuotation();
 
         if ($quotation?->payment_terms) {
@@ -140,14 +145,112 @@ class FinancePackageBuilder
             'paymentSchedule' => $this->paymentScheduleService->toApiArray($schedule),
             'milestones' => $schedule->milestones->map(fn (PaymentMilestone $m) => [
                 'scmMilestoneId' => (string) $m->id,
+                'stageId' => 'scm-milestone-'.$m->id,
+                'sequence' => (int) $m->milestone_number,
                 'milestoneNumber' => $m->milestone_number,
                 'label' => $m->label,
                 'percentage' => (float) $m->percentage,
+                'paymentPercentage' => (float) $m->percentage,
                 'amount' => $m->amount !== null ? (float) $m->amount : null,
                 'triggerCondition' => $m->trigger_condition,
+                'triggerEvent' => $m->trigger_condition,
                 'requiredDocuments' => $m->required_documents ?? [],
                 'status' => $m->status,
             ])->values()->all(),
+        ];
+    }
+
+    /**
+     * Send configured payment stages as source data without inferring percentages
+     * from free-text terms.
+     *
+     * @return array<string, mixed>
+     */
+    private function buildStructuredPaymentPlan(
+        MRF $mrf,
+        ?PaymentSchedule $schedule,
+        ?string $paymentTerms,
+        float $poTotal,
+    ): array {
+        $approvedTerms = filled($mrf->po_payment_terms)
+            ? (string) $mrf->po_payment_terms
+            : null;
+        $stages = $schedule
+            ? $schedule->milestones->map(fn (PaymentMilestone $milestone) => [
+                'stageId' => 'scm-milestone-'.$milestone->id,
+                'scmMilestoneId' => (string) $milestone->id,
+                'sequence' => (int) $milestone->milestone_number,
+                'paymentPercentage' => (float) $milestone->percentage,
+                'triggerEvent' => $milestone->trigger_condition,
+                'requiredEvidenceCategories' => $milestone->required_documents ?? [],
+                'label' => $milestone->label,
+                'originalApprovedTerms' => $approvedTerms,
+                'sourcePaymentTerms' => $paymentTerms,
+                'poNumber' => $mrf->po_number,
+            ])->values()->all()
+            : [];
+
+        return [
+            'classificationStatus' => $schedule ? 'configured_from_payment_schedule' : 'requires_finance_ap_classification',
+            'originalApprovedTerms' => $approvedTerms,
+            'sourcePaymentTerms' => $paymentTerms,
+            'poNumber' => $mrf->po_number,
+            'poAmount' => $poTotal,
+            'currency' => $mrf->currency ?? 'NGN',
+            'stages' => $stages,
+        ];
+    }
+
+    /**
+     * Return a configured stage only when its required evidence includes the
+     * uploaded document category. An absent/ambiguous schedule is not guessed.
+     *
+     * @return array<string, mixed>|null
+     */
+    public function milestoneForSupportingDocument(MRF $mrf, ProcurementDocument $document): ?array
+    {
+        if (! in_array($document->type, [
+            ProcurementDocument::TYPE_WAYBILL,
+            ProcurementDocument::TYPE_JCC,
+        ], true)) {
+            return null;
+        }
+
+        $schedule = $mrf->paymentSchedule;
+        if (! $schedule) {
+            return null;
+        }
+
+        $schedule->loadMissing('milestones');
+        $milestone = $schedule->milestones->first(function (PaymentMilestone $milestone) use ($document) {
+            $requiredDocuments = is_array($milestone->required_documents)
+                ? $milestone->required_documents
+                : [];
+            $triggerMatchesDocument = match ($milestone->trigger_condition) {
+                PaymentMilestone::TRIGGER_UPON_DELIVERY => in_array($document->type, $requiredDocuments, true),
+                PaymentMilestone::TRIGGER_UPON_COMPLETION => $document->type === ProcurementDocument::TYPE_JCC
+                    && in_array($document->type, $requiredDocuments, true),
+                default => false,
+            };
+
+            return ! in_array($milestone->status, [
+                PaymentMilestone::STATUS_PAID,
+                PaymentMilestone::STATUS_COMPLETE,
+            ], true)
+                && $triggerMatchesDocument;
+        });
+
+        if (! $milestone) {
+            return null;
+        }
+
+        return [
+            'stage_id' => 'scm-milestone-'.$milestone->id,
+            'scm_milestone_id' => (string) $milestone->id,
+            'sequence' => (int) $milestone->milestone_number,
+            'payment_percentage' => (float) $milestone->percentage,
+            'trigger' => $milestone->trigger_condition,
+            'required_evidence_categories' => $milestone->required_documents ?? [],
         ];
     }
 

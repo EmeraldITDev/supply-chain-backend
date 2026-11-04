@@ -61,6 +61,11 @@ class FinanceApWorkflowOrchestrator
 
         if ($nextState === WorkflowStateService::STATE_FINANCE_HANDOFF_PENDING) {
             $this->attemptFinanceApPush($mrf, $user);
+        } elseif (config('finance_ap.milestone_events_enabled')
+            && ! $this->financeIntegrationService->hasPackageBeenPushed($mrf)) {
+            // Seed Finance AP with the signed PO and approved terms without
+            // advancing the SCM delivery-confirmation or handoff state.
+            $this->financeIntegrationService->pushPackage($mrf, null, $user);
         }
 
         Log::info('Finance AP post-PO routing applied', [
@@ -82,6 +87,8 @@ class FinanceApWorkflowOrchestrator
         }
 
         if ($this->financeIntegrationService->hasPackageBeenPushed($mrf)) {
+            $this->financeIntegrationService->transitionAfterSuccessfulPush($mrf, $user);
+
             return;
         }
 

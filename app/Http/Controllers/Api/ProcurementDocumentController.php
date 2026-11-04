@@ -222,6 +222,22 @@ class ProcurementDocumentController extends Controller
                 }
 
                 $successful[] = $this->documentService->transform($document);
+
+                if (in_array($type, [
+                    ProcurementDocument::TYPE_WAYBILL,
+                    ProcurementDocument::TYPE_JCC,
+                ], true)) {
+                    try {
+                        app(\App\Services\Finance\FinanceIntegrationService::class)
+                            ->queueSupportingDocumentUploaded($mrf, $document);
+                    } catch (\Throwable $e) {
+                        Log::error('Finance AP milestone notification could not be queued', [
+                            'mrf_id' => $mrf->mrf_id,
+                            'document_id' => $document->id,
+                            'error' => $e->getMessage(),
+                        ]);
+                    }
+                }
             } catch (\RuntimeException $e) {
                 $failed[] = array_merge($result, [
                     'status' => 'failed',

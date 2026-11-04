@@ -15,6 +15,9 @@ return [
 
     'enabled' => filter_var(env('FINANCE_AP_INTEGRATION_ENABLED', true), FILTER_VALIDATE_BOOL),
 
+    // Must remain disabled until Finance AP has implemented the draft-preparation event contract.
+    'milestone_events_enabled' => filter_var(env('FINANCE_AP_MILESTONE_EVENTS_ENABLED', false), FILTER_VALIDATE_BOOL),
+
     // Push vendor create/update snapshots to Finance AP (in addition to package header.vendor).
     'vendor_sync_enabled' => filter_var(env('FINANCE_AP_VENDOR_SYNC_ENABLED', true), FILTER_VALIDATE_BOOL),
 
