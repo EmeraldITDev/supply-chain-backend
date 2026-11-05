@@ -593,6 +593,7 @@ class TripRequestWorkflowController extends ApiController
             $fill['title'] = 'Trip request: ' . $fill['destination'];
         }
 
+        $wasChangesRequested = $trip->workflow_stage === Trip::WORKFLOW_CHANGES_REQUESTED;
         $trip->fill($fill);
         if ($trip->workflow_stage === Trip::WORKFLOW_CHANGES_REQUESTED) {
             $trip->workflow_stage = Trip::WORKFLOW_TRIP_REQUEST;
@@ -619,7 +620,7 @@ class TripRequestWorkflowController extends ApiController
         $remarks = $request->input('remarks');
         $changeSummary = $this->requesterEditService->summarizeChangedFields($changedFields);
         $this->requesterEditService->recordTripEdit($trip, $user, $remarks, $changedFields);
-        $this->tripRequestNotifications->notifyRequesterUpdated($trip, $user, $changeSummary);
+        $this->tripRequestNotifications->notifyRequesterUpdated($trip, $user, $changeSummary, $wasChangesRequested);
 
         return $this->success([
             'trip' => $this->presentTripRequest($trip->load(['creator']), includeProgressSummary: true, viewer: $user),
@@ -743,14 +744,14 @@ class TripRequestWorkflowController extends ApiController
         );
 
         if ($request->action === 'forward') {
-            app(\App\Services\WorkflowNotificationService::class)
-                ->notifyScdTripPendingApproval($trip, $user);
+            $this->tripRequestNotifications->notifyForwardedToDirector($trip->fresh(['creator']), $user);
         } elseif ($request->action === 'request_changes') {
-            app(\App\Services\WorkflowNotificationService::class)
-                ->notifyRequesterChangesRequired($trip, $user, $request->input('comments'));
+            $this->tripRequestNotifications->notifyChangesRequested($trip->fresh(['creator']), $user, $request->input('comments'));
         } elseif ($request->action === 'reject') {
-            app(\App\Services\WorkflowNotificationService::class)
-                ->notifyRequesterTripRejected($trip, $user, $request->input('reason'));
+            $requester = $trip->creator ?? User::find($trip->created_by);
+            if ($requester) {
+                $this->tripRequestNotifications->notifyRejected($trip, $requester, $request->input('reason'));
+            }
         }
 
         $message = 'Trip request updated.';
@@ -1643,12 +1644,6 @@ class TripRequestWorkflowController extends ApiController
                     'created_by' => $user->id,
                 ]);
 
-                $this->workflow->notifyStage(
-                    $trip,
-                    'trip_scd_approved',
-                    "Trip {$trip->trip_code} approved by Supply Chain Director and awaiting logistics conversion",
-                    ['logistics_manager', 'logistics_officer', 'admin']
-                );
             }
         });
 

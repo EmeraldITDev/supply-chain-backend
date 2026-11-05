@@ -4,6 +4,8 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Support\Facades\Cache;
+use Closure;
 
 /**
  * Tracks sent procurement approval reminders for deduplication.
@@ -34,7 +36,7 @@ class ProcurementReminderDispatch extends Model
     }
 
     /**
-     * Whether a reminder was already sent for this user + record + state today.
+     * Whether a successful reminder was sent in the rolling 24-hour window.
      */
     public static function alreadySent(
         int $userId,
@@ -48,8 +50,48 @@ class ProcurementReminderDispatch extends Model
             ->where('subject_type', $subjectType)
             ->where('subject_id', $subjectId)
             ->where('workflow_state', $workflowState)
-            ->where('period_key', $periodKey)
+            ->where('status', 'sent')
+            ->where('created_at', '>=', now()->subDay())
             ->exists();
+    }
+
+    /**
+     * Serialize the check, delivery dispatch, and successful record so two
+     * overlapping scheduler runs cannot send the same reminder.
+     */
+    public static function dispatchIfDue(
+        int $userId,
+        string $subjectType,
+        int|string $subjectId,
+        string $workflowState,
+        string $periodKey,
+        Closure $dispatch,
+    ): bool {
+        $lockKey = implode(':', [
+            'procurement-reminder',
+            $userId,
+            md5($subjectType),
+            $subjectId,
+            md5($workflowState),
+        ]);
+
+        return Cache::lock($lockKey, 60)->block(5, function () use (
+            $userId,
+            $subjectType,
+            $subjectId,
+            $workflowState,
+            $periodKey,
+            $dispatch,
+        ): bool {
+            if (static::alreadySent($userId, $subjectType, $subjectId, $workflowState, $periodKey)) {
+                return false;
+            }
+
+            $dispatch();
+            static::markSent($userId, $subjectType, $subjectId, $workflowState, $periodKey);
+
+            return true;
+        });
     }
 
     /**

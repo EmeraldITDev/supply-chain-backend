@@ -108,7 +108,7 @@ class ProcurementReminderTest extends TestCase
         );
     }
 
-    public function test_different_period_keys_are_not_deduped(): void
+    public function test_reminder_cooldown_is_rolling_24_hours(): void
     {
         if (! Schema::hasTable('procurement_reminder_dispatches')) {
             $this->markTestSkipped('procurement_reminder_dispatches table not available');
@@ -117,12 +117,48 @@ class ProcurementReminderTest extends TestCase
         $userId = 888;
         $mrf    = MRF::factory()->create(['workflow_state' => 'executive_review']);
 
-        ProcurementReminderDispatch::markSent($userId, MRF::class, $mrf->id, 'executive_review', '2026-10-18');
+        $dispatch = ProcurementReminderDispatch::create([
+            'user_id' => $userId,
+            'subject_type' => MRF::class,
+            'subject_id' => $mrf->id,
+            'workflow_state' => 'executive_review',
+            'period_key' => 'old-window',
+            'status' => 'sent',
+        ]);
 
-        // Different day → allowed
-        $this->assertFalse(
-            ProcurementReminderDispatch::alreadySent($userId, MRF::class, $mrf->id, 'executive_review', '2026-10-19'),
+        $dispatch->created_at = now()->subHours(23);
+        $dispatch->save();
+
+        // A different period key does not bypass the rolling cooldown.
+        $this->assertTrue(
+            ProcurementReminderDispatch::alreadySent($userId, MRF::class, $mrf->id, 'executive_review', 'new-window'),
         );
+
+        $dispatch->created_at = now()->subHours(25);
+        $dispatch->save();
+
+        // Once the rolling window expires, another dispatch is allowed.
+        $this->assertFalse(
+            ProcurementReminderDispatch::alreadySent($userId, MRF::class, $mrf->id, 'executive_review', 'new-window'),
+        );
+    }
+
+    public function test_concurrent_claims_allow_only_one_reminder_dispatch(): void
+    {
+        if (! Schema::hasTable('procurement_reminder_dispatches')) {
+            $this->markTestSkipped('procurement_reminder_dispatches table not available');
+        }
+
+        $mrf = MRF::factory()->create(['workflow_state' => 'executive_review']);
+        $calls = 0;
+        $dispatch = fn () => $calls++;
+
+        $first = ProcurementReminderDispatch::dispatchIfDue(777, MRF::class, $mrf->id, 'executive_review', now()->format('Y-m-d'), $dispatch);
+        $second = ProcurementReminderDispatch::dispatchIfDue(777, MRF::class, $mrf->id, 'executive_review', now()->format('Y-m-d'), $dispatch);
+
+        $this->assertTrue($first);
+        $this->assertFalse($second);
+        $this->assertSame(1, $calls);
     }
 
     // ─── Deep link format ─────────────────────────────────────────────────────

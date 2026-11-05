@@ -19,7 +19,7 @@ use Illuminate\Support\Facades\Notification;
  *   1. Recipient resolver finds the SPECIFIC individual responsible — not all
  *      users in a role. Assignment gaps are flagged, not broadcast.
  *   2. Deduplication via procurement_reminder_dispatches: one reminder per
- *      (user + record + state) per 24h window. Period_key = 'YYYY-MM-DD'.
+ *      (user + record + state) in a rolling 24h window.
  *   3. Deep links use config('app.frontend_url') + record route.
  *   4. Keeps existing 24h stale threshold and hourly schedule unchanged.
  *   5. Does NOT delete, update, or auto-complete any SCM records.
@@ -56,7 +56,7 @@ class SendProcurementApprovalReminders extends Command
             ->whereNotIn('workflow_state', [WorkflowStateService::STATE_CLOSED ?? 'closed'])
             ->where(function ($q): void {
                 $q->whereNull('status')
-                    ->orWhereRaw('LOWER(status) NOT IN (?, ?, ?)', ['completed', 'rejected', 'cancelled']);
+                    ->orWhereRaw('LOWER(status) NOT IN (?, ?, ?, ?)', ['approved', 'completed', 'rejected', 'cancelled']);
             })
             ->orderBy('updated_at')
             ->limit(200)
@@ -93,27 +93,6 @@ class SendProcurementApprovalReminders extends Command
             }
 
             foreach ($resolution['recipients'] as $recipient) {
-                // Deduplication check
-                if (ProcurementReminderDispatch::alreadySent(
-                    $recipient->id,
-                    MRF::class,
-                    $mrf->id,
-                    $state,
-                    $periodKey,
-                )) {
-                    $dedup++;
-                    if ($dryRun) {
-                        $this->line(sprintf(
-                            'DEDUP_SKIP  %s → %s (%s)',
-                            $mrf->mrf_id,
-                            $recipient->email,
-                            $periodKey,
-                        ));
-                    }
-
-                    continue;
-                }
-
                 $this->line(sprintf(
                     '%s [%s] → %s <%s>, pending ~%dh',
                     $mrf->mrf_id,
@@ -128,19 +107,33 @@ class SendProcurementApprovalReminders extends Command
                 }
 
                 try {
-                    Notification::send(
-                        collect([$recipient]),
-                        new ProcurementActionReminderNotification($mrf, $hoursPending),
-                    );
-
-                    ProcurementReminderDispatch::markSent(
+                    $claimed = ProcurementReminderDispatch::dispatchIfDue(
                         $recipient->id,
                         MRF::class,
                         $mrf->id,
                         $state,
                         $periodKey,
+                        function () use ($recipient, $mrf, $hoursPending): void {
+                            Notification::send(
+                                collect([$recipient]),
+                                new ProcurementActionReminderNotification($mrf, $hoursPending),
+                            );
+                        },
                     );
-                    $sent++;
+
+                    if ($claimed) {
+                        $sent++;
+                    } else {
+                        $dedup++;
+                        if ($dryRun) {
+                            $this->line(sprintf(
+                                'DEDUP_SKIP  %s → %s (%s)',
+                                $mrf->mrf_id,
+                                $recipient->email,
+                                $periodKey,
+                            ));
+                        }
+                    }
                 } catch (\Throwable $e) {
                     Log::error('Failed to send procurement reminder', [
                         'mrf_id'     => $mrf->mrf_id,

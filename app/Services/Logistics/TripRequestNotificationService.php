@@ -4,24 +4,20 @@ namespace App\Services\Logistics;
 
 use App\Mail\TripChangesRequestedMail;
 use App\Mail\TripExternalPassengerConfirmedMail;
+use App\Mail\TripRequestRejectedMail;
 use App\Mail\TripRequestRequesterUpdatedMail;
+use App\Mail\TripRequestDirectorApprovedMail;
 use App\Models\Logistics\Trip;
 use App\Models\User;
 use App\Notifications\LogisticsEventNotification;
-use App\Services\WorkflowNotificationService;
 use App\Support\DatabaseNotifications;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
-use Illuminate\Support\Str;
 
 class TripRequestNotificationService
 {
-    public function __construct(
-        private WorkflowNotificationService $workflowNotifications,
-    ) {
-    }
 
-    public function notifyRequesterUpdated(Trip $trip, User $editor, ?string $changeSummary = null): void
+    public function notifyRequesterUpdated(Trip $trip, User $editor, ?string $changeSummary = null, bool $requiresReview = false): void
     {
         $message = sprintf(
             'Trip request %s was updated by %s%s',
@@ -39,23 +35,13 @@ class TripRequestNotificationService
             '/logistics?tab=trip-requests'
         );
 
-        $emails = User::query()
-            ->whereIn('supply_chain_role', ['logistics_manager', 'logistics_officer'])
-            ->whereNotNull('email')
-            ->pluck('email');
-
-        $emails = $emails->merge(collect(config('scm.logistics_notification_cc_emails', [])));
-
-        foreach ($emails->filter()->unique(fn ($e) => strtolower((string) $e))->values() as $email) {
-            try {
-                Mail::to((string) $email)->send(new TripRequestRequesterUpdatedMail($trip, $editor, $changeSummary));
-            } catch (\Throwable $e) {
-                Log::warning('Failed to email trip requester edit notification', [
-                    'trip_request_id' => $trip->id,
-                    'email' => $email,
-                    'error' => $e->getMessage(),
-                ]);
-            }
+        if ($requiresReview) {
+            $this->sendToUsersWithRoles(
+                $trip,
+                ['logistics_manager', 'logistics_officer'],
+                fn (string $email) => new TripRequestRequesterUpdatedMail($trip, $editor, $changeSummary),
+                'trip requester resubmission'
+            );
         }
 
         $this->notifyUser(
@@ -80,27 +66,19 @@ class TripRequestNotificationService
 
         $this->notifyUsersByRoles(
             $trip,
-            ['logistics_manager', 'logistics_officer', 'supply_chain_director', 'supply_chain', 'procurement_manager', 'procurement'],
+            ['logistics_manager', 'logistics_officer'],
             'trip_request_submitted',
             'New trip request',
             $message,
             '/trip-requests/' . $trip->id
         );
 
-        $emails = User::query()
-            ->whereIn('supply_chain_role', [
-                'logistics_manager', 'logistics_officer',
-                'supply_chain_director', 'supply_chain',
-                'procurement_manager', 'procurement',
-            ])
-            ->whereNotNull('email')
-            ->pluck('email');
-
-        $emails = $emails->merge(collect(config('scm.logistics_notification_cc_emails', [])));
-
-        foreach ($emails->filter()->unique(fn ($e) => strtolower((string) $e))->values() as $email) {
-            $this->workflowNotifications->notifyTripRequestSubmittedToEmail($trip, $requester, (string) $email);
-        }
+        $this->sendToUsersWithRoles(
+            $trip,
+            ['logistics_manager', 'logistics_officer'],
+            fn (string $email) => new \App\Mail\TripRequestSubmittedMail($trip, $requester),
+            'trip request submission'
+        );
     }
 
     public function notifyForwardedToDirector(Trip $trip, User $forwardedBy): void
@@ -120,14 +98,12 @@ class TripRequestNotificationService
             '/trip-requests/' . $trip->id
         );
 
-        User::query()
-            ->whereIn('supply_chain_role', ['supply_chain_director', 'supply_chain'])
-            ->whereNotNull('email')
-            ->pluck('email')
-            ->filter()
-            ->unique(fn ($e) => strtolower((string) $e))
-            ->values()
-            ->each(fn (string $email) => $this->workflowNotifications->notifyTripRequestForwardedToDirectorEmail($trip, $forwardedBy, (string) $email));
+        $this->sendToUsersWithRoles(
+            $trip,
+            ['supply_chain_director', 'supply_chain'],
+            fn (string $email) => new \App\Mail\TripRequestForwardedMail($trip, $forwardedBy),
+            'trip director approval'
+        );
     }
 
     public function notifyChangesRequested(Trip $trip, User $reviewer, ?string $reason = null): void
@@ -209,21 +185,12 @@ class TripRequestNotificationService
             ]
         );
 
-        $logisticsEmails = User::query()
-            ->whereIn('supply_chain_role', ['logistics_manager', 'logistics_officer'])
-            ->whereNotNull('email')
-            ->pluck('email')
-            ->filter()
-            ->unique(fn ($email) => strtolower((string) $email))
-            ->values();
-
-        foreach ($logisticsEmails as $email) {
-            $this->workflowNotifications->notifyTripRequestDirectorApprovedToEmail(
-                $trip,
-                $director,
-                (string) $email,
-            );
-        }
+        $this->sendToUsersWithRoles(
+            $trip,
+            ['logistics_manager', 'logistics_officer'],
+            fn (string $email) => new TripRequestDirectorApprovedMail($trip, $director),
+            'trip logistics approval'
+        );
 
         $requester = $trip->creator ?? User::find($trip->created_by);
         if (! $requester) {
@@ -253,6 +220,8 @@ class TripRequestNotificationService
                 'priority' => 'normal',
             ]
         );
+
+        $this->sendToUser($requester, new TripRequestDirectorApprovedMail($trip, $director), 'trip requester approval');
     }
 
     public function notifyScdApproved(Trip $trip, User $scdApprover): void
@@ -282,20 +251,19 @@ class TripRequestNotificationService
             ]
         );
 
-        $logisticsEmails = User::query()
-            ->whereIn('supply_chain_role', ['logistics_manager', 'logistics_officer'])
-            ->whereNotNull('email')
-            ->pluck('email')
-            ->filter()
-            ->unique(fn ($email) => strtolower((string) $email))
-            ->values();
+        $this->sendToUsersWithRoles(
+            $trip,
+            ['logistics_manager', 'logistics_officer'],
+            fn (string $email) => new TripRequestDirectorApprovedMail($trip, $scdApprover),
+            'trip logistics approval'
+        );
 
-        foreach ($logisticsEmails as $email) {
-            $this->workflowNotifications->notifyTripRequestDirectorApprovedToEmail(
-                $trip,
-                $scdApprover,
-                (string) $email,
-            );
+        $requester = $trip->creator ?? User::find($trip->created_by);
+        if ($requester) {
+            $this->notifyUser($requester, $trip, 'trip_request_scd_approved', 'Trip request approved',
+                sprintf('Your trip request %s was approved and is awaiting logistics processing.', $trip->trip_code),
+                '/trip-requests/' . $trip->id);
+            $this->sendToUser($requester, new TripRequestDirectorApprovedMail($trip, $scdApprover), 'trip requester approval');
         }
     }
 
@@ -328,15 +296,7 @@ class TripRequestNotificationService
             $extra
         );
 
-        $this->notifyUsersByRoles(
-            $trip,
-            ['logistics_manager', 'logistics_officer'],
-            'trip_request_director_rejected',
-            'Trip request rejected by director',
-            $message,
-            '/trip-requests/' . $trip->id,
-            $extra
-        );
+        $this->sendToUser($requester, new TripRequestRejectedMail($trip, $director, $reason), 'trip requester rejection');
     }
 
     public function notifyDirectorReturned(Trip $trip, User $director, User $requester, ?string $reason = null): void
@@ -369,15 +329,6 @@ class TripRequestNotificationService
             $extra
         );
 
-        $this->notifyUsersByRoles(
-            $trip,
-            ['logistics_manager', 'logistics_officer'],
-            'trip_request_returned',
-            'Trip request returned by director',
-            $message,
-            '/trip-requests/' . $trip->id,
-            $extra
-        );
     }
 
     public function notifyConverted(Trip $tripRequest, Trip $logisticsTrip, User $convertedBy): void
@@ -448,6 +399,8 @@ class TripRequestNotificationService
             $message,
             '/department'
         );
+
+        $this->sendToUser($requester, new TripRequestRejectedMail($trip, null, $reason), 'trip requester rejection');
     }
 
     public function notifyComment(Trip $trip, User $author, string $body, bool $isTripRequest): void
@@ -493,6 +446,9 @@ class TripRequestNotificationService
         User::query()
             ->whereIn('supply_chain_role', $roles)
             ->get()
+            ->unique(fn (User $user) => trim((string) $user->email) !== ''
+                ? strtolower(trim((string) $user->email))
+                : 'user:' . $user->id)
             ->each(fn (User $user) => $this->notifyUser($user, $trip, $type, $title, $message, $actionUrl, $extra));
     }
 
@@ -540,6 +496,35 @@ class TripRequestNotificationService
                 'trip_id' => $trip->id,
                 'user_id' => $user->id,
                 'type' => $type,
+                'error' => $e->getMessage(),
+            ]);
+        }
+    }
+
+    private function sendToUsersWithRoles(Trip $trip, array $roles, callable $mailableFactory, string $event): void
+    {
+        User::query()
+            ->whereIn('supply_chain_role', $roles)
+            ->whereNotNull('email')
+            ->get()
+            ->filter(fn (User $user) => trim((string) $user->email) !== '')
+            ->unique(fn (User $user) => strtolower(trim((string) $user->email)))
+            ->each(fn (User $user) => $this->sendToUser($user, $mailableFactory((string) $user->email), $event));
+    }
+
+    private function sendToUser(User $user, object $mailable, string $event): void
+    {
+        if (! trim((string) $user->email)) {
+            return;
+        }
+
+        try {
+            Mail::to(trim((string) $user->email))->send($mailable);
+        } catch (\Throwable $e) {
+            Log::warning('Trip notification email failed', [
+                'event' => $event,
+                'user_id' => $user->id,
+                'email' => $user->email,
                 'error' => $e->getMessage(),
             ]);
         }
