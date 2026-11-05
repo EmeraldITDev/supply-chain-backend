@@ -2468,7 +2468,47 @@ class MRFWorkflowController extends Controller
         }
 
         try {
-            app(WorkflowNotificationService::class)->forwardSignedPoToVendor($mrf);
+            $issuance = DB::transaction(function () use ($mrf, $user) {
+                $lockedMrf = MRF::query()
+                    ->with('selectedVendor')
+                    ->lockForUpdate()
+                    ->find($mrf->id);
+
+                if (! $lockedMrf) {
+                    throw new \RuntimeException('Purchase order no longer exists.');
+                }
+
+                $lockedVendorEmail = trim((string) ($lockedMrf->selectedVendor?->email ?? ''));
+                if (! filter_var($lockedVendorEmail, FILTER_VALIDATE_EMAIL)) {
+                    throw new \InvalidArgumentException('The selected vendor has no email address, so the signed PO cannot be forwarded.');
+                }
+
+                if ($lockedMrf->po_forwarded_to_vendor_at) {
+                    return [
+                        'mrf' => $lockedMrf,
+                        'vendor_email' => $lockedVendorEmail,
+                        'forwarded_at' => $lockedMrf->po_forwarded_to_vendor_at,
+                    ];
+                }
+
+                app(WorkflowNotificationService::class)->forwardSignedPoToVendor($lockedMrf);
+
+                $forwardedAt = now();
+                $lockedMrf->update(['po_forwarded_to_vendor_at' => $forwardedAt]);
+                MRFApprovalHistory::record(
+                    $lockedMrf,
+                    'po_forwarded_to_vendor',
+                    'supply_chain',
+                    $user,
+                    'Signed PO forwarded to '.$lockedVendorEmail,
+                );
+
+                return [
+                    'mrf' => $lockedMrf->fresh(),
+                    'vendor_email' => $lockedVendorEmail,
+                    'forwarded_at' => $forwardedAt,
+                ];
+            });
         } catch (\Throwable $e) {
             Log::error('Failed to forward signed PO to vendor', [
                 'mrf_id' => $mrf->mrf_id,
@@ -2482,15 +2522,9 @@ class MRFWorkflowController extends Controller
             ], 500);
         }
 
-        $forwardedAt = now();
-        $mrf->update(['po_forwarded_to_vendor_at' => $forwardedAt]);
-        MRFApprovalHistory::record(
-            $mrf,
-            'po_forwarded_to_vendor',
-            'supply_chain',
-            $user,
-            'Signed PO forwarded to '.$vendorEmail,
-        );
+        $mrf = $issuance['mrf'];
+        $vendorEmail = $issuance['vendor_email'];
+        $forwardedAt = $issuance['forwarded_at'];
 
         return response()->json([
             'success' => true,

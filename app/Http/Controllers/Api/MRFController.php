@@ -1973,9 +1973,7 @@ class MRFController extends Controller
         }
 
         $remarks = $request->input('remarks');
-        $changeSummary = $requesterEditService->summarizeChangedFields($changedFields);
         $requesterEditService->recordMrfEdit($mrf, $user, $remarks, $changedFields);
-        $this->notificationService->notifyMRFRequesterUpdated($mrf, $user, $changeSummary);
 
         $requesterEditMeta = $requesterEditService->metaForMrf($user, $mrf);
         $attachments = $attachmentService->payloadFor($mrf);
@@ -2872,6 +2870,8 @@ class MRFController extends Controller
         $mrf->status = 'pending';
 
         $mrf->save();
+
+        $this->notificationService->notifyMRFSubmitted($mrf->fresh());
 
         return response()->json([
             'success' => true,

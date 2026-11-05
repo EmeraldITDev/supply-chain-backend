@@ -92,4 +92,30 @@ class POGeneratedNotificationTest extends TestCase
         Mail::assertSentCount(1);
         Notification::assertSentToTimes($director, \App\Notifications\SystemAnnouncementNotification::class, 1);
     }
+
+    public function test_repeated_signature_notification_for_the_same_po_is_suppressed(): void
+    {
+        Mail::fake();
+
+        $director = User::factory()->create([
+            'email' => 'repeat-director@example.com',
+            'supply_chain_role' => 'supply_chain_director',
+        ]);
+        $mrf = MRF::create([
+            'mrf_id' => 'MRF-TEST-003',
+            'requester_name' => 'Requester',
+            'title' => 'Repeated notification test',
+            'status' => 'awaiting_scd_signature',
+            'workflow_state' => 'po_generated',
+            'po_number' => 'PO-TEST-003',
+            'director_approved_by' => $director->id,
+        ]);
+
+        $service = app(\App\Services\WorkflowNotificationService::class);
+        $service->notifyPOReadyForSignature($mrf);
+        $service->notifyPOReadyForSignature($mrf);
+
+        Mail::assertSentCount(1);
+        $this->assertDatabaseCount('notifications', 1);
+    }
 }

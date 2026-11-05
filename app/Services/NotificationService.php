@@ -15,8 +15,6 @@ use App\Services\WorkflowStateService;
 use App\Notifications\MRFSubmittedNotification;
 use App\Notifications\MRFApprovedNotification;
 use App\Notifications\MRFRejectedNotification;
-use App\Notifications\MRFRequesterUpdatedNotification;
-use App\Notifications\SRFRequesterUpdatedNotification;
 use App\Notifications\RFQAssignedNotification;
 use App\Notifications\QuotationSubmittedNotification;
 use App\Notifications\QuotationStatusUpdatedNotification;
@@ -138,132 +136,25 @@ class NotificationService
     }
 
     /**
-     * Notify workflow participants when a requester edits an MRF within the edit window.
+     * Keep the legacy API while avoiding notifications for non-actionable edits.
      */
     public function notifyMRFRequesterUpdated(MRF $mrf, User $editor, ?string $changeSummary = null): void
     {
-        try {
-            $roles = $this->mrfWorkflowParticipantRoles($mrf);
-
-            $notifiables = User::query()
-                ->whereIn('supply_chain_role', $roles)
-                ->get();
-
-            foreach ($notifiables as $user) {
-                if ((int) $user->id === (int) $editor->id) {
-                    continue;
-                }
-
-                DatabaseNotifications::send($user, new MRFRequesterUpdatedNotification($mrf, $editor, $changeSummary));
-            }
-
-            DatabaseNotifications::send($editor, new MRFRequesterUpdatedNotification(
-                $mrf,
-                $editor,
-                $changeSummary ?: 'Your changes were saved successfully.'
-            ));
-
-            Log::info('MRF requester edit notification sent', [
-                'mrf_id' => $mrf->mrf_id,
-                'editor_id' => $editor->id,
-            ]);
-        } catch (\Exception $e) {
-            Log::error('Failed to send MRF requester edit notification', [
-                'mrf_id' => $mrf->mrf_id,
-                'error' => $e->getMessage(),
-            ]);
-        }
+        Log::info('MRF requester edit recorded without workflow notification', [
+            'mrf_id' => $mrf->mrf_id,
+            'editor_id' => $editor->id,
+        ]);
     }
 
     /**
-     * Notify workflow participants when a requester edits an SRF within the edit window.
+     * Keep the legacy API while avoiding notifications for non-actionable edits.
      */
     public function notifySRFRequesterUpdated(SRF $srf, User $editor, ?string $changeSummary = null): void
     {
-        try {
-            $roles = $this->srfWorkflowParticipantRoles($srf);
-
-            $notifiables = User::query()
-                ->whereIn('supply_chain_role', $roles)
-                ->get();
-
-            foreach ($notifiables as $user) {
-                if ((int) $user->id === (int) $editor->id) {
-                    continue;
-                }
-
-                DatabaseNotifications::send($user, new SRFRequesterUpdatedNotification($srf, $editor, $changeSummary));
-            }
-
-            DatabaseNotifications::send($editor, new SRFRequesterUpdatedNotification(
-                $srf,
-                $editor,
-                $changeSummary ?: 'Your changes were saved successfully.'
-            ));
-
-            Log::info('SRF requester edit notification sent', [
-                'srf_id' => $srf->srf_id,
-                'editor_id' => $editor->id,
-            ]);
-        } catch (\Exception $e) {
-            Log::error('Failed to send SRF requester edit notification', [
-                'srf_id' => $srf->srf_id,
-                'error' => $e->getMessage(),
-            ]);
-        }
-    }
-
-    /**
-     * @return list<string>
-     */
-    private function mrfWorkflowParticipantRoles(MRF $mrf): array
-    {
-        $state = strtolower(trim((string) ($mrf->workflow_state ?? WorkflowStateService::STATE_MRF_CREATED)));
-
-        if ($state === WorkflowStateService::STATE_EXECUTIVE_REVIEW) {
-            return ['executive', 'admin'];
-        }
-
-        if (in_array($state, [
-            WorkflowStateService::STATE_SUPPLY_CHAIN_DIRECTOR_REVIEW,
-            WorkflowStateService::STATE_VENDOR_SELECTED,
-            WorkflowStateService::STATE_INVOICE_APPROVED,
-        ], true)) {
-            return ['supply_chain_director', 'supply_chain', 'admin'];
-        }
-
-        if (in_array($state, [
-            WorkflowStateService::STATE_PROCUREMENT_REVIEW,
-            WorkflowStateService::STATE_PROCUREMENT_APPROVED,
-            WorkflowStateService::STATE_RFQ_ISSUED,
-            WorkflowStateService::STATE_QUOTATIONS_RECEIVED,
-            WorkflowStateService::STATE_QUOTATIONS_EVALUATED,
-            WorkflowStateService::STATE_EXECUTIVE_APPROVED,
-            WorkflowStateService::STATE_SUPPLY_CHAIN_DIRECTOR_APPROVED,
-            WorkflowStateService::STATE_MRF_CREATED,
-        ], true)) {
-            return ['procurement', 'procurement_manager', 'supply_chain_director', 'supply_chain', 'executive', 'admin'];
-        }
-
-        return ['procurement', 'procurement_manager', 'supply_chain_director', 'supply_chain', 'executive', 'admin'];
-    }
-
-    /**
-     * @return list<string>
-     */
-    private function srfWorkflowParticipantRoles(SRF $srf): array
-    {
-        $stage = strtolower(trim((string) ($srf->current_stage ?? '')));
-
-        if ($stage === 'supply_chain_director_review') {
-            return ['supply_chain_director', 'supply_chain', 'admin'];
-        }
-
-        if (in_array($stage, ['procurement', 'procurement_review', 'vendor_selected'], true)) {
-            return ['procurement', 'procurement_manager', 'admin'];
-        }
-
-        return ['procurement', 'procurement_manager', 'supply_chain_director', 'supply_chain', 'logistics_manager', 'logistics_officer', 'admin'];
+        Log::info('SRF requester edit recorded without workflow notification', [
+            'srf_id' => $srf->srf_id,
+            'editor_id' => $editor->id,
+        ]);
     }
 
     /**
@@ -970,21 +861,43 @@ class NotificationService
     public function notifyGRNRequested(MRF $mrf, User $requestedBy): void
     {
         try {
-            $procurementManagers = User::whereIn('supply_chain_role', ['procurement_manager', 'procurement', 'admin'])->get();
+            $receivingOfficer = $this->resolveReceivingOfficer();
 
-            foreach ($procurementManagers as $manager) {
-                DatabaseNotifications::send($manager, new SystemAnnouncementNotification(
-                    'GRN Requested',
-                    "GRN has been requested for PO {$mrf->po_number} (MRF {$mrf->mrf_id}) by {$requestedBy->name}. Please complete the GRN.",
-                    "/mrfs/{$mrf->mrf_id}",
-                    'high'
-                ));
+            if (! $receivingOfficer) {
+                Log::warning('GRN request notification skipped because no receiving officer was resolved', [
+                    'mrf_id' => $mrf->mrf_id,
+                    'po_number' => $mrf->po_number,
+                ]);
+
+                return;
             }
+
+            $eventKey = "grn-requested:{$mrf->getKey()}";
+            if ($receivingOfficer->notifications()
+                ->where('type', SystemAnnouncementNotification::class)
+                ->whereJsonContains('data->event_key', $eventKey)
+                ->exists()) {
+                Log::info('GRN request notification already sent', [
+                    'mrf_id' => $mrf->mrf_id,
+                    'receiving_officer_id' => $receivingOfficer->id,
+                ]);
+
+                return;
+            }
+
+            DatabaseNotifications::send($receivingOfficer, new SystemAnnouncementNotification(
+                'GRN Requested',
+                "GRN has been requested for PO {$mrf->po_number} (MRF {$mrf->mrf_id}) by {$requestedBy->name}. Please complete the GRN.",
+                "/mrfs/{$mrf->mrf_id}",
+                'high',
+                ['event_key' => $eventKey]
+            ));
 
             Log::info('GRN requested notification sent', [
                 'mrf_id' => $mrf->mrf_id,
                 'po_number' => $mrf->po_number,
-                'requested_by' => $requestedBy->id
+                'requested_by' => $requestedBy->id,
+                'receiving_officer_id' => $receivingOfficer->id,
             ]);
         } catch (\Exception $e) {
             Log::error('Failed to send GRN requested notification', [
@@ -992,6 +905,33 @@ class NotificationService
                 'error' => $e->getMessage()
             ]);
         }
+    }
+
+    private function resolveReceivingOfficer(): ?User
+    {
+        $roles = ['logistics_officer', 'logistics_manager'];
+        $candidates = User::query()
+            ->whereIn('supply_chain_role', $roles)
+            ->whereNotNull('email')
+            ->where('email', '!=', '')
+            ->get();
+
+        $uniqueCandidates = $candidates->unique(fn (User $user) => User::normalizeEmail($user->email));
+        if ($uniqueCandidates->count() === 1) {
+            return $uniqueCandidates->first();
+        }
+
+        foreach ($roles as $role) {
+            $roleCandidates = $candidates
+                ->where('supply_chain_role', $role)
+                ->unique(fn (User $user) => User::normalizeEmail($user->email));
+
+            if ($roleCandidates->count() === 1) {
+                return $roleCandidates->first();
+            }
+        }
+
+        return null;
     }
 
     /**

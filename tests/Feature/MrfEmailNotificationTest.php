@@ -10,6 +10,7 @@ use App\Notifications\MRFSubmittedNotification;
 use App\Services\NotificationService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Notification;
+use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
 class MrfEmailNotificationTest extends TestCase
@@ -145,6 +146,45 @@ class MrfEmailNotificationTest extends TestCase
         Notification::assertSentToTimes($procurement, MRFSubmittedNotification::class, 1);
         Notification::assertNotSentTo($executive, MRFSubmittedNotification::class);
         Notification::assertNotSentTo($director, MRFSubmittedNotification::class);
+    }
+
+    public function test_explicit_mrf_resubmission_notifies_the_new_parallel_approvers(): void
+    {
+        Notification::fake();
+
+        $requester = User::factory()->create(['email' => 'resubmitter@example.com']);
+        $executive = User::factory()->create([
+            'email' => 'resubmit-executive@example.com',
+            'supply_chain_role' => 'executive',
+        ]);
+        $director = User::factory()->create([
+            'email' => 'resubmit-director@example.com',
+            'supply_chain_role' => 'supply_chain_director',
+        ]);
+        $mrf = MRF::create([
+            'mrf_id' => 'MRF-RESUBMIT-001',
+            'requester_id' => $requester->id,
+            'requester_name' => $requester->name,
+            'title' => 'Resubmission',
+            'category' => 'Operations',
+            'description' => 'Corrected request',
+            'quantity' => '1',
+            'estimated_cost' => 100,
+            'justification' => 'Required correction',
+            'date' => now()->toDateString(),
+            'status' => 'rejected',
+            'workflow_state' => 'rejected',
+            'current_stage' => 'rejected',
+        ]);
+
+        Sanctum::actingAs($requester);
+
+        $this->postJson('/api/mrfs/'.$mrf->mrf_id.'/resubmit', [
+            'title' => 'Corrected resubmission',
+        ])->assertOk();
+
+        Notification::assertSentToTimes($executive, MRFSubmittedNotification::class, 1);
+        Notification::assertSentToTimes($director, MRFSubmittedNotification::class, 1);
     }
 
     private function mrf(array $attributes = []): MRF

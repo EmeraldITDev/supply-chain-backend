@@ -883,9 +883,7 @@ class SRFController extends Controller
         }
 
         $remarks = $request->input('remarks');
-        $changeSummary = $this->requesterEditService->summarizeChangedFields($changedFields);
         $this->requesterEditService->recordSrfEdit($srf, $user, $remarks, $changedFields);
-        $this->notificationService->notifySRFRequesterUpdated($srf, $user, $changeSummary);
 
         $payload = $this->presentSrf($srf, true, $user);
         $payload['items'] = $srf->items->map(fn ($item) => [

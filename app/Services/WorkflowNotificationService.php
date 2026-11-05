@@ -355,11 +355,28 @@ class WorkflowNotificationService
             return;
         }
 
+        $eventKey = sprintf('po-ready-for-signature:%s:%s', $mrf->getKey(), $mrf->po_number);
+        $alreadyNotified = $signatory->notifications()
+            ->where('type', SystemAnnouncementNotification::class)
+            ->whereJsonContains('data->event_key', $eventKey)
+            ->exists();
+
+        if ($alreadyNotified) {
+            Log::info('PO ready-for-signature notification already sent', [
+                'mrf_id' => $mrf->mrf_id,
+                'po_number' => $mrf->po_number,
+                'signatory_id' => $signatory->id,
+            ]);
+
+            return;
+        }
+
         DatabaseNotifications::send($signatory, new SystemAnnouncementNotification(
             'PO Ready for Signature',
             "PO {$mrf->po_number} for MRF {$mrf->mrf_id} is ready for your signature.",
             "/mrfs/{$mrf->mrf_id}",
-            'high'
+            'high',
+            ['event_key' => $eventKey]
         ));
 
         $this->deliverMailable(

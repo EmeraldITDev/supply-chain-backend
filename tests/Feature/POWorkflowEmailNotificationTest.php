@@ -149,6 +149,12 @@ class POWorkflowEmailNotificationTest extends TestCase
 
         Sanctum::actingAs($director);
 
+        Mail::assertNothingSent();
+
+        $this->postJson('/api/purchase-orders/'.rawurlencode($mrf->formatted_id).'/forward-to-vendor')
+            ->assertOk()
+            ->assertJsonPath('success', true);
+
         $this->postJson('/api/purchase-orders/'.rawurlencode($mrf->formatted_id).'/forward-to-vendor')
             ->assertOk()
             ->assertJsonPath('success', true);
@@ -157,6 +163,7 @@ class POWorkflowEmailNotificationTest extends TestCase
             return $mail->hasTo($vendor->email)
                 && $mail->hasCc('procurement@emeraldcfze.com');
         });
+        Mail::assertSentCount(1);
 
         $mrf->refresh();
         $this->assertNotNull($mrf->po_forwarded_to_vendor_at);
