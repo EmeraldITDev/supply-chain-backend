@@ -144,7 +144,7 @@ class FinanceIntegrationService
         }
     }
 
-    public function pushPackage(MRF $mrf, ?int $requestedMilestoneId = null, ?User $actor = null): bool
+    public function pushPackage(MRF $mrf, ?int $requestedMilestoneId = null, ?User $actor = null, ?int $packageVersion = null): bool
     {
         if (! mrfUsesFinanceAp($mrf)) {
             return false;
@@ -158,7 +158,7 @@ class FinanceIntegrationService
             return false;
         }
 
-        $package = $this->buildPackage($mrf, $requestedMilestoneId);
+        $package = $this->buildPackage($mrf, $requestedMilestoneId, null, $packageVersion);
         $idempotencyKey = sprintf(
             '%s:package_push:v%d',
             $mrf->scm_transaction_id,

@@ -142,4 +142,31 @@ class FinanceApDocumentListTest extends TestCase
         Http::assertNotSent(fn ($request) => str_contains($request->url(), 'integrations/scm/packages'));
         $this->assertNull($stuck->fresh()->finance_ap_case_id);
     }
+
+    public function test_resend_command_sends_the_next_version_and_moves_the_mrf_on(): void
+    {
+        config([
+            'finance_ap.cutover_date' => '2026-01-01',
+            'finance_ap.enabled' => true,
+            'finance_ap.base_url' => 'https://finance-ap.test',
+            'finance_ap.api_key' => 'scm-key',
+            'finance_ap.paths.package' => '/integrations/scm/packages',
+        ]);
+        User::factory()->create(['supply_chain_role' => 'admin']);
+        Http::fake(['finance-ap.test/*' => Http::response([
+            'success' => true,
+            'data' => ['financeApCaseId' => 'FA-2026-00097', 'status' => 'pending_review'],
+        ], 201)]);
+
+        $stuck = $this->mrf(['workflow_state' => WorkflowStateService::STATE_FINANCE_HANDOFF_PENDING, 'status' => 'finance']);
+        $this->document($stuck, ProcurementDocument::TYPE_PFI);
+
+        $this->artisan('finance-ap:resend-stuck-packages --execute')->assertSuccessful();
+
+        Http::assertSent(fn ($request) => str_contains($request->url(), '/integrations/scm/packages')
+            && $request['packageVersion'] === 2
+            && $request['documentManifest'][0]['type'] === 'pfi');
+        $this->assertSame('FA-2026-00097', $stuck->fresh()->finance_ap_case_id);
+        $this->assertSame(WorkflowStateService::STATE_FINANCE_IN_REVIEW, $stuck->fresh()->workflow_state);
+    }
 }
