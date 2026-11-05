@@ -71,6 +71,30 @@ class Stage34NotificationTest extends TestCase
         ]);
     }
 
+    public function test_ambiguous_receiving_officers_receive_no_grn_notification(): void
+    {
+        Notification::fake();
+
+        User::factory()->create([
+            'email' => 'receiving-one@example.com',
+            'supply_chain_role' => 'logistics_officer',
+        ]);
+        User::factory()->create([
+            'email' => 'receiving-two@example.com',
+            'supply_chain_role' => 'logistics_officer',
+        ]);
+        $requester = User::factory()->create([
+            'email' => 'requester-ambiguous@example.com',
+        ]);
+
+        app(NotificationService::class)->notifyGRNRequested(new MRF([
+            'mrf_id' => 'MRF-GRN-AMBIGUOUS',
+            'po_number' => 'PO-GRN-AMBIGUOUS',
+        ]), $requester);
+
+        Notification::assertNothingSent();
+    }
+
     public function test_non_actionable_mrf_and_srf_edits_do_not_dispatch_notifications(): void
     {
         Notification::fake();

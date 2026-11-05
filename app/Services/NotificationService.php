@@ -921,16 +921,8 @@ class NotificationService
             return $uniqueCandidates->first();
         }
 
-        foreach ($roles as $role) {
-            $roleCandidates = $candidates
-                ->where('supply_chain_role', $role)
-                ->unique(fn (User $user) => User::normalizeEmail($user->email));
-
-            if ($roleCandidates->count() === 1) {
-                return $roleCandidates->first();
-            }
-        }
-
+        // A role-priority fallback would silently choose the wrong receiver
+        // when multiple eligible logistics users exist.
         return null;
     }
 

@@ -169,6 +169,50 @@ class POWorkflowEmailNotificationTest extends TestCase
         $this->assertNotNull($mrf->po_forwarded_to_vendor_at);
     }
 
+    public function test_vendor_forwarding_failure_does_not_mark_issuance_as_sent(): void
+    {
+        Mail::fake();
+
+        $director = User::factory()->create([
+            'supply_chain_role' => 'supply_chain_director',
+        ]);
+        $vendor = \App\Models\Vendor::create([
+            'name' => 'Retry Vendor',
+            'email' => 'vendor-retry@example.com',
+            'status' => 'Active',
+        ]);
+        $mrf = MRF::create([
+            'mrf_id' => 'MRF-PO-FORWARD-002',
+            'formatted_id' => 'MRF-EMERALD-FORWARD-002',
+            'requester_name' => 'Requester',
+            'title' => 'Retry PO',
+            'status' => 'signed',
+            'workflow_state' => 'po_signed',
+            'po_number' => 'PO-FORWARD-002',
+            'selected_vendor_id' => $vendor->id,
+            'signed_po_url' => 'https://s3.example/signed.pdf',
+            'po_signed_at' => now(),
+        ]);
+
+        $this->mock(WorkflowNotificationService::class, function ($mock): void {
+            $mock->shouldReceive('forwardSignedPoToVendor')
+                ->once()
+                ->andThrow(new \RuntimeException('Temporary mail failure'));
+        });
+        Sanctum::actingAs($director);
+
+        $this->postJson('/api/purchase-orders/'.rawurlencode($mrf->formatted_id).'/forward-to-vendor')
+            ->assertStatus(500)
+            ->assertJsonPath('code', 'MAIL_FAILED');
+
+        $this->assertNull($mrf->fresh()->po_forwarded_to_vendor_at);
+        $this->assertDatabaseMissing('mrf_approval_history', [
+            'mrf_id' => $mrf->id,
+            'action' => 'po_forwarded_to_vendor',
+        ]);
+        Mail::assertNothingSent();
+    }
+
     public function test_vendor_selection_approval_emails_procurement(): void
     {
         Mail::fake();
