@@ -4,7 +4,6 @@ namespace Tests\Feature;
 
 use App\Jobs\ProcessPurchaseOrderNotificationsJob;
 use App\Mail\POForwardedToVendorMail;
-use App\Mail\POGeneratedMail;
 use App\Mail\POReadyForSignatureMail;
 use App\Mail\POSignedMail;
 use App\Mail\VendorSelectionApprovedMail;
@@ -14,6 +13,7 @@ use App\Services\ManualVendorOnboardingService;
 use App\Services\NotificationService;
 use App\Services\WorkflowNotificationService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Mail;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
@@ -22,9 +22,10 @@ class POWorkflowEmailNotificationTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_fast_track_po_generation_still_emails_signers_and_stakeholders(): void
+    public function test_fast_track_po_generation_notifies_only_the_responsible_signatory(): void
     {
         Mail::fake();
+        Notification::fake();
 
         $director = User::factory()->create([
             'email' => 'director@example.com',
@@ -62,16 +63,17 @@ class POWorkflowEmailNotificationTest extends TestCase
 
         $job->handle(
             app(NotificationService::class),
-            app(WorkflowNotificationService::class),
             $onboarding,
         );
 
-        Mail::assertSent(POGeneratedMail::class, function (POGeneratedMail $mail) use ($requester) {
-            return $mail->hasTo($requester->email);
-        });
         Mail::assertSent(POReadyForSignatureMail::class, function (POReadyForSignatureMail $mail) use ($director) {
             return $mail->hasTo($director->email);
         });
+        Mail::assertSentCount(1);
+        Mail::assertNotSent(\App\Mail\POGeneratedMail::class);
+        Notification::assertSentToTimes($director, \App\Notifications\SystemAnnouncementNotification::class, 1);
+        Notification::assertNotSentTo($requester, \App\Notifications\SystemAnnouncementNotification::class);
+        Notification::assertNotSentTo($generator, \App\Notifications\SystemAnnouncementNotification::class);
     }
 
     public function test_signed_po_emails_finance_and_requester_but_not_the_vendor_or_lazarus(): void

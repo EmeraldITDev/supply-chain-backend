@@ -2,7 +2,6 @@
 
 namespace App\Services;
 
-use App\Mail\POGeneratedMail;
 use App\Mail\POReadyForSignatureMail;
 use App\Mail\POForwardedToVendorMail;
 use App\Mail\POSignedMail;
@@ -337,29 +336,7 @@ class WorkflowNotificationService
 
     public function notifyPOGenerated(MRF $mrf): void
     {
-        $mrf->loadMissing(['requester', 'selectedVendor']);
-
-        $emails = collect([
-            $mrf->requester?->email ?? null,
-            $mrf->selectedVendor?->email ?? null,
-        ])
-            ->merge(config('scm.po_generated_to_recipients', []))
-            ->merge($this->getEmailsByRoles(['supply_chain_director', 'supply_chain']))
-            ->merge(config('scm.po_cc_recipients', []))
-            ->push(\App\Support\PurchaseOrderInvoiceCc::PROCUREMENT_EMAIL)
-            ->filter()
-            ->unique()
-            ->values()
-            ->toArray();
-
-        foreach ($emails as $email) {
-            $this->deliverMailable(
-                event: 'po_generated',
-                recipient: $email,
-                modelId: $mrf->formatted_id ?: $mrf->mrf_id,
-                mailableFactory: static fn () => new POGeneratedMail($mrf)
-            );
-        }
+        $this->notifyPOReadyForSignature($mrf);
     }
 
     /**
@@ -367,24 +344,80 @@ class WorkflowNotificationService
      */
     public function notifyPOReadyForSignature(MRF $mrf): void
     {
-        $mrf->loadMissing(['requester', 'selectedVendor']);
+        $signatory = $this->resolvePoSignatory($mrf);
 
-        $emails = collect($this->getEmailsByRoles(['supply_chain_director', 'supply_chain']))
-            ->merge(config('scm.po_generated_to_recipients', []))
-            ->merge(config('scm.po_cc_recipients', []))
-            ->filter()
-            ->unique(fn ($email) => strtolower((string) $email))
-            ->values()
-            ->all();
+        if (! $signatory) {
+            Log::warning('No responsible PO signatory could be resolved', [
+                'mrf_id' => $mrf->mrf_id,
+                'po_number' => $mrf->po_number,
+            ]);
 
-        foreach ($emails as $email) {
-            $this->deliverMailable(
-                event: 'po_ready_for_signature',
-                recipient: (string) $email,
-                modelId: $mrf->formatted_id ?: $mrf->mrf_id,
-                mailableFactory: static fn () => new POReadyForSignatureMail($mrf)
-            );
+            return;
         }
+
+        DatabaseNotifications::send($signatory, new SystemAnnouncementNotification(
+            'PO Ready for Signature',
+            "PO {$mrf->po_number} for MRF {$mrf->mrf_id} is ready for your signature.",
+            "/mrfs/{$mrf->mrf_id}",
+            'high'
+        ));
+
+        $this->deliverMailable(
+            event: 'po_ready_for_signature',
+            recipient: (string) $signatory->email,
+            modelId: $mrf->formatted_id ?: $mrf->mrf_id,
+            mailableFactory: static fn () => new POReadyForSignatureMail($mrf)
+        );
+    }
+
+    private function resolvePoSignatory(MRF $mrf): ?User
+    {
+        $allowedRoles = ['supply_chain_director', 'supply_chain', 'admin'];
+        $mrf->loadMissing('directorApprover');
+
+        $assigned = $mrf->directorApprover;
+        if ($assigned && in_array($assigned->supply_chain_role, $allowedRoles, true) && filled($assigned->email)) {
+            return $assigned;
+        }
+
+        $approvedBy = $mrf->director_approved_by ?? $mrf->scd_approved_by ?? $mrf->supply_chain_approved_by;
+        if (filled($approvedBy)) {
+            $assigned = User::query()
+                ->where(function ($query) use ($approvedBy) {
+                    $query->whereKey($approvedBy)
+                        ->orWhere('email', $approvedBy)
+                        ->orWhere('name', $approvedBy);
+                })
+                ->whereIn('supply_chain_role', $allowedRoles)
+                ->whereNotNull('email')
+                ->first();
+
+            if ($assigned) {
+                return $assigned;
+            }
+        }
+
+        $candidates = User::query()
+            ->whereIn('supply_chain_role', $allowedRoles)
+            ->whereNotNull('email')
+            ->where('email', '!=', '')
+            ->get();
+
+        $uniqueCandidates = $candidates->unique(fn (User $user) => strtolower(trim((string) $user->email)));
+        if ($uniqueCandidates->count() === 1) {
+            return $uniqueCandidates->first();
+        }
+
+        foreach ($allowedRoles as $role) {
+            $roleCandidates = $candidates->where('supply_chain_role', $role)
+                ->unique(fn (User $user) => strtolower(trim((string) $user->email)));
+
+            if ($roleCandidates->count() === 1) {
+                return $roleCandidates->first();
+            }
+        }
+
+        return null;
     }
 
     /**

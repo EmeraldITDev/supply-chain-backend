@@ -683,33 +683,18 @@ class NotificationService
     public function notifyPOReadyForSignature(MRF $mrf): void
     {
         try {
-            $supplyChainDirectors = User::whereIn('supply_chain_role', ['supply_chain_director', 'supply_chain', 'admin'])->get();
-
-            foreach ($supplyChainDirectors as $director) {
-                DatabaseNotifications::send($director, new SystemAnnouncementNotification(
-                    'PO Ready for Signature',
-                    "PO {$mrf->po_number} for MRF {$mrf->mrf_id} is ready for your signature.",
-                    "/mrfs/{$mrf->mrf_id}",
-                    'high'
-                ));
-            }
-
-            Log::info('PO ready for signature notification sent', ['mrf_id' => $mrf->mrf_id, 'po_number' => $mrf->po_number]);
-        } catch (\Exception $e) {
-            Log::error('Failed to send PO signature notification', [
-                'mrf_id' => $mrf->mrf_id,
-                'error' => $e->getMessage()
-            ]);
-        }
-
-        try {
             app(WorkflowNotificationService::class)->notifyPOReadyForSignature($mrf);
         } catch (\Throwable $e) {
-            Log::error('Failed to send PO ready-for-signature email', [
+            Log::error('Failed to send PO ready-for-signature notification', [
                 'mrf_id' => $mrf->mrf_id,
                 'error' => $e->getMessage(),
             ]);
         }
+    }
+
+    public function notifyPOGenerated(MRF $mrf, ?User $generator = null): void
+    {
+        $this->notifyPOReadyForSignature($mrf);
     }
 
     /**
