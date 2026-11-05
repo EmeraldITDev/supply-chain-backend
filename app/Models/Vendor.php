@@ -136,6 +136,15 @@ class Vendor extends Model
     }
 
     /**
+     * KYC label for API consumers. Matches the SCM portal, which shows every
+     * directory vendor as Verified regardless of status or onboarding source.
+     */
+    public function kycStatus(): string
+    {
+        return 'Verified';
+    }
+
+    /**
      * Generate Vendor ID
      */
     public static function generateVendorId(): string
