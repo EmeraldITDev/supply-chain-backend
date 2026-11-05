@@ -5,7 +5,6 @@ namespace App\Console\Commands;
 use App\Models\MRF;
 use App\Models\User;
 use App\Services\NotificationService;
-use App\Services\WorkflowNotificationService;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Notification as DatabaseNotifications;
 
@@ -20,7 +19,6 @@ class ResendMrfApprovedEmail extends Command
 
     public function handle(
         NotificationService $notificationService,
-        WorkflowNotificationService $workflowNotificationService,
     ): int {
         $id = trim((string) $this->argument('mrf_id'));
         $mrf = MRF::query()
@@ -101,14 +99,6 @@ class ResendMrfApprovedEmail extends Command
         } else {
             $notificationService->notifyMRFApproved($mrf, $approver, $remarks);
             $this->info('Queued/sent MRFApprovedNotification to '.$mrf->requester->email);
-        }
-
-        // Also fire the dedicated mailable path used by some workflows.
-        try {
-            $workflowNotificationService->notifyMRFApproved($mrf);
-            $this->info('Queued/sent MRFApprovedMail to '.$mrf->requester->email);
-        } catch (\Throwable $e) {
-            $this->warn('Workflow mailable path failed: '.$e->getMessage());
         }
 
         $this->newLine();

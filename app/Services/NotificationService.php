@@ -11,6 +11,7 @@ use App\Models\Quotation;
 use App\Models\Vendor;
 use App\Models\VendorRegistration;
 use App\Models\ProcurementDocument;
+use App\Services\WorkflowStateService;
 use App\Notifications\MRFSubmittedNotification;
 use App\Notifications\MRFApprovedNotification;
 use App\Notifications\MRFRejectedNotification;
@@ -39,24 +40,33 @@ class NotificationService
         try {
             $mrf->loadMissing('requester');
 
-            $notifiables = collect();
+            if (strtolower((string) $mrf->source) === 'po_generated') {
+                Log::info('MRF submitted notification skipped for fast-tracked source', [
+                    'mrf_id' => $mrf->mrf_id,
+                    'source' => $mrf->source,
+                ]);
 
-            $executives = User::query()
-                ->whereIn('supply_chain_role', ['executive', 'admin'])
-                ->get();
-            $notifiables = $notifiables->merge($executives);
-
-            $namedExecutive = User::where('email', 'bunmi.babajide@emeraldcfze.com')->first();
-            if ($namedExecutive) {
-                $notifiables->push($namedExecutive);
+                return;
             }
 
-            $directors = User::query()
-                ->whereIn('supply_chain_role', ['supply_chain_director', 'supply_chain', 'admin'])
-                ->get();
-            $notifiables = $notifiables->merge($directors);
+            $roles = $this->mrfSubmissionRecipientRoles($mrf);
+            if ($roles === []) {
+                Log::warning('MRF submitted notification skipped because no approval role was resolved', [
+                    'mrf_id' => $mrf->mrf_id,
+                    'workflow_state' => $mrf->workflow_state,
+                    'current_stage' => $mrf->current_stage,
+                ]);
 
-            $notifiables = $notifiables->unique('id')->values();
+                return;
+            }
+
+            $notifiables = User::query()
+                ->whereIn('supply_chain_role', $roles)
+                ->whereNotNull('email')
+                ->where('email', '!=', '')
+                ->get()
+                ->unique(fn (User $user) => strtolower(trim((string) $user->email)))
+                ->values();
 
             foreach ($notifiables as $user) {
                 DatabaseNotifications::send($user, new MRFSubmittedNotification($mrf));
@@ -72,6 +82,36 @@ class NotificationService
                 'error' => $e->getMessage()
             ]);
         }
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function mrfSubmissionRecipientRoles(MRF $mrf): array
+    {
+        $state = strtolower(trim((string) ($mrf->workflow_state ?: $mrf->current_stage)));
+
+        return match ($state) {
+            WorkflowStateService::STATE_CHAIRMAN_REVIEW => ['chairman', 'admin'],
+            WorkflowStateService::STATE_PARALLEL_FIRST_APPROVAL => [
+                'executive',
+                'supply_chain_director',
+                'supply_chain',
+                'admin',
+            ],
+            WorkflowStateService::STATE_EXECUTIVE_REVIEW => ['executive', 'admin'],
+            WorkflowStateService::STATE_SUPPLY_CHAIN_DIRECTOR_REVIEW => [
+                'supply_chain_director',
+                'supply_chain',
+                'admin',
+            ],
+            WorkflowStateService::STATE_PROCUREMENT_REVIEW => [
+                'procurement_manager',
+                'procurement',
+                'admin',
+            ],
+            default => [],
+        };
     }
 
     /**

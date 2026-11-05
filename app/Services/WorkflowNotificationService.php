@@ -2,9 +2,6 @@
 
 namespace App\Services;
 
-use App\Mail\MRFCreatedMail;
-use App\Mail\MRFApprovedMail;
-use App\Mail\MRFRejectedMail;
 use App\Mail\POGeneratedMail;
 use App\Mail\POReadyForSignatureMail;
 use App\Mail\POForwardedToVendorMail;
@@ -39,31 +36,6 @@ use Illuminate\Support\Facades\Storage;
 class WorkflowNotificationService
 {
     public const LAZARUS_EMAIL = LazarusNotificationSettings::EMAIL;
-    public function notifyMRFSubmitted(MRF $mrf): void
-    {
-        // Parallel first-approval recipients: executives + supply chain directors.
-        $emails = collect($this->getEmailsByRoles([
-            'executive',
-            'admin',
-            'supply_chain_director',
-            'supply_chain',
-        ]))
-            ->push('bunmi.babajide@emeraldcfze.com')
-            ->merge(collect(config('scm.logistics_notification_cc_emails', [])))
-            ->filter()
-            ->unique(fn ($e) => strtolower((string) $e))
-            ->values();
-
-        foreach ($emails as $email) {
-            $this->deliverMailable(
-                event: 'mrf_created',
-                recipient: (string) $email,
-                modelId: $mrf->formatted_id ?: $mrf->mrf_id,
-                mailableFactory: static fn () => new MRFCreatedMail($mrf)
-            );
-        }
-    }
-
     public function notifyTripRequestSubmittedToEmail(Trip $trip, User $requester, string $email): void
     {
         $this->deliverMailable(
@@ -339,46 +311,6 @@ class WorkflowNotificationService
                 'srf_id' => $srf->srf_id,
                 'error' => $e->getMessage(),
             ]);
-        }
-    }
-
-    public function notifyMRFApproved(MRF $mrf): void
-    {
-        $emails = collect([
-            $mrf->requester?->email ?? null,
-        ])
-        ->filter()
-        ->unique()
-        ->values()
-        ->toArray();
-
-        foreach ($emails as $email) {
-            $this->deliverMailable(
-                event: 'mrf_approved',
-                recipient: $email,
-                modelId: $mrf->formatted_id ?: $mrf->mrf_id,
-                mailableFactory: static fn () => new MRFApprovedMail($mrf)
-            );
-        }
-    }
-
-    public function notifyMRFRejected(MRF $mrf, ?string $remarks = null): void
-    {
-        $emails = collect([
-            $mrf->requester?->email ?? null,
-        ])
-        ->filter()
-        ->unique()
-        ->values()
-        ->toArray();
-
-        foreach ($emails as $email) {
-            $this->deliverMailable(
-                event: 'mrf_rejected',
-                recipient: $email,
-                modelId: $mrf->formatted_id ?: $mrf->mrf_id,
-                mailableFactory: static fn () => new MRFRejectedMail($mrf, $remarks)
-            );
         }
     }
 

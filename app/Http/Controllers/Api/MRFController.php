@@ -1736,7 +1736,6 @@ class MRFController extends Controller
                 || $mrfSource === 'po_generated';
 
             if (! $suppressNotifications) {
-                // Send notification to Executive
                 try {
                     $this->notificationService->notifyMRFSubmitted($mrf);
                 } catch (\Exception $e) {
@@ -1744,16 +1743,6 @@ class MRFController extends Controller
                     \Log::error('Failed to send MRF notification', [
                         'mrf_id' => $mrf->mrf_id,
                         'error' => $e->getMessage()
-                    ]);
-                }
-                try {
-                    $this->workflowNotificationService->notifyMRFSubmitted($mrf);
-                } catch (\Exception $e) {
-                    \Log::error('Failed to send MRF created email notification', [
-                        'event' => 'mrf_created',
-                        'recipient' => null,
-                        'model_id' => $mrf->mrf_id,
-                        'error' => $e->getMessage(),
                     ]);
                 }
             } else {
@@ -2103,18 +2092,6 @@ class MRFController extends Controller
 
         // Send notification to requester
         $this->notificationService->notifyMRFApproved($mrf, $user, $request->remarks);
-        try {
-            $mrf->loadMissing('requester');
-            $this->workflowNotificationService->notifyMRFApproved($mrf);
-        } catch (\Exception $e) {
-            \Log::error('Failed to send MRF approved email notification', [
-                'event' => 'mrf_approved',
-                'recipient' => $mrf->requester?->email,
-                'model_id' => $mrf->mrf_id,
-                'error' => $e->getMessage(),
-            ]);
-        }
-
         return response()->json([
             'success' => true,
             'message' => 'MRF approved successfully',
@@ -2172,18 +2149,6 @@ class MRFController extends Controller
 
         // Send notification to requester
         $this->notificationService->notifyMRFRejected($mrf, $user, $request->reason);
-        try {
-            $mrf->loadMissing('requester');
-            $this->workflowNotificationService->notifyMRFRejected($mrf, $request->reason);
-        } catch (\Exception $e) {
-            \Log::error('Failed to send MRF rejected email notification', [
-                'event' => 'mrf_rejected',
-                'recipient' => $mrf->requester?->email,
-                'model_id' => $mrf->mrf_id,
-                'error' => $e->getMessage(),
-            ]);
-        }
-
         return response()->json([
             'success' => true,
             'message' => 'MRF rejected',
@@ -2841,7 +2806,6 @@ class MRFController extends Controller
         try {
             $mrf->load('requester');
             $this->notificationService->notifyMRFRejected($mrf, $user, $request->reason);
-            $this->workflowNotificationService->notifyMRFRejected($mrf, $request->reason);
         } catch (\Exception $e) {
             \Log::error('Failed to send MRF rejected notification', [
                 'mrf_id' => $mrf->mrf_id,

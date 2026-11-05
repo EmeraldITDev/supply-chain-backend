@@ -2,9 +2,6 @@
 
 namespace App\Listeners;
 
-use App\Mail\MRFApprovedMail;
-use App\Mail\MRFCreatedMail;
-use App\Mail\MRFRejectedMail;
 use App\Mail\POGeneratedMail;
 use App\Mail\POReadyForSignatureMail;
 use App\Mail\PORevisedForResignMail;
@@ -30,9 +27,6 @@ class SuppressLazarusMailUnlessEnabled
      * @var array<class-string, string>
      */
     private const CLASS_TOGGLES = [
-        MRFCreatedMail::class => 'mrf_submitted',
-        MRFApprovedMail::class => 'mrf_submitted',
-        MRFRejectedMail::class => 'mrf_submitted',
         MRFSubmittedNotification::class => 'mrf_submitted',
         MRFApprovedNotification::class => 'mrf_submitted',
         MRFRejectedNotification::class => 'mrf_submitted',
