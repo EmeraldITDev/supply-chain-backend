@@ -42,7 +42,13 @@ class FinancePackageBuilder
     /**
      * @return array<string, mixed>
      */
-    public function build(MRF $mrf, ?int $requestedMilestoneId = null, ?string $deltaReason = null): array
+    public function build(
+        MRF $mrf,
+        ?int $requestedMilestoneId = null,
+        ?string $deltaReason = null,
+        ?int $packageVersion = null,
+        bool $recalculateAmounts = true,
+    ): array
     {
         $mrf->loadMissing([
             'requester:id,name,email,department',
@@ -58,16 +64,17 @@ class FinancePackageBuilder
         $paymentTerms = $this->resolvePaymentTerms($mrf, $schedule);
         $paymentType = $this->paymentTypeMapper->map($paymentTerms, $schedule, $documentManifest);
 
-        if ($schedule) {
+        if ($schedule && $recalculateAmounts) {
             $this->paymentScheduleService->recalculateAmounts($schedule, $poTotal);
             $schedule->load('milestones');
         }
 
         return [
-            'packageVersion' => $this->nextPackageVersion($mrf),
+            'packageVersion' => $packageVersion ?? $this->nextPackageVersion($mrf),
             'deltaReason' => $deltaReason,
             'header' => $this->buildHeader($mrf, $vendor, $poTotal, $paymentTerms, $paymentType),
             'paymentSchedule' => $schedule ? $this->buildPaymentScheduleSection($schedule) : null,
+            'paymentPlan' => $this->buildStructuredPaymentPlan($mrf, $schedule, $paymentTerms, $poTotal),
             'lineItems' => $this->buildLineItems($mrf),
             'approvalsSummary' => $this->buildApprovalsSummary($mrf),
             'documentManifest' => $documentManifest,
@@ -112,6 +119,10 @@ class FinancePackageBuilder
 
     private function resolvePaymentTerms(MRF $mrf, ?PaymentSchedule $schedule): ?string
     {
+        if (filled($mrf->po_payment_terms)) {
+            return (string) $mrf->po_payment_terms;
+        }
+
         $quotation = $mrf->selectedQuotation();
 
         if ($quotation?->payment_terms) {
@@ -140,14 +151,112 @@ class FinancePackageBuilder
             'paymentSchedule' => $this->paymentScheduleService->toApiArray($schedule),
             'milestones' => $schedule->milestones->map(fn (PaymentMilestone $m) => [
                 'scmMilestoneId' => (string) $m->id,
+                'stageId' => 'scm-milestone-'.$m->id,
+                'sequence' => (int) $m->milestone_number,
                 'milestoneNumber' => $m->milestone_number,
                 'label' => $m->label,
                 'percentage' => (float) $m->percentage,
+                'paymentPercentage' => (float) $m->percentage,
                 'amount' => $m->amount !== null ? (float) $m->amount : null,
                 'triggerCondition' => $m->trigger_condition,
+                'triggerEvent' => $m->trigger_condition,
                 'requiredDocuments' => $m->required_documents ?? [],
                 'status' => $m->status,
             ])->values()->all(),
+        ];
+    }
+
+    /**
+     * Send configured payment stages as source data without inferring percentages
+     * from free-text terms.
+     *
+     * @return array<string, mixed>
+     */
+    private function buildStructuredPaymentPlan(
+        MRF $mrf,
+        ?PaymentSchedule $schedule,
+        ?string $paymentTerms,
+        float $poTotal,
+    ): array {
+        $approvedTerms = filled($mrf->po_payment_terms)
+            ? (string) $mrf->po_payment_terms
+            : null;
+        $stages = $schedule
+            ? $schedule->milestones->map(fn (PaymentMilestone $milestone) => [
+                'stageId' => 'scm-milestone-'.$milestone->id,
+                'scmMilestoneId' => (string) $milestone->id,
+                'sequence' => (int) $milestone->milestone_number,
+                'paymentPercentage' => (float) $milestone->percentage,
+                'triggerEvent' => $milestone->trigger_condition,
+                'requiredEvidenceCategories' => $milestone->required_documents ?? [],
+                'label' => $milestone->label,
+                'originalApprovedTerms' => $approvedTerms,
+                'sourcePaymentTerms' => $paymentTerms,
+                'poNumber' => $mrf->po_number,
+            ])->values()->all()
+            : [];
+
+        return [
+            'classificationStatus' => $schedule ? 'configured_from_payment_schedule' : 'requires_finance_ap_classification',
+            'originalApprovedTerms' => $approvedTerms,
+            'sourcePaymentTerms' => $paymentTerms,
+            'poNumber' => $mrf->po_number,
+            'poAmount' => $poTotal,
+            'currency' => $mrf->currency ?? 'NGN',
+            'stages' => $stages,
+        ];
+    }
+
+    /**
+     * Return a configured stage only when its required evidence includes the
+     * uploaded document category. An absent/ambiguous schedule is not guessed.
+     *
+     * @return array<string, mixed>|null
+     */
+    public function milestoneForSupportingDocument(MRF $mrf, ProcurementDocument $document): ?array
+    {
+        if (! in_array($document->type, [
+            ProcurementDocument::TYPE_WAYBILL,
+            ProcurementDocument::TYPE_JCC,
+        ], true)) {
+            return null;
+        }
+
+        $schedule = $mrf->paymentSchedule;
+        if (! $schedule) {
+            return null;
+        }
+
+        $schedule->loadMissing('milestones');
+        $milestone = $schedule->milestones->first(function (PaymentMilestone $milestone) use ($document) {
+            $requiredDocuments = is_array($milestone->required_documents)
+                ? $milestone->required_documents
+                : [];
+            $triggerMatchesDocument = match ($milestone->trigger_condition) {
+                PaymentMilestone::TRIGGER_UPON_DELIVERY => in_array($document->type, $requiredDocuments, true),
+                PaymentMilestone::TRIGGER_UPON_COMPLETION => $document->type === ProcurementDocument::TYPE_JCC
+                    && in_array($document->type, $requiredDocuments, true),
+                default => false,
+            };
+
+            return ! in_array($milestone->status, [
+                PaymentMilestone::STATUS_PAID,
+                PaymentMilestone::STATUS_COMPLETE,
+            ], true)
+                && $triggerMatchesDocument;
+        });
+
+        if (! $milestone) {
+            return null;
+        }
+
+        return [
+            'stage_id' => 'scm-milestone-'.$milestone->id,
+            'scm_milestone_id' => (string) $milestone->id,
+            'sequence' => (int) $milestone->milestone_number,
+            'payment_percentage' => (float) $milestone->percentage,
+            'trigger' => $milestone->trigger_condition,
+            'required_evidence_categories' => $milestone->required_documents ?? [],
         ];
     }
 
@@ -205,18 +314,33 @@ class FinancePackageBuilder
      */
     private function buildDocumentManifest(MRF $mrf): array
     {
-        return $this->activeDocuments($mrf)
-            ->map(fn (ProcurementDocument $doc) => [
-                'documentId' => (string) $doc->id,
-                'type' => $this->mapFinanceApDocumentType($doc->type),
-                'scmDocumentType' => $doc->type,
-                'fileName' => $doc->file_name,
-                // Stored URLs are 7-day S3 links; Finance AP downloads on receipt, so sign afresh.
-                'fileUrl' => $this->documentService->freshUrlForDocument($doc),
-                'version' => (int) $doc->version,
-                'uploadedAt' => $doc->uploaded_at?->toIso8601String(),
-                'sha256' => $this->documentChecksum($doc),
-            ])
+        $documents = $this->activeDocuments($mrf);
+        $availability = $this->documentAvailability($documents);
+        $primaryPoId = $this->primaryPurchaseOrderId($documents, $availability);
+
+        return $documents
+            ->map(function (ProcurementDocument $doc) use ($availability, $primaryPoId) {
+                $isAvailable = $availability[$doc->id];
+
+                return [
+                    'documentId' => (string) $doc->id,
+                    'type' => $this->mapFinanceApDocumentType($doc->type),
+                    'scmDocumentType' => $doc->type,
+                    'fileName' => $doc->file_name,
+                    'fileUrl' => $isAvailable
+                        ? $this->documentService->freshAuthorizedUrlForDocument($doc)
+                        : null,
+                    'version' => (int) $doc->version,
+                    'uploadedAt' => $doc->uploaded_at?->toIso8601String(),
+                    'isLatest' => true,
+                    'available' => $isAvailable,
+                    'isPrimary' => $primaryPoId === $doc->id,
+                    'poNumber' => $mrf->po_number,
+                    'remarks' => $doc->metadata['remarks'] ?? null,
+                    ...$this->invoiceClassification($doc),
+                    'sha256' => $this->documentChecksum($doc),
+                ];
+            })
             ->values()
             ->all();
     }
@@ -229,7 +353,11 @@ class FinancePackageBuilder
      */
     public function buildDocumentList(MRF $mrf): array
     {
-        return $this->activeDocuments($mrf)
+        $documents = $this->activeDocuments($mrf);
+        $availability = $this->documentAvailability($documents);
+        $primaryPoId = $this->primaryPurchaseOrderId($documents, $availability);
+
+        return $documents
             ->map(fn (ProcurementDocument $doc) => [
                 'documentId' => (string) $doc->id,
                 'type' => $this->mapFinanceApDocumentType($doc->type),
@@ -237,6 +365,12 @@ class FinancePackageBuilder
                 'fileName' => $doc->file_name,
                 'version' => (int) $doc->version,
                 'uploadedAt' => $doc->uploaded_at?->toIso8601String(),
+                'isLatest' => true,
+                'available' => $availability[$doc->id],
+                'isPrimary' => $primaryPoId === $doc->id,
+                'poNumber' => $mrf->po_number,
+                'remarks' => $doc->metadata['remarks'] ?? null,
+                ...$this->invoiceClassification($doc),
             ])
             ->values()
             ->all();
@@ -245,20 +379,87 @@ class FinancePackageBuilder
     /**
      * Active documents for the MRF and its selected vendor.
      *
-     * @return \Illuminate\Database\Eloquent\Collection<int, ProcurementDocument>
+     * @return \Illuminate\Support\Collection<int, ProcurementDocument>
      */
     private function activeDocuments(MRF $mrf)
     {
         $vendorId = $this->documentService->resolveVendorId($mrf);
 
-        return ProcurementDocument::query()
+        $documents = ProcurementDocument::query()
             ->where('mrf_id', $mrf->id)
             ->where('is_active', true)
-            ->when($vendorId, fn ($q) => $q->where(function ($query) use ($vendorId) {
-                $query->whereNull('vendor_id')->orWhere('vendor_id', $vendorId);
-            }))
+            ->where(function ($query) use ($vendorId) {
+                $query->whereNull('vendor_id');
+                if ($vendorId) {
+                    $query->orWhere('vendor_id', $vendorId);
+                }
+            })
             ->orderBy('type')
+            ->orderBy('version')
+            ->orderBy('uploaded_at')
+            ->orderBy('id')
             ->get();
+
+        return $documents
+            ->groupBy('type')
+            ->map(fn ($versions) => $versions->last())
+            ->values()
+            ->sortBy(fn (ProcurementDocument $doc) => match ($doc->type) {
+                ProcurementDocument::TYPE_SIGNED_PO => 0,
+                ProcurementDocument::TYPE_PO_PDF => 1,
+                default => 2,
+            })
+            ->values();
+    }
+
+    /**
+     * @param  \Illuminate\Support\Collection<int, ProcurementDocument>  $documents
+     * @return array<int, bool>
+     */
+    private function documentAvailability($documents): array
+    {
+        return $documents
+            ->mapWithKeys(fn (ProcurementDocument $doc) => [
+                $doc->id => $this->documentService->isAvailableForFinanceAp($doc),
+            ])
+            ->all();
+    }
+
+    /**
+     * @param  \Illuminate\Support\Collection<int, ProcurementDocument>  $documents
+     * @param  array<int, bool>  $availability
+     */
+    private function primaryPurchaseOrderId($documents, array $availability): ?int
+    {
+        $primary = $documents->first(fn (ProcurementDocument $doc) =>
+            in_array($doc->type, [
+                ProcurementDocument::TYPE_SIGNED_PO,
+                ProcurementDocument::TYPE_PO_PDF,
+            ], true)
+            && ($availability[$doc->id] ?? false)
+        );
+
+        return $primary?->id;
+    }
+
+    /**
+     * @return array{invoiceStatus?: string, isSubmitted?: bool, isVerified?: bool}
+     */
+    private function invoiceClassification(ProcurementDocument $document): array
+    {
+        return match ($document->type) {
+            ProcurementDocument::TYPE_VENDOR_INVOICE => [
+                'invoiceStatus' => 'submitted',
+                'isSubmitted' => true,
+                'isVerified' => false,
+            ],
+            ProcurementDocument::TYPE_SUPPORTING_VENDOR_INVOICE => [
+                'invoiceStatus' => 'supporting',
+                'isSubmitted' => false,
+                'isVerified' => false,
+            ],
+            default => [],
+        };
     }
 
     public function mapFinanceApDocumentType(string $scmType): string
@@ -267,6 +468,7 @@ class FinancePackageBuilder
             ProcurementDocument::TYPE_SIGNED_PO,
             ProcurementDocument::TYPE_PO_PDF => 'purchase_order',
             ProcurementDocument::TYPE_VENDOR_INVOICE => 'invoice',
+            ProcurementDocument::TYPE_SUPPORTING_VENDOR_INVOICE => 'supporting_invoice',
             ProcurementDocument::TYPE_PFI => 'pfi',
             ProcurementDocument::TYPE_GRN => 'grn',
             ProcurementDocument::TYPE_WAYBILL => 'waybill',

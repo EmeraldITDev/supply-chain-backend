@@ -2,6 +2,7 @@
 
 namespace App\Services\Finance;
 
+use App\Jobs\NotifyFinanceApSupportingDocumentUploaded;
 use App\Models\FinanceSyncEvent;
 use App\Models\MRF;
 use App\Models\PaymentMilestone;
@@ -46,9 +47,101 @@ class FinanceIntegrationService
     /**
      * @return array<string, mixed>
      */
-    public function buildPackage(MRF $mrf, ?int $requestedMilestoneId = null, ?string $deltaReason = null): array
+    public function buildPackage(
+        MRF $mrf,
+        ?int $requestedMilestoneId = null,
+        ?string $deltaReason = null,
+        ?int $packageVersion = null,
+        bool $recalculateAmounts = true,
+    ): array
     {
-        return $this->packageBuilder->build($mrf, $requestedMilestoneId, $deltaReason);
+        if ($packageVersion === null && $recalculateAmounts) {
+            return $this->packageBuilder->build($mrf, $requestedMilestoneId, $deltaReason);
+        }
+
+        return $this->packageBuilder->build(
+            $mrf,
+            $requestedMilestoneId,
+            $deltaReason,
+            $packageVersion,
+            $recalculateAmounts,
+        );
+    }
+
+    /**
+     * Push an explicitly versioned refresh without changing SCM workflow state.
+     * The caller must obtain the current Finance AP version out-of-band until
+     * Finance AP exposes a package-version lookup endpoint.
+     */
+    public function pushPackageAtVersion(MRF $mrf, int $packageVersion): bool
+    {
+        if (! mrfUsesFinanceAp($mrf) || ! $this->isConfigured() || $packageVersion < 1) {
+            return false;
+        }
+
+        $package = $this->buildPackage($mrf, null, 'authorized_refresh', $packageVersion, false);
+        $idempotencyKey = sprintf('%s:package_refresh:v%d', $mrf->scm_transaction_id, $packageVersion);
+        $payloadHash = hash('sha256', json_encode($package));
+        $event = FinanceSyncEvent::query()->where('idempotency_key', $idempotencyKey)->first();
+
+        if ($event?->status === FinanceSyncEvent::STATUS_SUCCESS) {
+            return true;
+        }
+
+        if ($event?->status === FinanceSyncEvent::STATUS_PENDING
+            || ($event && $event->payload_hash !== $payloadHash)) {
+            return false;
+        }
+
+        if (! $event) {
+            $event = $this->logOutboundEvent($mrf, 'package_refresh', $idempotencyKey, $package);
+        } else {
+            $event->update([
+                'request_payload' => $package,
+                'payload_hash' => $payloadHash,
+                'status' => FinanceSyncEvent::STATUS_PENDING,
+                'error_message' => null,
+            ]);
+        }
+
+        try {
+            $response = Http::baseUrl(config('finance_ap.base_url'))
+                ->timeout(config('finance_ap.http_timeout', 30))
+                ->withHeaders([
+                    'X-Api-Key' => config('finance_ap.api_key'),
+                    'Accept' => 'application/json',
+                    'Idempotency-Key' => $idempotencyKey,
+                ])
+                ->post(config('finance_ap.paths.package'), $package);
+
+            $body = $response->json();
+            $event->update([
+                'http_status' => $response->status(),
+                'response_payload' => is_array($body) ? $body : ['raw' => $response->body()],
+                'status' => $response->successful() ? FinanceSyncEvent::STATUS_SUCCESS : FinanceSyncEvent::STATUS_FAILED,
+                'error_message' => $response->successful() ? null : ($body['message'] ?? $response->body()),
+                'processed_at' => now(),
+            ]);
+
+            if (! $response->successful()) {
+                return false;
+            }
+
+            $data = $body['data'] ?? $body;
+            if (! empty($data['status'] ?? $data['finance_ap_status'] ?? null)) {
+                $mrf->update(['finance_ap_status' => (string) ($data['status'] ?? $data['finance_ap_status'])]);
+            }
+
+            return true;
+        } catch (\Throwable $e) {
+            $event->update([
+                'status' => FinanceSyncEvent::STATUS_FAILED,
+                'error_message' => $e->getMessage(),
+                'processed_at' => now(),
+            ]);
+
+            return false;
+        }
     }
 
     public function pushPackage(MRF $mrf, ?int $requestedMilestoneId = null, ?User $actor = null): bool
@@ -202,6 +295,176 @@ class FinanceIntegrationService
         }
     }
 
+    public function queueSupportingDocumentUploaded(MRF $mrf, ProcurementDocument $document): void
+    {
+        if (! config('finance_ap.milestone_events_enabled')
+            || ! $this->isConfigured()
+            || ! mrfUsesFinanceAp($mrf)
+            || (int) $document->mrf_id !== (int) $mrf->id
+            || ! $document->is_active
+            || ! in_array($document->type, [
+                ProcurementDocument::TYPE_WAYBILL,
+                ProcurementDocument::TYPE_JCC,
+            ], true)
+            || ! $this->hasPackageBeenPushed($mrf)) {
+            return;
+        }
+
+        NotifyFinanceApSupportingDocumentUploaded::dispatch($mrf->id, $document->id);
+    }
+
+    /**
+     * Deliver a document-triggered draft-preparation event through the existing
+     * authenticated Finance AP delta route.
+     */
+    public function sendSupportingDocumentUploadedEvent(int $mrfId, int $documentId): void
+    {
+        if (! config('finance_ap.milestone_events_enabled')) {
+            return;
+        }
+
+        $mrf = MRF::query()->find($mrfId);
+        $document = ProcurementDocument::query()
+            ->whereKey($documentId)
+            ->where('mrf_id', $mrfId)
+            ->where('is_active', true)
+            ->first();
+
+        if (! $mrf || ! $document
+            || ! mrfUsesFinanceAp($mrf)
+            || ! $this->hasPackageBeenPushed($mrf)
+            || ! in_array($document->type, [
+                ProcurementDocument::TYPE_WAYBILL,
+                ProcurementDocument::TYPE_JCC,
+            ], true)) {
+            throw new \RuntimeException('The supporting document is not eligible for Finance AP milestone notification.');
+        }
+
+        $documentService = app(ProcurementDocumentService::class);
+        $vendorId = $documentService->resolveVendorId($mrf);
+        if ($document->vendor_id && (int) $document->vendor_id !== $vendorId) {
+            throw new \RuntimeException('The supporting document does not belong to the selected PO vendor.');
+        }
+        if (! $documentService->isAvailableForFinanceAp($document) || ! filled($mrf->po_number)) {
+            throw new \RuntimeException('The supporting document or PO reference is unavailable.');
+        }
+
+        $signedPoAvailable = ProcurementDocument::query()
+            ->where('mrf_id', $mrf->id)
+            ->where('type', ProcurementDocument::TYPE_SIGNED_PO)
+            ->where('is_active', true)
+            ->get()
+            ->contains(fn (ProcurementDocument $signedPo) => $documentService->isAvailableForFinanceAp($signedPo));
+        if (! $signedPoAvailable) {
+            throw new \RuntimeException('A signed Purchase Order is required before milestone notification.');
+        }
+
+        $milestone = $this->packageBuilder->milestoneForSupportingDocument($mrf, $document);
+        $eventIdSource = $milestone
+            ? $mrf->scm_transaction_id.':'.$milestone['stage_id'].':draft-preparation'
+            : $mrf->scm_transaction_id.':document:'.$document->id.':classification-required';
+        $eventId = 'scm-'.substr(hash('sha256', $eventIdSource), 0, 40);
+        $idempotencyKey = 'milestone-document:'.$eventId;
+        $eventPayload = [
+            'event_type' => 'procurement.supporting_document_uploaded',
+            'event_id' => $eventId,
+            'scm_transaction_id' => $mrf->scm_transaction_id,
+            'po_number' => $mrf->po_number,
+            'trigger_event' => 'waybill_or_jcc_uploaded',
+            'action' => 'draft_preparation_only',
+            'draft_preparation_eligible' => $milestone !== null,
+            'classification_status' => $milestone ? 'classified' : 'requires_finance_ap_classification',
+            'document' => [
+                'document_id' => (string) $document->id,
+                'type' => $document->type,
+                'file_name' => $document->file_name,
+                'version' => (int) $document->version,
+                'uploaded_at' => $document->uploaded_at?->toIso8601String(),
+            ],
+            'milestone' => $milestone ? [
+                'stage_id' => $milestone['stage_id'],
+                'scm_milestone_id' => $milestone['scm_milestone_id'],
+                'sequence' => $milestone['sequence'],
+                'payment_percentage' => $milestone['payment_percentage'],
+                'trigger' => $milestone['trigger'],
+                'required_evidence_categories' => $milestone['required_evidence_categories'],
+            ] : null,
+        ];
+        $requestPayload = [
+            'reason' => 'procurement_supporting_document_uploaded',
+            'event' => $eventPayload,
+            'package' => $this->buildPackage($mrf, null, 'procurement_supporting_document_uploaded'),
+        ];
+        $event = FinanceSyncEvent::query()->firstOrCreate(
+            ['idempotency_key' => $idempotencyKey],
+            [
+                'mrf_id' => $mrf->id,
+                'scm_transaction_id' => $mrf->scm_transaction_id,
+                'direction' => FinanceSyncEvent::DIRECTION_OUTBOUND,
+                'event_type' => 'supporting_document_uploaded',
+                'correlation_id' => $eventId,
+                'payload_hash' => hash('sha256', json_encode($requestPayload)),
+                'request_payload' => $requestPayload,
+                'status' => FinanceSyncEvent::STATUS_PENDING,
+            ],
+        );
+
+        if ($event->status === FinanceSyncEvent::STATUS_SUCCESS) {
+            return;
+        }
+
+        $event->update([
+            'request_payload' => $requestPayload,
+            'payload_hash' => hash('sha256', json_encode($requestPayload)),
+            'status' => FinanceSyncEvent::STATUS_PENDING,
+            'error_message' => null,
+        ]);
+
+        $path = str_replace(
+            '{scm_transaction_id}',
+            $mrf->scm_transaction_id,
+            config('finance_ap.paths.delta')
+        );
+
+        try {
+            $response = Http::baseUrl(config('finance_ap.base_url'))
+                ->timeout(config('finance_ap.http_timeout', 30))
+                ->withHeaders([
+                    'X-Api-Key' => config('finance_ap.api_key'),
+                    'Accept' => 'application/json',
+                    'Idempotency-Key' => $idempotencyKey,
+                ])
+                ->post($path, $requestPayload);
+
+            $body = $response->json();
+            $event->update([
+                'http_status' => $response->status(),
+                'response_payload' => is_array($body) ? $body : ['raw' => $response->body()],
+                'status' => $response->successful() ? FinanceSyncEvent::STATUS_SUCCESS : FinanceSyncEvent::STATUS_FAILED,
+                'error_message' => $response->successful() ? null : ($body['message'] ?? $response->body()),
+                'processed_at' => now(),
+            ]);
+
+            if (! $response->successful()) {
+                throw new \RuntimeException('Finance AP rejected the milestone preparation event.');
+            }
+        } catch (\Throwable $e) {
+            $event->update([
+                'status' => FinanceSyncEvent::STATUS_FAILED,
+                'error_message' => $e->getMessage(),
+                'processed_at' => now(),
+            ]);
+            Log::error('Finance AP supporting-document event delivery failed', [
+                'mrf_id' => $mrf->mrf_id,
+                'document_id' => $document->id,
+                'event_id' => $eventId,
+                'error' => $e->getMessage(),
+            ]);
+
+            throw $e;
+        }
+    }
+
     /**
      * @param  array<string, mixed>  $payload
      */
@@ -278,7 +541,7 @@ class FinanceIntegrationService
             ->all();
     }
 
-    private function transitionAfterSuccessfulPush(MRF $mrf, ?User $actor): void
+    public function transitionAfterSuccessfulPush(MRF $mrf, ?User $actor): void
     {
         $mrf->refresh();
         $state = $mrf->workflow_state ?? WorkflowStateService::STATE_MRF_CREATED;
@@ -488,18 +751,25 @@ class FinanceIntegrationService
      */
     public function refreshDocument(MRF $mrf, int $documentId): ?array
     {
+        $documentService = app(ProcurementDocumentService::class);
+        $vendorId = $documentService->resolveVendorId($mrf);
         $document = ProcurementDocument::query()
             ->where('mrf_id', $mrf->id)
             ->where('id', $documentId)
             ->where('is_active', true)
+            ->where(function ($query) use ($vendorId) {
+                $query->whereNull('vendor_id');
+                if ($vendorId) {
+                    $query->orWhere('vendor_id', $vendorId);
+                }
+            })
             ->first();
 
-        if (! $document || ! $document->file_path) {
+        if (! $document || ! $documentService->isAvailableForFinanceAp($document)) {
             return null;
         }
 
-        $disk = config('filesystems.documents_disk', env('DOCUMENTS_DISK', 's3'));
-        $freshUrl = app(ProcurementDocumentService::class)->refreshFileUrl($document->file_path, $disk);
+        $freshUrl = $documentService->freshAuthorizedUrlForDocument($document);
 
         $document->update(['file_url' => $freshUrl]);
 
@@ -512,6 +782,17 @@ class FinanceIntegrationService
             'fileUrl' => $freshUrl,
             'version' => (int) $document->version,
             'uploadedAt' => $document->uploaded_at?->toIso8601String(),
+            'isLatest' => true,
+            'available' => true,
+            'poNumber' => $mrf->po_number,
+            'remarks' => $document->metadata['remarks'] ?? null,
+            'invoiceStatus' => match ($document->type) {
+                ProcurementDocument::TYPE_VENDOR_INVOICE => 'submitted',
+                ProcurementDocument::TYPE_SUPPORTING_VENDOR_INVOICE => 'supporting',
+                default => null,
+            },
+            'isSubmitted' => $document->type === ProcurementDocument::TYPE_VENDOR_INVOICE,
+            'isVerified' => false,
             'refreshedAt' => now()->toIso8601String(),
         ];
     }

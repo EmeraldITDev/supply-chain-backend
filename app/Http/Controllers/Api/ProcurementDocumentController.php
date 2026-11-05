@@ -23,6 +23,7 @@ class ProcurementDocumentController extends Controller
         ProcurementDocument::TYPE_JCC,
         ProcurementDocument::TYPE_PFI,
         ProcurementDocument::TYPE_VENDOR_INVOICE,
+        ProcurementDocument::TYPE_SUPPORTING_VENDOR_INVOICE,
         ProcurementDocument::TYPE_DELIVERY_CONFIRMATION,
         ProcurementDocument::TYPE_OTHER,
     ];
@@ -210,6 +211,7 @@ class ProcurementDocumentController extends Controller
             try {
                 // An invoice uploaded by procurement stands in for the vendor's own submission,
                 // so it follows the same gate, one-per-vendor rule and Finance AP update.
+                // A supporting vendor invoice is reference only and takes the plain path.
                 $document = $type === ProcurementDocument::TYPE_VENDOR_INVOICE
                     ? $this->vendorInvoices->submit($mrf, $this->selectedVendor($mrf), $user, $file)
                     : $this->documentService->storeUpload(
@@ -218,6 +220,7 @@ class ProcurementDocumentController extends Controller
                         $type,
                         $user,
                         $vendorId,
+                        metadata: filled($remarks) ? ['remarks' => $remarks] : null,
                     );
 
                 if ($type === ProcurementDocument::TYPE_GRN) {
@@ -234,6 +237,22 @@ class ProcurementDocumentController extends Controller
                 }
 
                 $successful[] = $this->documentService->transform($document);
+
+                if (in_array($type, [
+                    ProcurementDocument::TYPE_WAYBILL,
+                    ProcurementDocument::TYPE_JCC,
+                ], true)) {
+                    try {
+                        app(\App\Services\Finance\FinanceIntegrationService::class)
+                            ->queueSupportingDocumentUploaded($mrf, $document);
+                    } catch (\Throwable $e) {
+                        Log::error('Finance AP milestone notification could not be queued', [
+                            'mrf_id' => $mrf->mrf_id,
+                            'document_id' => $document->id,
+                            'error' => $e->getMessage(),
+                        ]);
+                    }
+                }
             } catch (\RuntimeException $e) {
                 $failed[] = array_merge($result, [
                     'status' => 'failed',

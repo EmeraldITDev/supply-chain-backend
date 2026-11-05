@@ -84,6 +84,26 @@ class FinanceIntegrationServiceTest extends TestCase
         $this->assertSame($expected, $service->buildPackage($mrf, 5, 'vendor_invoice_submitted'));
     }
 
+    public function test_build_package_can_use_explicit_version_without_recalculating_schedule(): void
+    {
+        $mrf = new MRF(['mrf_id' => 'MRF-REFRESH']);
+        $expected = ['packageVersion' => 2, 'header' => []];
+
+        $builder = $this->createMock(FinancePackageBuilder::class);
+        $builder->expects($this->once())
+            ->method('build')
+            ->with($mrf, null, 'authorized_refresh', 2, false)
+            ->willReturn($expected);
+
+        $service = new FinanceIntegrationService(
+            $builder,
+            app(\App\Services\WorkflowStateService::class),
+            app(\App\Services\FinanceAp\ClosureReadinessService::class),
+        );
+
+        $this->assertSame($expected, $service->buildPackage($mrf, null, 'authorized_refresh', 2, false));
+    }
+
     public function test_push_package_skips_when_integration_disabled(): void
     {
         config([

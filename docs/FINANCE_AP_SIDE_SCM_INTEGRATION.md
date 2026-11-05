@@ -102,6 +102,20 @@ Updated manifest (e.g. `vendor_invoice_submitted`). Finance AP re-pulls and re-c
 
 When cached copy is stale or URL expired, Finance AP calls SCM refresh API; SCM returns fresh signed URL; Finance AP re-caches.
 
+### 5.4 Payment-stage draft preparation events (SCM → Finance AP)
+
+SCM's signed-PO package includes an additive `paymentPlan` section with the stored PO terms (when available), source payment terms, PO reference, amount, currency, and configured milestone stage IDs, percentages, trigger conditions, and evidence categories. If SCM has no configured schedule, it sends no inferred percentages and sets `classificationStatus` to `requires_finance_ap_classification`.
+
+When enabled after joint approval, SCM also:
+
+1. Seeds Finance AP with the signed-PO package without advancing SCM's delivery-confirmation or handoff state.
+2. Queues a `procurement.supporting_document_uploaded` event after a successful Waybill/JCC registry upload, only when the Finance AP case/package exists.
+3. Sends the event as an additive `event` member of the existing authenticated package-delta request. It includes a stable event/idempotency ID, source document ID/type/version, SCM transaction and PO IDs, and a configured milestone when the uploaded category matches that stage's required evidence.
+
+The event's action is `draft_preparation_only`; it must never approve, authorize, or disburse payment. When Waybill and JCC satisfy the same configured stage, they share the stage-scoped event ID so they cannot create duplicate drafts. Events with no unambiguous configured stage are marked `requires_finance_ap_classification` and `draft_preparation_eligible: false`.
+
+SCM dispatch is controlled by `FINANCE_AP_MILESTONE_EVENTS_ENABLED`, which defaults to `false`. Finance AP must implement and acknowledge this additive delta-event contract before SCM enables the flag. While disabled, no early signed-PO package seed or milestone event is sent; the existing Finance Handoff package push and operational-document deltas retain their existing behavior. The `paymentPlan` field is additive to packages.
+
 ---
 
 ## 6. Finance AP → SCM: webhooks
