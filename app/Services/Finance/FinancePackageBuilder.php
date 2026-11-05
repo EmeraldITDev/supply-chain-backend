@@ -319,7 +319,7 @@ class FinancePackageBuilder
         $primaryPoId = $this->primaryPurchaseOrderId($documents, $availability);
 
         return $documents
-            ->map(function (ProcurementDocument $doc) use ($availability, $primaryPoId) {
+            ->map(function (ProcurementDocument $doc) use ($availability, $primaryPoId, $mrf) {
                 $isAvailable = $availability[$doc->id];
 
                 return [
