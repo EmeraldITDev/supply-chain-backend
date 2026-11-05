@@ -123,4 +123,42 @@ class FinanceIntegrationServiceTest extends TestCase
         $this->assertFalse($service->pushPackage($mrf));
         Http::assertNothingSent();
     }
+
+    public function test_unlinked_case_ownership_is_verified_by_transaction_and_po(): void
+    {
+        config([
+            'finance_ap.enabled' => true,
+            'finance_ap.base_url' => 'https://financeap.test',
+            'finance_ap.api_key' => 'test-key',
+            'finance_ap.paths.package_lookup' => '/api/v1/integrations/scm/packages/{scm_transaction_id}',
+        ]);
+
+        $transactionId = '95afefc4-ed87-48af-9f9a-7df5515b237f';
+        Http::fake([
+            'https://financeap.test/api/v1/integrations/scm/packages/*' => Http::response([
+                'data' => [
+                    'finance_ap_case_id' => '99',
+                    'scm_transaction_id' => $transactionId,
+                    'scm_po_number' => 'PO-221026-MARVISGLOBALFURNITURE-0002',
+                    'package_version' => 1,
+                ],
+            ], 200),
+        ]);
+
+        $mrf = new MRF([
+            'scm_transaction_id' => $transactionId,
+            'po_number' => 'PO-221026-MARVISGLOBALFURNITURE-0002',
+        ]);
+
+        $result = app(FinanceIntegrationService::class)->verifyCaseOwnership(
+            $mrf,
+            '99',
+            'PO-221026-MARVISGLOBALFURNITURE-0002',
+        );
+
+        $this->assertTrue($result['available']);
+        $this->assertTrue($result['verified']);
+        Http::assertSent(fn ($request) => $request->method() === 'GET'
+            && $request->hasHeader('X-Api-Key', 'test-key'));
+    }
 }

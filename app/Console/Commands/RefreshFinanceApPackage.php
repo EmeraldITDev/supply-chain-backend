@@ -31,10 +31,31 @@ class RefreshFinanceApPackage extends Command
         }
 
         $mrf = MRF::query()->where('scm_transaction_id', $transactionId)->first();
-        if (! $mrf || $mrf->po_number !== $poNumber || (string) $mrf->finance_ap_case_id !== $caseId) {
-            $this->error('SCM transaction, PO number, and Finance AP case do not match one record.');
+        if (! $mrf || $mrf->po_number !== $poNumber) {
+            $this->error('SCM transaction UUID and PO number do not match one SCM record.');
 
             return self::FAILURE;
+        }
+
+        if (filled($mrf->finance_ap_case_id)) {
+            if ((string) $mrf->finance_ap_case_id !== $caseId) {
+                $this->error('The supplied Finance AP case does not match the SCM record.');
+
+                return self::FAILURE;
+            }
+        } else {
+            $verification = $integration->verifyCaseOwnership($mrf, $caseId, $poNumber);
+            if (! ($verification['available'] ?? false)) {
+                $this->error('Finance AP read-only case verification is required before using an unlinked case: '.($verification['reason'] ?? 'verification unavailable'));
+
+                return self::FAILURE;
+            }
+
+            if (! ($verification['verified'] ?? false)) {
+                $this->error('The supplied Finance AP case is not verified against this SCM transaction and PO.');
+
+                return self::FAILURE;
+            }
         }
 
         if (! mrfUsesFinanceAp($mrf)) {

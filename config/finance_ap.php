@@ -25,6 +25,7 @@ return [
 
     'paths' => [
         'package' => '/api/v1/integrations/scm/packages',
+        'package_lookup' => '/api/v1/integrations/scm/packages/{scm_transaction_id}',
         'delta' => '/api/v1/integrations/scm/packages/{scm_transaction_id}/delta',
         'document_refresh' => '/api/v1/integrations/scm/documents/{scm_transaction_id}/{document_id}',
         'vendor_sync' => '/api/v1/integrations/scm/vendors',

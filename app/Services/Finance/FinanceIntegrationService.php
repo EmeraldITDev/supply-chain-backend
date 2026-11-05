@@ -45,6 +45,96 @@ class FinanceIntegrationService
     }
 
     /**
+     * Verify an explicitly supplied Finance AP case against the SCM transaction
+     * and PO when SCM has not persisted the case reference locally.
+     *
+     * @return array{available: bool, verified: bool, reason: string}
+     */
+    public function verifyCaseOwnership(MRF $mrf, string $caseId, string $poNumber): array
+    {
+        if (! $this->isConfigured()) {
+            return [
+                'available' => false,
+                'verified' => false,
+                'reason' => 'Finance AP read-only verification is not configured.',
+            ];
+        }
+
+        $transactionId = trim((string) $mrf->scm_transaction_id);
+        $path = (string) config('finance_ap.paths.package_lookup', '');
+        if ($transactionId === '' || $path === '') {
+            return [
+                'available' => false,
+                'verified' => false,
+                'reason' => 'Finance AP read-only case verification endpoint is unavailable.',
+            ];
+        }
+
+        try {
+            $response = Http::baseUrl(config('finance_ap.base_url'))
+                ->timeout(config('finance_ap.http_timeout', 30))
+                ->withHeaders([
+                    'X-Api-Key' => config('finance_ap.api_key'),
+                    'Accept' => 'application/json',
+                ])
+                ->get(str_replace('{scm_transaction_id}', rawurlencode($transactionId), $path));
+        } catch (\Throwable $e) {
+            Log::warning('Finance AP read-only case verification failed', [
+                'scm_transaction_id' => $transactionId,
+                'finance_ap_case_id' => $caseId,
+                'error' => $e->getMessage(),
+            ]);
+
+            return [
+                'available' => false,
+                'verified' => false,
+                'reason' => 'Finance AP read-only case verification could not be completed.',
+            ];
+        }
+
+        if (! $response->successful()) {
+            return [
+                'available' => false,
+                'verified' => false,
+                'reason' => 'Finance AP read-only case verification returned an unavailable response.',
+            ];
+        }
+
+        $body = $response->json();
+        $data = is_array($body['data'] ?? null) ? $body['data'] : (is_array($body) ? $body : []);
+        $header = is_array($data['header'] ?? null) ? $data['header'] : [];
+
+        $remoteCaseId = (string) ($data['finance_ap_case_id']
+            ?? $data['financeApCaseId']
+            ?? $data['case_id']
+            ?? '');
+        $remoteTransactionId = (string) ($data['scm_transaction_id']
+            ?? $data['scmTransactionId']
+            ?? $header['scm_transaction_id']
+            ?? $header['scmTransactionId']
+            ?? '');
+        $remotePoNumber = (string) ($data['scm_po_number']
+            ?? $data['scmPoNumber']
+            ?? $data['po_number']
+            ?? $data['poNumber']
+            ?? $header['scm_po_number']
+            ?? $header['scmPoNumber']
+            ?? '');
+
+        $verified = hash_equals($caseId, $remoteCaseId)
+            && hash_equals($transactionId, $remoteTransactionId)
+            && hash_equals($poNumber, $remotePoNumber);
+
+        return [
+            'available' => true,
+            'verified' => $verified,
+            'reason' => $verified
+                ? 'Finance AP case ownership verified.'
+                : 'Finance AP case does not match the SCM transaction and PO.',
+        ];
+    }
+
+    /**
      * @return array<string, mixed>
      */
     public function buildPackage(
