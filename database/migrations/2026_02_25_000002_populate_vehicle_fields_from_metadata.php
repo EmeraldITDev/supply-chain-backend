@@ -18,7 +18,9 @@ return new class extends Migration
             WHERE make_model IS NULL AND type IS NOT NULL
         ");
 
-        if (Schema::getConnection()->getDriverName() !== 'sqlite') {
+        // Postgres-only JSON syntax. A one-off backfill of existing rows: a fresh database has
+        // none, and data copied from production is already backfilled.
+        if (Schema::getConnection()->getDriverName() === 'pgsql') {
             // Populate fields from metadata JSON if they exist there
             DB::statement("
                 UPDATE logistics_vehicles

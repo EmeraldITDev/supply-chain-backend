@@ -23,7 +23,8 @@ return new class extends Migration
             $table->timestamps();
 
             $table->foreign('jcc_id')->references('id')->on('job_completion_certificates')->cascadeOnDelete();
-            $table->foreign('vendor_submission_id')->references('id')->on('trip_vendor_submissions')->nullOnDelete();
+            // Explicit name: the generated one is 66 characters, over MySQL's 64 limit.
+            $table->foreign('vendor_submission_id', 'jcc_line_items_vendor_submission_id_foreign')->references('id')->on('trip_vendor_submissions')->nullOnDelete();
         });
     }
 

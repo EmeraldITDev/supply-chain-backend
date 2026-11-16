@@ -26,6 +26,12 @@ return new class extends Migration
             return;
         }
 
+        // On a fresh database the column is only added by 2026_01_16_000001; the later
+        // fix_*_workflow_state_check_constraint migrations set the current list of values.
+        if (! Schema::hasColumn('m_r_f_s', 'workflow_state')) {
+            return;
+        }
+
         // For PostgreSQL, we need to drop the old check constraint and create a new one
         // Since the column might be an enum or have a check constraint, we handle both cases
 

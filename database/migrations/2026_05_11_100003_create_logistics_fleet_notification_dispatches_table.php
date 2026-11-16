@@ -17,7 +17,8 @@ return new class extends Migration
             $table->timestamps();
 
             $table->unique(['subject_type', 'subject_id', 'channel', 'period_key'], 'fleet_notify_dispatch_unique');
-            $table->index(['subject_type', 'subject_id']);
+            // Explicit name: the generated one is 69 characters, over MySQL's 64 limit.
+            $table->index(['subject_type', 'subject_id'], 'fleet_notify_dispatch_subject_index');
         });
     }
 

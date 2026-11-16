@@ -26,7 +26,10 @@ return new class extends Migration
             return;
         }
 
-        if (Schema::hasColumn('m_r_f_s', 'contract_type')) {
+        if (Schema::hasColumn('m_r_f_s', 'contract_type') && Schema::getConnection()->getDriverName() !== 'pgsql') {
+            // MySQL/MariaDB: same result as the two Postgres statements below.
+            DB::statement('ALTER TABLE m_r_f_s MODIFY contract_type VARCHAR(255) NULL');
+        } elseif (Schema::hasColumn('m_r_f_s', 'contract_type')) {
             // Convert column to VARCHAR if it was previously an enum
             DB::statement("
                 ALTER TABLE m_r_f_s

@@ -24,9 +24,19 @@ return new class extends Migration
             $table->text('selection_reason')->nullable();
             $table->timestamps();
 
-            $table->index(['purchase_order_id', 'item_description']);
+            if (Schema::getConnection()->getDriverName() !== 'mysql' && Schema::getConnection()->getDriverName() !== 'mariadb') {
+                $table->index(['purchase_order_id', 'item_description']);
+            }
             $table->index(['vendor_id', 'is_selected']);
         });
+
+        // MySQL/MariaDB cannot index a whole TEXT column: index its first 191 characters.
+        if (in_array(Schema::getConnection()->getDriverName(), ['mysql', 'mariadb'], true)) {
+            \Illuminate\Support\Facades\DB::statement(
+                'ALTER TABLE price_comparisons ADD INDEX price_comparisons_purchase_order_id_item_description_index '
+                . '(purchase_order_id, item_description(191))'
+            );
+        }
     }
 
     public function down(): void

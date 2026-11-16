@@ -16,6 +16,12 @@ return new class extends Migration
             return;
         }
 
+        // Postgres UPDATE ... FROM syntax. A one-off backfill of existing rows: a fresh database
+        // has none, and data copied from production is already backfilled.
+        if (DB::getDriverName() !== 'pgsql') {
+            return;
+        }
+
         if (Schema::hasColumn('m_r_f_s', 'rfq_issued_at') && Schema::hasTable('r_f_q_s')) {
             DB::statement("
                 UPDATE m_r_f_s AS m

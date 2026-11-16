@@ -58,6 +58,10 @@ return [
             'prefix_indexes' => true,
             'strict' => true,
             'engine' => null,
+            // Session time zone. TIMESTAMP columns are converted through it, so pin it (default
+            // +00:00) instead of using the server's local zone: values the app writes (in
+            // APP_TIMEZONE) are then stored and read back exactly as written.
+            'timezone' => env('DB_TIMEZONE', '+00:00'),
             'options' => extension_loaded('pdo_mysql') ? array_filter([
                 (PHP_VERSION_ID >= 80500 ? \Pdo\Mysql::ATTR_SSL_CA : \PDO::MYSQL_ATTR_SSL_CA) => env('MYSQL_ATTR_SSL_CA'),
             ]) : [],
