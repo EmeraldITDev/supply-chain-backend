@@ -34,6 +34,13 @@ class SupplierResolutionService
         if ($emailMatches->count() === 1) {
             $emailVendor = $emailMatches->first();
             if ($nameMatches->count() === 0) {
+                if (
+                    $normalizedName !== ''
+                    && Vendor::normalizeName((string) $emailVendor->name) !== $normalizedName
+                ) {
+                    return $this->reviewResult('The normalized email and company name identify different suppliers.');
+                }
+
                 return $this->matchedResult($emailVendor, 'email');
             }
             if ($nameMatches->count() === 1 && $nameMatches->first()->id === $emailVendor->id) {
@@ -186,23 +193,33 @@ class SupplierResolutionService
         sort($lockNames);
         $acquired = [];
 
-        foreach (array_unique($lockNames) as $lockName) {
-            $lock = $connection->selectOne('SELECT GET_LOCK(?, 10) AS acquired', [$lockName]);
-            if ((int) ($lock->acquired ?? 0) !== 1) {
-                foreach (array_reverse($acquired) as $acquiredName) {
-                    $connection->selectOne('SELECT RELEASE_LOCK(?) AS released', [$acquiredName]);
-                }
-
-                throw new \RuntimeException('Supplier identity is busy. Please retry the request.');
-            }
-            $acquired[] = $lockName;
-        }
-
         try {
+            foreach (array_unique($lockNames) as $lockName) {
+                $lock = $connection->selectOne('SELECT GET_LOCK(?, 10) AS acquired', [$lockName]);
+                if ((int) ($lock->acquired ?? 0) !== 1) {
+                    throw new \RuntimeException('Supplier identity is busy. Please retry the request.');
+                }
+                $acquired[] = $lockName;
+            }
+
             return $callback();
         } finally {
-            foreach (array_reverse($acquired) as $lockName) {
+            $this->releaseIdentityLocks($connection, $acquired);
+        }
+    }
+
+    /**
+     * @param  list<string>  $acquired
+     */
+    private function releaseIdentityLocks($connection, array $acquired): void
+    {
+        foreach (array_reverse($acquired) as $lockName) {
+            try {
                 $connection->selectOne('SELECT RELEASE_LOCK(?) AS released', [$lockName]);
+            } catch (\Throwable $exception) {
+                \Log::warning('Failed to release supplier identity lock.', [
+                    'error' => $exception->getMessage(),
+                ]);
             }
         }
     }

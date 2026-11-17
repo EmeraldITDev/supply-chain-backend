@@ -5,7 +5,10 @@ namespace Tests\Feature;
 use App\Models\Vendor;
 use App\Services\ManualVendorOnboardingService;
 use App\Services\SupplierResolutionService;
+use Illuminate\Database\ConnectionInterface;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
+use ReflectionMethod;
 use Tests\TestCase;
 
 class SupplierResolutionServiceTest extends TestCase
@@ -63,6 +66,19 @@ class SupplierResolutionServiceTest extends TestCase
 
         $result = app(SupplierResolutionService::class)->resolve(
             'Beta Services',
+            'shared@example.com',
+        );
+
+        $this->assertSame('review_required', $result['status']);
+        $this->assertNull($result['vendor']);
+    }
+
+    public function test_email_match_with_an_unknown_conflicting_name_requires_review(): void
+    {
+        $this->createVendor('Alpha Services', 'shared@example.com');
+
+        $result = app(SupplierResolutionService::class)->resolve(
+            'New Beta Services',
             'shared@example.com',
         );
 
@@ -129,6 +145,34 @@ class SupplierResolutionServiceTest extends TestCase
         $this->assertSame('created', $first['status']);
         $this->assertSame('review_required', $second['status']);
         $this->assertSame(1, Vendor::query()->count());
+    }
+
+    public function test_mysql_lock_timeout_releases_any_lock_already_acquired(): void
+    {
+        $connection = $this->mock(ConnectionInterface::class);
+        $connection->shouldReceive('getDriverName')->once()->andReturn('mysql');
+        $connection->shouldReceive('selectOne')->times(3)->andReturnUsing(function (string $sql) {
+            static $getLockCalls = 0;
+            if (str_contains($sql, 'GET_LOCK')) {
+                $getLockCalls++;
+
+                return (object) ['acquired' => $getLockCalls === 1 ? 1 : 0];
+            }
+
+            return (object) ['released' => 1];
+        });
+        DB::shouldReceive('connection')->once()->andReturn($connection);
+
+        $method = new ReflectionMethod(SupplierResolutionService::class, 'withIdentityLocks');
+        $method->setAccessible(true);
+
+        $this->expectException(\RuntimeException::class);
+        $method->invoke(
+            app(SupplierResolutionService::class),
+            'supplier name',
+            'supplier@example.com',
+            static fn () => null,
+        );
     }
 
     private function createVendor(string $name, string $email): Vendor
