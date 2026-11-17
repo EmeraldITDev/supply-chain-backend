@@ -1313,6 +1313,13 @@ class VendorController extends Controller
                 ],
                 'temporaryPassword' => $result['temporary_password'] ?? null,
             ]);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Supplier identity requires review before approval.',
+                'code' => 'SUPPLIER_REVIEW_REQUIRED',
+                'errors' => $e->errors(),
+            ], 422);
         } catch (\Illuminate\Database\QueryException $e) {
             // Handle duplicate email error
             if ($e->getCode() === '23000' && strpos($e->getMessage(), 'Duplicate entry') !== false) {

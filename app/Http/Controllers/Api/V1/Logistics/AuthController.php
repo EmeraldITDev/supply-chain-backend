@@ -9,13 +9,17 @@ use App\Models\Logistics\VendorInvite;
 use App\Models\User;
 use App\Models\Vendor;
 use App\Services\Logistics\AuditLogger;
+use App\Services\SupplierResolutionService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
 
 class AuthController extends ApiController
 {
-    public function __construct(private AuditLogger $auditLogger)
+    public function __construct(
+        private AuditLogger $auditLogger,
+        private SupplierResolutionService $supplierResolution,
+    )
     {
     }
 
@@ -78,19 +82,34 @@ class AuthController extends ApiController
             return $this->error('Invalid or expired invitation', 'INVALID_INVITE', 422);
         }
 
-        $vendor = Vendor::firstOrCreate([
-            'email' => $request->email,
-        ], [
-            'vendor_id' => Vendor::generateVendorId(),
-            'name' => $request->vendor_name,
-            'status' => 'temporary',
-            'phone' => $request->phone,
-            'address' => $request->address,
-            'contact_person' => $request->contact_person,
-        ]);
+        $email = Vendor::normalizeEmail((string) $request->email);
+        $resolution = $this->supplierResolution->resolveOrCreate(
+            (string) $request->vendor_name,
+            $email,
+            fn (string $name, string $resolvedEmail): Vendor => Vendor::create([
+                'vendor_id' => Vendor::generateVendorId(),
+                'name' => $name,
+                'email' => $resolvedEmail,
+                'status' => 'temporary',
+                'phone' => $request->phone,
+                'address' => $request->address,
+                'contact_person' => $request->contact_person,
+            ]),
+        );
+
+        if ($resolution['status'] === 'review_required') {
+            return $this->error(
+                $resolution['message'] ?? 'Supplier identity requires review.',
+                'SUPPLIER_REVIEW_REQUIRED',
+                422,
+            );
+        }
+
+        /** @var Vendor $vendor */
+        $vendor = $resolution['vendor'];
 
         $user = User::firstOrCreate([
-            'email' => $request->email,
+            'email' => $email,
         ], [
             'name' => $request->vendor_name,
             'password' => Hash::make(Str::random(24)),

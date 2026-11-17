@@ -5,12 +5,16 @@ namespace App\Http\Controllers\Api\V1\Logistics;
 use App\Models\Logistics\VendorCompliance;
 use App\Models\Vendor;
 use App\Services\Logistics\AuditLogger;
+use App\Services\SupplierResolutionService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
 
 class VendorController extends ApiController
 {
-    public function __construct(private AuditLogger $auditLogger)
+    public function __construct(
+        private AuditLogger $auditLogger,
+        private SupplierResolutionService $supplierResolution,
+    )
     {
     }
 
@@ -18,7 +22,7 @@ class VendorController extends ApiController
     {
         $validator = Validator::make($request->all(), [
             'name' => 'required|string|max:255',
-            'email' => 'required|email|unique:vendors,email',
+            'email' => 'required|email',
             'category' => 'nullable|string|max:255',
             'phone' => 'nullable|string|max:50',
             'address' => 'nullable|string|max:255',
@@ -31,30 +35,46 @@ class VendorController extends ApiController
             return $this->error('Validation failed', 'VALIDATION_ERROR', 422, $validator->errors()->toArray());
         }
 
-        $vendor = Vendor::create([
-            'vendor_id' => Vendor::generateVendorId(),
-            'name' => $request->name,
-            'email' => $request->email,
-            'category' => $request->category,
-            'phone' => $request->phone,
-            'address' => $request->address,
-            'contact_person' => $request->contact_person,
-            'notes' => $request->notes,
-            'status' => 'active',
-        ]);
+        $resolution = $this->supplierResolution->resolveOrCreate(
+            (string) $request->name,
+            (string) $request->email,
+            fn (string $name, string $email): Vendor => Vendor::create([
+                'vendor_id' => Vendor::generateVendorId(),
+                'name' => $name,
+                'email' => $email,
+                'category' => $request->category,
+                'phone' => $request->phone,
+                'address' => $request->address,
+                'contact_person' => $request->contact_person,
+                'notes' => $request->notes,
+                'status' => 'active',
+            ]),
+        );
 
-        VendorCompliance::updateOrCreate([
-            'vendor_id' => $vendor->id,
-        ], [
-            'status' => 'pending',
-            'metadata' => $request->input('compliance', []),
-        ]);
+        if ($resolution['status'] === 'review_required') {
+            return $this->error(
+                $resolution['message'] ?? 'Supplier identity requires review.',
+                'SUPPLIER_REVIEW_REQUIRED',
+                422,
+            );
+        }
+
+        /** @var Vendor $vendor */
+        $vendor = $resolution['vendor'];
+        if ($resolution['status'] === 'created') {
+            VendorCompliance::updateOrCreate([
+                'vendor_id' => $vendor->id,
+            ], [
+                'status' => 'pending',
+                'metadata' => $request->input('compliance', []),
+            ]);
+        }
 
         $this->auditLogger->log('vendor_created', $request->user(), 'vendor', (string) $vendor->id, $vendor->toArray(), $request);
 
         return $this->success([
             'vendor' => $vendor,
-        ], 201);
+        ], $resolution['status'] === 'created' ? 201 : 200);
     }
 
     public function index(Request $request)

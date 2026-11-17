@@ -17,7 +17,10 @@ class VendorApprovalService
 {
     protected NotificationService $notificationService;
 
-    public function __construct(NotificationService $notificationService)
+    public function __construct(
+        NotificationService $notificationService,
+        private SupplierResolutionService $supplierResolution,
+    )
     {
         $this->notificationService = $notificationService;
     }
@@ -252,51 +255,15 @@ class VendorApprovalService
             // Generate temporary password
             $temporaryPassword = $this->generateTemporaryPassword();
 
-            // Check if vendor with same email already exists
-            $existingVendorByEmail = Vendor::where('email', $registration->email)->first();
-            $vendor = null;
-
-            if ($existingVendorByEmail) {
-                // Use existing vendor
-                $vendor = $existingVendorByEmail;
-                // Update vendor details from registration if needed
-                $vendorUpdate = [
-                    'name' => $registration->company_name,
-                    'category' => $registration->category,
-                    'phone' => $registration->phone,
-                    'address' => $registration->address,
-                    'tax_id' => $registration->tax_id,
-                    'contact_person' => $registration->contact_person,
-                    'status' => 'Active',
-                    // Extended profile fields from registration
-                    'year_established' => $registration->year_established,
-                    'number_of_employees' => $registration->number_of_employees,
-                    'annual_revenue' => $registration->annual_revenue,
-                    'website' => $registration->website,
-                    'country_code' => $registration->country_code,
-                    'contact_person_email' => $registration->contact_person_email,
-                    'contact_person_phone' => $registration->contact_person_phone,
-                    'contact_person_title' => $registration->contact_person_title,
-                    'city' => $registration->city,
-                    'state' => $registration->state,
-                    'postal_code' => $registration->postal_code,
-                    'alternate_phone' => $registration->alternate_phone,
-                    'bank_name' => $registration->bank_name,
-                    'account_name' => $registration->account_name,
-                    'currency' => $registration->currency,
-                ];
-                if (Schema::hasColumn('vendors', 'category_other')) {
-                    $vendorUpdate['category_other'] = $registration->category_other;
-                }
-                $vendor->update($vendorUpdate);
-            } else {
-                // Create new vendor record from registration
-                try {
+            $resolution = $this->supplierResolution->resolveOrCreate(
+                (string) $registration->company_name,
+                (string) $registration->email,
+                function (string $name, string $email) use ($registration): Vendor {
                     $vendorCreate = [
                         'vendor_id' => Vendor::generateVendorId(),
-                        'name' => $registration->company_name,
+                        'name' => $name,
                         'category' => $registration->category,
-                        'email' => $registration->email,
+                        'email' => $email,
                         'phone' => $registration->phone,
                         'address' => $registration->address,
                         'tax_id' => $registration->tax_id,
@@ -304,7 +271,6 @@ class VendorApprovalService
                         'status' => 'Active',
                         'rating' => 0,
                         'total_orders' => 0,
-                        // Extended profile fields from registration
                         'year_established' => $registration->year_established,
                         'number_of_employees' => $registration->number_of_employees,
                         'annual_revenue' => $registration->annual_revenue,
@@ -324,16 +290,22 @@ class VendorApprovalService
                     if (Schema::hasColumn('vendors', 'category_other')) {
                         $vendorCreate['category_other'] = $registration->category_other;
                     }
-                    $vendor = Vendor::create($vendorCreate);
-                } catch (\Exception $e) {
-                    \Log::error('Failed to create vendor: ' . $e->getMessage(), [
-                        'registration_id' => $registration->id,
-                        'email' => $registration->email,
-                        'trace' => $e->getTraceAsString(),
-                    ]);
-                    throw new \Exception('Failed to create vendor record: ' . $e->getMessage());
-                }
+
+                    return Vendor::create($vendorCreate);
+                },
+                fn (Vendor $vendor) => $this->fillBlankVendorFields($vendor, $registration),
+            );
+
+            if ($resolution['status'] === 'review_required') {
+                throw \Illuminate\Validation\ValidationException::withMessages([
+                    'supplier' => [
+                    $resolution['message'] ?? 'Supplier identity requires review before approval.'
+                    ],
+                ]);
             }
+
+            /** @var Vendor $vendor */
+            $vendor = $resolution['vendor'];
 
 
             // Create or update user account
@@ -396,5 +368,42 @@ class VendorApprovalService
         });
     }
 
-}
+    private function fillBlankVendorFields(Vendor $vendor, VendorRegistration $registration): void
+    {
+        $updates = [];
+        foreach ([
+            'category' => 'category',
+            'category_other' => 'category_other',
+            'phone' => 'phone',
+            'address' => 'address',
+            'tax_id' => 'tax_id',
+            'contact_person' => 'contact_person',
+            'year_established' => 'year_established',
+            'number_of_employees' => 'number_of_employees',
+            'annual_revenue' => 'annual_revenue',
+            'website' => 'website',
+            'country_code' => 'country_code',
+            'contact_person_email' => 'contact_person_email',
+            'contact_person_phone' => 'contact_person_phone',
+            'contact_person_title' => 'contact_person_title',
+            'city' => 'city',
+            'state' => 'state',
+            'postal_code' => 'postal_code',
+            'alternate_phone' => 'alternate_phone',
+        ] as $registrationField => $vendorField) {
+            if ($registrationField === 'category_other' && ! Schema::hasColumn('vendors', 'category_other')) {
+                continue;
+            }
 
+            $incoming = $registration->{$registrationField};
+            if ($incoming !== null && trim((string) $incoming) !== '' && trim((string) $vendor->{$vendorField}) === '') {
+                $updates[$vendorField] = $incoming;
+            }
+        }
+
+        if ($updates !== []) {
+            $vendor->update($updates);
+        }
+    }
+
+}

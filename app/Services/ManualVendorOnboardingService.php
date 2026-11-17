@@ -18,6 +18,7 @@ class ManualVendorOnboardingService
         private VendorApprovalService $vendorApprovalService,
         private EmailService $emailService,
         private PriceComparisonPoLineService $priceComparisonPoLineService,
+        private SupplierResolutionService $supplierResolution,
     ) {
     }
 
@@ -26,21 +27,22 @@ class ManualVendorOnboardingService
      */
     public function lookup(?string $email, ?string $name): ?array
     {
-        $email = trim((string) $email);
-        $name = trim((string) $name);
-
-        if ($email !== '') {
-            $vendor = Vendor::findByEmailCaseInsensitive($email);
-            if ($vendor) {
-                return $this->formatLookupMatch($vendor, 'email');
-            }
+        $result = $this->supplierResolution->resolve(
+            trim((string) $name),
+            trim((string) $email),
+        );
+        if ($result['status'] === 'matched') {
+            return $this->formatLookupMatch(
+                $result['vendor'],
+                $result['matched_on'] ?? 'email',
+            );
         }
-
-        if ($name !== '') {
-            $vendor = Vendor::findByNormalizedName($name);
-            if ($vendor) {
-                return $this->formatLookupMatch($vendor, 'name');
-            }
+        if ($result['status'] === 'review_required') {
+            return [
+                'reviewRequired' => true,
+                'reason' => $result['reason'] ?? 'supplier_identity_ambiguous',
+                'message' => $result['message'] ?? 'Supplier identity requires review.',
+            ];
         }
 
         return null;
@@ -62,58 +64,59 @@ class ManualVendorOnboardingService
             'phone' => trim((string) ($manual['phone'] ?? '')) ?: null,
         ];
 
-        $existing = Vendor::findByEmailCaseInsensitive($email);
-        $matchedOn = 'email';
+        $result = $this->supplierResolution->resolveOrCreate(
+            $name,
+            $email,
+            function (string $resolvedName, string $resolvedEmail) use ($manual, $input): Vendor {
+                return Vendor::create([
+                    'vendor_id' => Vendor::generateVendorId(),
+                    'name' => $resolvedName,
+                    'category' => 'General',
+                    'rating' => 0,
+                    'total_orders' => 0,
+                    'status' => 'Active',
+                    'email' => $resolvedEmail,
+                    'phone' => $input['phone'],
+                    'address' => $this->nullableString($manual['address'] ?? null),
+                    'contact_person' => $this->nullableString($manual['contact_person'] ?? null),
+                    'contact_person_email' => $this->nullableString($manual['contact_person_email'] ?? null),
+                    'notes' => 'Created from procurement price comparison (manual / fast-track).',
+                    'profile_completed' => false,
+                    'onboarding_source' => self::ONBOARDING_SOURCE_MANUAL_PO,
+                ]);
+            },
+            function (Vendor $existing) use ($manual): void {
+                $this->fillBlankVendorFields($existing, $manual);
+            },
+        );
 
-        if (! $existing && $name !== '') {
-            $existing = Vendor::findByNormalizedName($name);
-            $matchedOn = 'name';
-        }
-
-        if ($existing) {
-            $this->fillBlankVendorFields($existing, $manual);
-
-            Log::info('Manual vendor linked to existing directory record', [
-                'mrf_id' => $mrf?->mrf_id,
-                'vendor_id' => $existing->vendor_id,
-                'matched_on' => $matchedOn,
+        if ($result['status'] === 'review_required') {
+            throw ValidationException::withMessages([
+                'manual_vendor' => [$result['message'] ?? 'Supplier identity requires review before it can be used.'],
             ]);
-
-            return [
-                'vendor' => $existing->fresh(),
-                'action' => 'linked_existing',
-                'input' => $input,
-                'matchedOn' => $matchedOn,
-            ];
         }
 
-        $vendor = Vendor::create([
-            'vendor_id' => Vendor::generateVendorId(),
-            'name' => $name,
-            'category' => 'General',
-            'rating' => 0,
-            'total_orders' => 0,
-            'status' => 'Active',
-            'email' => $email,
-            'phone' => $input['phone'],
-            'address' => $this->nullableString($manual['address'] ?? null),
-            'contact_person' => $this->nullableString($manual['contact_person'] ?? null),
-            'contact_person_email' => $this->nullableString($manual['contact_person_email'] ?? null),
-            'notes' => 'Created from procurement price comparison (manual / fast-track).',
-            'profile_completed' => false,
-            'onboarding_source' => self::ONBOARDING_SOURCE_MANUAL_PO,
-        ]);
+        /** @var Vendor $vendor */
+        $vendor = $result['vendor'];
+        $action = $result['status'] === 'created' ? 'created' : 'linked_existing';
+        $matchedOn = $result['matched_on'] ?? null;
 
-        Log::info('Manual vendor created from price comparison', [
-            'mrf_id' => $mrf?->mrf_id,
-            'vendor_id' => $vendor->vendor_id,
-        ]);
+        Log::info(
+            $action === 'created'
+                ? 'Manual vendor created from price comparison'
+                : 'Manual vendor linked to existing directory record',
+            [
+                'mrf_id' => $mrf?->mrf_id,
+                'vendor_id' => $vendor->vendor_id,
+                'matched_on' => $matchedOn,
+            ],
+        );
 
         return [
             'vendor' => $vendor,
-            'action' => 'created',
+            'action' => $action,
             'input' => $input,
-            'matchedOn' => null,
+            'matchedOn' => $matchedOn,
         ];
     }
 
