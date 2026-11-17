@@ -1,0 +1,74 @@
+name: SCM Supplier Resolution Tests
+
+on:
+  push:
+    paths:
+      - 'app/Services/SupplierResolutionService.php'
+      - 'app/Services/ManualVendorOnboardingService.php'
+      - 'app/Services/VendorApprovalService.php'
+      - 'app/Http/Controllers/Api/V1/Logistics/VendorController.php'
+      - 'app/Http/Controllers/Api/V1/Logistics/AuthController.php'
+      - 'app/Http/Controllers/Api/VendorController.php'
+      - 'database/**'
+      - 'tests/Feature/SupplierResolutionServiceTest.php'
+      - 'composer.json'
+      - 'composer.lock'
+      - '.github/workflows/scm-supplier-tests.yml'
+  pull_request:
+    paths:
+      - 'app/Services/SupplierResolutionService.php'
+      - 'app/Services/ManualVendorOnboardingService.php'
+      - 'app/Services/VendorApprovalService.php'
+      - 'app/Http/Controllers/Api/V1/Logistics/VendorController.php'
+      - 'app/Http/Controllers/Api/V1/Logistics/AuthController.php'
+      - 'app/Http/Controllers/Api/VendorController.php'
+      - 'database/**'
+      - 'tests/Feature/SupplierResolutionServiceTest.php'
+      - 'composer.json'
+      - 'composer.lock'
+      - '.github/workflows/scm-supplier-tests.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  supplier-resolution:
+    runs-on: ubuntu-latest
+
+    env:
+      APP_ENV: testing
+      APP_DEBUG: 'true'
+      APP_KEY: base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+      DB_CONNECTION: sqlite
+      DB_DATABASE: ':memory:'
+      CACHE_STORE: array
+      QUEUE_CONNECTION: sync
+      SESSION_DRIVER: array
+      MAIL_MAILER: array
+      QUICKBOOKS_DRY_RUN: 'true'
+      QUICKBOOKS_WRITES_ENABLED: 'false'
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up PHP 8.2
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: gd, sqlite3, pdo_sqlite
+          coverage: none
+          tools: composer:v2
+
+      - name: Install Composer dependencies
+        run: composer install --prefer-dist --no-progress --no-interaction --dev
+
+      - name: Verify isolated test environment
+        run: |
+          test ! -e .env
+          test ! -e .env.testing
+          php artisan migrate --force
+
+      - name: Run Stage A supplier-resolution regression tests
+        run: php artisan test tests/Feature/SupplierResolutionServiceTest.php --colors=always
