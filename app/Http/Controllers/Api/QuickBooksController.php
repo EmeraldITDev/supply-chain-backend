@@ -141,20 +141,31 @@ class QuickBooksController extends Controller
         $status = match ($blocked) {
             'validation_failed' => 422,
             'writes_disabled' => 409,
+            'currency_invalid', 'vendor_mapping_required', 'vendor_currency_unconfirmed', 'vendor_currency_mismatch' => 422,
             default => 200,
         };
         $code = match ($blocked) {
             'validation_failed' => 'QB_VALIDATION_FAILED',
             'writes_disabled' => 'QB_WRITES_DISABLED',
+            'currency_invalid' => 'QB_CURRENCY_INVALID',
+            'vendor_mapping_required' => 'QB_VENDOR_MAPPING_REQUIRED',
+            'vendor_currency_unconfirmed' => 'QB_VENDOR_CURRENCY_UNCONFIRMED',
+            'vendor_currency_mismatch' => 'QB_VENDOR_CURRENCY_MISMATCH',
             default => null,
         };
 
         return response()->json(array_filter([
             'success' => (bool) $result['passed'],
             'code' => $code,
-            'message' => $code === 'QB_VALIDATION_FAILED'
-                ? 'This purchase order did not pass QuickBooks validation.'
-                : ($code === 'QB_WRITES_DISABLED' ? 'QuickBooks writes are disabled.' : null),
+            'message' => match ($code) {
+                'QB_VALIDATION_FAILED' => 'This purchase order did not pass QuickBooks validation.',
+                'QB_WRITES_DISABLED' => 'QuickBooks writes are disabled.',
+                'QB_CURRENCY_INVALID' => 'The purchase order has no supported currency.',
+                'QB_VENDOR_MAPPING_REQUIRED' => 'A verified QuickBooks vendor mapping is required.',
+                'QB_VENDOR_CURRENCY_UNCONFIRMED' => 'The QuickBooks vendor currency could not be confirmed.',
+                'QB_VENDOR_CURRENCY_MISMATCH' => 'The QuickBooks vendor currency does not match the purchase order.',
+                default => null,
+            },
             'dry_run' => (bool) $result['dry_run'],
             'data' => $result,
         ], fn ($value) => $value !== null), $status);

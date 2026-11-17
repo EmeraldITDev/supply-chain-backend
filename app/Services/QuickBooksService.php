@@ -63,6 +63,26 @@ class QuickBooksService
         return $json !== null;
     }
 
+    /**
+     * @return array{Id: string, DisplayName: string, currency: ?string}|null
+     */
+    public function readVendor(string $id, ?int $mrfId = null): ?array
+    {
+        $json = $this->findById('vendor', $id, $mrfId, 'read_vendor');
+        $vendor = is_array($json['Vendor'] ?? null) ? $json['Vendor'] : null;
+        if ($vendor === null) {
+            return null;
+        }
+
+        $currency = data_get($vendor, 'CurrencyRef.value') ?? data_get($vendor, 'CurrencyRef');
+
+        return [
+            'Id' => (string) ($vendor['Id'] ?? $id),
+            'DisplayName' => (string) ($vendor['DisplayName'] ?? ''),
+            'currency' => is_string($currency) && trim($currency) !== '' ? strtoupper(trim($currency)) : null,
+        ];
+    }
+
     public function findVendorByName(string $name, ?int $mrfId = null): ?string
     {
         $literal = self::escapeQueryLiteral($name);

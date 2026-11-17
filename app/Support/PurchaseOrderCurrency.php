@@ -21,6 +21,13 @@ final class PurchaseOrderCurrency
         return in_array($code, self::SUPPORTED, true) ? $code : self::DEFAULT;
     }
 
+    public static function validate(mixed $value): ?string
+    {
+        $code = strtoupper(trim((string) ($value ?? '')));
+
+        return in_array($code, self::SUPPORTED, true) ? $code : null;
+    }
+
     /**
      * Resolve currency from request body (currency key only).
      */

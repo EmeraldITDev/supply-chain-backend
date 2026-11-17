@@ -79,7 +79,7 @@ class QuickBooksPOSyncService
             $assumptions[] = "DocNumber omitted because \"{$poNumber}\" exceeds {$maxDoc} characters. QuickBooks will auto-number the purchase order.";
         }
 
-        $currency = PurchaseOrderCurrency::normalize($mrf->currency);
+        $currency = PurchaseOrderCurrency::normalize($context['po_currency'] ?? $mrf->currency);
         $home = strtoupper((string) ($context['home_currency'] ?? ''));
         $multi = (bool) ($context['multi_currency'] ?? false);
         if ($multi) {
@@ -218,11 +218,29 @@ class QuickBooksPOSyncService
 
         $dryRun = $forceDryRun || config('services.quickbooks.dry_run') === true;
         $canPost = ! $dryRun && config('services.quickbooks.writes_enabled') === true;
+        $currency = PurchaseOrderCurrency::validate($mrf->currency);
+        if ($currency === null) {
+            return $this->blockedResult(
+                'currency_invalid',
+                'The purchase order currency is missing or unsupported. Supported currencies are NGN and USD.',
+                $dryRun,
+            );
+        }
+
+        $resolved = $this->resolveVendor($vendor, $currency, $mrf->id);
+        if ($resolved['id'] === null) {
+            return $this->blockedResult(
+                $resolved['reason'] ?? 'vendor_mapping_required',
+                $resolved['message'] ?? 'A verified QuickBooks vendor mapping is required before synchronisation.',
+                $dryRun,
+            );
+        }
+
         $accounting = $this->quickBooks->accountingContext($mrf->id);
-        $resolved = $this->resolveVendor($vendor, false, $mrf->id);
         $built = $this->buildPayload($mrf, [
             'vendor_id' => $resolved['id'],
             'vendor_action' => $resolved['action'],
+            'po_currency' => $currency,
             'home_currency' => $accounting['home_currency'],
             'multi_currency' => $accounting['multi_currency'],
             'ap_accounts' => $accounting['ap_accounts'],
@@ -257,14 +275,6 @@ class QuickBooksPOSyncService
         }
 
         $validation = $this->validator->validate($payload, $meta, true, $mrf->id);
-
-        if ($canPost && $validation['passed'] && $resolved['id'] === null) {
-            $createdId = $this->quickBooks->createVendor($vendor, $mrf->id);
-            $payload['VendorRef'] = ['value' => $createdId];
-            $meta['vendor_action'] = 'created';
-            $resolved = ['id' => $createdId, 'action' => 'created'];
-            $validation = $this->validator->validate($payload, $meta, true, $mrf->id);
-        }
 
         $result = [
             'dry_run' => $dryRun,
@@ -324,27 +334,97 @@ class QuickBooksPOSyncService
     }
 
     /**
-     * @return array{id: ?string, action: string}
+     * @return array{id: ?string, action: string, reason?: string, message?: string}
      */
-    private function resolveVendor(Vendor $vendor, bool $allowCreate, int $mrfId): array
+    private function resolveVendor(Vendor $vendor, string $poCurrency, int $mrfId): array
     {
         if (filled($vendor->quickbooks_vendor_id)) {
             $linked = (string) $vendor->quickbooks_vendor_id;
-            if ($this->quickBooks->entityExists('vendor', $linked, $mrfId)) {
+            $verified = $this->verifyVendorCurrency($linked, $poCurrency, $mrfId);
+            if ($verified['valid']) {
                 return ['id' => $linked, 'action' => 'linked'];
             }
+            return [
+                'id' => null,
+                'action' => 'blocked',
+                'reason' => $verified['reason'],
+                'message' => $verified['message'],
+            ];
         }
 
         $found = $this->quickBooks->findVendorByName((string) $vendor->name, $mrfId);
         if ($found !== null) {
-            return ['id' => $found, 'action' => 'matched'];
+            $verified = $this->verifyVendorCurrency($found, $poCurrency, $mrfId);
+            if ($verified['valid']) {
+                return ['id' => $found, 'action' => 'matched'];
+            }
+            return [
+                'id' => null,
+                'action' => 'blocked',
+                'reason' => $verified['reason'],
+                'message' => $verified['message'],
+            ];
         }
 
-        if (! $allowCreate) {
-            return ['id' => null, 'action' => 'would_create'];
+        return [
+            'id' => null,
+            'action' => 'blocked',
+            'reason' => 'vendor_mapping_required',
+            'message' => 'No verified QuickBooks vendor mapping exists. Reconcile the supplier before synchronisation.',
+        ];
+    }
+
+    /**
+     * @return array{valid: bool, reason: string, message: string}
+     */
+    private function verifyVendorCurrency(string $vendorId, string $poCurrency, int $mrfId): array
+    {
+        $vendor = $this->quickBooks->readVendor($vendorId, $mrfId);
+        if ($vendor === null) {
+            return [
+                'valid' => false,
+                'reason' => 'vendor_mapping_required',
+                'message' => 'The configured QuickBooks vendor mapping could not be verified.',
+            ];
         }
 
-        return ['id' => $this->quickBooks->createVendor($vendor, $mrfId), 'action' => 'created'];
+        if ($vendor['currency'] === null) {
+            return [
+                'valid' => false,
+                'reason' => 'vendor_currency_unconfirmed',
+                'message' => 'The QuickBooks vendor currency could not be confirmed.',
+            ];
+        }
+
+        if ($vendor['currency'] !== $poCurrency) {
+            return [
+                'valid' => false,
+                'reason' => 'vendor_currency_mismatch',
+                'message' => "The QuickBooks vendor currency ({$vendor['currency']}) does not match the PO currency ({$poCurrency}).",
+            ];
+        }
+
+        return ['valid' => true, 'reason' => '', 'message' => ''];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function blockedResult(string $reason, string $message, bool $dryRun): array
+    {
+        return [
+            'dry_run' => $dryRun,
+            'passed' => false,
+            'results' => [[
+                'check' => $reason,
+                'passed' => false,
+                'detail' => $message,
+            ]],
+            'assumptions' => [$message],
+            'quickbooks_po_id' => null,
+            'quickbooks_sync_status' => null,
+            'blocked_reason' => $reason,
+        ];
     }
 
     private function txnDate(MRF $mrf): string
