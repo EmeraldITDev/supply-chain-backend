@@ -970,6 +970,10 @@ Route::middleware(['auth:sanctum', 'quickbooks.nocache'])->prefix('quickbooks')-
     Route::post('/pull/vendors', [QuickBooksController::class, 'pullVendors'])->middleware($quickBooksSyncRoles);
     Route::post('/pull/purchase-orders', [QuickBooksController::class, 'pullPurchaseOrders'])->middleware($quickBooksSyncRoles);
     Route::get('/suppliers/reconciliation', [QuickBooksController::class, 'supplierReconciliation'])->middleware(\App\Support\QuickBooksRoles::supplierMiddleware());
+    Route::get('/suppliers/reconciliation/bulk-preview', [QuickBooksController::class, 'supplierBulkPreview'])->middleware(\App\Support\QuickBooksRoles::supplierMiddleware());
+    Route::post('/suppliers/bulk-import', [QuickBooksController::class, 'bulkImportSuppliers'])->middleware(\App\Support\QuickBooksRoles::supplierMiddleware());
+    Route::post('/suppliers/bulk-exclude', [QuickBooksController::class, 'bulkExcludeSuppliers'])->middleware(\App\Support\QuickBooksRoles::supplierMiddleware());
+    Route::post('/suppliers/bulk-restore-exclusions', [QuickBooksController::class, 'bulkRestoreSupplierExclusions'])->middleware(\App\Support\QuickBooksRoles::supplierMiddleware());
     Route::post('/suppliers/mappings', [QuickBooksController::class, 'approveSupplierMapping'])->middleware(\App\Support\QuickBooksRoles::supplierMiddleware());
     Route::post('/suppliers/mappings/{mapping}/decision', [QuickBooksController::class, 'decideSupplierMapping'])->middleware(\App\Support\QuickBooksRoles::supplierMiddleware());
     Route::post('/suppliers/import', [QuickBooksController::class, 'importSupplier'])->middleware(\App\Support\QuickBooksRoles::supplierMiddleware());

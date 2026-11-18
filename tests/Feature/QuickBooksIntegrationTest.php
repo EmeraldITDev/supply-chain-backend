@@ -12,6 +12,7 @@ use App\Models\User;
 use App\Models\Vendor;
 use App\Models\VendorQuickBooksMapping;
 use App\Models\QuickBooksVendorCreationRequest;
+use App\Models\QuickBooksSupplierExclusion;
 use App\Services\QuickBooksPayloadValidator;
 use App\Services\QuickBooksService;
 use App\Services\QuickBooksTokenService;
@@ -916,6 +917,86 @@ class QuickBooksIntegrationTest extends TestCase
             'quickbooks_vendor_id' => 'no-email-1',
             'currency' => 'NGN',
         ]);
+    }
+
+    public function test_bulk_supplier_preview_classifies_candidates_and_possible_duplicates(): void
+    {
+        $this->storeConnection();
+        Vendor::create([
+            'vendor_id' => 'V-EXISTING-BULK',
+            'name' => 'Existing Bulk Supplier',
+            'category' => 'goods',
+            'email' => 'existing-bulk@example.com',
+            'status' => 'Active',
+        ]);
+        $pull = \Mockery::mock(\App\Services\QuickBooksPullService::class);
+        $pull->shouldReceive('pullVendors')->once()->andReturn([
+            'matched' => [],
+            'unmatched' => [
+                ['id' => 'bulk-business', 'display_name' => 'New Business Limited', 'company_name' => 'New Business Limited', 'email' => 'new-business@example.com', 'currency' => 'USD'],
+                ['id' => 'bulk-duplicate', 'display_name' => 'Existing Bulk Supplier', 'company_name' => 'Existing Bulk Supplier', 'email' => 'different@example.com', 'currency' => 'NGN'],
+            ],
+        ]);
+        $this->app->instance(\App\Services\QuickBooksPullService::class, $pull);
+
+        Sanctum::actingAs(User::factory()->create(['supply_chain_role' => 'finance']));
+        $this->getJson('/api/quickbooks/suppliers/reconciliation/bulk-preview?per_page=50')
+            ->assertOk()
+            ->assertJsonPath('data.items.0.classification', 'business_import_candidate')
+            ->assertJsonPath('data.items.1.classification', 'possible_duplicate');
+    }
+
+    public function test_bulk_import_returns_mixed_results_and_retries_are_safe(): void
+    {
+        $this->storeConnection();
+        $pull = \Mockery::mock(\App\Services\QuickBooksPullService::class);
+        $pull->shouldReceive('pullVendors')->once()->andReturn([
+            'matched' => [],
+            'unmatched' => [
+                ['id' => 'bulk-import-1', 'display_name' => 'Bulk Import Supplier', 'company_name' => 'Bulk Import Supplier', 'email' => 'bulk-import@example.com', 'currency' => 'USD'],
+                ['id' => 'bulk-import-duplicate', 'display_name' => 'Missing Evidence', 'company_name' => null, 'email' => null, 'currency' => 'USD'],
+            ],
+        ]);
+        $this->app->instance(\App\Services\QuickBooksPullService::class, $pull);
+        $this->mock(QuickBooksService::class, function ($mock) {
+            $mock->shouldReceive('readVendor')->once()->with('bulk-import-1')->andReturn([
+                'Id' => 'bulk-import-1', 'DisplayName' => 'Bulk Import Supplier', 'currency' => 'USD',
+            ]);
+            $mock->shouldNotReceive('post');
+        });
+
+        Sanctum::actingAs(User::factory()->create(['supply_chain_role' => 'finance']));
+        $payload = ['records' => [
+            ['quickbooks_vendor_id' => 'bulk-import-1', 'currency' => 'USD'],
+            ['quickbooks_vendor_id' => 'bulk-import-duplicate', 'currency' => 'USD'],
+        ]];
+        $this->postJson('/api/quickbooks/suppliers/bulk-import', $payload)
+            ->assertStatus(207)
+            ->assertJsonPath('data.results.0.result', 'imported')
+            ->assertJsonPath('data.results.1.result', 'skipped');
+        $this->assertDatabaseCount('vendor_quickbooks_mappings', 1);
+    }
+
+    public function test_bulk_exclusion_is_idempotent_and_can_be_restored(): void
+    {
+        $this->storeConnection();
+        $pull = \Mockery::mock(\App\Services\QuickBooksPullService::class);
+        $pull->shouldReceive('pullVendors')->twice()->andReturn([
+            'matched' => [],
+            'unmatched' => [['id' => 'excluded-1', 'display_name' => 'Excluded Supplier', 'company_name' => 'Excluded Supplier', 'email' => 'excluded@example.com', 'currency' => 'EUR']],
+        ]);
+        $this->app->instance(\App\Services\QuickBooksPullService::class, $pull);
+        Sanctum::actingAs(User::factory()->create(['supply_chain_role' => 'finance']));
+        $payload = ['records' => [['quickbooks_vendor_id' => 'excluded-1', 'currency' => 'EUR', 'reason' => 'Manual review required']]];
+
+        $this->postJson('/api/quickbooks/suppliers/bulk-exclude', $payload)->assertStatus(207);
+        $this->postJson('/api/quickbooks/suppliers/bulk-exclude', $payload)->assertStatus(207);
+        $this->assertDatabaseCount('quickbooks_supplier_exclusions', 1);
+        $exclusionId = QuickBooksSupplierExclusion::query()->value('id');
+        $this->postJson('/api/quickbooks/suppliers/bulk-restore-exclusions', ['exclusion_ids' => [$exclusionId]])
+            ->assertStatus(207)
+            ->assertJsonPath('data.results.0.result', 'restored');
+        $this->assertDatabaseHas('quickbooks_supplier_exclusions', ['id' => $exclusionId, 'status' => 'restored']);
     }
 
     public function test_vendor_creation_requires_approval_and_never_posts_to_quickbooks(): void

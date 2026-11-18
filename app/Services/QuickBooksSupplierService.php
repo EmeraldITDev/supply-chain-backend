@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Exceptions\QuickBooksSupplierConflictException;
 use App\Models\QuickBooksVendorCreationRequest;
+use App\Models\QuickBooksSupplierExclusion;
 use App\Models\Vendor;
 use App\Models\VendorQuickBooksMapping;
 use App\Support\PurchaseOrderCurrency;
@@ -12,6 +13,10 @@ use Illuminate\Validation\ValidationException;
 
 class QuickBooksSupplierService
 {
+    private const BULK_MAX = 50;
+
+    private const PREVIEW_MAX = 5000;
+
     public function __construct(
         private QuickBooksPullService $pull,
         private QuickBooksService $quickBooks,
@@ -48,6 +53,198 @@ class QuickBooksSupplierService
             'supported_currencies' => PurchaseOrderCurrency::SUPPORTED,
             ...$preview,
         ];
+    }
+
+    /**
+     * Classify only the currently unmatched QuickBooks suppliers. The preview
+     * is read-only; it never creates SCM records or mappings.
+     *
+     * @return array<string, mixed>
+     */
+    public function bulkClassificationPreview(int $page = 1, int $perPage = 25, ?string $search = null, string $filter = 'all'): array
+    {
+        $page = max(1, $page);
+        $perPage = min(self::PREVIEW_MAX, max(1, $perPage));
+        $realmId = $this->tokens->realmId();
+        $preview = $this->reconciliationPreview();
+        $mappings = VendorQuickBooksMapping::query()->where('realm_id', $realmId)->get()
+            ->keyBy(fn (VendorQuickBooksMapping $mapping) => $mapping->quickbooks_vendor_id.'|'.$mapping->currency);
+        $exclusions = QuickBooksSupplierExclusion::query()->where('realm_id', $realmId)->get()
+            ->keyBy(fn (QuickBooksSupplierExclusion $exclusion) => $exclusion->quickbooks_vendor_id.'|'.$exclusion->currency);
+
+        $rows = collect($preview['unmatched'])->map(function (array $row) use ($mappings, $exclusions, $realmId) {
+            $vendorId = (string) ($row['id'] ?? '');
+            $currency = strtoupper((string) ($row['currency'] ?? ''));
+            $key = $vendorId.'|'.$currency;
+            $mapping = $mappings->get($key);
+            $exclusion = $exclusions->get($key);
+            $classification = $this->classifyUnmatchedVendor($row, $mappings, $realmId);
+
+            if ($mapping) {
+                $classification = ['code' => 'already_linked', 'label' => 'Already linked', 'explanation' => 'A QuickBooks mapping already exists for this realm and currency.', 'eligible_import' => false];
+            } elseif ($exclusion?->status === 'excluded') {
+                $classification = ['code' => 'previously_excluded', 'label' => 'Previously excluded', 'explanation' => $exclusion->reason, 'eligible_import' => false];
+            }
+
+            return [
+                ...$row,
+                'realm_id' => $realmId,
+                'classification' => $classification['code'],
+                'classification_label' => $classification['label'],
+                'classification_explanation' => $classification['explanation'],
+                'eligible_import' => $classification['eligible_import'],
+                'mapping_id' => $mapping?->id,
+                'exclusion_id' => $exclusion?->id,
+                'exclusion_status' => $exclusion?->status,
+                'exclusion_reason' => $exclusion?->reason,
+            ];
+        });
+
+        if ($search !== null && trim($search) !== '') {
+            $needle = mb_strtolower(trim($search));
+            $rows = $rows->filter(fn (array $row) => str_contains(mb_strtolower(implode(' ', [
+                (string) ($row['id'] ?? ''),
+                (string) ($row['display_name'] ?? ''),
+                (string) ($row['company_name'] ?? ''),
+                (string) ($row['email'] ?? ''),
+                (string) ($row['currency'] ?? ''),
+            ])), $needle))->values();
+        }
+        if ($filter !== 'all') {
+            $rows = $rows->where('classification', $filter)->values();
+        }
+
+        $total = $rows->count();
+        $items = $rows->forPage($page, $perPage)->values()->all();
+
+        return [
+            'realm_id' => $realmId,
+            'page' => $page,
+            'per_page' => $perPage,
+            'total' => $total,
+            'last_page' => max(1, (int) ceil($total / $perPage)),
+            'items' => $items,
+            'classifications' => [
+                'business_import_candidate',
+                'likely_individual',
+                'possible_duplicate',
+                'quickbooks_identity_overlap',
+                'insufficient_evidence',
+                'previously_excluded',
+                'already_linked',
+            ],
+        ];
+    }
+
+    /**
+     * @param list<array{quickbooks_vendor_id: string, currency: string, manual_override?: bool, justification?: string}> $records
+     * @return array{results: list<array<string, mixed>>, processed: int}
+     */
+    public function bulkImport(array $records, int $actorId): array
+    {
+        if (count($records) > self::BULK_MAX) {
+            throw ValidationException::withMessages(['records' => 'A maximum of '.self::BULK_MAX.' suppliers may be processed per batch.']);
+        }
+
+        $preview = $this->bulkClassificationPreview(1, self::PREVIEW_MAX);
+        $available = collect($preview['items'])->keyBy(fn (array $row) => $row['id'].'|'.$row['currency']);
+        $results = [];
+        foreach ($records as $record) {
+            $key = trim($record['quickbooks_vendor_id']).'|'.strtoupper(trim($record['currency']));
+            $row = $available->get($key);
+            if (! $row) {
+                $results[] = ['quickbooks_vendor_id' => $record['quickbooks_vendor_id'], 'currency' => $record['currency'], 'result' => 'skipped', 'reason' => 'The supplier is not present in the current unmatched preview.'];
+                continue;
+            }
+            if ($row['classification'] === 'already_linked') {
+                $results[] = [...$this->bulkIdentity($row), 'result' => 'already_linked'];
+                continue;
+            }
+            if ($row['classification'] === 'previously_excluded') {
+                $results[] = [...$this->bulkIdentity($row), 'result' => 'excluded'];
+                continue;
+            }
+            $override = (bool) ($record['manual_override'] ?? false);
+            if (! $row['eligible_import'] && ! ($row['classification'] === 'likely_individual' && $override && trim((string) ($record['justification'] ?? '')) !== '')) {
+                $results[] = [...$this->bulkIdentity($row), 'result' => 'skipped', 'reason' => $row['classification_explanation']];
+                continue;
+            }
+
+            try {
+                $imported = $this->importVendor((string) $row['id'], (string) $row['currency'], $actorId);
+                $results[] = [...$this->bulkIdentity($row), 'result' => 'imported', 'vendor_id' => $imported['vendor']->id, 'mapping_id' => $imported['mapping']->id];
+            } catch (\Throwable $exception) {
+                $existing = VendorQuickBooksMapping::query()->where('realm_id', $preview['realm_id'])->where('quickbooks_vendor_id', $row['id'])->where('currency', $row['currency'])->first();
+                $results[] = [...$this->bulkIdentity($row), 'result' => $existing ? 'already_linked' : 'failed', 'reason' => $existing ? 'The supplier was linked by a concurrent or repeated request.' : $exception->getMessage()];
+            }
+        }
+
+        return ['results' => $results, 'processed' => count($results)];
+    }
+
+    /**
+     * @param list<array{quickbooks_vendor_id: string, currency: string, reason: string}> $records
+     * @return array{results: list<array<string, mixed>>, processed: int}
+     */
+    public function bulkExclude(array $records, int $actorId): array
+    {
+        if (count($records) > self::BULK_MAX) {
+            throw ValidationException::withMessages(['records' => 'A maximum of '.self::BULK_MAX.' suppliers may be processed per batch.']);
+        }
+        $realmId = $this->tokens->realmId();
+        $preview = $this->bulkClassificationPreview(1, self::PREVIEW_MAX);
+        $available = collect($preview['items'])->keyBy(fn (array $row) => $row['id'].'|'.$row['currency']);
+        $results = [];
+        foreach ($records as $record) {
+            $vendorId = trim($record['quickbooks_vendor_id']);
+            $currency = $this->validatedCurrency($record['currency']);
+            $row = $available->get($vendorId.'|'.$currency);
+            if (! $row) {
+                $results[] = ['quickbooks_vendor_id' => $vendorId, 'currency' => $currency, 'result' => 'skipped', 'reason' => 'The supplier is not present in the current unmatched preview.'];
+                continue;
+            }
+            if ($row['classification'] === 'already_linked') {
+                $results[] = ['quickbooks_vendor_id' => $vendorId, 'currency' => $currency, 'result' => 'conflict', 'reason' => 'A linked SCM mapping cannot be excluded from the unmatched workflow.'];
+                continue;
+            }
+            $exclusion = QuickBooksSupplierExclusion::query()->updateOrCreate(
+                ['realm_id' => $realmId, 'quickbooks_vendor_id' => $vendorId, 'currency' => $currency],
+                ['reason' => trim($record['reason']), 'excluded_by' => $actorId, 'excluded_at' => now(), 'restored_by' => null, 'restored_at' => null, 'status' => 'excluded'],
+            );
+            $this->audit->record('quickbooks_supplier_excluded', 'QuickBooksSupplierExclusion', $exclusion->id, auth()->user(), 'Excluded QuickBooks supplier from SCM import review.', [
+                'realm_id' => $realmId,
+                'quickbooks_vendor_id' => $vendorId,
+                'currency' => $currency,
+                'reason' => trim($record['reason']),
+            ]);
+            $results[] = ['quickbooks_vendor_id' => $vendorId, 'currency' => $currency, 'result' => 'excluded', 'exclusion_id' => $exclusion->id];
+        }
+
+        return ['results' => $results, 'processed' => count($results)];
+    }
+
+    /**
+     * @param list<int> $exclusionIds
+     * @return array{results: list<array<string, mixed>>, processed: int}
+     */
+    public function bulkRestore(array $exclusionIds, int $actorId): array
+    {
+        if (count($exclusionIds) > self::BULK_MAX) {
+            throw ValidationException::withMessages(['exclusion_ids' => 'A maximum of '.self::BULK_MAX.' suppliers may be processed per batch.']);
+        }
+        $realmId = $this->tokens->realmId();
+        $results = [];
+        foreach ($exclusionIds as $id) {
+            $exclusion = QuickBooksSupplierExclusion::query()->where('realm_id', $realmId)->find($id);
+            if (! $exclusion) {
+                $results[] = ['exclusion_id' => $id, 'result' => 'failed', 'reason' => 'The exclusion does not belong to the connected QuickBooks company.'];
+                continue;
+            }
+            $exclusion->update(['status' => 'restored', 'restored_by' => $actorId, 'restored_at' => now()]);
+            $results[] = ['exclusion_id' => $id, 'quickbooks_vendor_id' => $exclusion->quickbooks_vendor_id, 'currency' => $exclusion->currency, 'result' => 'restored'];
+        }
+
+        return ['results' => $results, 'processed' => count($results)];
     }
 
     public function approveMapping(
@@ -480,5 +677,69 @@ class QuickBooksSupplierService
         }
 
         return $currency;
+    }
+
+    /**
+     * @param array<string, mixed> $row
+     * @param \Illuminate\Support\Collection<string, VendorQuickBooksMapping> $mappings
+     * @return array{code: string, label: string, explanation: string, eligible_import: bool}
+     */
+    private function classifyUnmatchedVendor(array $row, $mappings, string $realmId): array
+    {
+        $name = trim((string) ($row['company_name'] ?? $row['display_name'] ?? ''));
+        $email = trim((string) ($row['email'] ?? ''));
+        $currency = strtoupper(trim((string) ($row['currency'] ?? '')));
+        if ($name === '' && $email === '') {
+            return ['code' => 'insufficient_evidence', 'label' => 'Insufficient evidence', 'explanation' => 'The QuickBooks supplier has neither a usable name nor email for safe review.', 'eligible_import' => false];
+        }
+        if (! in_array($currency, PurchaseOrderCurrency::SUPPORTED, true)) {
+            return ['code' => 'insufficient_evidence', 'label' => 'Insufficient evidence', 'explanation' => 'The QuickBooks supplier has no supported, identified currency for safe import.', 'eligible_import' => false];
+        }
+
+        $sameVendorMappings = $mappings->filter(fn (VendorQuickBooksMapping $mapping) => (string) $mapping->quickbooks_vendor_id === (string) ($row['id'] ?? ''));
+        if ($sameVendorMappings->isNotEmpty()) {
+            return ['code' => 'quickbooks_identity_overlap', 'label' => 'Duplicate or overlapping QuickBooks identity', 'explanation' => 'This QuickBooks vendor ID already has a currency or SCM mapping in the connected realm.', 'eligible_import' => false];
+        }
+
+        $identity = $this->resolution->resolve($name, $email);
+        if ($identity['status'] === 'review_required') {
+            $reason = (string) ($identity['reason'] ?? '');
+            if (in_array($reason, ['multiple_email_matches', 'multiple_name_matches', 'email_name_conflict', 'name_email_conflict'], true)
+                && ($identity['candidate_vendor_ids'] ?? []) !== []) {
+                return ['code' => 'possible_duplicate', 'label' => 'Possible duplicate of existing SCM supplier', 'explanation' => $identity['message'] ?? 'Existing SCM suppliers require manual identity review.', 'eligible_import' => false];
+            }
+
+            return ['code' => 'insufficient_evidence', 'label' => 'Insufficient evidence', 'explanation' => $identity['message'] ?? 'Identity evidence conflicts and requires manual review.', 'eligible_import' => false];
+        }
+        if ($identity['status'] === 'matched') {
+            return ['code' => 'possible_duplicate', 'label' => 'Possible duplicate of existing SCM supplier', 'explanation' => 'The supplier name or email matches an existing SCM supplier; reconcile it instead of importing.', 'eligible_import' => false];
+        }
+
+        if ($this->looksLikeIndividualName($name)) {
+            return ['code' => 'likely_individual', 'label' => 'Likely individual/person name — manual review', 'explanation' => 'The name resembles a person. Sole proprietors and contractors may still be legitimate; manual review is required.', 'eligible_import' => false];
+        }
+
+        return ['code' => 'business_import_candidate', 'label' => 'Business import candidate', 'explanation' => 'No existing SCM identity match was found and the record has usable business identity evidence.', 'eligible_import' => true];
+    }
+
+    private function looksLikeIndividualName(string $name): bool
+    {
+        $normalized = Vendor::normalizeName($name);
+        if ($normalized === '' || preg_match('/\d|\b(ltd|limited|llc|inc|company|corp|services|enterprise|ventures|trading|agency|plc|group)\b/i', $normalized)) {
+            return false;
+        }
+
+        $parts = preg_split('/\s+/', $normalized, -1, PREG_SPLIT_NO_EMPTY);
+
+        return is_array($parts) && count($parts) >= 2 && count($parts) <= 4 && collect($parts)->every(fn (string $part) => preg_match('/^[a-z\-\']+$/i', $part) === 1);
+    }
+
+    /** @param array<string, mixed> $row */
+    private function bulkIdentity(array $row): array
+    {
+        return [
+            'quickbooks_vendor_id' => $row['id'] ?? null,
+            'currency' => $row['currency'] ?? null,
+        ];
     }
 }

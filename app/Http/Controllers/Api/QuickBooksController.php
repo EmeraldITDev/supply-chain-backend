@@ -202,6 +202,67 @@ class QuickBooksController extends Controller
         return $this->inspected(fn () => $this->supplierService->reconciliationPreview());
     }
 
+    public function supplierBulkPreview(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'page' => ['nullable', 'integer', 'min:1'],
+            'per_page' => ['nullable', 'integer', 'min:1', 'max:5000'],
+            'search' => ['nullable', 'string', 'max:120'],
+            'filter' => ['nullable', 'string', 'max:40'],
+        ]);
+
+        return $this->inspected(fn () => $this->supplierService->bulkClassificationPreview(
+            (int) ($data['page'] ?? 1),
+            (int) ($data['per_page'] ?? 25),
+            $data['search'] ?? null,
+            $data['filter'] ?? 'all',
+        ));
+    }
+
+    public function bulkImportSuppliers(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'records' => ['required', 'array', 'min:1', 'max:50'],
+            'records.*.quickbooks_vendor_id' => ['required', 'string', 'max:64'],
+            'records.*.currency' => ['required', 'string', 'size:3'],
+            'records.*.manual_override' => ['sometimes', 'boolean'],
+            'records.*.justification' => ['nullable', 'string', 'max:1000'],
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'data' => $this->supplierService->bulkImport($data['records'], (int) $request->user()->id),
+        ], 207);
+    }
+
+    public function bulkExcludeSuppliers(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'records' => ['required', 'array', 'min:1', 'max:50'],
+            'records.*.quickbooks_vendor_id' => ['required', 'string', 'max:64'],
+            'records.*.currency' => ['required', 'string', 'size:3'],
+            'records.*.reason' => ['required', 'string', 'min:3', 'max:1000'],
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'data' => $this->supplierService->bulkExclude($data['records'], (int) $request->user()->id),
+        ], 207);
+    }
+
+    public function bulkRestoreSupplierExclusions(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'exclusion_ids' => ['required', 'array', 'min:1', 'max:50'],
+            'exclusion_ids.*' => ['required', 'integer'],
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'data' => $this->supplierService->bulkRestore($data['exclusion_ids'], (int) $request->user()->id),
+        ], 207);
+    }
+
     public function approveSupplierMapping(Request $request): JsonResponse
     {
         $data = $request->validate([
