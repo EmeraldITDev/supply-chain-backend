@@ -977,6 +977,35 @@ class QuickBooksIntegrationTest extends TestCase
         $this->assertDatabaseCount('vendor_quickbooks_mappings', 1);
     }
 
+    public function test_bulk_import_rejects_missing_or_invalid_email_even_when_selected(): void
+    {
+        $this->storeConnection();
+        $pull = \Mockery::mock(\App\Services\QuickBooksPullService::class);
+        $pull->shouldReceive('pullVendors')->once()->andReturn([
+            'matched' => [],
+            'unmatched' => [
+                ['id' => 'bulk-no-email', 'display_name' => 'No Email Business Limited', 'company_name' => 'No Email Business Limited', 'email' => null, 'currency' => 'USD'],
+                ['id' => 'bulk-invalid-email', 'display_name' => 'Invalid Email Business Limited', 'company_name' => 'Invalid Email Business Limited', 'email' => 'not-an-email', 'currency' => 'USD'],
+            ],
+        ]);
+        $this->app->instance(\App\Services\QuickBooksPullService::class, $pull);
+        $this->mock(QuickBooksService::class, function ($mock) {
+            $mock->shouldNotReceive('readVendor');
+            $mock->shouldNotReceive('post');
+        });
+
+        Sanctum::actingAs(User::factory()->create(['supply_chain_role' => 'finance']));
+        $this->postJson('/api/quickbooks/suppliers/bulk-import', ['records' => [
+            ['quickbooks_vendor_id' => 'bulk-no-email', 'currency' => 'USD'],
+            ['quickbooks_vendor_id' => 'bulk-invalid-email', 'currency' => 'USD', 'manual_override' => true, 'justification' => 'Reviewed manually'],
+        ]])->assertStatus(207)
+            ->assertJsonPath('data.results.0.result', 'skipped')
+            ->assertJsonPath('data.results.1.result', 'skipped');
+
+        $this->assertDatabaseMissing('vendors', ['name' => 'No Email Business Limited']);
+        $this->assertDatabaseMissing('vendors', ['name' => 'Invalid Email Business Limited']);
+    }
+
     public function test_bulk_exclusion_is_idempotent_and_can_be_restored(): void
     {
         $this->storeConnection();

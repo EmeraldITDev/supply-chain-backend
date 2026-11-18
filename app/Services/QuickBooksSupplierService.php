@@ -129,6 +129,7 @@ class QuickBooksSupplierService
                 'likely_individual',
                 'possible_duplicate',
                 'quickbooks_identity_overlap',
+                'missing_email',
                 'insufficient_evidence',
                 'previously_excluded',
                 'already_linked',
@@ -164,8 +165,7 @@ class QuickBooksSupplierService
                 $results[] = [...$this->bulkIdentity($row), 'result' => 'excluded'];
                 continue;
             }
-            $override = (bool) ($record['manual_override'] ?? false);
-            if (! $row['eligible_import'] && ! ($row['classification'] === 'likely_individual' && $override && trim((string) ($record['justification'] ?? '')) !== '')) {
+            if (! $row['eligible_import']) {
                 $results[] = [...$this->bulkIdentity($row), 'result' => 'skipped', 'reason' => $row['classification_explanation']];
                 continue;
             }
@@ -689,8 +689,10 @@ class QuickBooksSupplierService
         $name = trim((string) ($row['company_name'] ?? $row['display_name'] ?? ''));
         $email = trim((string) ($row['email'] ?? ''));
         $currency = strtoupper(trim((string) ($row['currency'] ?? '')));
-        if ($name === '' && $email === '') {
-            return ['code' => 'insufficient_evidence', 'label' => 'Insufficient evidence', 'explanation' => 'The QuickBooks supplier has neither a usable name nor email for safe review.', 'eligible_import' => false];
+        if ($name === '') {
+            return $email === '' || filter_var($email, FILTER_VALIDATE_EMAIL) === false
+                ? ['code' => 'missing_email', 'label' => 'No email — manual review', 'explanation' => 'A valid email address and usable supplier name are required before import.', 'eligible_import' => false]
+                : ['code' => 'insufficient_evidence', 'label' => 'Insufficient evidence', 'explanation' => 'The QuickBooks supplier has no usable name for safe review.', 'eligible_import' => false];
         }
         if (! in_array($currency, PurchaseOrderCurrency::SUPPORTED, true)) {
             return ['code' => 'insufficient_evidence', 'label' => 'Insufficient evidence', 'explanation' => 'The QuickBooks supplier has no supported, identified currency for safe import.', 'eligible_import' => false];
@@ -716,7 +718,10 @@ class QuickBooksSupplierService
         }
 
         if ($this->looksLikeIndividualName($name)) {
-            return ['code' => 'likely_individual', 'label' => 'Likely individual/person name — manual review', 'explanation' => 'The name resembles a person. Sole proprietors and contractors may still be legitimate; manual review is required.', 'eligible_import' => false];
+            return ['code' => 'likely_individual', 'label' => 'Likely individual/person name — manual review', 'explanation' => 'The name resembles a person. Sole proprietors and contractors may still be legitimate; manual review is required, and a valid email is still required for import.', 'eligible_import' => false];
+        }
+        if ($email === '' || filter_var($email, FILTER_VALIDATE_EMAIL) === false) {
+            return ['code' => 'missing_email', 'label' => 'No email — manual review', 'explanation' => 'A valid email address is required before a supplier can be imported into SCM.', 'eligible_import' => false];
         }
 
         return ['code' => 'business_import_candidate', 'label' => 'Business import candidate', 'explanation' => 'No existing SCM identity match was found and the record has usable business identity evidence.', 'eligible_import' => true];
