@@ -10,9 +10,9 @@ final class PurchaseOrderCurrency
     public const DEFAULT = 'NGN';
 
     /** @var list<string> */
-    public const SUPPORTED = ['NGN', 'USD'];
+    public const SUPPORTED = ['NGN', 'USD', 'GBP', 'EUR'];
 
-    public const VALIDATION_RULE = 'nullable|string|in:NGN,USD';
+    public const VALIDATION_RULE = 'nullable|string|in:NGN,USD,GBP,EUR';
 
     public static function normalize(mixed $value): string
     {

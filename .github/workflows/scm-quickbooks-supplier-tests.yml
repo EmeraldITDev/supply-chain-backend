@@ -1,0 +1,82 @@
+name: SCM QuickBooks Supplier Tests
+
+on:
+  push:
+    paths:
+      - 'app/Http/Controllers/Api/QuickBooksController.php'
+      - 'app/Models/Vendor.php'
+      - 'app/Models/VendorQuickBooksMapping.php'
+      - 'app/Models/QuickBooksVendorCreationRequest.php'
+      - 'app/Services/QuickBooks*.php'
+      - 'app/Support/PurchaseOrderCurrency.php'
+      - 'app/Support/QuickBooksRoles.php'
+      - 'database/migrations/2026_11_18_120000_create_vendor_quickbooks_mappings_table.php'
+      - 'database/migrations/2026_11_18_120001_create_quickbooks_vendor_creation_requests_table.php'
+      - 'routes/api.php'
+      - 'tests/Feature/QuickBooksIntegrationTest.php'
+      - 'composer.json'
+      - 'composer.lock'
+      - '.github/workflows/scm-quickbooks-supplier-tests.yml'
+  pull_request:
+    paths:
+      - 'app/Http/Controllers/Api/QuickBooksController.php'
+      - 'app/Models/Vendor.php'
+      - 'app/Models/VendorQuickBooksMapping.php'
+      - 'app/Models/QuickBooksVendorCreationRequest.php'
+      - 'app/Services/QuickBooks*.php'
+      - 'app/Support/PurchaseOrderCurrency.php'
+      - 'app/Support/QuickBooksRoles.php'
+      - 'database/migrations/2026_11_18_120000_create_vendor_quickbooks_mappings_table.php'
+      - 'database/migrations/2026_11_18_120001_create_quickbooks_vendor_creation_requests_table.php'
+      - 'routes/api.php'
+      - 'tests/Feature/QuickBooksIntegrationTest.php'
+      - 'composer.json'
+      - 'composer.lock'
+      - '.github/workflows/scm-quickbooks-supplier-tests.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  quickbooks-supplier:
+    runs-on: ubuntu-latest
+    env:
+      APP_ENV: testing
+      APP_DEBUG: 'true'
+      APP_KEY: base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+      DB_CONNECTION: sqlite
+      DB_DATABASE: ':memory:'
+      CACHE_STORE: array
+      QUEUE_CONNECTION: sync
+      SESSION_DRIVER: array
+      MAIL_MAILER: array
+      QUICKBOOKS_DRY_RUN: 'true'
+      QUICKBOOKS_WRITES_ENABLED: 'false'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create empty test environment file
+        run: |
+          test ! -e .env
+          test ! -e .env.testing
+          touch .env
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: gd, sqlite3, pdo_sqlite
+          coverage: none
+          tools: composer:v2
+
+      - run: composer install --prefer-dist --no-progress --no-interaction --dev
+
+      - name: Run QuickBooks supplier tests
+        run: |
+          php artisan migrate --force
+          php artisan test tests/Feature/QuickBooksIntegrationTest.php \
+            --colors=always \
+            --display-warnings \
+            --fail-on-warning \
+            --fail-on-risky

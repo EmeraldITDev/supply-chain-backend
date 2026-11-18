@@ -34,9 +34,22 @@ final class QuickBooksRoles
         'admin',
     ];
 
+    public const SUPPLIER_ROLES = [
+        'admin',
+        'finance',
+        'finance_officer',
+        'procurement_manager',
+        'supply_chain_director',
+    ];
+
     public static function syncMiddleware(): string
     {
         return 'role:'.implode(',', self::SYNC_ROLES);
+    }
+
+    public static function supplierMiddleware(): string
+    {
+        return 'role:'.implode(',', self::SUPPLIER_ROLES);
     }
 
     /**

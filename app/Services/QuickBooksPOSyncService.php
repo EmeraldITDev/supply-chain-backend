@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Exceptions\QuickBooksException;
 use App\Models\MRF;
 use App\Models\Vendor;
+use App\Models\VendorQuickBooksMapping;
 use App\Support\PurchaseOrderCurrency;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
@@ -14,6 +15,7 @@ class QuickBooksPOSyncService
     public function __construct(
         private QuickBooksService $quickBooks,
         private QuickBooksPayloadValidator $validator,
+        private QuickBooksSupplierService $suppliers,
     ) {}
 
     /**
@@ -222,7 +224,7 @@ class QuickBooksPOSyncService
         if ($currency === null) {
             return $this->blockedResult(
                 'currency_invalid',
-                'The purchase order currency is missing or unsupported. Supported currencies are NGN and USD.',
+                'The purchase order currency is missing or unsupported. Supported currencies are NGN, USD, GBP and EUR.',
                 $dryRun,
             );
         }
@@ -338,25 +340,11 @@ class QuickBooksPOSyncService
      */
     private function resolveVendor(Vendor $vendor, string $poCurrency, int $mrfId): array
     {
-        if (filled($vendor->quickbooks_vendor_id)) {
-            $linked = (string) $vendor->quickbooks_vendor_id;
-            $verified = $this->verifyVendorCurrency($linked, $poCurrency, $mrfId);
+        $mapping = $this->suppliers->approvedMapping($vendor, $poCurrency);
+        if ($mapping instanceof VendorQuickBooksMapping) {
+            $verified = $this->verifyVendorCurrency((string) $mapping->quickbooks_vendor_id, $poCurrency, $mrfId);
             if ($verified['valid']) {
-                return ['id' => $linked, 'action' => 'linked'];
-            }
-            return [
-                'id' => null,
-                'action' => 'blocked',
-                'reason' => $verified['reason'],
-                'message' => $verified['message'],
-            ];
-        }
-
-        $found = $this->quickBooks->findVendorByName((string) $vendor->name, $mrfId);
-        if ($found !== null) {
-            $verified = $this->verifyVendorCurrency($found, $poCurrency, $mrfId);
-            if ($verified['valid']) {
-                return ['id' => $found, 'action' => 'matched'];
+                return ['id' => (string) $mapping->quickbooks_vendor_id, 'action' => 'mapped'];
             }
             return [
                 'id' => null,

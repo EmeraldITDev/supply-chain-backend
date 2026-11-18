@@ -34,27 +34,23 @@ class QuickBooksPullService
                 continue;
             }
 
-            $scm = $match['vendor'];
-            $usedScm[] = $scm->id;
+            $scm = $match['vendor'] ?? null;
+            if ($scm instanceof Vendor) {
+                $usedScm[] = $scm->id;
+            }
             $matchedQuickBooks[] = $qb['id'];
             $row = [
-                'scm_vendor_id' => $scm->id,
-                'scm_vendor_name' => $scm->name,
-                'quickbooks_vendor_id' => (string) ($scm->quickbooks_vendor_id ?: $qb['id']),
+                'scm_vendor_id' => $scm?->id,
+                'scm_vendor_name' => $scm?->name,
+                'quickbooks_vendor_id' => $qb['id'],
                 'quickbooks_name' => $qb['display_name'] ?? $qb['company_name'],
+                'quickbooks_email' => $qb['email'],
+                'currency' => $qb['currency'],
                 'match_method' => $match['method'],
-                'conflict' => false,
+                'match_status' => $match['status'],
+                'candidate_scm_vendor_ids' => $match['candidate_ids'],
+                'conflict' => $match['status'] !== 'matched',
             ];
-            if ((string) $scm->quickbooks_vendor_id === '') {
-                $scm->quickbooks_vendor_id = $qb['id'];
-                $scm->save();
-                $row['quickbooks_vendor_id'] = $qb['id'];
-            } elseif ((string) $scm->quickbooks_vendor_id !== $qb['id']) {
-                $row['quickbooks_vendor_id'] = (string) $scm->quickbooks_vendor_id;
-                $row['conflict'] = true;
-                $matched[] = $row;
-                continue;
-            }
 
             $matched[] = $row;
         }
@@ -131,15 +127,15 @@ class QuickBooksPullService
     }
 
     /**
-     * @return list<array{id: string, display_name: ?string, company_name: ?string, email: ?string}>
+     * @return list<array{id: string, display_name: ?string, company_name: ?string, email: ?string, currency: ?string}>
      */
-    private function quickbooksVendors(): array
+    public function quickbooksVendors(): array
     {
         $rows = [];
         $start = 1;
         do {
             $result = $this->quickBooks->query(
-                "select Id, DisplayName, CompanyName, PrimaryEmailAddr from Vendor startposition {$start} maxresults 100",
+                "select Id, DisplayName, CompanyName, PrimaryEmailAddr, CurrencyRef from Vendor startposition {$start} maxresults 100",
                 null,
                 'pull_vendors',
             );
@@ -154,6 +150,7 @@ class QuickBooksPullService
                     'display_name' => isset($row['DisplayName']) ? (string) $row['DisplayName'] : null,
                     'company_name' => isset($row['CompanyName']) ? (string) $row['CompanyName'] : null,
                     'email' => data_get($row, 'PrimaryEmailAddr.Address'),
+                    'currency' => $this->currencyFromVendor($row),
                 ];
             }
             $start += count($batch);
@@ -195,41 +192,47 @@ class QuickBooksPullService
 
     /**
      * @param  \Illuminate\Support\Collection<int, Vendor>  $scmVendors
-     * @param  array{id: string, display_name: ?string, company_name: ?string, email: ?string}  $qb
+     * @param  array{id: string, display_name: ?string, company_name: ?string, email: ?string, currency: ?string}  $qb
      * @param  list<int>  $usedScm
-     * @return array{vendor: Vendor, method: 'email'|'name'}|null
+     * @return array{vendor: ?Vendor, method: string, status: string, candidate_ids: list<int>}|null
      */
     private function matchVendor($scmVendors, array $qb, array $usedScm): ?array
     {
         $email = Vendor::normalizeEmail($qb['email'] ?? null);
-        if ($email !== '') {
-            $byEmail = $scmVendors->first(function (Vendor $vendor) use ($email, $usedScm) {
-                if (in_array($vendor->id, $usedScm, true)) {
-                    return false;
-                }
+        $name = Vendor::normalizeName($qb['company_name'] ?: $qb['display_name']);
+        $emailMatches = $email === '' ? collect() : $scmVendors->filter(function (Vendor $vendor) use ($email, $usedScm) {
+            return ! in_array($vendor->id, $usedScm, true)
+                && (Vendor::normalizeEmail($vendor->email) === $email
+                    || Vendor::normalizeEmail($vendor->contact_person_email) === $email);
+        });
+        $nameMatches = $name === '' ? collect() : $scmVendors->filter(function (Vendor $vendor) use ($name, $usedScm) {
+            return ! in_array($vendor->id, $usedScm, true)
+                && Vendor::normalizeName($vendor->name) === $name;
+        });
+        $candidateIds = $emailMatches->merge($nameMatches)->pluck('id')->unique()->values()->all();
 
-                return Vendor::normalizeEmail($vendor->email) === $email
-                    || Vendor::normalizeEmail($vendor->contact_person_email) === $email;
-            });
-            if ($byEmail instanceof Vendor) {
-                return ['vendor' => $byEmail, 'method' => 'email'];
-            }
+        if ($candidateIds === []) {
+            return null;
         }
 
-        foreach ([$qb['display_name'] ?? null, $qb['company_name'] ?? null] as $candidate) {
-            $name = Vendor::normalizeName($candidate);
-            if ($name === '') {
-                continue;
-            }
-            $byName = $scmVendors->first(function (Vendor $vendor) use ($name, $usedScm) {
-                return ! in_array($vendor->id, $usedScm, true)
-                    && Vendor::normalizeName($vendor->name) === $name;
-            });
-            if ($byName instanceof Vendor) {
-                return ['vendor' => $byName, 'method' => 'name'];
-            }
-        }
+        $sameIdentity = $emailMatches->pluck('id')->intersect($nameMatches->pluck('id'))->count() > 0;
+        $status = count($candidateIds) === 1 && ($emailMatches->isEmpty() || $nameMatches->isEmpty() || $sameIdentity)
+            ? 'matched'
+            : 'review_required';
+        $vendor = $status === 'matched' ? $scmVendors->firstWhere('id', $candidateIds[0]) : null;
 
-        return null;
+        return [
+            'vendor' => $vendor,
+            'method' => $emailMatches->isNotEmpty() && $nameMatches->isNotEmpty() ? 'email_and_name' : ($emailMatches->isNotEmpty() ? 'email' : 'name'),
+            'status' => $status,
+            'candidate_ids' => array_map('intval', $candidateIds),
+        ];
+    }
+
+    private function currencyFromVendor(array $row): ?string
+    {
+        $currency = data_get($row, 'CurrencyRef.value') ?? data_get($row, 'CurrencyRef');
+
+        return is_string($currency) && trim($currency) !== '' ? strtoupper(trim($currency)) : null;
     }
 }

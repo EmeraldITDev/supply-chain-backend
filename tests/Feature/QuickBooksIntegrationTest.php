@@ -10,6 +10,8 @@ use App\Models\MRFItem;
 use App\Models\SystemSetting;
 use App\Models\User;
 use App\Models\Vendor;
+use App\Models\VendorQuickBooksMapping;
+use App\Models\QuickBooksVendorCreationRequest;
 use App\Services\QuickBooksPayloadValidator;
 use App\Services\QuickBooksService;
 use App\Services\QuickBooksTokenService;
@@ -492,8 +494,9 @@ class QuickBooksIntegrationTest extends TestCase
     public function test_sync_requires_a_verified_vendor_mapping_and_never_creates_one(): void
     {
         $mrf = $this->makeSignedPo();
+        $this->storeConnection();
         $this->mock(QuickBooksService::class, function ($mock) {
-            $mock->shouldReceive('findVendorByName')->once()->andReturnNull();
+            $mock->shouldNotReceive('findVendorByName');
             $mock->shouldNotReceive('createVendor');
         });
 
@@ -509,7 +512,15 @@ class QuickBooksIntegrationTest extends TestCase
     public function test_sync_blocks_a_quickbooks_vendor_with_the_wrong_currency(): void
     {
         $mrf = $this->makeSignedPo();
-        $mrf->selectedVendor->update(['quickbooks_vendor_id' => '77']);
+        $this->storeConnection();
+        VendorQuickBooksMapping::create([
+            'vendor_id' => $mrf->selectedVendor->id,
+            'realm_id' => 'realm-should-not-leak',
+            'currency' => 'NGN',
+            'quickbooks_vendor_id' => '77',
+            'status' => VendorQuickBooksMapping::STATUS_APPROVED,
+            'match_method' => 'email',
+        ]);
         $this->mock(QuickBooksService::class, function ($mock) {
             $mock->shouldReceive('readVendor')->once()->andReturn([
                 'Id' => '77',
@@ -526,11 +537,12 @@ class QuickBooksIntegrationTest extends TestCase
             ->assertJsonPath('data.blocked_reason', 'vendor_currency_mismatch');
     }
 
-    public function test_sync_rejects_unsupported_po_currencies_without_quickbooks_requests(): void
+    public function test_sync_requires_currency_mapping_for_gbp_and_eur(): void
     {
         foreach (['GBP', 'EUR'] as $currency) {
             $mrf = $this->makeSignedPo();
             $mrf->update(['currency' => $currency]);
+            $this->storeConnection();
             $this->mock(QuickBooksService::class, function ($mock) {
                 $mock->shouldNotReceive('findVendorByName');
                 $mock->shouldNotReceive('readVendor');
@@ -540,15 +552,23 @@ class QuickBooksIntegrationTest extends TestCase
             Sanctum::actingAs(User::factory()->create(['supply_chain_role' => 'procurement_manager']));
             $this->postJson('/api/quickbooks/sync-po/'.$mrf->id)
                 ->assertStatus(422)
-                ->assertJsonPath('code', 'QB_CURRENCY_INVALID')
-                ->assertJsonPath('data.blocked_reason', 'currency_invalid');
+                ->assertJsonPath('code', 'QB_VENDOR_MAPPING_REQUIRED')
+                ->assertJsonPath('data.blocked_reason', 'vendor_mapping_required');
         }
     }
 
     public function test_sync_accepts_a_verified_vendor_currency_in_dry_run_without_posting(): void
     {
         $mrf = $this->makeSignedPo();
-        $mrf->selectedVendor->update(['quickbooks_vendor_id' => '77']);
+        $this->storeConnection();
+        VendorQuickBooksMapping::create([
+            'vendor_id' => $mrf->selectedVendor->id,
+            'realm_id' => 'realm-should-not-leak',
+            'currency' => 'NGN',
+            'quickbooks_vendor_id' => '77',
+            'status' => VendorQuickBooksMapping::STATUS_APPROVED,
+            'match_method' => 'email',
+        ]);
         $this->mock(QuickBooksService::class, function ($mock) {
             $mock->shouldReceive('readVendor')->once()->andReturn([
                 'Id' => '77',
@@ -576,6 +596,135 @@ class QuickBooksIntegrationTest extends TestCase
             ->assertOk()
             ->assertJsonPath('data.passed', true)
             ->assertJsonPath('dry_run', true);
+    }
+
+    public function test_supplier_mapping_approval_supports_each_currency_and_blocks_duplicate_profiles(): void
+    {
+        $this->storeConnection();
+        $vendor = Vendor::create([
+            'vendor_id' => 'V-MULTI',
+            'name' => 'Multi Currency Supplier',
+            'category' => 'goods',
+            'email' => 'multi@example.com',
+            'status' => 'Active',
+        ]);
+        $this->mock(QuickBooksService::class, function ($mock) {
+            $mock->shouldReceive('readVendor')->times(5)->andReturnUsing(function (string $id) {
+                return ['Id' => $id, 'DisplayName' => 'Multi Currency Supplier', 'currency' => match ($id) {
+                    'ngn-1' => 'NGN',
+                    'usd-1' => 'USD',
+                    'gbp-1' => 'GBP',
+                    'eur-1' => 'EUR',
+                    default => 'NGN',
+                }];
+            });
+            $mock->shouldNotReceive('post');
+        });
+
+        Sanctum::actingAs(User::factory()->create(['supply_chain_role' => 'finance']));
+        foreach ([['NGN', 'ngn-1'], ['USD', 'usd-1'], ['GBP', 'gbp-1'], ['EUR', 'eur-1']] as [$currency, $id]) {
+            $this->postJson('/api/quickbooks/suppliers/mappings', [
+                'vendor_id' => $vendor->id,
+                'quickbooks_vendor_id' => $id,
+                'currency' => $currency,
+                'match_method' => 'email',
+            ])->assertCreated();
+        }
+
+        $otherVendor = Vendor::create([
+            'vendor_id' => 'V-OTHER',
+            'name' => 'Other Supplier',
+            'category' => 'goods',
+            'email' => 'other@example.com',
+            'status' => 'Active',
+        ]);
+        $this->postJson('/api/quickbooks/suppliers/mappings', [
+            'vendor_id' => $otherVendor->id,
+            'quickbooks_vendor_id' => 'ngn-1',
+            'currency' => 'NGN',
+            'match_method' => 'name',
+        ])->assertUnprocessable();
+
+        $this->assertSame(4, VendorQuickBooksMapping::query()->where('vendor_id', $vendor->id)->count());
+    }
+
+    public function test_supplier_import_is_pending_and_does_not_write_to_quickbooks(): void
+    {
+        $this->storeConnection();
+        $this->mock(QuickBooksService::class, function ($mock) {
+            $mock->shouldReceive('readVendor')->once()->andReturn([
+                'Id' => 'import-1',
+                'DisplayName' => 'Imported Supplier',
+                'currency' => 'USD',
+            ]);
+            $mock->shouldNotReceive('post');
+        });
+
+        Sanctum::actingAs(User::factory()->create(['supply_chain_role' => 'finance']));
+        $response = $this->postJson('/api/quickbooks/suppliers/import', [
+            'quickbooks_vendor_id' => 'import-1',
+            'currency' => 'USD',
+        ])->assertCreated();
+
+        $vendor = Vendor::query()->where('name', 'Imported Supplier')->firstOrFail();
+        $this->assertSame('Pending', $vendor->status);
+        $this->assertSame('quickbooks_import', $vendor->onboarding_source);
+        $this->assertSame('pending', $response->json('data.mapping.status'));
+        $this->assertSame(1, VendorQuickBooksMapping::query()->where('vendor_id', $vendor->id)->count());
+    }
+
+    public function test_reconciliation_preview_reports_ambiguous_supplier_matches(): void
+    {
+        $this->storeConnection();
+        $pull = \Mockery::mock(\App\Services\QuickBooksPullService::class);
+        $pull->shouldReceive('pullVendors')->once()->andReturn([
+            'matched' => [[
+                'quickbooks_vendor_id' => 'ambiguous-1',
+                'quickbooks_name' => 'ECM Transport Services',
+                'quickbooks_email' => 'new@example.com',
+                'currency' => 'NGN',
+                'match_status' => 'review_required',
+                'candidate_scm_vendor_ids' => [1, 2],
+            ]],
+            'unmatched' => [],
+        ]);
+        $this->app->instance(\App\Services\QuickBooksPullService::class, $pull);
+
+        Sanctum::actingAs(User::factory()->create(['supply_chain_role' => 'finance']));
+        $this->getJson('/api/quickbooks/suppliers/reconciliation')
+            ->assertOk()
+            ->assertJsonPath('data.matched.0.match_status', 'review_required')
+            ->assertJsonPath('data.matched.0.mapping_status', null);
+    }
+
+    public function test_vendor_creation_requires_approval_and_never_posts_to_quickbooks(): void
+    {
+        $this->storeConnection();
+        $vendor = Vendor::create([
+            'vendor_id' => 'V-CREATE',
+            'name' => 'Approved Supplier',
+            'category' => 'goods',
+            'email' => 'approved@example.com',
+            'status' => 'Active',
+            'profile_completed' => true,
+        ]);
+        $this->mock(QuickBooksService::class, function ($mock) {
+            $mock->shouldReceive('findVendorByName')->once()->andReturnNull();
+            $mock->shouldNotReceive('post');
+        });
+
+        Sanctum::actingAs(User::factory()->create(['supply_chain_role' => 'finance']));
+        $first = $this->postJson('/api/quickbooks/suppliers/'.$vendor->id.'/vendor-creation-requests', ['currency' => 'EUR'])
+            ->assertCreated();
+        $second = $this->postJson('/api/quickbooks/suppliers/'.$vendor->id.'/vendor-creation-requests', ['currency' => 'EUR'])
+            ->assertCreated();
+
+        $this->assertSame($first->json('data.id'), $second->json('data.id'));
+        $request = QuickBooksVendorCreationRequest::query()->findOrFail($first->json('data.id'));
+        $this->postJson('/api/quickbooks/suppliers/vendor-creation-requests/'.$request->id.'/approve', [
+            'decision_notes' => 'Finance reviewed supplier documentation.',
+        ])->assertOk()->assertJsonPath('data.status', 'approved');
+        $this->assertDatabaseCount('quickbooks_vendor_creation_requests', 1);
     }
 
     public function test_enabled_post_uses_a_single_query_string(): void

@@ -969,4 +969,11 @@ Route::middleware(['auth:sanctum', 'quickbooks.nocache'])->prefix('quickbooks')-
     Route::get('/inspect/accounts-items', [QuickBooksController::class, 'inspectAccountsItems'])->middleware('quickbooks.connection');
     Route::post('/pull/vendors', [QuickBooksController::class, 'pullVendors'])->middleware($quickBooksSyncRoles);
     Route::post('/pull/purchase-orders', [QuickBooksController::class, 'pullPurchaseOrders'])->middleware($quickBooksSyncRoles);
+    Route::get('/suppliers/reconciliation', [QuickBooksController::class, 'supplierReconciliation'])->middleware(\App\Support\QuickBooksRoles::supplierMiddleware());
+    Route::post('/suppliers/mappings', [QuickBooksController::class, 'approveSupplierMapping'])->middleware(\App\Support\QuickBooksRoles::supplierMiddleware());
+    Route::post('/suppliers/mappings/{mapping}/decision', [QuickBooksController::class, 'decideSupplierMapping'])->middleware(\App\Support\QuickBooksRoles::supplierMiddleware());
+    Route::post('/suppliers/import', [QuickBooksController::class, 'importSupplier'])->middleware(\App\Support\QuickBooksRoles::supplierMiddleware());
+    Route::post('/suppliers/{vendor}/vendor-creation-requests', [QuickBooksController::class, 'prepareSupplierCreation'])->middleware(\App\Support\QuickBooksRoles::supplierMiddleware());
+    Route::post('/suppliers/vendor-creation-requests/{creationRequest}/approve', [QuickBooksController::class, 'approveSupplierCreation'])->middleware(\App\Support\QuickBooksRoles::supplierMiddleware());
+    Route::get('/suppliers/{vendor}/mappings', [QuickBooksController::class, 'supplierMappings'])->middleware(\App\Support\QuickBooksRoles::supplierMiddleware());
 });

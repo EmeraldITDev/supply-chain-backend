@@ -64,7 +64,7 @@ class QuickBooksService
     }
 
     /**
-     * @return array{Id: string, DisplayName: string, currency: ?string}|null
+     * @return array{Id: string, DisplayName: string, email: ?string, currency: ?string}|null
      */
     public function readVendor(string $id, ?int $mrfId = null): ?array
     {
@@ -79,6 +79,7 @@ class QuickBooksService
         return [
             'Id' => (string) ($vendor['Id'] ?? $id),
             'DisplayName' => (string) ($vendor['DisplayName'] ?? ''),
+            'email' => data_get($vendor, 'PrimaryEmailAddr.Address'),
             'currency' => is_string($currency) && trim($currency) !== '' ? strtoupper(trim($currency)) : null,
         ];
     }
@@ -97,7 +98,7 @@ class QuickBooksService
         return $id === null || $id === '' ? null : (string) $id;
     }
 
-    public function createVendor(Vendor $vendor, ?int $mrfId = null): string
+    public function createVendor(Vendor $vendor, ?int $mrfId = null, ?string $currency = null): string
     {
         $name = trim((string) $vendor->name);
         if ($name === '') {
@@ -110,6 +111,13 @@ class QuickBooksService
         }
         if (filled($vendor->phone)) {
             $body['PrimaryPhone'] = ['FreeFormNumber' => $vendor->phone];
+        }
+        if ($currency !== null) {
+            $currency = strtoupper(trim($currency));
+            if (! in_array($currency, \App\Support\PurchaseOrderCurrency::SUPPORTED, true)) {
+                throw new QuickBooksException('The QuickBooks vendor currency is unsupported or unidentified.', status: 422);
+            }
+            $body['CurrencyRef'] = ['value' => $currency];
         }
 
         $json = $this->post('/vendor', $body, [], $mrfId, 'create_vendor');
@@ -299,6 +307,7 @@ class QuickBooksService
             'display_name' => $row['DisplayName'] ?? null,
             'company_name' => $row['CompanyName'] ?? null,
             'email' => data_get($row, 'PrimaryEmailAddr.Address'),
+            'currency' => data_get($row, 'CurrencyRef.value') ?? data_get($row, 'CurrencyRef'),
             'active' => $row['Active'] ?? null,
         ], $rows);
     }

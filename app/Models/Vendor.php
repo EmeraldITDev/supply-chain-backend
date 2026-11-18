@@ -103,6 +103,16 @@ class Vendor extends Model
     {
         return $this->hasMany(VendorRegistrationDocument::class);
     }
+
+    public function quickbooksMappings(): HasMany
+    {
+        return $this->hasMany(VendorQuickBooksMapping::class);
+    }
+
+    public function quickbooksCreationRequests(): HasMany
+    {
+        return $this->hasMany(QuickBooksVendorCreationRequest::class);
+    }
     
     /**
      * Get vendor ratings

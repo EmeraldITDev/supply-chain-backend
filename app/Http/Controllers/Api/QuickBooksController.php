@@ -5,11 +5,15 @@ namespace App\Http\Controllers\Api;
 use App\Exceptions\QuickBooksException;
 use App\Http\Controllers\Controller;
 use App\Models\MRF;
+use App\Models\QuickBooksVendorCreationRequest;
+use App\Models\Vendor;
+use App\Models\VendorQuickBooksMapping;
 use App\Services\QuickBooksDiscoveryService;
 use App\Services\QuickBooksPOSyncService;
 use App\Services\QuickBooksPullService;
 use App\Services\QuickBooksService;
 use App\Services\QuickBooksTokenService;
+use App\Services\QuickBooksSupplierService;
 use App\Services\ScmAuditService;
 use App\Support\UserRoleNormalizer;
 use Illuminate\Http\JsonResponse;
@@ -26,6 +30,7 @@ class QuickBooksController extends Controller
         private QuickBooksService $quickBooks,
         private QuickBooksPOSyncService $syncService,
         private QuickBooksPullService $pullService,
+        private QuickBooksSupplierService $supplierService,
     ) {}
 
     public function connect(): JsonResponse
@@ -189,6 +194,82 @@ class QuickBooksController extends Controller
     public function pullVendors(): JsonResponse
     {
         return $this->inspected(fn () => $this->pullService->pullVendors());
+    }
+
+    public function supplierReconciliation(): JsonResponse
+    {
+        return $this->inspected(fn () => $this->supplierService->reconciliationPreview());
+    }
+
+    public function approveSupplierMapping(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'vendor_id' => ['required', 'integer', 'exists:vendors,id'],
+            'quickbooks_vendor_id' => ['required', 'string', 'max:64'],
+            'currency' => ['required', 'string', 'size:3'],
+            'match_method' => ['required', 'string', 'max:32'],
+        ]);
+        $mapping = $this->supplierService->approveMapping(
+            Vendor::findOrFail($data['vendor_id']),
+            $data['quickbooks_vendor_id'],
+            $data['currency'],
+            $data['match_method'],
+            (int) $request->user()->id,
+        );
+
+        return response()->json(['success' => true, 'data' => $mapping], 201);
+    }
+
+    public function importSupplier(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'quickbooks_vendor_id' => ['required', 'string', 'max:64'],
+            'currency' => ['required', 'string', 'size:3'],
+        ]);
+        $result = $this->supplierService->importVendor(
+            $data['quickbooks_vendor_id'],
+            $data['currency'],
+            (int) $request->user()->id,
+        );
+
+        return response()->json(['success' => true, 'data' => $result], 201);
+    }
+
+    public function decideSupplierMapping(Request $request, VendorQuickBooksMapping $mapping): JsonResponse
+    {
+        $data = $request->validate(['status' => ['required', 'in:rejected,deferred']]);
+        $mapping = $this->supplierService->decideMapping($mapping, $data['status'], (int) $request->user()->id);
+
+        return response()->json(['success' => true, 'data' => $mapping]);
+    }
+
+    public function prepareSupplierCreation(Request $request, Vendor $vendor): JsonResponse
+    {
+        $data = $request->validate(['currency' => ['required', 'string', 'size:3']]);
+        $creationRequest = $this->supplierService->prepareCreation($vendor, $data['currency'], (int) $request->user()->id);
+
+        return response()->json(['success' => true, 'data' => $creationRequest], 201);
+    }
+
+    public function approveSupplierCreation(Request $request, QuickBooksVendorCreationRequest $creationRequest): JsonResponse
+    {
+        $data = $request->validate(['decision_notes' => ['nullable', 'string', 'max:2000']]);
+        $creationRequest = $this->supplierService->approveCreation(
+            $creationRequest,
+            (int) $request->user()->id,
+            $data['decision_notes'] ?? null,
+        );
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Approved for controlled QuickBooks vendor creation; no QuickBooks write was performed.',
+            'data' => $creationRequest,
+        ]);
+    }
+
+    public function supplierMappings(Vendor $vendor): JsonResponse
+    {
+        return response()->json(['success' => true, 'data' => $this->supplierService->mappingsFor($vendor)]);
     }
 
     public function pullPurchaseOrders(): JsonResponse
