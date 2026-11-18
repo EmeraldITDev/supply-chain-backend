@@ -814,6 +814,14 @@ class QuickBooksIntegrationTest extends TestCase
     {
         $this->storeConnection();
         $mrf = $this->makeSignedPo();
+        VendorQuickBooksMapping::create([
+            'vendor_id' => $mrf->selectedVendor->id,
+            'realm_id' => 'realm-should-not-leak',
+            'currency' => 'NGN',
+            'quickbooks_vendor_id' => '77',
+            'status' => VendorQuickBooksMapping::STATUS_APPROVED,
+            'match_method' => 'email',
+        ]);
         $this->fakeHttp(function (Request $request) {
             if ($request->method() === 'POST') {
                 return Http::response(['posted' => true], 500);
