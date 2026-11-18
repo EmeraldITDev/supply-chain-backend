@@ -66,4 +66,9 @@ return [
         'doc_number_max_length' => 21,
     ],
 
+    // GitHub Actions deploy to cPanel (App\Http\Controllers\DeployController).
+    'deploy' => [
+        'token' => env('DEPLOY_TOKEN'),
+    ],
+
 ];

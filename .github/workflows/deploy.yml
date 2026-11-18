@@ -1,0 +1,86 @@
+name: Deploy to cPanel
+
+# Every push to main is built and uploaded to cPanel, then migrations run.
+# It can also be started by hand: Actions tab -> Deploy to cPanel -> Run workflow.
+#
+# Repo secrets needed (Settings -> Secrets and variables -> Actions):
+#   FTP_SERVER, FTP_USERNAME, FTP_PASSWORD  - the cPanel FTP account (directory: public_html)
+#   DEPLOY_TOKEN                            - same value as DEPLOY_TOKEN in the server's .env
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-cpanel
+  cancel-in-progress: false
+
+env:
+  APP_DOMAIN: scm-api.emeraldcfze.com
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    # The first run uploads everything (vendor/ included) and can take up to an hour.
+    # Later runs only send the files that changed.
+    timeout-minutes: 120
+    env:
+      FTP_SERVER: ${{ secrets.FTP_SERVER }}
+    steps:
+      - name: Check secrets
+        if: env.FTP_SERVER == ''
+        run: echo "::warning::FTP_SERVER secret is not set, so nothing was deployed."
+
+      - uses: actions/checkout@v4
+        if: env.FTP_SERVER != ''
+
+      - uses: shivammathur/setup-php@v2
+        if: env.FTP_SERVER != ''
+        with:
+          php-version: '8.3'
+          tools: composer:v2
+          coverage: none
+
+      - name: Install production dependencies
+        if: env.FTP_SERVER != ''
+        run: composer install --no-dev --optimize-autoloader --no-interaction --no-progress --prefer-dist
+
+      - name: Upload to cPanel
+        if: env.FTP_SERVER != ''
+        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
+        with:
+          server: ${{ secrets.FTP_SERVER }}
+          username: ${{ secrets.FTP_USERNAME }}
+          password: ${{ secrets.FTP_PASSWORD }}
+          protocol: ftps
+          port: 21
+          local-dir: ./
+          server-dir: ${{ env.APP_DOMAIN }}/
+          # Never touch the server's .env or storage/ (logs, sessions, uploaded files).
+          exclude: |
+            **/.git*
+            **/.git*/**
+            **/node_modules/**
+            .env
+            .env.*
+            storage/**
+            tests/**
+            docs/**
+            render.yaml
+            Dockerfile
+            dockerfile
+            .dockerignore
+            phpunit.xml
+            .editorconfig
+
+      - name: Run migrations
+        if: env.FTP_SERVER != ''
+        env:
+          DEPLOY_TOKEN: ${{ secrets.DEPLOY_TOKEN }}
+        run: |
+          curl --fail-with-body -sS --retry 3 --retry-delay 10 --retry-all-errors --max-time 300 \
+            -X POST -H "Accept: application/json" -H "X-Deploy-Token: ${DEPLOY_TOKEN}" \
+            "https://${APP_DOMAIN}/api/deploy/migrate"
+          echo
+          curl --fail -sS -o /dev/null -w "Health check /up: HTTP %{http_code}\n" "https://${APP_DOMAIN}/up"
