@@ -52,6 +52,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Create empty test environment file
         run: |
@@ -66,6 +68,21 @@ jobs:
           extensions: gd, sqlite3, pdo_sqlite
           coverage: none
           tools: composer:v2
+
+      - name: Validate changed PHP migrations
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+          EVENT_BEFORE: ${{ github.event.before }}
+        run: |
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            base="$(git merge-base HEAD "origin/$BASE_REF")"
+            bash .github/scripts/validate-migrations.sh "$base"
+          elif [ "$EVENT_NAME" = "push" ] && [ -n "$EVENT_BEFORE" ] && [[ "$EVENT_BEFORE" != 0000000000000000000000000000000000000000 ]]; then
+            bash .github/scripts/validate-migrations.sh "$EVENT_BEFORE"
+          else
+            bash .github/scripts/validate-migrations.sh --all
+          fi
 
       - name: Install Composer dependencies
         run: composer install --prefer-dist --no-progress --no-interaction --dev

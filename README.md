@@ -77,3 +77,7 @@ Further reading:
 ## Deployment
 
 Deployed on **Render** (`render.yaml`, `Dockerfile`). Each build runs `composer install` and `php artisan migrate --force`. Set secrets (database, `APP_KEY`, AWS, mail, Finance AP keys) in the Render dashboard.
+
+### Migration upload safety
+
+Upload migration files directly from the repository or its checked-out archive. Do not copy PHP migration contents through interfaces that can strip namespace backslashes; for example, `Illuminate\\Database\\Migrations\\Migration` must remain unchanged. The SCM GitHub Actions workflows run `php -l` and reject suspicious flattened Laravel imports in changed migration files.
