@@ -53,6 +53,12 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
+      - name: Create empty test environment file
+        run: |
+          test ! -e .env
+          test ! -e .env.testing
+          touch .env
+
       - name: Set up PHP 8.2
         uses: shivammathur/setup-php@v2
         with:
@@ -66,7 +72,7 @@ jobs:
 
       - name: Verify isolated test environment
         run: |
-          test ! -e .env
+          test -f .env
           test ! -e .env.testing
           php artisan migrate --force
 
