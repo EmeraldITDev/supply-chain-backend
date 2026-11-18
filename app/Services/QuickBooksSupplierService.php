@@ -70,7 +70,10 @@ class QuickBooksSupplierService
         if ($quickbooksVendor['currency'] !== $currency) {
             throw ValidationException::withMessages(['currency' => 'The QuickBooks vendor currency does not match the requested mapping currency.']);
         }
-        $identity = $this->resolution->resolve($quickbooksVendor['DisplayName'], $quickbooksVendor['email'] ?? null);
+        $quickbooksEmail = is_string($quickbooksVendor['email'] ?? null)
+            ? $quickbooksVendor['email']
+            : '';
+        $identity = $this->resolution->resolve($quickbooksVendor['DisplayName'], $quickbooksEmail);
         if ($identity['status'] === 'review_required' || ($identity['status'] === 'matched' && (int) $identity['vendor']->id !== (int) $vendor->id)) {
             throw ValidationException::withMessages(['vendor_id' => 'The QuickBooks supplier identity conflicts with the selected SCM supplier.']);
         }

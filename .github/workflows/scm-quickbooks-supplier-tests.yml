@@ -70,7 +70,7 @@ jobs:
           coverage: none
           tools: composer:v2
 
-      - name: Validate changed PHP migrations
+      - name: Validate changed PHP files
         env:
           EVENT_NAME: ${{ github.event_name }}
           BASE_REF: ${{ github.base_ref }}
@@ -78,11 +78,11 @@ jobs:
         run: |
           if [ "$EVENT_NAME" = "pull_request" ]; then
             base="$(git merge-base HEAD "origin/$BASE_REF")"
-            bash .github/scripts/validate-migrations.sh "$base"
+            bash .github/scripts/validate-migrations.sh --php "$base"
           elif [ "$EVENT_NAME" = "push" ] && [ -n "$EVENT_BEFORE" ] && [[ "$EVENT_BEFORE" != 0000000000000000000000000000000000000000 ]]; then
-            bash .github/scripts/validate-migrations.sh "$EVENT_BEFORE"
+            bash .github/scripts/validate-migrations.sh --php "$EVENT_BEFORE"
           else
-            bash .github/scripts/validate-migrations.sh --all
+            bash .github/scripts/validate-migrations.sh --all-php
           fi
 
       - run: composer install --prefer-dist --no-progress --no-interaction --dev

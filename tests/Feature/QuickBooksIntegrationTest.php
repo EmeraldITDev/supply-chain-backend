@@ -697,6 +697,41 @@ class QuickBooksIntegrationTest extends TestCase
             ->assertJsonPath('data.matched.0.mapping_status', null);
     }
 
+    public function test_supplier_mapping_approval_handles_a_quickbooks_supplier_without_email(): void
+    {
+        $this->storeConnection();
+        $vendor = Vendor::create([
+            'vendor_id' => 'V-NO-EMAIL',
+            'name' => 'No Email Supplier',
+            'category' => 'goods',
+            'email' => 'local@example.com',
+            'status' => 'Active',
+        ]);
+        $this->mock(QuickBooksService::class, function ($mock) {
+            $mock->shouldReceive('readVendor')->once()->with('no-email-1')->andReturn([
+                'Id' => 'no-email-1',
+                'DisplayName' => 'No Email Supplier',
+                'currency' => 'NGN',
+            ]);
+            $mock->shouldNotReceive('post');
+        });
+
+        Sanctum::actingAs(User::factory()->create(['supply_chain_role' => 'finance']));
+        $this->postJson('/api/quickbooks/suppliers/mappings', [
+            'vendor_id' => $vendor->id,
+            'quickbooks_vendor_id' => 'no-email-1',
+            'currency' => 'NGN',
+            'match_method' => 'name',
+        ])->assertCreated()
+            ->assertJsonPath('data.quickbooks_vendor_id', 'no-email-1');
+
+        $this->assertDatabaseHas('vendor_quickbooks_mappings', [
+            'vendor_id' => $vendor->id,
+            'quickbooks_vendor_id' => 'no-email-1',
+            'currency' => 'NGN',
+        ]);
+    }
+
     public function test_vendor_creation_requires_approval_and_never_posts_to_quickbooks(): void
     {
         $this->storeConnection();
