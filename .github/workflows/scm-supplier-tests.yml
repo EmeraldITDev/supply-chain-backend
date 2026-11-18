@@ -71,4 +71,29 @@ jobs:
           php artisan migrate --force
 
       - name: Run Stage A supplier-resolution regression tests
-        run: php artisan test tests/Feature/SupplierResolutionServiceTest.php --colors=always
+        id: phpunit
+        continue-on-error: true
+        run: |
+          mkdir -p storage/test-results
+          php artisan test tests/Feature/SupplierResolutionServiceTest.php \
+            --colors=always \
+            --display-warnings \
+            --fail-on-warning \
+            --fail-on-risky \
+            --log-junit=storage/test-results/supplier-resolution.xml
+
+      - name: Report PHPUnit result counts
+        if: always()
+        run: |
+          php -r '
+            $xml = simplexml_load_file("storage/test-results/supplier-resolution.xml");
+            $tests = (int) $xml->testsuite[0]["tests"];
+            $failures = (int) $xml->testsuite[0]["failures"] + (int) $xml->testsuite[0]["errors"];
+            $skipped = (int) $xml->testsuite[0]["skipped"];
+            $assertions = (int) $xml->testsuite[0]["assertions"];
+            printf("PHPUnit summary: passed=%d failed=%d skipped=%d assertions=%d\\n", $tests - $failures - $skipped, $failures, $skipped, $assertions);
+          '
+
+      - name: Fail workflow when PHPUnit fails or warns
+        if: steps.phpunit.outcome != 'success'
+        run: exit 1
