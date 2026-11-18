@@ -44,6 +44,7 @@ class QuickBooksPullService
                 'scm_vendor_name' => $scm?->name,
                 'quickbooks_vendor_id' => $qb['id'],
                 'quickbooks_name' => $qb['display_name'] ?? $qb['company_name'],
+                'quickbooks_company_name' => $qb['company_name'],
                 'quickbooks_email' => $qb['email'],
                 'currency' => $qb['currency'],
                 'match_method' => $match['method'],

@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Exceptions\QuickBooksSupplierConflictException;
 use App\Models\QuickBooksVendorCreationRequest;
 use App\Models\Vendor;
 use App\Models\VendorQuickBooksMapping;
@@ -63,6 +64,87 @@ class QuickBooksSupplierService
             throw ValidationException::withMessages(['quickbooks_vendor_id' => 'A QuickBooks vendor ID is required.']);
         }
 
+        $existingMapping = VendorQuickBooksMapping::query()
+            ->where('vendor_id', $vendor->id)
+            ->where('realm_id', $realmId)
+            ->where('currency', $currency)
+            ->first();
+        $existingQuickBooksMapping = VendorQuickBooksMapping::query()
+            ->where('realm_id', $realmId)
+            ->where('quickbooks_vendor_id', $quickbooksVendorId)
+            ->first();
+
+        if ($existingQuickBooksMapping && (int) $existingQuickBooksMapping->vendor_id !== (int) $vendor->id) {
+            throw new QuickBooksSupplierConflictException(
+                'quickbooks_vendor_already_mapped',
+                'This QuickBooks supplier is already mapped to another SCM supplier.',
+                'Review the existing SCM supplier mapping before approving this proposal.',
+                [
+                    'realm_id' => $realmId,
+                    'quickbooks_vendor_id' => $quickbooksVendorId,
+                    'selected_vendor_id' => $vendor->id,
+                    'conflicting_vendor_id' => $existingQuickBooksMapping->vendor_id,
+                ],
+            );
+        }
+
+        if ($existingQuickBooksMapping
+            && (int) $existingQuickBooksMapping->vendor_id === (int) $vendor->id
+            && (string) $existingQuickBooksMapping->currency !== $currency
+        ) {
+            throw new QuickBooksSupplierConflictException(
+                'quickbooks_vendor_currency_mapping_exists',
+                'This QuickBooks supplier profile is already mapped for another currency.',
+                'Use the QuickBooks supplier profile that matches the requested currency; do not reuse one profile across currencies.',
+                [
+                    'realm_id' => $realmId,
+                    'selected_vendor_id' => $vendor->id,
+                    'currency' => $currency,
+                    'existing_currency' => $existingQuickBooksMapping->currency,
+                    'quickbooks_vendor_id' => $quickbooksVendorId,
+                ],
+            );
+        }
+
+        if ($existingMapping && (string) $existingMapping->quickbooks_vendor_id !== $quickbooksVendorId) {
+            throw new QuickBooksSupplierConflictException(
+                'supplier_currency_mapping_exists',
+                'This SCM supplier already has a different QuickBooks mapping for this realm and currency.',
+                'Review the existing mapping; an approved mapping cannot be silently replaced.',
+                [
+                    'realm_id' => $realmId,
+                    'selected_vendor_id' => $vendor->id,
+                    'currency' => $currency,
+                    'existing_quickbooks_vendor_id' => $existingMapping->quickbooks_vendor_id,
+                    'proposed_quickbooks_vendor_id' => $quickbooksVendorId,
+                ],
+            );
+        }
+
+        if ($existingMapping?->status === VendorQuickBooksMapping::STATUS_APPROVED
+            && (string) $existingMapping->quickbooks_vendor_id === $quickbooksVendorId) {
+            return $existingMapping->fresh();
+        }
+
+        $legacyQuickBooksVendorId = trim((string) $vendor->quickbooks_vendor_id);
+        if ($currency === PurchaseOrderCurrency::DEFAULT
+            && $legacyQuickBooksVendorId !== ''
+            && $legacyQuickBooksVendorId !== $quickbooksVendorId
+        ) {
+            throw new QuickBooksSupplierConflictException(
+                'legacy_vendor_id_conflict',
+                'The legacy SCM QuickBooks vendor ID differs from the proposed authoritative mapping.',
+                'Verify the legacy vendor ID and approve the correct mapping explicitly; no legacy value was overwritten.',
+                [
+                    'realm_id' => $realmId,
+                    'selected_vendor_id' => $vendor->id,
+                    'currency' => $currency,
+                    'legacy_quickbooks_vendor_id' => $legacyQuickBooksVendorId,
+                    'proposed_quickbooks_vendor_id' => $quickbooksVendorId,
+                ],
+            );
+        }
+
         $quickbooksVendor = $this->quickBooks->readVendor($quickbooksVendorId);
         if ($quickbooksVendor === null) {
             throw ValidationException::withMessages(['quickbooks_vendor_id' => 'The QuickBooks vendor could not be verified.']);
@@ -73,12 +155,94 @@ class QuickBooksSupplierService
         $quickbooksEmail = is_string($quickbooksVendor['email'] ?? null)
             ? $quickbooksVendor['email']
             : '';
-        $identity = $this->resolution->resolve($quickbooksVendor['DisplayName'], $quickbooksEmail);
-        if ($identity['status'] === 'review_required' || ($identity['status'] === 'matched' && (int) $identity['vendor']->id !== (int) $vendor->id)) {
-            throw ValidationException::withMessages(['vendor_id' => 'The QuickBooks supplier identity conflicts with the selected SCM supplier.']);
+        $companyName = trim((string) ($quickbooksVendor['CompanyName'] ?? ''));
+        $displayName = trim((string) ($quickbooksVendor['DisplayName'] ?? ''));
+        $identityName = $companyName !== '' ? $companyName : $displayName;
+        $identity = $this->resolution->resolve($identityName, $quickbooksEmail);
+        if ($identity['status'] === 'review_required') {
+            throw new QuickBooksSupplierConflictException(
+                'identity_ambiguous',
+                $identity['message'] ?? 'The QuickBooks supplier identity is ambiguous.',
+                'Review the candidate SCM supplier IDs and resolve duplicate or conflicting identity evidence before approval.',
+                [
+                    'realm_id' => $realmId,
+                    'selected_vendor_id' => $vendor->id,
+                    'quickbooks_vendor_id' => $quickbooksVendorId,
+                    'candidate_vendor_ids' => $identity['candidate_vendor_ids'] ?? [],
+                    'identity_reason' => $identity['reason'] ?? null,
+                    'company_name' => $companyName ?: null,
+                    'display_name' => $displayName ?: null,
+                    'email' => $quickbooksEmail ?: null,
+                ],
+            );
+        }
+        if ($identity['status'] === 'matched' && (int) $identity['vendor']->id !== (int) $vendor->id) {
+            throw new QuickBooksSupplierConflictException(
+                'identity_match_conflict',
+                'The QuickBooks supplier identity matches a different SCM supplier.',
+                'Approve the mapping against the matched SCM supplier or resolve the supplier identity before retrying.',
+                [
+                    'realm_id' => $realmId,
+                    'selected_vendor_id' => $vendor->id,
+                    'matched_vendor_id' => $identity['vendor']->id,
+                    'quickbooks_vendor_id' => $quickbooksVendorId,
+                    'matched_on' => $identity['matched_on'] ?? null,
+                ],
+            );
+        }
+
+        if ($companyName !== '' && $displayName !== ''
+            && Vendor::normalizeName($companyName) !== Vendor::normalizeName($displayName)
+        ) {
+            $displayIdentity = $this->resolution->resolve($displayName, $quickbooksEmail);
+            $displayCandidates = array_map('intval', $displayIdentity['candidate_vendor_ids'] ?? []);
+            if ($displayIdentity['status'] === 'review_required'
+                && array_diff($displayCandidates, [(int) $vendor->id]) !== []
+            ) {
+                throw new QuickBooksSupplierConflictException(
+                    'identity_evidence_conflict',
+                    'QuickBooks CompanyName and DisplayName provide ambiguous SCM identity evidence.',
+                    'Review both QuickBooks names and the candidate SCM supplier IDs before approval.',
+                    [
+                        'realm_id' => $realmId,
+                        'selected_vendor_id' => $vendor->id,
+                        'company_name_vendor_id' => $identity['vendor']?->id,
+                        'display_name_candidate_vendor_ids' => $displayCandidates,
+                        'quickbooks_vendor_id' => $quickbooksVendorId,
+                    ],
+                );
+            }
+            if ($displayIdentity['status'] === 'matched'
+                && (int) $displayIdentity['vendor']->id !== (int) $vendor->id
+            ) {
+                throw new QuickBooksSupplierConflictException(
+                    'identity_evidence_conflict',
+                    'QuickBooks CompanyName and DisplayName identify different SCM suppliers.',
+                    'Review both QuickBooks names and select the correct SCM supplier before approval.',
+                    [
+                        'realm_id' => $realmId,
+                        'selected_vendor_id' => $vendor->id,
+                        'company_name_vendor_id' => $identity['vendor']?->id,
+                        'display_name_vendor_id' => $displayIdentity['vendor']->id,
+                        'quickbooks_vendor_id' => $quickbooksVendorId,
+                    ],
+                );
+            }
         }
         if ($identity['status'] !== 'matched' && $matchMethod !== 'manual') {
-            throw ValidationException::withMessages(['match_method' => 'A non-manual mapping requires an unambiguous supplier match.']);
+            throw new QuickBooksSupplierConflictException(
+                'identity_unmatched',
+                'The QuickBooks supplier could not be matched unambiguously to the selected SCM supplier.',
+                'Use manual review only after confirming the supplier identity and supporting evidence.',
+                [
+                    'realm_id' => $realmId,
+                    'selected_vendor_id' => $vendor->id,
+                    'quickbooks_vendor_id' => $quickbooksVendorId,
+                    'company_name' => $companyName ?: null,
+                    'display_name' => $displayName ?: null,
+                    'email' => $quickbooksEmail ?: null,
+                ],
+            );
         }
 
         $mapping = DB::transaction(function () use ($vendor, $quickbooksVendorId, $currency, $matchMethod, $approvedBy, $realmId) {
@@ -88,7 +252,17 @@ class QuickBooksSupplierService
                 ->lockForUpdate()
                 ->first();
             if ($existingVendorMapping && (int) $existingVendorMapping->vendor_id !== (int) $vendor->id) {
-                throw ValidationException::withMessages(['quickbooks_vendor_id' => 'This QuickBooks vendor is already mapped to another SCM supplier.']);
+                throw new QuickBooksSupplierConflictException(
+                    'quickbooks_vendor_already_mapped',
+                    'This QuickBooks supplier is already mapped to another SCM supplier.',
+                    'Review the existing SCM supplier mapping before approving this proposal.',
+                    [
+                        'realm_id' => $realmId,
+                        'quickbooks_vendor_id' => $quickbooksVendorId,
+                        'selected_vendor_id' => $vendor->id,
+                        'conflicting_vendor_id' => $existingVendorMapping->vendor_id,
+                    ],
+                );
             }
 
             $mapping = VendorQuickBooksMapping::query()
@@ -98,7 +272,18 @@ class QuickBooksSupplierService
                 ->lockForUpdate()
                 ->first();
             if ($mapping && (string) $mapping->quickbooks_vendor_id !== $quickbooksVendorId) {
-                throw ValidationException::withMessages(['currency' => 'A different mapping already exists for this supplier and currency.']);
+                throw new QuickBooksSupplierConflictException(
+                    'supplier_currency_mapping_exists',
+                    'This SCM supplier already has a different QuickBooks mapping for this realm and currency.',
+                    'Review the existing mapping; an approved mapping cannot be silently replaced.',
+                    [
+                        'realm_id' => $realmId,
+                        'selected_vendor_id' => $vendor->id,
+                        'currency' => $currency,
+                        'existing_quickbooks_vendor_id' => $mapping->quickbooks_vendor_id,
+                        'proposed_quickbooks_vendor_id' => $quickbooksVendorId,
+                    ],
+                );
             }
 
             $mapping ??= new VendorQuickBooksMapping([

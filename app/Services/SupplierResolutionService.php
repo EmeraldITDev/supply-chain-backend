@@ -28,7 +28,11 @@ class SupplierResolutionService
             : $this->findNameMatches($normalizedName);
 
         if ($emailMatches->count() > 1) {
-            return $this->reviewResult('Multiple suppliers share the normalized email address.');
+            return $this->reviewResult(
+                'Multiple suppliers share the normalized email address.',
+                'multiple_email_matches',
+                $emailMatches->pluck('id')->map(fn ($id) => (int) $id)->values()->all(),
+            );
         }
 
         if ($emailMatches->count() === 1) {
@@ -38,7 +42,11 @@ class SupplierResolutionService
                     $normalizedName !== ''
                     && Vendor::normalizeName((string) $emailVendor->name) !== $normalizedName
                 ) {
-                    return $this->reviewResult('The normalized email and company name identify different suppliers.');
+                    return $this->reviewResult(
+                        'The normalized email and company name identify different suppliers.',
+                        'email_name_conflict',
+                        [(int) $emailVendor->id],
+                    );
                 }
 
                 return $this->matchedResult($emailVendor, 'email');
@@ -47,18 +55,30 @@ class SupplierResolutionService
                 return $this->matchedResult($emailVendor, 'email_and_name');
             }
 
-            return $this->reviewResult('The normalized email and company name identify different suppliers.');
+            return $this->reviewResult(
+                'The normalized email and company name identify different suppliers.',
+                'email_name_conflict',
+                $emailMatches->merge($nameMatches)->pluck('id')->map(fn ($id) => (int) $id)->unique()->values()->all(),
+            );
         }
 
         if ($nameMatches->count() > 1) {
-            return $this->reviewResult('Multiple suppliers share the normalized company name.');
+            return $this->reviewResult(
+                'Multiple suppliers share the normalized company name.',
+                'multiple_name_matches',
+                $nameMatches->pluck('id')->map(fn ($id) => (int) $id)->values()->all(),
+            );
         }
 
         if ($nameMatches->count() === 1) {
             $nameVendor = $nameMatches->first();
             $existingEmail = Vendor::normalizeEmail((string) $nameVendor->email);
             if ($normalizedEmail !== '' && $this->isReliableEmail($existingEmail) && $existingEmail !== $normalizedEmail) {
-                return $this->reviewResult('The company name matches a supplier with a different email address.');
+                return $this->reviewResult(
+                    'The company name matches a supplier with a different email address.',
+                    'name_email_conflict',
+                    [(int) $nameVendor->id],
+                );
             }
 
             return $this->matchedResult($nameVendor, 'name');
@@ -157,13 +177,18 @@ class SupplierResolutionService
     /**
      * @return array{status: string, vendor: null, reason: string, message: string}
      */
-    private function reviewResult(string $message): array
+    /**
+     * @param list<int> $candidateVendorIds
+     * @return array{status: string, vendor: null, reason: string, message: string, candidate_vendor_ids: list<int>}
+     */
+    private function reviewResult(string $message, string $reason = 'supplier_identity_ambiguous', array $candidateVendorIds = []): array
     {
         return [
             'status' => 'review_required',
             'vendor' => null,
-            'reason' => 'supplier_identity_ambiguous',
+            'reason' => $reason,
             'message' => $message,
+            'candidate_vendor_ids' => $candidateVendorIds,
         ];
     }
 

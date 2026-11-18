@@ -64,7 +64,7 @@ class QuickBooksService
     }
 
     /**
-     * @return array{Id: string, DisplayName: string, email: ?string, currency: ?string}|null
+     * @return array{Id: string, DisplayName: string, CompanyName: ?string, email: ?string, currency: ?string}|null
      */
     public function readVendor(string $id, ?int $mrfId = null): ?array
     {
@@ -79,6 +79,7 @@ class QuickBooksService
         return [
             'Id' => (string) ($vendor['Id'] ?? $id),
             'DisplayName' => (string) ($vendor['DisplayName'] ?? ''),
+            'CompanyName' => isset($vendor['CompanyName']) ? (string) $vendor['CompanyName'] : null,
             'email' => data_get($vendor, 'PrimaryEmailAddr.Address'),
             'currency' => is_string($currency) && trim($currency) !== '' ? strtoupper(trim($currency)) : null,
         ];

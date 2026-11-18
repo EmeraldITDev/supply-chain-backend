@@ -648,6 +648,192 @@ class QuickBooksIntegrationTest extends TestCase
         $this->assertSame(4, VendorQuickBooksMapping::query()->where('vendor_id', $vendor->id)->count());
     }
 
+    public function test_supplier_mapping_approval_uses_company_name_when_display_name_differs(): void
+    {
+        $this->storeConnection();
+        $vendor = Vendor::create([
+            'vendor_id' => 'V-COMPANY-NAME',
+            'name' => 'Acme Holdings',
+            'category' => 'goods',
+            'email' => 'acme@example.com',
+            'status' => 'Active',
+        ]);
+        $this->mock(QuickBooksService::class, function ($mock) {
+            $mock->shouldReceive('readVendor')->once()->andReturn([
+                'Id' => 'company-name-1',
+                'DisplayName' => 'Acme Holdings - Lagos',
+                'CompanyName' => 'Acme Holdings',
+                'email' => 'acme@example.com',
+                'currency' => 'NGN',
+            ]);
+            $mock->shouldNotReceive('post');
+        });
+
+        Sanctum::actingAs(User::factory()->create(['supply_chain_role' => 'finance']));
+        $this->postJson('/api/quickbooks/suppliers/mappings', [
+            'vendor_id' => $vendor->id,
+            'quickbooks_vendor_id' => 'company-name-1',
+            'currency' => 'NGN',
+            'match_method' => 'email_and_name',
+        ])->assertCreated();
+    }
+
+    public function test_supplier_mapping_approval_returns_structured_legacy_conflict(): void
+    {
+        $this->storeConnection();
+        $vendor = Vendor::create([
+            'vendor_id' => 'V-LEGACY-CONFLICT',
+            'name' => 'Legacy Supplier',
+            'category' => 'goods',
+            'email' => 'legacy@example.com',
+            'status' => 'Active',
+            'quickbooks_vendor_id' => 'legacy-qb-1',
+        ]);
+        $this->mock(QuickBooksService::class)->shouldNotReceive('readVendor');
+
+        Sanctum::actingAs(User::factory()->create(['supply_chain_role' => 'finance']));
+        $this->postJson('/api/quickbooks/suppliers/mappings', [
+            'vendor_id' => $vendor->id,
+            'quickbooks_vendor_id' => 'proposed-qb-1',
+            'currency' => 'NGN',
+            'match_method' => 'manual',
+        ])->assertStatus(409)
+            ->assertJsonPath('code', 'QB_SUPPLIER_IDENTITY_CONFLICT')
+            ->assertJsonPath('conflict_type', 'legacy_vendor_id_conflict')
+            ->assertJsonPath('conflict.legacy_quickbooks_vendor_id', 'legacy-qb-1')
+            ->assertJsonPath('conflict.proposed_quickbooks_vendor_id', 'proposed-qb-1');
+    }
+
+    public function test_supplier_mapping_approval_returns_structured_mapping_conflicts(): void
+    {
+        $this->storeConnection();
+        $vendor = Vendor::create([
+            'vendor_id' => 'V-MAPPING-CONFLICT',
+            'name' => 'Mapping Supplier',
+            'category' => 'goods',
+            'email' => 'mapping@example.com',
+            'status' => 'Active',
+        ]);
+        $otherVendor = Vendor::create([
+            'vendor_id' => 'V-OTHER-MAPPING',
+            'name' => 'Other Mapping Supplier',
+            'category' => 'goods',
+            'email' => 'other-mapping@example.com',
+            'status' => 'Active',
+        ]);
+        VendorQuickBooksMapping::create([
+            'vendor_id' => $otherVendor->id,
+            'realm_id' => 'realm-should-not-leak',
+            'currency' => 'NGN',
+            'quickbooks_vendor_id' => 'shared-qb-1',
+            'status' => VendorQuickBooksMapping::STATUS_APPROVED,
+            'match_method' => 'email',
+        ]);
+        $this->mock(QuickBooksService::class)->shouldNotReceive('readVendor');
+
+        Sanctum::actingAs(User::factory()->create(['supply_chain_role' => 'finance']));
+        $this->postJson('/api/quickbooks/suppliers/mappings', [
+            'vendor_id' => $vendor->id,
+            'quickbooks_vendor_id' => 'shared-qb-1',
+            'currency' => 'NGN',
+            'match_method' => 'manual',
+        ])->assertStatus(409)
+            ->assertJsonPath('conflict_type', 'quickbooks_vendor_already_mapped')
+            ->assertJsonPath('conflict.conflicting_vendor_id', $otherVendor->id);
+
+        VendorQuickBooksMapping::create([
+            'vendor_id' => $vendor->id,
+            'realm_id' => 'realm-should-not-leak',
+            'currency' => 'USD',
+            'quickbooks_vendor_id' => 'existing-qb-1',
+            'status' => VendorQuickBooksMapping::STATUS_APPROVED,
+            'match_method' => 'email',
+        ]);
+        $this->postJson('/api/quickbooks/suppliers/mappings', [
+            'vendor_id' => $vendor->id,
+            'quickbooks_vendor_id' => 'proposed-qb-2',
+            'currency' => 'USD',
+            'match_method' => 'manual',
+        ])->assertStatus(409)
+            ->assertJsonPath('conflict_type', 'supplier_currency_mapping_exists')
+            ->assertJsonPath('conflict.existing_quickbooks_vendor_id', 'existing-qb-1');
+    }
+
+    public function test_supplier_mapping_approval_returns_structured_ambiguous_identity_conflict(): void
+    {
+        $this->storeConnection();
+        $first = Vendor::create([
+            'vendor_id' => 'V-DUPLICATE-1',
+            'name' => 'Duplicate Supplier',
+            'category' => 'goods',
+            'email' => 'duplicate-one@example.com',
+            'status' => 'Active',
+        ]);
+        $second = Vendor::create([
+            'vendor_id' => 'V-DUPLICATE-2',
+            'name' => 'Duplicate Supplier',
+            'category' => 'goods',
+            'email' => 'duplicate-two@example.com',
+            'status' => 'Active',
+        ]);
+        $this->mock(QuickBooksService::class, function ($mock) {
+            $mock->shouldReceive('readVendor')->once()->andReturn([
+                'Id' => 'ambiguous-qb-1',
+                'DisplayName' => 'Duplicate Supplier',
+                'CompanyName' => 'Duplicate Supplier',
+                'email' => null,
+                'currency' => 'NGN',
+            ]);
+        });
+
+        Sanctum::actingAs(User::factory()->create(['supply_chain_role' => 'finance']));
+        $this->postJson('/api/quickbooks/suppliers/mappings', [
+            'vendor_id' => $first->id,
+            'quickbooks_vendor_id' => 'ambiguous-qb-1',
+            'currency' => 'NGN',
+            'match_method' => 'name',
+        ])->assertStatus(409)
+            ->assertJsonPath('conflict_type', 'identity_ambiguous')
+            ->assertJsonPath('conflict.identity_reason', 'multiple_name_matches')
+            ->assertJsonPath('conflict.candidate_vendor_ids.0', $first->id)
+            ->assertJsonPath('conflict.candidate_vendor_ids.1', $second->id);
+    }
+
+    public function test_repeated_approval_of_identical_mapping_is_idempotent(): void
+    {
+        $this->storeConnection();
+        $vendor = Vendor::create([
+            'vendor_id' => 'V-IDEMPOTENT',
+            'name' => 'Idempotent Supplier',
+            'category' => 'goods',
+            'email' => 'idempotent@example.com',
+            'status' => 'Active',
+        ]);
+        $actor = User::factory()->create(['supply_chain_role' => 'finance']);
+        $mapping = VendorQuickBooksMapping::create([
+            'vendor_id' => $vendor->id,
+            'realm_id' => 'realm-should-not-leak',
+            'currency' => 'USD',
+            'quickbooks_vendor_id' => 'idempotent-qb-1',
+            'status' => VendorQuickBooksMapping::STATUS_APPROVED,
+            'match_method' => 'email',
+            'approved_by' => $actor->id,
+            'approved_at' => now()->subMinute(),
+        ]);
+        $this->mock(QuickBooksService::class)->shouldNotReceive('readVendor');
+
+        Sanctum::actingAs($actor);
+        $response = $this->postJson('/api/quickbooks/suppliers/mappings', [
+            'vendor_id' => $vendor->id,
+            'quickbooks_vendor_id' => 'idempotent-qb-1',
+            'currency' => 'USD',
+            'match_method' => 'email',
+        ])->assertCreated();
+
+        $this->assertSame($mapping->id, $response->json('data.id'));
+        $this->assertSame(1, VendorQuickBooksMapping::query()->where('vendor_id', $vendor->id)->count());
+    }
+
     public function test_supplier_import_is_pending_and_does_not_write_to_quickbooks(): void
     {
         $this->storeConnection();

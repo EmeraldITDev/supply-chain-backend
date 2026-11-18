@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Exceptions\QuickBooksException;
+use App\Exceptions\QuickBooksSupplierConflictException;
 use App\Http\Controllers\Controller;
 use App\Models\MRF;
 use App\Models\QuickBooksVendorCreationRequest;
@@ -209,13 +210,25 @@ class QuickBooksController extends Controller
             'currency' => ['required', 'string', 'size:3'],
             'match_method' => ['required', 'string', 'max:32'],
         ]);
-        $mapping = $this->supplierService->approveMapping(
-            Vendor::findOrFail($data['vendor_id']),
-            $data['quickbooks_vendor_id'],
-            $data['currency'],
-            $data['match_method'],
-            (int) $request->user()->id,
-        );
+        try {
+            $mapping = $this->supplierService->approveMapping(
+                Vendor::findOrFail($data['vendor_id']),
+                $data['quickbooks_vendor_id'],
+                $data['currency'],
+                $data['match_method'],
+                (int) $request->user()->id,
+            );
+        } catch (QuickBooksSupplierConflictException $exception) {
+            return response()->json([
+                'success' => false,
+                'code' => 'QB_SUPPLIER_IDENTITY_CONFLICT',
+                'message' => $exception->getMessage(),
+                'conflict_type' => $exception->conflictType,
+                'conflict' => array_merge($exception->details, [
+                    'recommended_resolution' => $exception->recommendedResolution,
+                ]),
+            ], 409);
+        }
 
         return response()->json(['success' => true, 'data' => $mapping], 201);
     }
