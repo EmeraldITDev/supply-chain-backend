@@ -13,8 +13,6 @@
  *
  * .env, storage/ and .deploy/ are never written or deleted. The extract step
  * does not load Laravel, so a broken release can always be replaced by the next.
- * While the files are swapped in (a few seconds) the app answers 503 "updating"
- * (maintenance mode), unless it was already put down with php artisan down.
  *
  * Every request needs the header X-Deploy-Token equal to DEPLOY_TOKEN in the
  * app's .env (at least 32 characters). Otherwise the answer is a plain 404.
@@ -93,11 +91,6 @@ function extractRelease(string $base, string $deployDir): never
         respond(500, ['ok' => false, 'error' => 'release.zip has no artisan or vendor/autoload.php; nothing was changed']);
     }
 
-    // While old and new files are mixed (a few seconds), visitors get a short
-    // 503 "updating" answer instead of a possible error.
-    $maintenance = maintenanceOn($base);
-    $swapStarted = microtime(true);
-
     // 2. Move each file into place. rename() replaces a file in one step, so a
     //    visitor never gets a half-written file.
     $errors = [];
@@ -138,13 +131,8 @@ function extractRelease(string $base, string $deployDir): never
         @opcache_reset();
     }
 
-    if ($maintenance) {
-        maintenanceOff($base);
-    }
-
     respond($errors ? 500 : 200, [
         'ok' => ! $errors,
-        'maintenance_seconds' => $maintenance ? round(microtime(true) - $swapStarted, 1) : 'skipped: the app was already in maintenance mode',
         'files' => count($files),
         'removed' => $removed,
         'errors' => array_slice($errors, 0, 50),
@@ -179,48 +167,6 @@ function migrate(string $base): never
     }
 
     respond(200, ['ok' => true, 'output' => $output]);
-}
-
-/**
- * Turn on maintenance mode through public/index.php's first check
- * (storage/framework/maintenance.php), which runs before Laravel loads, so it
- * works even while vendor/ is half old and half new. Returns false, and leaves
- * things alone, when the app is already down (php artisan down).
- */
-function maintenanceOn(string $base): bool
-{
-    $file = $base.'/storage/framework/maintenance.php';
-    if (is_file($file) || ! is_dir(dirname($file))) {
-        return false;
-    }
-
-    $page = <<<'PHP'
-<?php
-// Written by public/deploy.php while a release is put in place, removed a few
-// seconds later. If a deploy ever dies halfway, it stops itself after 5 minutes.
-if (time() - (int) @filemtime(__FILE__) > 300) {
-    @unlink(__FILE__);
-
-    return;
-}
-http_response_code(503);
-header('Retry-After: 5');
-header('Cache-Control: no-store');
-header('Content-Type: application/json');
-if (isset($_SERVER['HTTP_ORIGIN'])) {
-    header('Access-Control-Allow-Origin: '.$_SERVER['HTTP_ORIGIN']);
-    header('Vary: Origin');
-}
-echo '{"message":"The service is being updated. Please try again in a few seconds."}';
-exit;
-PHP;
-
-    return file_put_contents($file, $page) !== false;
-}
-
-function maintenanceOff(string $base): void
-{
-    @unlink($base.'/storage/framework/maintenance.php');
 }
 
 function tokenIsValid(string $base): bool
