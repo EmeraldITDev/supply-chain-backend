@@ -38,14 +38,16 @@ class JourneyStatusUpdatedNotification extends Notification implements ShouldQue
         ];
 
         $trip = $this->journey->trip;
-        
+        $newLabel = $statusLabels[$this->newStatus] ?? $this->newStatus;
+        $previousLabel = $statusLabels[$this->previousStatus] ?? $this->previousStatus;
+
         return (new MailMessage)
-            ->subject("Journey Status Update: {$trip->trip_code} - {$statusLabels[$this->newStatus] ?? $this->newStatus}")
+            ->subject("Journey Status Update: {$trip->trip_code} - {$newLabel}")
             ->greeting("Journey Update Notification")
             ->line("Trip Code: {$trip->trip_code}")
             ->line("Origin: {$trip->origin}")
             ->line("Destination: {$trip->destination}")
-            ->line("Status Changed: {$statusLabels[$this->previousStatus] ?? $this->previousStatus} → {$statusLabels[$this->newStatus] ?? $this->newStatus}")
+            ->line("Status Changed: {$previousLabel} → {$newLabel}")
             ->when($this->journey->current_location, fn($mail) => $mail->line("Current Location: {$this->journey->current_location}"))
             ->when($this->journey->estimated_arrival_at, fn($mail) => $mail->line("Estimated Arrival: {$this->journey->estimated_arrival_at->format('Y-m-d H:i')}"))
             ->action('View Journey Details', url("/logistics/trips/{$trip->id}"))
