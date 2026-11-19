@@ -981,6 +981,3 @@ Route::middleware(['auth:sanctum', 'quickbooks.nocache'])->prefix('quickbooks')-
     Route::post('/suppliers/vendor-creation-requests/{creationRequest}/approve', [QuickBooksController::class, 'approveSupplierCreation'])->middleware(\App\Support\QuickBooksRoles::supplierMiddleware());
     Route::get('/suppliers/{vendor}/mappings', [QuickBooksController::class, 'supplierMappings'])->middleware(\App\Support\QuickBooksRoles::supplierMiddleware());
 });
-
-// CI/CD: called by .github/workflows/deploy.yml after each upload to cPanel (runs migrations).
-Route::post('/deploy/migrate', \App\Http\Controllers\DeployController::class)->middleware('throttle:5,1');
