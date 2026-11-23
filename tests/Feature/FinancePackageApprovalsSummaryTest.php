@@ -132,6 +132,26 @@ class FinancePackageApprovalsSummaryTest extends TestCase
         $this->assertNotSame($summary[0]['authority'], $summary[1]['authority']);
     }
 
+    public function test_parallel_first_approval_by_admin_maps_to_scd(): void
+    {
+        $mrf = $this->createMrf();
+
+        MRFApprovalHistory::create([
+            'mrf_id' => $mrf->id,
+            'action' => 'approved',
+            'stage' => 'parallel_first_approval',
+            'performed_by' => User::factory()->create(['name' => 'Ada Admin'])->id,
+            'performer_name' => 'Ada Admin',
+            'performer_role' => 'admin',
+        ]);
+
+        $summary = $this->approvalsSummary($mrf);
+
+        $this->assertCount(1, $summary);
+        $this->assertSame('scd', $summary[0]['authority']);
+        $this->assertSame('Ada Admin', $summary[0]['performerName']);
+    }
+
     /**
      * @return list<array<string, mixed>>
      */

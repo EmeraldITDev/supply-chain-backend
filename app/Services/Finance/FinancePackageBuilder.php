@@ -283,12 +283,16 @@ class FinancePackageBuilder
     public function buildApprovalsSummary(MRF $mrf): array
     {
         return MRFApprovalHistory::query()
+            ->with('performer:id,name')
             ->where('mrf_id', $mrf->id)
             ->orderBy('created_at')
             ->get()
             ->map(function (MRFApprovalHistory $row) {
                 $authority = $this->approvalAuthority($row->stage, $row->performer_role);
                 $performerName = trim((string) ($row->performer_name ?? ''));
+                if ($performerName === '' && $row->performer) {
+                    $performerName = trim((string) $row->performer->name);
+                }
 
                 return [
                     'stage' => $row->stage,
@@ -334,13 +338,18 @@ class FinancePackageBuilder
         }
 
         if (in_array($role, ['supply_chain_director', 'supply_chain', 'director'], true)
-            || in_array($stageKey, ['supply_chain_director_review', 'supply_chain_director_approved'], true)
-            || ($stageKey === 'parallel_first_approval' && in_array($role, ['supply_chain_director', 'supply_chain', 'director'], true))) {
+            || in_array($stageKey, ['supply_chain_director_review', 'supply_chain_director_approved'], true)) {
             return ['key' => 'scd', 'label' => 'SCD'];
         }
 
-        if ($stageKey === 'parallel_first_approval' && $role === 'executive') {
-            return ['key' => 'executive', 'label' => 'Executive'];
+        // Parallel first approval is the SCD/Executive gate. Admin actors for SCD
+        // still count as SCD unless the performer role is explicitly executive.
+        if ($stageKey === 'parallel_first_approval') {
+            if ($role === 'executive') {
+                return ['key' => 'executive', 'label' => 'Executive'];
+            }
+
+            return ['key' => 'scd', 'label' => 'SCD'];
         }
 
         return [
