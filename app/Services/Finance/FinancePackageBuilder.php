@@ -275,25 +275,90 @@ class FinancePackageBuilder
     }
 
     /**
-     * Role labels only — no individual names or emails.
+     * Authoritative SCM approval history for Finance AP (read-only).
+     * Includes authority label, actual approver name (when recorded), role, and timestamp.
      *
      * @return list<array<string, mixed>>
      */
-    private function buildApprovalsSummary(MRF $mrf): array
+    public function buildApprovalsSummary(MRF $mrf): array
     {
         return MRFApprovalHistory::query()
             ->where('mrf_id', $mrf->id)
             ->orderBy('created_at')
             ->get()
-            ->map(fn (MRFApprovalHistory $row) => [
-                'stage' => $row->stage,
-                'action' => $row->action,
-                'status' => 'completed',
-                'roleLabel' => $this->roleLabel($row->stage, $row->performer_role),
-                'timestamp' => $row->created_at?->toIso8601String(),
-            ])
+            ->map(function (MRFApprovalHistory $row) {
+                $authority = $this->approvalAuthority($row->stage, $row->performer_role);
+                $performerName = trim((string) ($row->performer_name ?? ''));
+
+                return [
+                    'stage' => $row->stage,
+                    'action' => $row->action,
+                    'status' => $this->approvalStatus($row->action),
+                    'authority' => $authority['key'],
+                    'authorityLabel' => $authority['label'],
+                    'roleLabel' => $this->roleLabel($row->stage, $row->performer_role),
+                    'performerRole' => $row->performer_role,
+                    'performerName' => $performerName !== '' ? $performerName : null,
+                    'performerNameAvailable' => $performerName !== '',
+                    'remarks' => $row->remarks,
+                    'eventReference' => (string) $row->id,
+                    'timestamp' => $row->created_at?->toIso8601String(),
+                ];
+            })
             ->values()
             ->all();
+    }
+
+    /**
+     * Preserve SCD vs Executive vs Chairman as distinct authorities.
+     * Does not treat chairman_payment (payment gate) as Chairman procurement approval.
+     *
+     * @return array{key: string, label: string}
+     */
+    private function approvalAuthority(string $stage, ?string $performerRole): array
+    {
+        $role = strtolower(trim((string) $performerRole));
+        $stageKey = strtolower(trim($stage));
+
+        // Payment-gate history is not a procurement-request Chairman approval.
+        if ($stageKey === 'chairman_payment') {
+            return ['key' => 'other', 'label' => $this->roleLabel($stage, $performerRole)];
+        }
+
+        if ($role === 'chairman' || $stageKey === 'chairman_review') {
+            return ['key' => 'chairman', 'label' => 'Chairman'];
+        }
+
+        if ($role === 'executive' || $stageKey === 'executive_review') {
+            return ['key' => 'executive', 'label' => 'Executive'];
+        }
+
+        if (in_array($role, ['supply_chain_director', 'supply_chain', 'director'], true)
+            || in_array($stageKey, ['supply_chain_director_review', 'supply_chain_director_approved'], true)
+            || ($stageKey === 'parallel_first_approval' && in_array($role, ['supply_chain_director', 'supply_chain', 'director'], true))) {
+            return ['key' => 'scd', 'label' => 'SCD'];
+        }
+
+        if ($stageKey === 'parallel_first_approval' && $role === 'executive') {
+            return ['key' => 'executive', 'label' => 'Executive'];
+        }
+
+        return [
+            'key' => 'other',
+            'label' => $this->roleLabel($stage, $performerRole),
+        ];
+    }
+
+    private function approvalStatus(?string $action): string
+    {
+        $value = strtolower(trim((string) $action));
+
+        return match ($value) {
+            'approved', 'vendor_approved', 'signed_po' => 'approved',
+            'rejected' => 'rejected',
+            'returned', 'changes_requested' => 'returned',
+            default => $value !== '' ? $value : 'completed',
+        };
     }
 
     private function roleLabel(string $stage, ?string $performerRole): string

@@ -2,7 +2,6 @@
 
 namespace Tests\Unit;
 
-use App\Models\PaymentSchedule;
 use App\Models\ProcurementDocument;
 use App\Services\Finance\FinanceApPaymentTypeMapper;
 use App\Services\Finance\FinancePackageBuilder;
