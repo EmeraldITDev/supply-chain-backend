@@ -336,6 +336,7 @@ class PurchaseOrderPdfService
                 PoTaxCalculator::discount($data['discount_type'] ?? null, $data['discount_value'] ?? null),
                 $currency.' '.$this->fmtMoney((float) ($data['discount'] ?? 0)),
             ),
+            subjectTitle: trim((string) ($data['title'] ?? $data['mrf_title'] ?? '')),
         ));
     }
 
@@ -450,6 +451,7 @@ class PurchaseOrderPdfService
             paymentMilestones: $paymentMilestones,
             discount: $discountAmount,
             discountNote: PoTaxCalculator::discountNote($discount, $currency.' '.$this->fmtMoney($discountAmount)),
+            subjectTitle: trim((string) ($mrf['title'] ?? $data['title'] ?? '')),
         ));
     }
 
@@ -485,6 +487,7 @@ class PurchaseOrderPdfService
         array $paymentMilestones = [],
         float $discount = 0.0,
         ?string $discountNote = null,
+        string $subjectTitle = '',
     ): array {
         $company = $this->normalizeCompany($company);
 
@@ -497,6 +500,7 @@ class PurchaseOrderPdfService
             'po_number' => $poNumber,
             'po_date_short' => $poDate->format('d/m/Y'),
             'document_title' => 'Purchase Order',
+            'subject_title' => $subjectTitle,
             'line_items' => $lineItems,
             'invoice_submission_to' => $this->resolveInvoiceSubmissionTo($invoiceEmail),
             'invoice_submission_cc' => $this->resolveInvoiceSubmissionCc($invoiceCc),

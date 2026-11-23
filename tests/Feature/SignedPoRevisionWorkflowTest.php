@@ -176,6 +176,7 @@ class SignedPoRevisionWorkflowTest extends TestCase
     {
         $service = app(PurchaseOrderRevisionService::class);
         $before = [
+            'title' => 'MUS-295KM FORD TRANSIT SERVICING',
             'total_value' => 1000,
             'supplier' => 'Acme',
             'expected_delivery_date' => '2026-09-01',
@@ -189,6 +190,7 @@ class SignedPoRevisionWorkflowTest extends TestCase
             ]],
         ];
         $after = [
+            'title' => 'MUS-275KM FORD TRANSIT SERVICING',
             'total_value' => 1600,
             'supplier' => 'Globex',
             'expected_delivery_date' => '2026-09-01',
@@ -203,6 +205,7 @@ class SignedPoRevisionWorkflowTest extends TestCase
         ];
 
         $changes = collect($service->diffSnapshots($before, $after))->pluck('field');
+        $this->assertTrue($changes->contains('title'));
         $this->assertTrue($changes->contains('total_value'));
         $this->assertTrue($changes->contains('supplier'));
         $this->assertTrue($changes->contains('line_item_quantity_0'));

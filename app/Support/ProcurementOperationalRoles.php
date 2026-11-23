@@ -35,6 +35,7 @@ final class ProcurementOperationalRoles
      */
     public const FORCE_CLOSE_ROLES = [
         'procurement_manager',
+        'procurement',
         'supply_chain_director',
         'supply_chain',
         'admin',

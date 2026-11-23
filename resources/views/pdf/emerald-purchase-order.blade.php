@@ -97,6 +97,9 @@
     </table>
 
     <div class="document-title">{{ $document_title ?? 'Purchase Order' }}</div>
+    @if (!empty($subject_title))
+        <div class="meta-value strong" style="margin: -8px 0 16px;">{{ $subject_title }}</div>
+    @endif
 
     <table class="meta-table">
         <tr>
