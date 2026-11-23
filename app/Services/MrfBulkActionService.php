@@ -205,7 +205,7 @@ class MrfBulkActionService
             'supply_chain_director_approved',
             'lazarus_director_approval',
             'pending',
-        ], true) && in_array($user->scmRole(), ['procurement_manager', 'procurement', 'admin'], true)) {
+        ], true) && $this->permissionService->userActsAsProcurement($user)) {
             $request = $this->makeRequest($user, array_merge($payload, ['action' => $action]));
 
             return $workflow->procurementApprove($request, $mrf->mrf_id);

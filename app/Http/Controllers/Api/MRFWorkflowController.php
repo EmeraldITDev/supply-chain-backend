@@ -30,6 +30,7 @@ use App\Services\PriceComparisonPoLineService;
 use App\Services\ProcurementDocumentService;
 use App\Services\QuotationAttachmentService;
 use App\Support\PoTaxCalculator;
+use App\Support\ProcurementOperationalRoles;
 use App\Support\PurchaseOrderCurrency;
 use App\Support\PurchaseOrderInvoiceCc;
 use Illuminate\Http\Request;
@@ -441,11 +442,11 @@ class MRFWorkflowController extends Controller
     {
         $user = $request->user();
 
-        // Check role - only procurement managers/team can approve
-        if (!in_array($user->scmRole(), ['procurement_manager', 'procurement', 'admin'])) {
+        // Procurement ops (PM + SCD) — does not replace SCD first-approval / PO sign steps
+        if (! ProcurementOperationalRoles::allows($user)) {
             return response()->json([
                 'success' => false,
-                'error' => 'Only procurement managers can approve at this stage',
+                'error' => 'Only procurement managers or supply chain directors can approve at this stage',
                 'code' => 'FORBIDDEN',
                 'requiredRole' => 'procurement_manager'
             ], 403);
@@ -584,11 +585,11 @@ class MRFWorkflowController extends Controller
     {
         $user = $request->user();
 
-        // Check role - only procurement can send vendor for approval
-        if (!in_array($user->scmRole(), ['procurement', 'procurement_manager', 'admin'])) {
+        // Selection still awaits the separate SCD approve-vendor-selection step
+        if (! ProcurementOperationalRoles::allows($user)) {
             return response()->json([
                 'success' => false,
-                'error' => 'Only procurement can send vendor for approval',
+                'error' => 'Only procurement or supply chain directors can send vendor for approval',
                 'code' => 'FORBIDDEN'
             ], 403);
         }
@@ -1640,6 +1641,7 @@ class MRFWorkflowController extends Controller
             // Mode 2: Auto-Generation (JSON body)
             $validator = Validator::make($request->all(), [
                 'po_number' => 'nullable|string|max:255',
+                'title' => 'nullable|string|min:3|max:255',
             'remarks' => 'nullable|string',
             'po_type' => 'nullable|in:goods,services,logistics',
             'custom_terms' => 'nullable|string',
@@ -1856,6 +1858,11 @@ class MRFWorkflowController extends Controller
                 'po_generation_error' => null,
                 'po_generation_failed_at' => null,
             ];
+
+            $finaliseTitle = trim((string) ($request->input('title') ?? ''));
+            if ($finaliseTitle !== '') {
+                $draftUpdate['title'] = $finaliseTitle;
+            }
 
             $resolvedVendor = $poData['resolved_vendor'] ?? null;
             if ($resolvedVendor) {
@@ -2890,12 +2897,7 @@ class MRFWorkflowController extends Controller
     {
         $user = $request->user();
 
-        // Check role - procurement managers and admin can delete POs
-        // Use case-insensitive comparison for role
-        $userRole = strtolower(trim($user->scmRole() ?? ''));
-        $allowedRoles = ['procurement_manager', 'procurement', 'admin'];
-
-        if (!in_array($userRole, array_map('strtolower', $allowedRoles))) {
+        if (! ProcurementOperationalRoles::allows($user)) {
             Log::warning('Unauthorized PO deletion attempt', [
                 'user_id' => $user->id,
                 'user_role' => $user->scmRole(),
@@ -2904,7 +2906,7 @@ class MRFWorkflowController extends Controller
 
             return response()->json([
                 'success' => false,
-                'error' => 'Only procurement managers and admins can delete POs',
+                'error' => 'Only procurement managers, supply chain directors, and admins can delete POs',
                 'code' => 'FORBIDDEN'
             ], 403);
         }
@@ -3220,6 +3222,7 @@ class MRFWorkflowController extends Controller
 
         $validator = Validator::make($request->all(), [
             'po_number' => 'nullable|string|max:255',
+            'title' => 'nullable|string|min:3|max:255',
             'po_type' => 'nullable|in:goods,services,logistics',
             'custom_terms' => 'nullable|string',
             'po_special_terms' => 'nullable|string',
@@ -3432,6 +3435,11 @@ class MRFWorkflowController extends Controller
             'po_generation_error' => null,
             'po_generation_failed_at' => null,
         ];
+
+        $draftTitle = trim((string) ($request->input('title') ?? ''));
+        if ($draftTitle !== '') {
+            $draftUpdate['title'] = $draftTitle;
+        }
 
         $selectedVendor = $this->resolveSelectedVendor($request, $mrf);
         if ($selectedVendor) {

@@ -949,7 +949,12 @@ class SRFController extends Controller
             $isRequester = (int) $srf->requester_id === (int) $user->id;
             $logisticsRoles = ['logistics_manager', 'logistics_officer'];
             $scdRoles = ['supply_chain_director', 'supply_chain'];
-            $procurementRoles = ['procurement_manager', 'procurement'];
+            $procurementRoles = [
+                'procurement_manager',
+                'procurement',
+                'supply_chain_director',
+                'supply_chain',
+            ];
 
             $allowed = false;
             if ($isRequester) {

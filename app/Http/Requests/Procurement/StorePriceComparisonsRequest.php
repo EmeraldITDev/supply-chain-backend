@@ -43,8 +43,7 @@ class StorePriceComparisonsRequest extends FormRequest
     {
         $user = $this->user();
 
-        return $user !== null
-            && in_array($user->scmRole(), ['procurement_manager', 'procurement', 'supply_chain_director', 'admin'], true);
+        return \App\Support\ProcurementOperationalRoles::allows($user);
     }
 
     public function rules(): array

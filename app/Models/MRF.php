@@ -436,13 +436,26 @@ class MRF extends Model
         $latest = $history !== [] ? $history[array_key_last($history)] : null;
         $unlockedAt = $this->unlocked_at?->toIso8601String();
 
+        $revisionNumber = (int) ($this->revision_number ?? 0);
+        $status = strtolower(trim((string) ($this->status ?? '')));
+        $state = strtolower(trim((string) ($this->workflow_state ?? '')));
+        $awaitingRenewedApproval = $revisionNumber > 0 && (
+            $status === WorkflowStateService::STATE_PENDING_SCD_SIGNATURE
+            || $status === 'awaiting_scd_signature'
+            || $state === WorkflowStateService::STATE_PENDING_SCD_SIGNATURE
+            || $state === WorkflowStateService::STATE_PENDING_REVISION
+            || $status === WorkflowStateService::STATE_PENDING_REVISION
+        );
+
         return [
-            'revision_number' => (int) ($this->revision_number ?? 0),
-            'revisionNumber' => (int) ($this->revision_number ?? 0),
+            'revision_number' => $revisionNumber,
+            'revisionNumber' => $revisionNumber,
             'revision_history' => $history,
             'revisionHistory' => $history,
             'latest_revision_summary' => is_array($latest) ? ($latest['changed_fields'] ?? null) : null,
             'latestRevisionSummary' => is_array($latest) ? ($latest['changed_fields'] ?? null) : null,
+            'awaiting_renewed_approval' => $awaitingRenewedApproval,
+            'awaitingRenewedApproval' => $awaitingRenewedApproval,
             'unlocked_by' => $this->unlocked_by,
             'unlockedBy' => $this->unlocked_by,
             'unlocked_at' => $unlockedAt,

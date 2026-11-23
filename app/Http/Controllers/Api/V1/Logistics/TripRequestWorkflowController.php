@@ -14,6 +14,7 @@ use App\Services\TripRequestWorkflowService;
 use App\Support\ExternalPassengerRequest;
 use App\Support\InternationalTransportModeRequest;
 use App\Support\PassengerEligibility;
+use App\Support\ProcurementOperationalRoles;
 use App\Support\TripBookingRules;
 use App\Support\TripDisplayStatus;
 use Illuminate\Http\Request;
@@ -1515,7 +1516,7 @@ class TripRequestWorkflowController extends ApiController
     public function procurementApproveQuote(Request $request, int $id)
     {
         $user = $request->user();
-        if (! $user || ! in_array($user->scmRole(), ['procurement_manager', 'procurement', 'admin'], true)) {
+        if (! ProcurementOperationalRoles::allows($user)) {
             return $this->error('Procurement role required', 'FORBIDDEN', 403);
         }
 
@@ -1670,7 +1671,7 @@ class TripRequestWorkflowController extends ApiController
     public function generatePo(Request $request, int $id)
     {
         $user = $request->user();
-        if (! $user || ! in_array($user->scmRole(), ['procurement_manager', 'procurement', 'admin'], true)) {
+        if (! ProcurementOperationalRoles::allows($user)) {
             return $this->error('Procurement role required', 'FORBIDDEN', 403);
         }
 

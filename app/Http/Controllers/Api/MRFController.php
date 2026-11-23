@@ -1422,7 +1422,12 @@ class MRFController extends Controller
         // employees.
 
         $logisticsAuthors = ['logistics_manager', 'logistics_officer'];
-        $procurementAuthors = ['procurement_manager', 'procurement'];
+        $procurementAuthors = [
+            'procurement_manager',
+            'procurement',
+            'supply_chain_director',
+            'supply_chain',
+        ];
 
         // 1. ADD 'admin' to the privileged authors array
         $privilegedAuthors = array_merge($logisticsAuthors, $procurementAuthors, ['admin', 'executive']);
@@ -1440,7 +1445,7 @@ class MRFController extends Controller
             return response()->json([
                 'success' => false,
                 // Updated the error message string to reflect the new permissions
-                'error' => 'Only designated staff, logistics managers, procurement managers, or admins can create Material Request Forms.',
+                'error' => 'Only designated staff, logistics managers, procurement managers, supply chain directors, or admins can create Material Request Forms.',
             ], 403);
         }
 
@@ -2485,7 +2490,13 @@ class MRFController extends Controller
 
         // Check if user is a procurement manager or admin (admin can always delete)
         $isAdmin = $user->scmRole() === 'admin';
-        $isProcurementManager = in_array($user->scmRole(), ['procurement_manager', 'procurement', 'admin']);
+        $isProcurementManager = in_array($user->scmRole(), [
+            'procurement_manager',
+            'procurement',
+            'supply_chain_director',
+            'supply_chain',
+            'admin',
+        ], true);
 
         // Admin can always delete any MRF (force delete capability)
         if ($isAdmin) {

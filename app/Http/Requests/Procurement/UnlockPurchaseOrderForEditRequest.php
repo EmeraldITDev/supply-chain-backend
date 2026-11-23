@@ -26,7 +26,7 @@ class UnlockPurchaseOrderForEditRequest extends FormRequest
     {
         throw new HttpResponseException(response()->json([
             'success' => false,
-            'error' => 'Only Procurement Managers and Admins can unlock a signed purchase order.',
+            'error' => 'Only Procurement Managers, Supply Chain Directors, and Admins can unlock a signed purchase order.',
             'code' => 'FORBIDDEN',
         ], 403));
     }

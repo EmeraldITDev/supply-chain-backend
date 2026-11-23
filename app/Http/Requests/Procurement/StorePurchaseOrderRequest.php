@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests\Procurement;
 
+use App\Support\ProcurementOperationalRoles;
 use App\Support\PurchaseOrderCurrency;
 use App\Support\RequestLineItemParser;
 use Illuminate\Contracts\Validation\Validator;
@@ -17,10 +18,7 @@ class StorePurchaseOrderRequest extends FormRequest
 
     public function authorize(): bool
     {
-        $user = $this->user();
-
-        return $user !== null
-            && in_array($user->scmRole(), ['procurement_manager', 'procurement', 'admin'], true);
+        return ProcurementOperationalRoles::allows($this->user());
     }
 
     public function rules(): array

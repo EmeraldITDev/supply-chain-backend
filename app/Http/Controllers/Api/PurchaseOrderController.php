@@ -7,6 +7,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Procurement\StorePurchaseOrderRequest;
 use App\Http\Requests\Procurement\UnlockPurchaseOrderForEditRequest;
 use App\Http\Requests\Procurement\UpdatePurchaseOrderRequest;
+use App\Http\Requests\Procurement\UpdatePurchaseOrderTitleRequest;
 use App\Models\MRF;
 use App\Models\MRFApprovalHistory;
 use App\Models\ProcurementDocument;
@@ -166,6 +167,39 @@ class PurchaseOrderController extends Controller
             'message' => 'Purchase order updated',
             'data' => $payload['data'] ?? $this->purchaseOrders->mapEditPayload($fresh),
         ]);
+    }
+
+    /**
+     * PATCH /api/pos/{id}/title — edit MRF/PO title with draft vs revision protection.
+     */
+    public function updateTitle(UpdatePurchaseOrderTitleRequest $request, string $id): JsonResponse
+    {
+        $mrf = $this->findMrfByPoReference($id);
+
+        if (! $mrf) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Purchase order not found',
+                'code' => 'NOT_FOUND',
+            ], 404);
+        }
+
+        try {
+            $payload = $this->revisions->updateTitle(
+                $mrf,
+                $request->user(),
+                (string) $request->input('title'),
+            );
+        } catch (ValidationException $e) {
+            return response()->json([
+                'success' => false,
+                'error' => collect($e->errors())->flatten()->first() ?: 'Unable to update title',
+                'errors' => $e->errors(),
+                'code' => 'INVALID_STATUS',
+            ], 422);
+        }
+
+        return response()->json($payload);
     }
 
     /**
@@ -349,16 +383,11 @@ class PurchaseOrderController extends Controller
     public function forceClose(Request $request, string $id): JsonResponse
     {
         $user = $request->user();
-        $allowedRoles = ['admin', 'procurement_manager'];
 
-        $hasAllowedRole =
-            ($user->scmRole() !== null && in_array($user->scmRole(), $allowedRoles, true))
-            || (method_exists($user, 'hasAnyRole') && $user->hasAnyRole($allowedRoles));
-
-        if (! $hasAllowedRole) {
+        if (! \App\Support\ProcurementOperationalRoles::allowsForceClose($user)) {
             return response()->json([
                 'success' => false,
-                'error' => 'Only Admin or Procurement Manager may force-close',
+                'error' => 'Only Admin, Procurement Manager, or Supply Chain Director may force-close',
                 'code' => 'FORBIDDEN',
             ], 403);
         }

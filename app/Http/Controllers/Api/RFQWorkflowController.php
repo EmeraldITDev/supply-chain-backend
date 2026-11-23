@@ -16,6 +16,7 @@ use App\Services\EmailService;
 use App\Services\PaymentScheduleService;
 use App\Services\QuotationAttachmentService;
 use App\Services\WorkflowNotificationService;
+use App\Support\ProcurementOperationalRoles;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\DB;
@@ -489,11 +490,10 @@ class RFQWorkflowController extends Controller
     {
         $user = $request->user();
 
-        // Check role
-        if (!in_array($user->scmRole(), ['procurement_manager', 'procurement', 'admin'])) {
+        if (! ProcurementOperationalRoles::allows($user)) {
             return response()->json([
                 'success' => false,
-                'error' => 'Only procurement managers can select vendors',
+                'error' => 'Only procurement managers or supply chain directors can select vendors',
                 'code' => 'FORBIDDEN'
             ], 403);
         }
@@ -1062,11 +1062,10 @@ class RFQWorkflowController extends Controller
     {
         $user = $request->user();
 
-        // Check role
-        if (!in_array($user->scmRole(), ['procurement_manager', 'procurement', 'admin'])) {
+        if (! ProcurementOperationalRoles::allows($user)) {
             return response()->json([
                 'success' => false,
-                'error' => 'Only procurement managers can close RFQs',
+                'error' => 'Only procurement managers or supply chain directors can close RFQs',
                 'code' => 'FORBIDDEN'
             ], 403);
         }

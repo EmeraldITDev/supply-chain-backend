@@ -8,6 +8,7 @@ use App\Models\MRF;
 use App\Models\User;
 use App\Notifications\SystemAnnouncementNotification;
 use App\Support\DatabaseNotifications;
+use App\Support\ProcurementOperationalRoles;
 use App\Support\PurchaseOrderCurrency;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
@@ -15,7 +16,7 @@ use Illuminate\Validation\ValidationException;
 
 class PurchaseOrderRevisionService
 {
-    public const EDITOR_ROLES = ['procurement_manager', 'procurement', 'admin'];
+    public const EDITOR_ROLES = ProcurementOperationalRoles::ROLES;
 
     public function __construct(
         private WorkflowStateService $workflowStateService,
@@ -26,13 +27,12 @@ class PurchaseOrderRevisionService
 
     public static function userCanRevise(?User $user): bool
     {
-        if (! $user) {
-            return false;
-        }
+        return ProcurementOperationalRoles::allows($user);
+    }
 
-        $role = strtolower(trim((string) ($user->scmRole() ?? '')));
-
-        return in_array($role, self::EDITOR_ROLES, true);
+    public static function userCanEditTitle(?User $user): bool
+    {
+        return self::userCanRevise($user);
     }
 
     public function isPendingRevision(MRF $mrf): bool
@@ -68,6 +68,222 @@ class PurchaseOrderRevisionService
         return $mrf->isPoDraft()
             || blank($mrf->unsigned_po_url)
             || blank($mrf->po_number);
+    }
+
+    /**
+     * True when the PO has been routed for SCD approval/signature (submitted).
+     */
+    public function isSubmittedForApproval(MRF $mrf): bool
+    {
+        if ($this->isPendingRevision($mrf) || $this->isDraftEditable($mrf)) {
+            return false;
+        }
+
+        $status = strtolower(trim((string) ($mrf->status ?? '')));
+        $state = strtolower(trim((string) ($mrf->workflow_state ?? '')));
+
+        if (in_array($status, ['awaiting_scd_signature', 'pending_scd_signature', 'supply_chain'], true)) {
+            return true;
+        }
+
+        if (in_array($state, [
+            WorkflowStateService::STATE_PO_GENERATED,
+            WorkflowStateService::STATE_PENDING_SCD_SIGNATURE,
+        ], true)) {
+            return true;
+        }
+
+        return filled($mrf->unsigned_po_url) && filled($mrf->po_number);
+    }
+
+    public function isQuickBooksSynced(MRF $mrf): bool
+    {
+        return trim((string) ($mrf->quickbooks_po_id ?? '')) !== '';
+    }
+
+    /**
+     * Update the MRF/PO title with draft vs controlled-revision semantics.
+     *
+     * @return array<string, mixed>
+     */
+    public function updateTitle(MRF $mrf, User $actor, string $title): array
+    {
+        $title = trim($title);
+        if ($title === '') {
+            throw ValidationException::withMessages([
+                'title' => 'A non-empty title is required.',
+            ]);
+        }
+
+        if (mb_strlen($title) > 255) {
+            throw ValidationException::withMessages([
+                'title' => 'Title may not be greater than 255 characters.',
+            ]);
+        }
+
+        $previousTitle = trim((string) ($mrf->title ?? ''));
+        if ($previousTitle === $title) {
+            return array_merge(
+                $this->payload($this->purchaseOrders->findForEdit($mrf->mrf_id) ?? $mrf->fresh() ?? $mrf, 'Title unchanged'),
+                [
+                    'previous_title' => $previousTitle,
+                    'new_title' => $title,
+                    'revision_required' => false,
+                ],
+            );
+        }
+
+        if ($this->isSignedAndLocked($mrf)) {
+            throw ValidationException::withMessages([
+                'status' => 'This purchase order is signed. Unlock it for revision before changing the title.',
+            ]);
+        }
+
+        // Draft / pre-submission: direct title edit (no approval loop).
+        if ($this->isDraftEditable($mrf) && ! $this->isPendingRevision($mrf) && ! $this->isQuickBooksSynced($mrf)) {
+            $mrf->update(['title' => $title]);
+            $this->writeTitleAudit($actor, $mrf, $previousTitle, $title, false);
+
+            return array_merge(
+                $this->payload($this->purchaseOrders->findForEdit($mrf->mrf_id) ?? $mrf->fresh() ?? $mrf, 'Purchase order title updated'),
+                [
+                    'previous_title' => $previousTitle,
+                    'new_title' => $title,
+                    'revision_required' => false,
+                ],
+            );
+        }
+
+        // Unlocked signed PO awaiting edits — persist title; resign still required.
+        if ($this->isPendingRevision($mrf)) {
+            $this->purchaseOrders->updateDraft($mrf, ['title' => $title]);
+            $this->writeTitleAudit($actor, $mrf, $previousTitle, $title, true);
+
+            return array_merge(
+                $this->payload($this->purchaseOrders->findForEdit($mrf->mrf_id) ?? $mrf->fresh() ?? $mrf, 'Title updated on pending revision'),
+                [
+                    'previous_title' => $previousTitle,
+                    'new_title' => $title,
+                    'revision_required' => true,
+                ],
+            );
+        }
+
+        // Submitted, approved, or QuickBooks-synced: controlled revision through SCD workflow.
+        if ($this->isSubmittedForApproval($mrf) || $this->isQuickBooksSynced($mrf)) {
+            return $this->reviseSubmittedTitle($mrf, $actor, $previousTitle, $title);
+        }
+
+        throw ValidationException::withMessages([
+            'status' => 'This purchase order title cannot be edited in its current status.',
+        ]);
+    }
+
+    /**
+     * Controlled title revision for a submitted/issued PO (preserves prior PDF URLs in history).
+     *
+     * @return array<string, mixed>
+     */
+    private function reviseSubmittedTitle(MRF $mrf, User $actor, string $previousTitle, string $newTitle): array
+    {
+        $mrf->loadMissing(['items', 'selectedVendor']);
+        $previousSnapshot = $this->snapshot($mrf);
+
+        $mrf->fill([
+            'title' => $newTitle,
+            'revision_snapshot' => $previousSnapshot,
+        ]);
+        $mrf->save();
+
+        $mrf->refresh()->loadMissing(['items', 'selectedVendor']);
+        $currentSnapshot = $this->snapshot($mrf);
+        $changedFields = $this->diffSnapshots($previousSnapshot, $currentSnapshot);
+        if ($changedFields === []) {
+            $changedFields = [
+                $this->change('title', 'Title', $previousTitle, $newTitle),
+            ];
+        }
+
+        $revisionNumber = (int) ($mrf->revision_number ?? 0) + 1;
+        $history = is_array($mrf->revision_history) ? $mrf->revision_history : [];
+        $revisedAt = now();
+
+        $history[] = [
+            'revision_number' => $revisionNumber,
+            'previous_unsigned_po_url' => $previousSnapshot['unsigned_po_url'] ?? null,
+            'previous_signed_po_url' => $previousSnapshot['signed_po_url'] ?? null,
+            'changed_fields' => $changedFields,
+            'previous_title' => $previousTitle,
+            'new_title' => $newTitle,
+            'editor_user_id' => $actor->id,
+            'editor_name' => $actor->name,
+            'timestamp' => $revisedAt->toIso8601String(),
+            'unlock_reason' => 'Title correction',
+            'title_revision' => true,
+        ];
+
+        $mrf->fill([
+            'revision_number' => $revisionNumber,
+            'po_version' => max((int) ($mrf->po_version ?? 1), $revisionNumber),
+            'revision_history' => $history,
+            'status' => WorkflowStateService::STATE_PENDING_SCD_SIGNATURE,
+            'workflow_state' => WorkflowStateService::STATE_PENDING_SCD_SIGNATURE,
+            'current_stage' => 'supply_chain',
+            'unlock_reason' => 'Title correction',
+            'unlocked_by' => $actor->id,
+            'unlocked_at' => $revisedAt,
+        ]);
+        $mrf->save();
+
+        $pdf = $this->unsignedPdf->refresh($mrf->fresh() ?? $mrf, $actor, ignoreStatus: true);
+        if (! ($pdf['success'] ?? false)) {
+            Log::warning('Title-revised PO unsigned PDF regeneration failed', [
+                'mrf_id' => $mrf->mrf_id,
+                'error' => $pdf['error'] ?? 'unknown',
+            ]);
+        }
+
+        $mrf->refresh();
+        $notification = $this->notifyDirectors($mrf, $actor, $changedFields, $revisedAt->toIso8601String());
+        $this->writeTitleAudit($actor, $mrf, $previousTitle, $newTitle, true, [
+            'revision_number' => $revisionNumber,
+            'changed_fields' => $changedFields,
+            'unsigned_po_url' => $mrf->unsigned_po_url,
+            'previous_unsigned_po_url' => $previousSnapshot['unsigned_po_url'] ?? null,
+        ]);
+
+        return array_merge(
+            $this->payload(
+                $this->purchaseOrders->findForEdit($mrf->mrf_id) ?? $mrf,
+                'Title revised — purchase order returned for renewed SCD approval'
+            ),
+            [
+                'previous_title' => $previousTitle,
+                'new_title' => $newTitle,
+                'revision_required' => true,
+                'revision_number' => $revisionNumber,
+                'changed_fields' => $changedFields,
+                'notifications' => $notification,
+            ],
+        );
+    }
+
+    /**
+     * @param  array<string, mixed>  $extra
+     */
+    private function writeTitleAudit(
+        User $actor,
+        MRF $mrf,
+        string $previousTitle,
+        string $newTitle,
+        bool $revisionRequired,
+        array $extra = [],
+    ): void {
+        $this->writeAudit($actor, $mrf, 'po_title_updated', $revisionRequired ? 'Title revision' : 'Title edit', array_merge([
+            'previous_title' => $previousTitle,
+            'new_title' => $newTitle,
+            'revision_required' => $revisionRequired,
+        ], $extra));
     }
 
     /**
@@ -242,6 +458,7 @@ class PurchaseOrderRevisionService
 
         return [
             'po_number' => $mrf->po_number,
+            'title' => (string) ($mrf->title ?? ''),
             'status' => $mrf->status,
             'workflow_state' => $mrf->workflow_state,
             'unsigned_po_url' => $mrf->unsigned_po_url,
@@ -271,6 +488,7 @@ class PurchaseOrderRevisionService
         $changes = [];
 
         $scalarFields = [
+            'title' => 'Title',
             'total_value' => 'Total value',
             'supplier' => 'Supplier',
             'expected_delivery_date' => 'Delivery date',

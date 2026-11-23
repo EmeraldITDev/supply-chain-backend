@@ -41,7 +41,7 @@ class PriceComparisonController extends Controller
     {
         $user = $request->user();
         $allowed = array_merge(
-            ['procurement_manager', 'procurement', 'supply_chain_director', 'admin'],
+            \App\Support\ProcurementOperationalRoles::ROLES,
             ProcurementOverviewAccess::OVERVIEW_ROLES,
         );
 

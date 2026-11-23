@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Support\ProcurementOperationalRoles;
 use App\Support\ProcurementOverviewAccess;
 use App\Support\UserRoleNormalizer;
 use App\Models\Employee;
@@ -32,6 +33,8 @@ class PermissionService
             'logistics_officer',
             'procurement_manager',
             'procurement',
+            'supply_chain_director',
+            'supply_chain',
             'executive',
             'admin',
         ], true) || ($user->is_admin ?? false) === true;
@@ -81,11 +84,12 @@ class PermissionService
     }
 
     /**
-     * Check if user can select vendors (Procurement only)
+     * Check if user can select vendors (Procurement ops — PM and SCD).
+     * Selection still routes to the separate SCD vendor-approval step.
      */
     public function canSelectVendors(User $user, MRF $mrf): bool
     {
-        if (!in_array($user->scmRole(), ['procurement', 'procurement_manager', 'admin'])) {
+        if (! ProcurementOperationalRoles::allows($user)) {
             return false;
         }
 
@@ -108,28 +112,30 @@ class PermissionService
     }
 
     /**
-     * Procurement / admin roles that may generate or upload POs.
+     * Roles that may perform Procurement Manager operational PO/RFQ work.
      *
-     * Matches login access patterns: normalized `users.role`, Spatie role names,
-     * `is_admin`, and employee job title "Procurement Manager" (same as AuthController).
+     * Includes Supply Chain Director so SCD has every PM operational capability
+     * while director-only approval endpoints remain separate steps (generate ≠
+     * sign; select vendor ≠ approve vendor selection).
+     *
+     * Matches login access patterns: normalized SCM role, Spatie role names,
+     * `is_admin`, and employee job title "Procurement Manager".
      */
     public function userActsAsProcurement(User $user): bool
     {
-        if (($user->is_admin ?? false) === true) {
+        if (ProcurementOperationalRoles::allows($user)) {
             return true;
         }
 
-        $allowed = ['procurement', 'procurement_manager', 'procurement_officer', 'admin'];
-
         foreach ($this->userRoleSlugCandidates($user) as $slug) {
-            if (in_array($slug, $allowed, true)) {
+            if (in_array($slug, ProcurementOperationalRoles::ROLES, true)) {
                 return true;
             }
         }
 
         if (method_exists($user, 'hasAnyRole')) {
             try {
-                if ($user->hasAnyRole(['procurement', 'procurement_manager', 'admin'])) {
+                if ($user->hasAnyRole(ProcurementOperationalRoles::ROLES)) {
                     return true;
                 }
             } catch (\Throwable) {
@@ -395,7 +401,11 @@ class PermissionService
             return true;
         }
 
-        if (in_array($user->scmRole(), ['procurement', 'procurement_manager', 'finance', 'finance_officer', 'admin'])) {
+        $role = $user->scmRole();
+        if (
+            ProcurementOperationalRoles::allows($user)
+            || in_array($role, ['finance', 'finance_officer'], true)
+        ) {
             $currentState = $mrf->workflow_state ?? WorkflowStateService::STATE_MRF_CREATED;
             return in_array($currentState, [
                 WorkflowStateService::STATE_INVOICE_RECEIVED,
@@ -568,8 +578,7 @@ class PermissionService
             return false;
         }
 
-        $role = $user->scmRole();
-        if (! in_array($role, ['admin', 'procurement_manager'], true)) {
+        if (! ProcurementOperationalRoles::allowsForceClose($user)) {
             return false;
         }
 
@@ -1023,12 +1032,13 @@ class PermissionService
                 'can_initiate_srf' => true,
             ],
             'supply_chain_director', 'supply_chain' => [
-                'can_create_mrf' => false,
-                'can_approve' => false,
-                'can_generate_po' => false,
-                'can_review_po' => false,
+                'can_create_mrf' => true,
+                'can_approve' => true,
+                'can_generate_po' => true,
+                'can_review_po' => true,
                 'can_process_payment' => false,
                 'can_request_grn' => false,
+                'can_complete_grn' => true,
                 'can_manage_users' => true,
                 'can_access_logistics' => true,
                 'can_manage_fleet' => true,

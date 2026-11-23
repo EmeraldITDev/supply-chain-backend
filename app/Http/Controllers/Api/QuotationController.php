@@ -10,6 +10,7 @@ use App\Models\RFQ;
 use App\Models\Vendor;
 use App\Services\PaymentScheduleService;
 use App\Services\QuotationAttachmentService;
+use App\Support\ProcurementOperationalRoles;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
 
@@ -142,10 +143,10 @@ class QuotationController extends Controller
     {
         $user = $request->user();
 
-        if (! $user || ! in_array($user->scmRole(), ['procurement', 'procurement_manager', 'admin'], true)) {
+        if (! ProcurementOperationalRoles::allows($user)) {
             return response()->json([
                 'success' => false,
-                'error' => 'Only procurement managers can save quotation evaluations',
+                'error' => 'Only procurement managers or supply chain directors can save quotation evaluations',
                 'code' => 'FORBIDDEN',
             ], 403);
         }
@@ -626,8 +627,7 @@ class QuotationController extends Controller
     {
         $user = $request->user();
 
-        // Check permission (procurement or admin)
-        if (!in_array($user->scmRole(), ['procurement', 'admin'])) {
+        if (! ProcurementOperationalRoles::allows($user)) {
             return response()->json([
                 'success' => false,
                 'error' => 'Insufficient permissions',
@@ -703,11 +703,10 @@ class QuotationController extends Controller
     {
         $user = $request->user();
 
-        // Check permission - procurement managers can reject quotations
-        if (!in_array($user->scmRole(), ['procurement', 'procurement_manager', 'admin'])) {
+        if (! ProcurementOperationalRoles::allows($user)) {
             return response()->json([
                 'success' => false,
-                'error' => 'Only procurement managers can reject quotations',
+                'error' => 'Only procurement managers or supply chain directors can reject quotations',
                 'code' => 'FORBIDDEN'
             ], 403);
         }
@@ -828,11 +827,10 @@ class QuotationController extends Controller
     {
         $user = $request->user();
 
-        // Only Procurement Manager can request revision
-        if (!in_array($user->scmRole(), ['procurement', 'procurement_manager', 'admin'])) {
+        if (! ProcurementOperationalRoles::allows($user)) {
             return response()->json([
                 'success' => false,
-                'error' => 'Unauthorized. Only Procurement Managers can request revisions.',
+                'error' => 'Unauthorized. Only Procurement Managers or Supply Chain Directors can request revisions.',
                 'code' => 'FORBIDDEN'
             ], 403);
         }
@@ -980,8 +978,7 @@ class QuotationController extends Controller
     {
         $user = $request->user();
 
-        // Authorization check - only procurement can close
-        if (!in_array($user->scmRole(), ['procurement_manager', 'procurement', 'admin'])) {
+        if (! ProcurementOperationalRoles::allows($user)) {
             return response()->json([
                 'success' => false,
                 'error' => 'Unauthorized',
@@ -1042,8 +1039,7 @@ class QuotationController extends Controller
     {
         $user = $request->user();
 
-        // Authorization check - only procurement can reopen
-        if (!in_array($user->scmRole(), ['procurement_manager', 'procurement', 'admin'])) {
+        if (! ProcurementOperationalRoles::allows($user)) {
             return response()->json([
                 'success' => false,
                 'error' => 'Unauthorized',
