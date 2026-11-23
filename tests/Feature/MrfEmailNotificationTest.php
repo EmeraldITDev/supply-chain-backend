@@ -33,6 +33,10 @@ class MrfEmailNotificationTest extends TestCase
             'email' => 'procurement@example.com',
             'supply_chain_role' => 'procurement_manager',
         ]);
+        $admin = User::factory()->create([
+            'email' => 'it@example.com',
+            'supply_chain_role' => 'admin',
+        ]);
 
         app(NotificationService::class)->notifyMRFSubmitted($this->mrf([
             'workflow_state' => 'parallel_first_approval',
@@ -41,6 +45,7 @@ class MrfEmailNotificationTest extends TestCase
         Notification::assertSentToTimes($executive, MRFSubmittedNotification::class, 1);
         Notification::assertSentToTimes($director, MRFSubmittedNotification::class, 1);
         Notification::assertNotSentTo($procurement, MRFSubmittedNotification::class);
+        Notification::assertNotSentTo($admin, MRFSubmittedNotification::class);
     }
 
     public function test_submission_deduplicates_users_with_the_same_normalized_email(): void

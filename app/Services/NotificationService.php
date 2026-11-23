@@ -89,24 +89,23 @@ class NotificationService
     {
         $state = strtolower(trim((string) ($mrf->workflow_state ?: $mrf->current_stage)));
 
+        // Only next-step approver roles — platform admins / IT are not notified
+        // merely because they have system access.
         return match ($state) {
-            WorkflowStateService::STATE_CHAIRMAN_REVIEW => ['chairman', 'admin'],
+            WorkflowStateService::STATE_CHAIRMAN_REVIEW => ['chairman'],
             WorkflowStateService::STATE_PARALLEL_FIRST_APPROVAL => [
                 'executive',
                 'supply_chain_director',
                 'supply_chain',
-                'admin',
             ],
-            WorkflowStateService::STATE_EXECUTIVE_REVIEW => ['executive', 'admin'],
+            WorkflowStateService::STATE_EXECUTIVE_REVIEW => ['executive'],
             WorkflowStateService::STATE_SUPPLY_CHAIN_DIRECTOR_REVIEW => [
                 'supply_chain_director',
                 'supply_chain',
-                'admin',
             ],
             WorkflowStateService::STATE_PROCUREMENT_REVIEW => [
                 'procurement_manager',
                 'procurement',
-                'admin',
             ],
             default => [],
         };

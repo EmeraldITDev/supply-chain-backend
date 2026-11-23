@@ -251,32 +251,17 @@ class WorkflowNotificationService
 
     public function notifySRFSubmitted(SRF $srf): void
     {
-        $emails = collect([
-            'viva.musa@emeraldcfze.com',
-            'lateef.olanrewaju@emeraldcfze.com',
-            'bunmi.babajide@emeraldcfze.com',
-        ]);
+        $roles = $this->srfSubmissionRecipientRoles($srf);
 
-        $stage = strtolower((string) ($srf->current_stage ?? ''));
-        if ($stage === 'supply_chain_director_review' || ($srf->origin ?? null) === 'fleet_dashboard') {
-            $emails = $emails->merge(
-                User::query()
-                    ->whereIn('supply_chain_role', ['supply_chain_director', 'supply_chain'])
-                    ->whereNotNull('email')
-                    ->pluck('email')
-            );
-        }
-
-        $emails = $emails->merge(
-            User::query()
-                ->whereIn('supply_chain_role', ['logistics_manager', 'logistics_officer'])
-                ->whereNotNull('email')
-                ->pluck('email')
-        );
+        $emails = User::query()
+            ->whereIn('supply_chain_role', $roles)
+            ->whereNotNull('email')
+            ->where('email', '!=', '')
+            ->pluck('email');
 
         $emails = $emails->merge(collect(config('scm.logistics_notification_cc_emails', [])));
 
-        foreach ($emails->filter()->unique(fn ($e) => strtolower((string) $e))->values() as $email) {
+        foreach ($emails->filter()->unique(fn ($e) => strtolower(trim((string) $e)))->values() as $email) {
             $this->deliverMailable(
                 event: 'srf_created',
                 recipient: (string) $email,
@@ -288,21 +273,30 @@ class WorkflowNotificationService
         $this->notifySRFSubmittedInApp($srf);
     }
 
+    /**
+     * @return list<string>
+     */
+    private function srfSubmissionRecipientRoles(SRF $srf): array
+    {
+        $stage = strtolower((string) ($srf->current_stage ?? ''));
+        if ($stage === 'supply_chain_director_review' || ($srf->origin ?? null) === 'fleet_dashboard') {
+            return ['supply_chain_director', 'supply_chain'];
+        }
+
+        // Default SRF next step is logistics review — not procurement or IT.
+        return ['logistics_manager', 'logistics_officer'];
+    }
+
     private function notifySRFSubmittedInApp(SRF $srf): void
     {
         try {
             $srf->loadMissing('requester');
 
-            $roles = ['logistics_manager', 'logistics_officer', 'procurement_manager', 'procurement'];
-            $stage = strtolower((string) ($srf->current_stage ?? ''));
-            if ($stage === 'supply_chain_director_review' || ($srf->origin ?? null) === 'fleet_dashboard') {
-                $roles[] = 'supply_chain_director';
-                $roles[] = 'supply_chain';
-            }
-
             $notifiables = User::query()
-                ->whereIn('supply_chain_role', array_unique($roles))
-                ->get();
+                ->whereIn('supply_chain_role', $this->srfSubmissionRecipientRoles($srf))
+                ->get()
+                ->unique(fn (User $user) => strtolower(trim((string) $user->email)))
+                ->values();
 
             DatabaseNotifications::sendMany($notifiables, new SRFSubmittedNotification($srf));
         } catch (\Throwable $e) {
