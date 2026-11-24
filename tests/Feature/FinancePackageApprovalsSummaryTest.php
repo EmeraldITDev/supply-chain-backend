@@ -152,6 +152,53 @@ class FinancePackageApprovalsSummaryTest extends TestCase
         $this->assertSame('Ada Admin', $summary[0]['performerName']);
     }
 
+    public function test_po_sign_off_summary_reports_signed_director_with_name(): void
+    {
+        $signer = User::factory()->create(['name' => 'Chi Director']);
+        $mrf = $this->createMrf([
+            'status' => 'po_signed',
+            'workflow_state' => 'po_signed',
+            'signed_po_url' => 'https://s3.example/signed.pdf',
+            'po_signed_at' => now(),
+        ]);
+
+        MRFApprovalHistory::create([
+            'mrf_id' => $mrf->id,
+            'action' => 'signed_po',
+            'stage' => 'supply_chain',
+            'performed_by' => $signer->id,
+            'performer_name' => 'Chi Director',
+            'performer_role' => 'supply_chain_director',
+        ]);
+
+        $builder = app(\App\Services\Finance\FinancePackageBuilder::class);
+        $signOff = $builder->buildPoSignOffSummary($mrf);
+
+        $this->assertSame('signed', $signOff['status']);
+        $this->assertTrue($signOff['signed']);
+        $this->assertSame('Chi Director', $signOff['signerName']);
+        $this->assertTrue($signOff['signerNameAvailable']);
+        $this->assertNotEmpty($signOff['signedAt']);
+    }
+
+    public function test_po_sign_off_summary_reports_awaiting_signature(): void
+    {
+        $mrf = $this->createMrf([
+            'status' => 'awaiting_scd_signature',
+            'workflow_state' => 'pending_scd_signature',
+            'unsigned_po_url' => 'https://s3.example/unsigned.pdf',
+            'signed_po_url' => null,
+            'po_signed_at' => null,
+        ]);
+
+        $builder = app(\App\Services\Finance\FinancePackageBuilder::class);
+        $signOff = $builder->buildPoSignOffSummary($mrf);
+
+        $this->assertSame('awaiting', $signOff['status']);
+        $this->assertTrue($signOff['awaitingSignature']);
+        $this->assertFalse($signOff['signed']);
+    }
+
     /**
      * @return list<array<string, mixed>>
      */
@@ -164,9 +211,12 @@ class FinancePackageApprovalsSummaryTest extends TestCase
         return $method->invoke($builder, $mrf);
     }
 
-    private function createMrf(): MRF
+    /**
+     * @param  array<string, mixed>  $overrides
+     */
+    private function createMrf(array $overrides = []): MRF
     {
-        return MRF::create([
+        return MRF::create(array_merge([
             'mrf_id' => 'MRF-APPR-'.Str::upper(Str::random(6)),
             'title' => 'Approval package test',
             'requester_id' => User::factory()->create()->id,
@@ -179,6 +229,6 @@ class FinancePackageApprovalsSummaryTest extends TestCase
             'estimated_cost' => 1000,
             'scm_transaction_id' => (string) Str::uuid(),
             'po_number' => 'PO-APPR-TEST',
-        ]);
+        ], $overrides));
     }
 }

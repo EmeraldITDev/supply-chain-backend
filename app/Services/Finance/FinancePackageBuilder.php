@@ -11,6 +11,7 @@ use App\Models\ProcurementDocument;
 use App\Models\Vendor;
 use App\Services\PaymentScheduleService;
 use App\Services\ProcurementDocumentService;
+use App\Services\WorkflowStateService;
 use Illuminate\Support\Facades\Storage;
 use App\Support\PoTaxCalculator;
 
@@ -77,6 +78,7 @@ class FinancePackageBuilder
             'paymentPlan' => $this->buildStructuredPaymentPlan($mrf, $schedule, $paymentTerms, $poTotal),
             'lineItems' => $this->buildLineItems($mrf),
             'approvalsSummary' => $this->buildApprovalsSummary($mrf),
+            'poSignOff' => $this->buildPoSignOffSummary($mrf),
             'documentManifest' => $documentManifest,
             'context' => [
                 'requestedMilestoneId' => $requestedMilestoneId,
@@ -85,7 +87,71 @@ class FinancePackageBuilder
                 'payment_type' => $paymentType,
                 'paymentTerms' => $paymentTerms,
                 'payment_terms' => $paymentTerms,
+                'poSignOff' => $this->buildPoSignOffSummary($mrf),
             ],
+        ];
+    }
+
+    /**
+     * Authoritative SCM Director PO signature status for Finance AP.
+     * Uses recorded signature fields — not MRF approval history alone.
+     *
+     * @return array<string, mixed>
+     */
+    public function buildPoSignOffSummary(MRF $mrf): array
+    {
+        $signed = WorkflowStateService::hasRecordedSignature($mrf->signed_po_url, $mrf->po_signed_at);
+        $awaiting = WorkflowStateService::isAwaitingScdSignature(
+            $mrf->status,
+            $mrf->workflow_state,
+            $mrf->signed_po_url,
+            $mrf->po_signed_at,
+        );
+
+        $signedDocument = ProcurementDocument::query()
+            ->with('uploader:id,name')
+            ->where('mrf_id', $mrf->id)
+            ->where('type', ProcurementDocument::TYPE_SIGNED_PO)
+            ->where('is_active', true)
+            ->orderByDesc('version')
+            ->orderByDesc('id')
+            ->first();
+
+        $history = MRFApprovalHistory::query()
+            ->where('mrf_id', $mrf->id)
+            ->where('action', 'signed_po')
+            ->orderByDesc('created_at')
+            ->orderByDesc('id')
+            ->first();
+
+        $signerName = trim((string) ($history?->performer_name ?? ''));
+        if ($signerName === '' && $signedDocument?->uploader) {
+            $signerName = trim((string) $signedDocument->uploader->name);
+        }
+
+        $signedAt = $mrf->po_signed_at?->toIso8601String()
+            ?? $history?->created_at?->toIso8601String()
+            ?? $signedDocument?->uploaded_at?->toIso8601String();
+
+        $status = 'unavailable';
+        if ($signed) {
+            $status = 'signed';
+        } elseif ($awaiting) {
+            $status = 'awaiting';
+        }
+
+        return [
+            'status' => $status,
+            'signed' => $signed,
+            'awaitingSignature' => $awaiting,
+            'signerName' => $signerName !== '' ? $signerName : null,
+            'signerNameAvailable' => $signerName !== '',
+            'signedAt' => $signedAt,
+            'signedPoDocumentId' => $signedDocument ? (string) $signedDocument->id : null,
+            'signedPoFileName' => $signedDocument?->file_name,
+            'documentVerified' => $signedDocument !== null || filled($mrf->signed_po_url),
+            'poNumber' => $mrf->po_number,
+            'workflowState' => $mrf->workflow_state,
         ];
     }
 
